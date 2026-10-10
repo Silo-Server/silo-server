@@ -615,8 +615,9 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Tier 1: embedding-based recommendations.
-	if h.recommender != nil {
+	// Tier 1: embedding-based recommendations, only from an item the session
+	// may see: neighbors of a hidden item would confirm that it exists.
+	if h.recommender != nil && h.similarSeedVisible(r.Context(), session, contentID) {
 		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
 		if recErr == nil && len(scored) > 0 {
 			if h.writeSimilarFromScored(w, r, session, scored, limit) {
@@ -627,6 +628,13 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 
 	// Tier 2: genre-based fallback.
 	h.writeSimilarFromGenre(w, r, session, contentID, limit)
+}
+
+// similarSeedVisible reports whether the session may see the item a Similar
+// list is built from. A failed check counts as not visible.
+func (h *ItemsHandler) similarSeedVisible(ctx context.Context, session *Session, contentID string) bool {
+	items, err := h.loadCompatItemsByContentIDs(ctx, session, []string{contentID}, nil)
+	return err == nil && len(items) == 1
 }
 
 // writeSimilarFromScored converts recommender ScoredItem results into a Jellyfin query result.

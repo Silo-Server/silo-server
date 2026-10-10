@@ -1357,9 +1357,14 @@ func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser 
 
 // --- Cold Start Queries ---
 
-// GetPopularItems returns the most-played media items over the given number of days.
-// Episodes are resolved to their parent series.
-func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
+// GetPopularItems returns the most-played media items over the given number
+// of days that filter allows; a zero filter allows every item. Episodes are
+// resolved to their parent series.
+func (r *Repo) GetPopularItems(ctx context.Context, days, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	conditions, args, ok := itemAccessConditions(filter, []any{days})
+	if !ok {
+		return []ScoredItem{}, nil
+	}
 	query := fmt.Sprintf(`
 		WITH %s,
 		watched_items AS (
@@ -1370,10 +1375,11 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
 		JOIN   media_items mi ON mi.content_id = wi.item_id
+		WHERE  %s
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
-		LIMIT  $2`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, days, limit)
+		LIMIT  $%d`, watchedActivityCTE, strings.Join(conditions, " AND "), len(args)+1)
+	rows, err := r.pool.Query(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
@@ -1397,15 +1403,22 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 // Audiobooks and ebooks bypass the matched-status gate because their
 // scan-derived metadata is authoritative before any external-provider match
 // exists.
-func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
+//
+// Only items filter allows are returned; a zero filter allows every item.
+func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	conditions, args, ok := itemAccessConditions(filter, []any{days})
+	if !ok {
+		return []ScoredItem{}, nil
+	}
 	query := fmt.Sprintf(`
 		SELECT mi.content_id, mi.created_at
 		FROM   media_items mi
 		WHERE  %s
 		  AND  mi.created_at > NOW() - make_interval(days => $1)
+		  AND  %s
 		ORDER  BY mi.created_at DESC
-		LIMIT  $2`, recommendationItemEligibilityWhereClause("mi"))
-	rows, err := r.pool.Query(ctx, query, days, limit)
+		LIMIT  $%d`, recommendationItemEligibilityWhereClause("mi"), strings.Join(conditions, " AND "), len(args)+1)
+	rows, err := r.pool.Query(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("get recently added: %w", err)
 	}
@@ -1598,6 +1611,21 @@ func (r *Repo) GetItemGenres(ctx context.Context, itemIDs []string) (map[string]
 		result[id] = genres
 	}
 	return result, rows.Err()
+}
+
+// itemAccessConditions returns the conditions on media_items alias mi that
+// keep the items filter allows (its libraries and maturity limits), with
+// their arguments appended to args. ok is false when filter allows no
+// library at all, so the caller can answer empty without a query.
+func itemAccessConditions(filter catalog.AccessFilter, args []any) (conditions []string, out []any, ok bool) {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return nil, nil, false
+	}
+	conditions = []string{"TRUE"}
+	argIdx := len(args) + 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	return conditions, args, true
 }
 
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given

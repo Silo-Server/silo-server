@@ -29,6 +29,10 @@ type SectionDetailView = sectionDetailResponse
 
 const (
 	recommendationsDefaultLimit = 20
+	// engineCandidateFactor is how many engine candidates a similar or
+	// because-watched list asks for per item it returns, so items the viewer
+	// may not see leave room for ones it may.
+	engineCandidateFactor = 3
 	// discoverClusterRowType is the row type of every taste-cluster row,
 	// including the main For You row.
 	discoverClusterRowType = "cluster"
@@ -38,25 +42,26 @@ func recommendationsUnavailable(message string) *APIError {
 	return apiError(http.StatusInternalServerError, "internal_error", message)
 }
 
-// BecauseWatched answers "because you watched {item}" candidates, minus the
-// profile's watched and low-rated items. An unavailable engine answers an
-// empty list.
-func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int, profileID, itemID string, limit int) ([]recommendations.ScoredItem, error) {
+// BecauseWatched answers "because you watched {item}" candidates the viewer
+// may see, minus the profile's watched and low-rated items. An unavailable
+// engine, or an item the viewer may not see, answers an empty list.
+func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
+	}
+	if visible, err := h.itemVisible(ctx, itemID, filter); err != nil || !visible {
+		return []recommendations.ScoredItem{}, err
 	}
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
-	items, err := h.engine.BecauseYouWatched(ctx, userID, profileID, itemID, limit)
+	items, err := h.engine.BecauseYouWatched(ctx, userID, profileID, itemID, limit*engineCandidateFactor)
 	if err != nil {
 		return nil, recommendationsUnavailable("Failed to fetch recommendations")
 	}
 	items = h.filterRecommendations(ctx, userID, profileID, items)
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+	items, err = h.visibleScoredItems(ctx, filter, h.excludeWatchedRecommendations(ctx, userID, profileID, items))
+	return firstScoredItems(items, limit), err
 }
 
 // ForYouMain answers the profile's main For You row; nil when the reader is
@@ -95,10 +100,10 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 	return rows, nil
 }
 
-// PopularItems answers the server-wide popular items of the last days,
-// minus what the profile has watched.
-func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetPopularItems(ctx, days, limit)
+// PopularItems answers the server-wide popular items of the last days that
+// the viewer may see, minus what the profile has watched.
+func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.recsRepo.GetPopularItems(ctx, days, limit, filter)
 	if err != nil {
 		return nil, recommendationsUnavailable("Failed to fetch popular items")
 	}
@@ -108,10 +113,10 @@ func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, p
 	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
 }
 
-// RecentlyAddedItems answers the items added in the last days, minus what
-// the profile has watched.
-func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetRecentlyAddedItems(ctx, days, limit)
+// RecentlyAddedItems answers the items added in the last days that the
+// viewer may see, minus what the profile has watched.
+func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.recsRepo.GetRecentlyAddedItems(ctx, days, limit, filter)
 	if err != nil {
 		return nil, recommendationsUnavailable("Failed to fetch recently added items")
 	}
@@ -119,6 +124,53 @@ func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID 
 		items = []recommendations.ScoredItem{}
 	}
 	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+}
+
+// visibleScoredItems keeps, in order, the scored items the viewer may see:
+// the library allowlist and maturity limits apply, as on every catalog read.
+// Without a fetcher to check against it keeps none, so a list never names a
+// title the viewer cannot open. The result is never nil.
+func (h *RecommendationsHandler) visibleScoredItems(ctx context.Context, filter catalog.AccessFilter, items []recommendations.ScoredItem) ([]recommendations.ScoredItem, error) {
+	if len(items) == 0 || h.Fetcher == nil {
+		return []recommendations.ScoredItem{}, nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.MediaItemID
+	}
+	visible, err := h.Fetcher.FetchItemsByContentIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, recommendationsUnavailable("Failed to fetch recommendations")
+	}
+	allowed := make(map[string]struct{}, len(visible))
+	for _, item := range visible {
+		if item != nil {
+			allowed[item.ContentID] = struct{}{}
+		}
+	}
+	out := make([]recommendations.ScoredItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowed[item.MediaItemID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+// firstScoredItems is at most the first limit items.
+func firstScoredItems(items []recommendations.ScoredItem, limit int) []recommendations.ScoredItem {
+	if len(items) > limit {
+		return items[:limit]
+	}
+	return items
+}
+
+// itemVisible reports whether the viewer may see the item a list is built
+// from. A list for an item the viewer may not see answers empty, as for an
+// unknown item, so it cannot confirm that the item exists.
+func (h *RecommendationsHandler) itemVisible(ctx context.Context, itemID string, filter catalog.AccessFilter) (bool, error) {
+	visible, err := h.visibleScoredItems(ctx, filter, []recommendations.ScoredItem{{MediaItemID: itemID}})
+	return len(visible) == 1, err
 }
 
 // Discover answers the discover page: the cached rows blended with upcoming
@@ -238,7 +290,7 @@ func (h *RecommendationsHandler) cardsOf(ctx context.Context, userID int, profil
 
 // BecauseWatchedCards is BecauseWatched rendered as cards.
 func (h *RecommendationsHandler) BecauseWatchedCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.BecauseWatched(ctx, userID, profileID, itemID, limit)
+	items, err := h.BecauseWatched(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +299,7 @@ func (h *RecommendationsHandler) BecauseWatchedCards(ctx context.Context, userID
 
 // PopularCards is PopularItems rendered as cards.
 func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.PopularItems(ctx, userID, profileID, days, limit)
+	items, err := h.PopularItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +308,7 @@ func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, p
 
 // RecentlyAddedCards is RecentlyAddedItems rendered as cards.
 func (h *RecommendationsHandler) RecentlyAddedCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit)
+	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -294,23 +346,25 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 	return h.renderDiscoverRows(ctx, userID, profileID, filter, discoverRowModelsFromRecommendations(rows))
 }
 
-// SimilarItems answers items similar to itemID; an unavailable engine
-// answers an empty list. The list is not viewer-filtered, as in v1.
-func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error) {
+// SimilarItems answers the items similar to itemID that the viewer may see.
+// An unavailable engine, or an item the viewer may not see, answers an empty
+// list.
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
+	}
+	if visible, err := h.itemVisible(ctx, itemID, filter); err != nil || !visible {
+		return []recommendations.ScoredItem{}, err
 	}
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
-	items, err := h.engine.SimilarItems(ctx, itemID, limit)
+	items, err := h.engine.SimilarItems(ctx, itemID, limit*engineCandidateFactor)
 	if err != nil {
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return items, nil
+	items, err = h.visibleScoredItems(ctx, filter, items)
+	return firstScoredItems(items, limit), err
 }
 
 // SimilarUsersLiked answers what similar profiles liked; an unavailable
@@ -334,7 +388,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 
 // SimilarCards is SimilarItems rendered as cards for the acting profile.
 func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.SimilarItems(ctx, itemID, limit)
+	items, err := h.SimilarItems(ctx, itemID, limit, filter)
 	if err != nil {
 		return nil, err
 	}

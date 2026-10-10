@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
@@ -391,14 +392,14 @@ func (w *Worker) doRecommendations() {
 
 // cacheGlobalRows generates and caches non-personalized rows.
 func (w *Worker) cacheGlobalRows(ctx context.Context, repo *Repo, expires string) {
-	popular, _ := repo.GetPopularItems(ctx, 30, CacheCandidateLimit)
+	popular, _ := repo.GetPopularItems(ctx, 30, CacheCandidateLimit, catalog.AccessFilter{})
 	if len(popular) > 0 {
 		if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypePopular, "", popular, expires); err != nil {
 			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
 		}
 	}
 
-	recentlyAdded, _ := repo.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit)
+	recentlyAdded, _ := repo.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit, catalog.AccessFilter{})
 	if len(recentlyAdded) > 0 {
 		if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "", recentlyAdded, expires); err != nil {
 			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
