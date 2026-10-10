@@ -37,11 +37,18 @@ func LoadEventsRetentionDays(ctx context.Context, store SettingsStore) (int, err
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", SettingKeyEventsRetentionDays, err)
 	}
-	days, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || days < 1 {
+	days, ok := parseRetentionDays(raw)
+	if !ok {
 		return DefaultEventsRetentionDays, nil
 	}
 	return min(days, MaxEventsRetentionDays), nil
+}
+
+// parseRetentionDays reports whether raw is a whole number of days, at least
+// one.
+func parseRetentionDays(raw string) (int, bool) {
+	days, err := strconv.Atoi(strings.TrimSpace(raw))
+	return days, err == nil && days >= 1
 }
 
 // EventPruneResult describes one bounded autoscan event cleanup run. It is
