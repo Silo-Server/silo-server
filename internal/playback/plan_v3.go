@@ -32,6 +32,7 @@ const (
 	degradationAudioConvertedV3            = "audio_converted"
 	audioCodecAACV3                        = "aac"
 	codecCopyV3                            = "copy"
+	mimeTypeHLSV3                          = "application/vnd.apple.mpegurl"
 	serverAudioAdaptationReasonV3          = "server_audio_adaptation"
 	decisionReasonAudioAdaptationV3        = "audio_adaptation"
 	hlsAudioAdaptationReasonV3             = "hls_audio_adaptation"
@@ -451,6 +452,18 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride, subtitleForcedAdaptation)
 	}
 
+	// A multichannel track the client would decode to PCM may reach a 5.1
+	// receiver as stereo. When the sink validates E-AC-3 or AC-3 5.1, prefer a
+	// copy-video remux that converts to it. Only routes that keep the original
+	// picture qualify: native range, no Dolby Vision Profile 7 handling, and
+	// unchanged subtitles. Otherwise, or once tried, direct play proceeds.
+	if target := surroundBitstreamTargetV3(source, input.Request, audioOK, passthrough, audioClaims); target != "" &&
+		source.DVProfile != 7 && rangeOK && quality.PreservesSource && originalSubtitleOK {
+		if result, ok := planSurroundBitstreamRemuxV3(input, base, source, target, subtitle, hlsSubtitle, high10Quirk); ok {
+			return result
+		}
+	}
+
 	// Profile 7 is normalized on the client against the original range-capable
 	// source. A decoder profile/max-instance claim alone is not proof of native
 	// dual-layer output, so the default Android route mirrors Silo Apple: P8.1
@@ -697,7 +710,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			if hlsRouteOK {
 				plan := cloneRemuxPlanCandidateV3(remuxBase)
 				plan.Delivery = DeliveryRemuxHLSV3
-				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: mimeTypeHLSV3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
 				hlsAudioChannels := 0
 				if hlsTranscodeAudio && !hlsQuirkConvertsAudio {
@@ -1193,7 +1206,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	}
 	plan := base
 	plan.Delivery = DeliveryTranscodeHLSV3
-	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: mimeTypeHLSV3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 	plan.EffectiveRecipe.VideoCodec = targetVideoCodec
 	if targetVideoCodec == transcodeCodecHEVC {
 		plan.EffectiveRecipe.VideoSampleEntry = VideoSampleEntryHVC1

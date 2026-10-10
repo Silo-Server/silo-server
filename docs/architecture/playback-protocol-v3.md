@@ -1216,6 +1216,8 @@ must not branch on an unrecognized value.
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
 `client_dv8_base_layer`, `evidence_insufficient_for_direct`,
+`surround_bitstream_conversion` (§11; advertised on `/api/v2` as the
+`surround_bitstream_conversion_v1` server feature),
 and the quality reasons `quality_original`, `quality_auto_source`,
 `quality_fixed_rung`, `quality_device_limit`, `quality_bandwidth_limit`,
 `quality_metered_limit`, `quality_bandwidth_cap`.
@@ -1574,6 +1576,8 @@ A transformation is a named, versioned media operation with claims attached.
 | Name | Executor | Recipe version | Promises | Claims |
 | --- | --- | --- | --- | --- |
 | `audio_to_aac` | `server` | `2` | — | `audio_decode` |
+| `audio_to_eac3` | `server` | `1` | E-AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
+| `audio_to_ac3` | `server` | `1` | AC-3 5.1, 48 kHz, 640 kbps | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
@@ -1589,6 +1593,28 @@ byte-affecting input. When a source with more than two channels is encoded to
 stereo, FFmpeg first rematrixes it to stereo, then applies up to 6 dB of input
 gain through a limiter with a -2 dBFS sample ceiling. Mono output, surround
 output, stereo sources, and copied audio do not use the boost.
+
+`audio_to_eac3` and `audio_to_ac3` serve the surround bitstream conversion
+(`decision_reason: surround_bitstream_conversion`). A client that would decode a
+track with more than two channels to PCM may lose its surround channels: an
+Android TV's own HDMI/eARC output commonly mixes app PCM to stereo, and Android
+cannot tell that mixer from one that carries multichannel PCM. When the client
+attests `exact` audio evidence and `layout_aware_passthrough`, its sink
+validates E-AC-3 (preferred) or AC-3 at six channels with a `5.1` layout, and
+the sink does not validate the source codec, the planner prefers a copy-video
+`server_remux_hls` that converts the selected track to that codec at 5.1. The
+plan claims passthrough for the converted codec and carries an
+`audio_converted` warning. Only routes that keep the original picture and
+subtitle presentation qualify: the native dynamic range, no Dolby Vision
+Profile 7 handling, and the same subtitle mode and claims as the original
+route. When no executor offers the recipe or the client already attempted the
+plan, the planner returns the route the conversion improved on. When session
+admission or route preparation refuses the conversion on a start or replan,
+the server re-plans once without it; the refused start's session records no
+watch history. A seek reanchor keeps its frozen recipe and reports the refusal
+instead. A device whose mixer does carry
+multichannel PCM therefore trades lossless PCM for E-AC-3 5.1 on codecs its
+sink cannot take; a sink that passes the source codec through is unaffected.
 
 Recipe 2 is fenced at every byte-producing boundary during a rolling upgrade.
 Token-based proxy remuxes use `/stream/remux/audio-v2/{token}`; Jellyfin-compatible
@@ -1647,6 +1673,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and a bounded silent-frame smoke test executes the exact stereo-downmix limiter graph |
+| `audio_to_eac3`, `audio_to_ac3` | `ffmpeg -encoders` contains the `eac3` / `ac3` encoder and a bounded silent-frame smoke test encodes 48 kHz 5.1 at 640 kbps into fragmented MP4 |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor |
 

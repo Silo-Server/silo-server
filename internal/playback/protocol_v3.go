@@ -75,11 +75,15 @@ const (
 	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
 	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
 	// NativeServerFeaturesV3).
-	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
-	PlanRecipeVersionV3        = "v3.4"
-	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
-	ClientDV7ToHDR10V3         = "client_dv7_to_hdr10"
-	ClientDVTransformVersionV3 = "1"
+	FeatureSubripSidecarV3 = "subrip_sidecar_v1"
+	// FeatureSurroundBitstreamConversionV3 tells a client the server may
+	// convert a multichannel track it would decode to PCM into E-AC-3 or AC-3
+	// 5.1 that its sink validates (decision_reason surround_bitstream_conversion).
+	FeatureSurroundBitstreamConversionV3 = "surround_bitstream_conversion_v1"
+	PlanRecipeVersionV3                  = "v3.4"
+	ClientDV7ToDV81V3                    = "client_dv7_to_dv81"
+	ClientDV7ToHDR10V3                   = "client_dv7_to_hdr10"
+	ClientDVTransformVersionV3           = "1"
 	// ClaimClientManagedDynamicRangeV3 is scoped to the original_http
 	// delivery. A client that advertises it accepts responsibility for mapping
 	// any source dynamic range it declares decodable onto the active output;
@@ -177,7 +181,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3, FeatureSurroundBitstreamConversionV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -264,6 +268,8 @@ const (
 // executor must run; the registry keys availability by the same names.
 const (
 	TransformationAudioToAACV3      = "audio_to_aac"
+	TransformationAudioToEAC3V3     = "audio_to_eac3"
+	TransformationAudioToAC3V3      = "audio_to_ac3"
 	TransformationVideoToH264V3     = "video_to_h264"
 	TransformationVideoToHEVCV3     = "video_to_hevc"
 	TransformationServerDV7HDR10V3  = "server_dv7_to_hdr10"
@@ -272,6 +278,8 @@ const (
 	TransformationVideoToH264RecipeVersionV3     = "2"
 	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
+	TransformationAudioToEAC3RecipeVersionV3     = "1"
+	TransformationAudioToAC3RecipeVersionV3      = "1"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
 	// TransformationServerDV7HDR10RecipeVersionV3 2 also removes the Profile 7
 	// enhancement-layer NAL units (see DV7ToHDR10BitstreamFilter), so an
