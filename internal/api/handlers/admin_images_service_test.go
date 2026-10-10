@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/go-chi/chi/v5"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
 )
 
 type curationImageItems map[string]*models.MediaItem
@@ -98,9 +100,14 @@ func TestAdminImageSharedPublishesImmutableRevision(t *testing.T) {
 	detail := catalog.NewDetailService(items, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil)
 	svc := &curationImageService{stored: stored}
 	h := NewAdminImageHandler(items, nil, nil, nil, svc, nil, detail)
+	bus := &recordingEventBus{}
+	h.EventBus = bus
 	out, err := h.ApplyAdminItemImage(t.Context(), id, AdminItemImageRequest{OriginalURL: "source", Type: "poster", ProviderID: "tmdb"})
 	if err != nil || out.StoredPath != stored || out.Revision != "revision" {
 		t.Fatalf("publish %+v %v", out, err)
+	}
+	if len(bus.events) != 1 || bus.events[0].Type != cache.EventCatalogItemChanged || bus.events[0].Payload != id {
+		t.Fatalf("catalog item changes = %+v, want one for %s", bus.events, id)
 	}
 	var path, source string
 	var locked []int

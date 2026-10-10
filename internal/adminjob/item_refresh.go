@@ -606,6 +606,13 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	// pre-refresh titles/posters and serve them for the whole cache TTL.
 	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
+	// scan_complete only rotates Recently Added. Every other cached home rail
+	// that lists the item would keep its pre-refresh values, for example the
+	// manual edits a Reset to Provider just replaced.
+	e.publish(cache.EventCatalogItemChanged, refreshContentID)
+	if req.RequestedContentID != "" && req.RequestedContentID != refreshContentID {
+		e.publish(cache.EventCatalogItemChanged, req.RequestedContentID)
+	}
 	if e.realtimeHub != nil {
 		if scanResult != nil && (scanResult.New > 0 || scanResult.Updated > 0 || scanResult.Missing > 0 || matched > 0) {
 			_ = e.realtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{

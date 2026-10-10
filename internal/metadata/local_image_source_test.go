@@ -78,7 +78,7 @@ func TestPrepareItemImagesForQueueRoutesLocalSource(t *testing.T) {
 		Type:       "movie",
 		PosterPath: "file:///media/movies/Film/poster.jpg",
 	}
-	prepareItemImagesForQueue(item, nil)
+	prepareItemImagesForQueue(item, nil, false)
 	if item.PosterPath != "" {
 		t.Fatalf("PosterPath = %q, want empty during pre-cache window", item.PosterPath)
 	}
@@ -359,7 +359,7 @@ func TestApplyBestImagesClearsClearArtLogoOnManualRefresh(t *testing.T) {
 	applyBestImages(&item, []RemoteImage{
 		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Language: "en", Rating: 10},
 	}, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(&item, existing)
+	prepareItemImagesForQueue(&item, existing, false)
 
 	if item.LogoPath != "" || item.LogoSourcePath != "" {
 		t.Fatalf("clear-art logo survived manual refresh: path=%q source=%q", item.LogoPath, item.LogoSourcePath)
@@ -377,7 +377,7 @@ func TestApplyBestImagesReplacesClearArtLogoWithTVDBClearLogo(t *testing.T) {
 		applyBestImages(&item, []RemoteImage{
 			{ProviderID: "tvdb", URL: tvdbClearLogoURL, Type: ImageLogo, Language: "en", Rating: 10},
 		}, mode, "en")
-		prepareItemImagesForQueue(&item, existing)
+		prepareItemImagesForQueue(&item, existing, false)
 
 		// The cached path stays served until the cache job publishes the new source.
 		if item.LogoPath != existing.LogoPath || item.LogoSourcePath != tvdbClearLogoURL {
@@ -394,7 +394,7 @@ func TestApplyBestImagesKeepsTVDBClearLogoWhenRefreshOffersNoLogo(t *testing.T) 
 	item := *existing
 
 	applyBestImages(&item, nil, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(&item, existing)
+	prepareItemImagesForQueue(&item, existing, false)
 
 	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
 		t.Fatalf("logo = path %q source %q, want cached TVDB ClearLogo kept", item.LogoPath, item.LogoSourcePath)
@@ -427,6 +427,7 @@ func TestBuildItemLocalizationRecordSkipsLocalCandidates(t *testing.T) {
 		},
 		MergeFillEmpty,
 		"de",
+		false,
 		false,
 	)
 	if loc.PosterPath != "" || loc.PosterSourcePath != "" {
@@ -591,7 +592,7 @@ func TestApplyBestImagesKeepsLockedClearArtLogoOnManualRefresh(t *testing.T) {
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Rating: 9},
 	}, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(item, &existing)
+	prepareItemImagesForQueue(item, &existing, false)
 	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
 		t.Fatalf("locked logo = path %q source %q, want admin selection kept", item.LogoPath, item.LogoSourcePath)
 	}

@@ -98,6 +98,9 @@
 ./internal/metadata TestArtworkRevisionGCDormantSweepCycles
 ./internal/metadata TestArtworkRevisionGCDormantCycleEndsWhileRowsArrive
 
+# An admin artwork choice is stored, locked and announced to every API node.
+./internal/api/handlers TestAdminImageSharedPublishesImmutableRevision
+
 # Persisted notification, request, marker and preview contracts.
 ./internal/markers TestPopulationSyncResumesAfterQuotaAcrossRuns
 ./internal/markers TestPopulationStoreReleaseKeepsFetchState

@@ -113,6 +113,7 @@ func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID 
 		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
 			cache.Event{Type: "item:updated", Payload: contentID})
 	}
+	publishCatalogItemChanged(ctx, h.EventBus, contentID)
 	if h.RealtimeHub != nil {
 		publishEventMetadataUpdate(ctx, h.RealtimeHub.EventsHub(), 0, contentID)
 	}

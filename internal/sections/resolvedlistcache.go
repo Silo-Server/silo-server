@@ -100,6 +100,11 @@ var (
 	resolvedListRefreshMu  sync.Mutex
 	resolvedListRefreshing = make(map[string]struct{})
 	resolvedListGeneration atomic.Uint64
+	// resolvedListEvictionEpoch advances on every item eviction. A rebuild
+	// records it before loading and installs its result only if no eviction
+	// ran meanwhile, so a load that read an item before an admin edit cannot
+	// put the evicted list back.
+	resolvedListEvictionEpoch atomic.Uint64
 
 	resolvedListInvalidationMu       sync.Mutex
 	resolvedListLastInvalidation     time.Time
@@ -223,44 +228,66 @@ func getOrRefresh(ctx context.Context, key string, now time.Time, loader resolve
 // blockingResolvedListRebuild rebuilds the entry for key, using singleflight so
 // concurrent cold/expired callers collapse into a single loader call.
 func blockingResolvedListRebuild(ctx context.Context, key string, now time.Time, loader resolvedListLoader) ([]*models.MediaItem, int, error) {
-	type buildResult struct {
-		items []*models.MediaItem
-		total int
-	}
-
-	value, err, _ := resolvedListGroup.Do(key, func() (any, error) {
-		// A concurrent async refresh may have installed a still-usable entry
-		// between the outer read and acquiring the flight; reuse it rather than
-		// hitting the database again.
-		if entry, ok := resolvedListGet(key); ok && now.Before(entry.expiresAt) {
-			return buildResult{items: entry.items, total: entry.total}, nil
-		}
-		// Run the loader detached from the leader's request cancellation:
-		// singleflight shares this one build across every collapsed waiter, so
-		// the leader's client disconnecting (or its deadline firing) must not
-		// fail all the other requests riding on the flight. WithoutCancel keeps
-		// the leader's context values (tracing, logging) while dropping its
-		// cancellation; the timeout re-bounds the detached work.
-		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolvedListBuildTimeout)
-		defer cancel()
-		items, total, err := loader(loadCtx)
+	// A caller that arrives after an item eviction can join a flight whose load
+	// started before it and so may still hold the evicted item's old values.
+	// Such a caller runs another flight instead of using that result. This
+	// ends: any flight that starts after callerEpoch was read is new enough.
+	callerEpoch := resolvedListEvictionEpoch.Load()
+	for {
+		value, err, _ := resolvedListGroup.Do(key, func() (any, error) {
+			return buildResolvedList(ctx, key, now, loader)
+		})
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		// Never cache an empty membership: some builders (trending, most-watched,
-		// new-to-library) can be transiently empty mid-refresh, and freezing an
-		// empty rail for the full TTL would starve it. Serve the empty result for
-		// this request but keep rebuilding until the row has content.
-		if len(items) > 0 {
-			resolvedListSet(key, items, total, now)
+		res, ok := value.(resolvedListBuild)
+		if !ok {
+			return nil, 0, fmt.Errorf("resolved list rebuild returned %T", value)
 		}
-		return buildResult{items: items, total: total}, nil
-	})
-	if err != nil {
-		return nil, 0, err
+		if res.epoch < callerEpoch {
+			continue
+		}
+		return cloneMediaItems(res.items), res.total, nil
 	}
-	res := value.(buildResult)
-	return cloneMediaItems(res.items), res.total, nil
+}
+
+// resolvedListBuild is one shared rebuild result. epoch is the eviction epoch
+// read before the result's data was loaded.
+type resolvedListBuild struct {
+	items []*models.MediaItem
+	total int
+	epoch uint64
+}
+
+func buildResolvedList(ctx context.Context, key string, now time.Time, loader resolvedListLoader) (resolvedListBuild, error) {
+	epoch := resolvedListEvictionEpoch.Load()
+	// A concurrent async refresh may have installed a still-usable entry
+	// between the outer read and acquiring the flight; reuse it rather than
+	// hitting the database again. An eviction after this epoch read drops
+	// the entry, so it is no older than epoch.
+	if entry, ok := resolvedListGet(key); ok && now.Before(entry.expiresAt) {
+		return resolvedListBuild{items: entry.items, total: entry.total, epoch: epoch}, nil
+	}
+	// Run the loader detached from the leader's request cancellation:
+	// singleflight shares this one build across every collapsed waiter, so
+	// the leader's client disconnecting (or its deadline firing) must not
+	// fail all the other requests riding on the flight. WithoutCancel keeps
+	// the leader's context values (tracing, logging) while dropping its
+	// cancellation; the timeout re-bounds the detached work.
+	loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolvedListBuildTimeout)
+	defer cancel()
+	items, total, err := loader(loadCtx)
+	if err != nil {
+		return resolvedListBuild{}, err
+	}
+	// Never cache an empty membership: some builders (trending, most-watched,
+	// new-to-library) can be transiently empty mid-refresh, and freezing an
+	// empty rail for the full TTL would starve it. Serve the empty result for
+	// this request but keep rebuilding until the row has content.
+	if len(items) > 0 {
+		resolvedListSet(key, items, total, now, epoch)
+	}
+	return resolvedListBuild{items: items, total: total, epoch: epoch}, nil
 }
 
 // scheduleResolvedListRefresh kicks off at most one background rebuild per key.
@@ -291,6 +318,7 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 		ctx, cancel := context.WithTimeout(context.Background(), resolvedListBuildTimeout)
 		defer cancel()
 
+		epoch := resolvedListEvictionEpoch.Load()
 		items, total, err := loader(ctx)
 		if err != nil {
 			slog.Warn("resolved list cache refresh failed", "key_hash", resolvedListLogKey(key), "error", err)
@@ -301,7 +329,7 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 		if len(items) == 0 {
 			return
 		}
-		resolvedListSet(key, items, total, now)
+		resolvedListSet(key, items, total, now, epoch)
 	}()
 }
 
@@ -335,8 +363,16 @@ func resolvedListGet(key string) (resolvedListEntry, bool) {
 	return entry, ok
 }
 
-func resolvedListSet(key string, items []*models.MediaItem, total int, now time.Time) {
+// resolvedListSet installs a loaded list unless an item eviction ran after the
+// load started (epoch is resolvedListEvictionEpoch read before the load). The
+// epoch is checked under the cache lock that EvictResolvedListItems also takes,
+// so an eviction either sees this entry and drops it or makes this call skip.
+func resolvedListSet(key string, items []*models.MediaItem, total int, now time.Time, epoch uint64) {
 	resolvedListCacheMu.Lock()
+	if resolvedListEvictionEpoch.Load() != epoch {
+		resolvedListCacheMu.Unlock()
+		return
+	}
 	pruneExpiredResolvedListEntriesLocked(now)
 	resolvedListCache[key] = resolvedListEntry{
 		items:        cloneMediaItems(items),
@@ -346,6 +382,36 @@ func resolvedListSet(key string, items []*models.MediaItem, total int, now time.
 		expiresAt:    now.Add(resolvedListTTL),
 	}
 	resolvedListCacheMu.Unlock()
+}
+
+// EvictResolvedListItems drops every cached list, in any generation or scope,
+// that contains one of contentIDs, so the next read of those rails rebuilds
+// from the database instead of serving the item's old title, artwork or
+// content ID. Unlike InvalidateResolvedListCache it keeps no grace copy and
+// leaves lists without those items alone: an admin edit changes what one item
+// shows, not which items a rail holds. Membership changes, such as a new
+// release date, still follow the normal refresh.
+func EvictResolvedListItems(contentIDs ...string) {
+	ids := make(map[string]struct{}, len(contentIDs))
+	for _, id := range contentIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	resolvedListCacheMu.Lock()
+	defer resolvedListCacheMu.Unlock()
+	resolvedListEvictionEpoch.Add(1)
+	for key, entry := range resolvedListCache {
+		for _, item := range entry.items {
+			if _, ok := ids[item.ContentID]; ok {
+				delete(resolvedListCache, key)
+				break
+			}
+		}
+	}
 }
 
 // pruneExpiredResolvedListEntriesLocked sweeps expired entries at most once per

@@ -772,7 +772,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, false)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)

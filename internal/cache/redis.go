@@ -67,6 +67,11 @@ const (
 	// same installations reconcile at once instead of on their next poll, and
 	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
+	// EventCatalogItemChanged is published on ChannelCatalog after an admin
+	// changes one catalog item's identity, fields or artwork outside a scan.
+	// The payload is the content ID; every API node evicts the cached home
+	// rails that list it.
+	EventCatalogItemChanged = "catalog_item_changed"
 )
 
 // EventAuthProvidersChanged is published on ChannelAdmin after an auth

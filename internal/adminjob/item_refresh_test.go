@@ -351,12 +351,14 @@ func TestItemRefreshPublishesScanCompleteAfterMetadataRefresh(t *testing.T) {
 	if refresher.contentID != "series-1" {
 		t.Fatalf("refreshed content = %q, want series-1", refresher.contentID)
 	}
+	var scanComplete, itemChanged bool
 	for _, event := range eventBus.events {
-		if event.Type == cache.EventScanComplete && event.Payload == "3" {
-			return
-		}
+		scanComplete = scanComplete || (event.Type == cache.EventScanComplete && event.Payload == "3")
+		itemChanged = itemChanged || (event.Type == cache.EventCatalogItemChanged && event.Payload == "series-1")
 	}
-	t.Fatalf("events = %#v, want scan_complete after metadata refresh", eventBus.events)
+	if !scanComplete || !itemChanged {
+		t.Fatalf("events = %#v, want scan_complete and catalog_item_changed for series-1 after metadata refresh", eventBus.events)
+	}
 }
 
 func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {

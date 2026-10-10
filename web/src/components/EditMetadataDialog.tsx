@@ -60,7 +60,8 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   title: FIELD_NAME,
   sort_title: FIELD_NAME,
   original_title: FIELD_NAME,
-  tagline: FIELD_NAME,
+  // The server keeps the tagline under the overview lock.
+  tagline: FIELD_OVERVIEW,
   overview: FIELD_OVERVIEW,
   genres: FIELD_GENRES,
   studios: FIELD_STUDIOS,
@@ -106,7 +107,6 @@ function initFormState(item: ItemDetail) {
     air_time: item.air_time ?? "",
     air_timezone: item.air_timezone ?? "",
     air_date: item.air_date ?? "",
-    status: item.status ?? "",
     rating_imdb: item.rating_imdb,
     rating_tmdb: item.rating_tmdb,
     rating_rt_critic: item.rating_rt_critic,
@@ -212,7 +212,6 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
       // validation and normalized to NULL server-side.
       data.air_timezone = form.air_timezone;
     if (form.air_date !== originalForm.air_date) data.air_date = form.air_date || null;
-    if (form.status !== originalForm.status) data.status = form.status;
     if (form.rating_imdb !== originalForm.rating_imdb) data.rating_imdb = form.rating_imdb;
     if (form.rating_tmdb !== originalForm.rating_tmdb) data.rating_tmdb = form.rating_tmdb;
     if (form.rating_rt_critic !== originalForm.rating_rt_critic)
@@ -245,10 +244,20 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     });
   }
 
-  function handleReset() {
-    refreshMutation.mutate({ item, mode: "quick" });
+  async function handleReset() {
     setShowResetConfirm(false);
+    // A refresh skips locked fields, so the locks must go first or the reset
+    // would keep every manual edit. If unlocking fails, the dialog stays open
+    // with the unsaved edits.
+    if (isLockable && (item.locked_fields?.length ?? 0) > 0) {
+      try {
+        await updateMutation.mutateAsync({ locked_fields: [] });
+      } catch {
+        return; // useUpdateItemMetadata already reported the failure.
+      }
+    }
     onOpenChange(false);
+    refreshMutation.mutate({ item, mode: "quick" });
   }
 
   function renderLockIcon(fieldName: string) {
@@ -387,19 +396,6 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                           value={form.runtime || ""}
                           onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
                         />
-                      </FieldRow>
-                    )}
-
-                    {item.type === "series" && (
-                      <FieldRow label="Status">
-                        <select
-                          value={form.status}
-                          onChange={(e) => setField("status", e.target.value)}
-                          className="border-border bg-background text-foreground focus:border-ring focus:ring-ring/50 h-9 w-full rounded-md px-3 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
-                        >
-                          <option value="Continuing">Continuing</option>
-                          <option value="Ended">Ended</option>
-                        </select>
                       </FieldRow>
                     )}
 
