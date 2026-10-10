@@ -230,7 +230,7 @@ func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
 
 // compatDVStripRecipeVersion pins the server_dv7_to_hdr10 recipe jellycompat
 // runs, matching the version the native planner freezes into its plans.
-const compatDVStripRecipeVersion = "1"
+const compatDVStripRecipeVersion = playback.TransformationServerDV7HDR10RecipeVersionV3
 
 // compatDVStripRouting narrows HLS route selection for a strip remux to
 // executors that can run it: transcode nodes whose stored report advertises

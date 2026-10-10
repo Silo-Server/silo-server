@@ -10,7 +10,11 @@ reseeds application fixtures; never use a shared or deployed database.
 Eight frozen household-session cases retain their actual account/profile authority
 and original empty-playback fixture. V2 uses the unpaged `items` envelope with no
 `page` field. No populated session filtering, loader completeness or playback
-lifecycle claim follows from these originals.
+lifecycle claim follows from these originals. `household.admin` (an admin session with
+no declared profile) now expects `403` on both transports: the fixture admin household has a
+PIN-locked profile, and the critical v1 bridge fix recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock) gives household management only
+to the primary profile.
 
 The ninth case retains the original `STANDARD` quality request and its `1080p`
 response. V2 submits the accepted canonical `1080p` value. This proves the original
@@ -26,8 +30,9 @@ onboarding, library restrictions and playback-session rows remain unchanged.
 The embedded packet locks complete originals and explicit v2 expectations.
 
 For a recorded collection-expectation correction only,
-`SILO_HOUSEHOLD_READBACK_FOLLOWUP=1` executes exactly the four successful v2
-household reads with strict four-result/eight-snapshot checks. It is not standalone
-nine-case acceptance: combine its report with the unchanged fourteen successful
-exchanges from the full run, retaining the initial failures and both reports.
+`SILO_HOUSEHOLD_READBACK_FOLLOWUP=1` executes exactly the three successful v2
+household reads with strict three-result/six-snapshot checks (`household.admin` became a
+refusal with the bridge fix above). It is not standalone nine-case acceptance: combine its
+report with the unchanged fifteen exchanges from the full run, retaining the initial failures
+and both reports.
 The normal invocation always requires all eighteen exchanges and 36 snapshots.

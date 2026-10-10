@@ -48,3 +48,33 @@ func TestApprovedCommunityMigrationKeepsFreshInstallsOffAndScopesLegacyMoves(t *
 		}
 	}
 }
+
+// Upgraded servers were opted into the approved community catalog without an
+// admin choosing it. The follow-up turns it off unless a plugin from it is
+// installed (1.0 plugin-management AC3).
+func TestUnusedApprovedCommunityCatalogIsTurnedOff(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/sql/20261010162953_disable_unused_approved_community_catalog.sql")
+	if err != nil {
+		t.Fatalf("read approved community follow-up migration: %v", err)
+	}
+	up, _, found := strings.Cut(string(data), "-- +goose Down")
+	if !found {
+		t.Fatal("migration has no Down section")
+	}
+
+	for _, fragment := range []string{
+		"SET value = 'false'",
+		"WHERE key = 'plugins.include_approved_community_plugins'",
+		"AND NOT EXISTS (",
+		"JOIN public.plugin_repositories r ON r.id = i.repository_id",
+		"WHERE r.managed_key = 'approved-community'",
+		"SET enabled = false",
+	} {
+		if !strings.Contains(up, fragment) {
+			t.Fatalf("migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(up, "DELETE") || strings.Contains(up, "plugin_installations\nSET") {
+		t.Fatal("migration must not remove or rewrite installations")
+	}
+}

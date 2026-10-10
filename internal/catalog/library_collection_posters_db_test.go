@@ -383,8 +383,9 @@ func TestCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		}
 	})
 
-	t.Run("a collection listed from a query has no collage", func(t *testing.T) {
+	t.Run("a smart collection has no collage", func(t *testing.T) {
 		queried := *stored
+		queried.CollectionType = "smart"
 		queried.QueryDefinition = json.RawMessage(`{"match":"all","groups":[]}`)
 		if got, ok := svc.CollectionPosters(ctx, []*models.LibraryCollection{&queried}, unrestricted)[collection.ID]; ok {
 			t.Fatalf("poster = %+v, want none", got)

@@ -204,7 +204,7 @@ func TestCountPersonalCollectionsBatchedDB(t *testing.T) {
 	before = pool.Stat().AcquireCount()
 	counts, err = CountPersonalCollections(ctx, pool, 0, distinct, viewer)
 	queries = pool.Stat().AcquireCount() - before
-	if err != nil || len(counts) != len(distinct) || queries > 2 {
+	if err != nil || len(counts) != len(distinct) || queries > personalCollectionCountStatements {
 		t.Fatalf("distinct counts: %d results, %d queries, error %v", len(counts), queries, err)
 	}
 	for id, want := range wants {

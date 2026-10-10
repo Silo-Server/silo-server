@@ -3,7 +3,7 @@ import { Check, GripHorizontal, RotateCcw, Trash2, X } from "lucide-react";
 import type { MarkerEditor } from "../hooks/useMarkerEditor";
 import { MARKER_KINDS, MARKER_LABELS } from "../hooks/useMarkerEditor";
 import type { MarkerKind } from "../types";
-import { formatTime } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 
 interface MarkerEditPanelProps {
   editor: MarkerEditor;
@@ -172,7 +172,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                     <button
                       type="button"
                       aria-label={`Clear ${MARKER_LABELS[kind]} marker`}
-                      title="Clear marker"
+                      title="Remove marker until manually set again"
                       disabled={!range}
                       onClick={() => editor.clearKind(kind)}
                       className="rounded-md p-1.5 text-white/40 transition-colors hover:bg-white/10 hover:text-red-300 disabled:pointer-events-none disabled:opacity-25"

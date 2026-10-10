@@ -34,7 +34,7 @@ const BASE_CLIENT_FEATURES_V3 = [FEATURE_PLAYBACK_PLAN_V3];
  * `plan_invalidated` command (see `VideoPlayer`) and replans off the plan the
  * server names.
  */
-export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3];
+export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3, "marker_thumbnails_v1"];
 
 /**
  * `client_features` is the contract's single advertisement location, and a

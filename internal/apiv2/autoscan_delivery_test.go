@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 )
 
 type autoscanDeliveryFixture struct {
@@ -73,5 +75,83 @@ func TestAutoscanDeliveryRejectsBeforeBodyAndPreservesBucket(t *testing.T) {
 	requireProblem(t, rec, TypeRateLimited)
 	if bucket != "autoscan_webhook" || f.calls != 0 || rec.Header().Get("Retry-After") != "3" {
 		t.Fatal(bucket, f.calls, rec.Header())
+	}
+}
+
+// deliveryStore is the slice of the autoscan repository the real delivery
+// handler touches. The embedded nil repository satisfies the rest of the
+// handler's store surface; reaching any of it would panic and fail the test.
+type deliveryStore struct {
+	*autoscan.Repository
+	source   autoscan.Source
+	settings autoscan.Settings
+	touched  []string
+}
+
+func (s *deliveryStore) ResolveWebhookToken(_ context.Context, token string) (autoscan.Source, autoscan.WebhookEndpoint, error) {
+	if token != "synthetic-capability" {
+		return autoscan.Source{}, autoscan.WebhookEndpoint{}, autoscan.ErrNotFound
+	}
+	return s.source, autoscan.WebhookEndpoint{SourceID: s.source.ID}, nil
+}
+func (s *deliveryStore) GetSettings(context.Context) (autoscan.Settings, error) {
+	return s.settings, nil
+}
+func (s *deliveryStore) TouchWebhookReceived(_ context.Context, sourceID string) error {
+	s.touched = append(s.touched, sourceID)
+	return nil
+}
+func (s *deliveryStore) RecordWebhookError(context.Context, string, string) error { return nil }
+
+type deliveryIngester struct {
+	*autoscan.Service
+	ingested int
+}
+
+func (i *deliveryIngester) IngestChanges(context.Context, autoscan.ChangeIngest) (autoscan.IngestResult, error) {
+	i.ingested++
+	return autoscan.IngestResult{Enqueued: 1}, nil
+}
+
+// The v2 route runs the shared delivery handler: it keeps answering 202 for a
+// disabled source, but only a provider Test event may move the admin "Last
+// delivery" timestamp. The full stamping rules are covered by the handler
+// tests; these rows check the wiring.
+func TestAutoscanDeliveryDisabledSourceStampsOnlyTestEvents(t *testing.T) {
+	const download = `{"eventType":"Download","series":{"path":"/data/tv/Show"},"episodeFile":{"path":"/data/tv/Show/Season 01/e01.mkv"}}`
+	const testEvent = `{"eventType":"Test","series":{"path":"/data/tv/Show"}}`
+	for name, tc := range map[string]struct {
+		body        string
+		wantTouched int
+	}{
+		"disabled source delivery":   {body: download},
+		"disabled source test event": {body: testEvent, wantTouched: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &deliveryStore{
+				source: autoscan.Source{
+					ID:           "src-1",
+					PluginID:     autoscan.BuiltinArrWebhookPluginID,
+					CapabilityID: autoscan.BuiltinArrWebhookCapabilityID,
+					Enabled:      false,
+					DeliveryMode: autoscan.DeliveryModeWebhook,
+					SourceConfig: map[string]string{autoscan.WebhookProviderConfigKey: "auto"},
+				},
+				settings: autoscan.Settings{Enabled: true},
+			}
+			ingester := &deliveryIngester{}
+			h := NewHandler(Dependencies{AutoscanDelivery: handlers.NewAutoscanHandler(store, ingester)})
+
+			rec := do(t, h, "POST", Prefix+"/autoscan/webhooks/synthetic-capability", tc.body, nil)
+			if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"status":"accepted"`) {
+				t.Fatalf("status = %d body %s, want 202 accepted", rec.Code, rec.Body.String())
+			}
+			if len(store.touched) != tc.wantTouched {
+				t.Fatalf("last_received_at stamps = %d, want %d", len(store.touched), tc.wantTouched)
+			}
+			if ingester.ingested != 0 {
+				t.Fatalf("a disabled source must not ingest, ingested = %d", ingester.ingested)
+			}
+		})
 	}
 }

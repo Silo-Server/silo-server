@@ -1,13 +1,41 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+type passwordHashCapture struct {
+	hash string
+}
+
+func (db *passwordHashCapture) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+	db.hash = args[2].(string)
+	return passwordHashRow{}
+}
+
+type passwordHashRow struct{}
+
+func (passwordHashRow) Scan(...any) error { return pgx.ErrNoRows }
+
+func TestCreateUserPasswordHashCost(t *testing.T) {
+	db := &passwordHashCapture{}
+	const password = "test account password"
+	_, err := createUser(t.Context(), db, models.CreateUserInput{
+		Username: "cost-test", Email: "cost@example.test", Password: password, Role: models.RoleUser,
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("createUser() error = %v, want %v", err, ErrNotFound)
+	}
+	assertTestPasswordHash(t, db.hash, password)
+}
 
 func passwordUser(t *testing.T, password string) *models.User {
 	t.Helper()

@@ -63,7 +63,7 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	base_title, base_year, base_type, identity_confidence, identity_json,
 	file_path, file_size, file_modified_at, file_hash,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
-	duration, bitrate, video_tracks, audio_tracks, subtitle_tracks, external_subtitles, chapters,
+	duration, bitrate, video_tracks, audio_tracks, subtitle_tracks, external_subtitles, chapters, marker_thumbnails,
 	chapter_thumbnail_retry_after, chapter_thumbnail_failure_count, chapter_thumbnail_last_error,
 	intro_start, intro_end, credits_start, credits_end, recap_start, recap_end, preview_start, preview_end, marker_segments, markers_source, markers_confidence,
 	intro_markers_source, intro_markers_provider, intro_markers_confidence, intro_markers_algorithm, intro_markers_detected_at,
@@ -88,7 +88,7 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.base_title, mf.base_year, mf.base_type, mf.identity_confidence, mf.identity_json,
 	mf.file_path, mf.file_size, mf.file_modified_at, mf.file_hash,
 	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
-	mf.duration, mf.bitrate, mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.chapters,
+	mf.duration, mf.bitrate, mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.chapters, mf.marker_thumbnails,
 	mf.chapter_thumbnail_retry_after, mf.chapter_thumbnail_failure_count, mf.chapter_thumbnail_last_error,
 	mf.intro_start, mf.intro_end, mf.credits_start, mf.credits_end, mf.recap_start, mf.recap_end, mf.preview_start, mf.preview_end, mf.marker_segments, mf.markers_source, mf.markers_confidence,
 	mf.intro_markers_source, mf.intro_markers_provider, mf.intro_markers_confidence, mf.intro_markers_algorithm, mf.intro_markers_detected_at,
@@ -172,6 +172,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&subtitleTracksJSON,
 		&externalSubtitlesJSON,
 		&chaptersJSON,
+		&f.MarkerThumbnails,
 		&chapterThumbnailRetryAfter,
 		&chapterThumbnailFailureCount,
 		&chapterThumbnailLastError,
@@ -492,6 +493,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&subtitleTracksJSON,
 			&externalSubtitlesJSON,
 			&chaptersJSON,
+			&f.MarkerThumbnails,
 			&chapterThumbnailRetryAfter,
 			&chapterThumbnailFailureCount,
 			&chapterThumbnailLastError,
@@ -1522,8 +1524,7 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 }
 
 // ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, including their provenance columns. Used by the admin manual-marker
-// API to remove a marker so detection/online fetch can repopulate it. Returns
+// a file, retaining manual provenance to prevent automatic rediscovery. Returns
 // whether a row was updated.
 func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
@@ -1762,16 +1763,16 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 		changed.preview = changed.preview || applied.preview
 	}
 	if clearFlags.intro {
-		changed.intro = clearSegmentState(&state.intro) || changed.intro
+		changed.intro = clearManualSegmentState(&state.intro, mutationAt) || changed.intro
 	}
 	if clearFlags.credits {
-		changed.credits = clearSegmentState(&state.credits) || changed.credits
+		changed.credits = clearManualSegmentState(&state.credits, mutationAt) || changed.credits
 	}
 	if clearFlags.recap {
-		changed.recap = clearSegmentState(&state.recap) || changed.recap
+		changed.recap = clearManualSegmentState(&state.recap, mutationAt) || changed.recap
 	}
 	if clearFlags.preview {
-		changed.preview = clearSegmentState(&state.preview) || changed.preview
+		changed.preview = clearManualSegmentState(&state.preview, mutationAt) || changed.preview
 	}
 	if !changed.any() {
 		if err := tx.Commit(ctx); err != nil {
@@ -2026,6 +2027,16 @@ func clearSegmentState(state *segmentState) bool {
 	state.confidence = nil
 	state.algorithm = nil
 	state.detectedAt = nil
+	return true
+}
+
+func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
+	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
+	if segmentEqual(*state, next) {
+		return false
+	}
+	*state = next
 	return true
 }
 
@@ -3035,6 +3046,11 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // reappears within the window restores without re-probing or re-matching.
 // A zero grace deletes all missing-marked rows immediately.
 //
+// Rows of an item that still exists without any library membership are kept
+// whatever their age: membership reconciliation runs first and deletes every
+// orphan it may, so such an item is held (catalog WithRemovalGrace) or
+// protected, and its orphan check on a later pass needs these rows to find it.
+//
 // Rows whose file_path lies at or under one of protectedRoots are never
 // deleted, no matter how long they have been missing: an unreachable library
 // root (dead drive, lost mount) is temporarily offline, not removed, so its
@@ -3043,7 +3059,15 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
+	query := `DELETE FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NOT NULL
+		  AND mf.missing_since < $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_items mi
+			WHERE mi.content_id = mf.content_id
+			  AND NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)
+		  )`
 	args := []any{folderID, cutoff}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
@@ -3238,17 +3262,26 @@ func (r *FileRepository) GetByFolder(ctx context.Context, folderID int) ([]*mode
 // GetByFolderAndPathPrefix returns all files for a folder that live under a
 // subtree path.
 func (r *FileRepository) GetByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*models.MediaFile, error) {
-	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	query, args := folderPathPrefixQuery(fileColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by folder and path prefix: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// folderPathPrefixQuery selects columns for the files of a folder at or under
+// pathPrefix. The range bounds let the (media_folder_id, file_path
+// text_pattern_ops) index narrow the subtree even under a generic plan, which
+// a parameterized LIKE cannot do.
+func folderPathPrefixQuery(columns string, folderID int, pathPrefix string) (string, []any) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT ` + columns + ` FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
+		ORDER BY file_path ASC`
+	return query, append([]any{folderID}, args...)
 }
 
 // ListByGroupKey returns all present media files in a logical content group.
@@ -3434,17 +3467,25 @@ func (r *FileRepository) FindParentContentIDForStem(ctx context.Context, folderI
 
 // FindUnambiguousParentContentIDForDir returns the single content id owning
 // the primary files under dir, or "" when the directory holds no matched
-// content or more than one distinct item (ambiguous — caller defers).
-func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string) (string, error) {
+// content or more than one distinct item (ambiguous — caller defers). Rows
+// marked missing still count: dropping them could leave a sibling as the sole
+// owner and bind the extra to the wrong item. Rows at excludePaths are
+// ignored: they are extras still carrying a primary link from before they
+// were classified.
+func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string, excludePaths []string) (string, error) {
+	if excludePaths == nil {
+		excludePaths = []string{}
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT COALESCE(e.series_id, mf.content_id) AS parent_id
 		FROM media_files mf
 		LEFT JOIN episodes e ON e.content_id = mf.episode_id
 		WHERE mf.media_folder_id = $1
 		  AND mf.file_path LIKE $2 ESCAPE '\'
+		  AND mf.file_path <> ALL($3::text[])
 		  AND mf.extra_id IS NULL
 		  AND (mf.content_id IS NOT NULL OR mf.episode_id IS NOT NULL)
-		LIMIT 2`, folderID, pathPrefixLike(dir))
+		LIMIT 2`, folderID, pathPrefixLike(dir), excludePaths)
 	if err != nil {
 		return "", fmt.Errorf("finding parent by dir: %w", err)
 	}
@@ -4080,7 +4121,25 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 		  )
 		  AND (
 			mf.chapters IS NULL
-			OR (
+            -- Count only markers models.EffectiveMarkerThumbnails can preview;
+            -- others never write state and would be listed every sweep.
+            OR (EXISTS (
+                    SELECT 1 FROM (
+                        SELECT segment->>'kind' AS kind, (segment->>'start_seconds')::float8 AS start_seconds, (segment->>'end_seconds')::float8 AS end_seconds
+                        FROM jsonb_array_elements(mf.marker_segments) AS segment
+                        UNION ALL VALUES ('intro', mf.intro_start, mf.intro_end), ('credits', mf.credits_start, mf.credits_end),
+                            ('recap', mf.recap_start, mf.recap_end), ('preview', mf.preview_start, mf.preview_end)
+                    ) AS marker
+                    WHERE marker.kind IN ('intro', 'credits', 'recap', 'preview')
+                      AND mf.duration > 0 AND marker.start_seconds >= 0 AND marker.start_seconds < mf.duration + 1
+                      AND marker.end_seconds > marker.start_seconds AND marker.end_seconds <= mf.duration + 1
+                )
+                AND (jsonb_array_length(mf.marker_thumbnails) = 0 OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(mf.marker_thumbnails) AS marker
+                    WHERE right(COALESCE(marker->>'thumbnail_path', ''), length($2)) <> $2
+                    AND (COALESCE(marker->>'thumbnail_retry_after', '') = '' OR (marker->>'thumbnail_retry_after')::timestamptz <= NOW())
+                )))
+            OR (
 				jsonb_typeof(mf.chapters) = 'array'
 				AND jsonb_array_length(mf.chapters) > 0
 				AND EXISTS (
@@ -4134,7 +4193,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		  AND NOT ($4::boolean AND `+chapterHDRFileSQL+`)
 		  AND EXISTS (
 			SELECT 1 FROM jsonb_array_elements(
-				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+				(CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END) || mf.marker_thumbnails
 			) AS chapter
 			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($2)) <> $2
 			  AND (COALESCE(chapter->>'thumbnail_retry_after', '') = ''
@@ -4166,7 +4225,7 @@ func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context,
 		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		CROSS JOIN LATERAL jsonb_array_elements(
-			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			(CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END) || mf.marker_thumbnails
 		) AS chapter
 		WHERE mf.missing_since IS NULL
 		  AND folders.enabled = true

@@ -51,7 +51,11 @@ const authExchangeOperations = new Set<V2OperationKey>([
 
 // Reads sent as POST because their input is a JSON document. They wait for
 // the server only as long as a GET does.
-const readOnlyPostOperations = new Set<V2OperationKey>(["POST /api/v2/catalog/query"]);
+const readOnlyPostOperations = new Set<V2OperationKey>([
+  "POST /api/v2/catalog/query",
+  "POST /api/v2/admin/sections/preview",
+  "POST /api/v2/direct-download/links",
+]);
 
 /**
  * The deadline a request gets when its caller sets none: reads fail with
@@ -223,7 +227,8 @@ export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
       ? { headers?: V2Headers<K> }
       : { headers: V2Headers<K> });
 
-type RequestArgs<K extends V2OperationKey> =
+/** The arguments after the operation key: options, optional when nothing is required. */
+export type V2RequestArgs<K extends V2OperationKey> =
   Record<never, never> extends V2RequestOptions<K>
     ? [options?: V2RequestOptions<K>]
     : [options: V2RequestOptions<K>];
@@ -402,7 +407,7 @@ async function readBody(res: Response, operationId: string): Promise<unknown> {
  */
 export async function v2<K extends V2OperationKey>(
   key: K,
-  ...args: RequestArgs<K>
+  ...args: V2RequestArgs<K>
 ): Promise<V2Result<K>> {
   const [method, route] = key.split(" ", 2) as [string, string];
   const options = (args[0] ?? {}) as CommonOptions & {

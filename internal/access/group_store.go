@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -235,9 +236,11 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 	if err := lockGroupWriters(ctx, tx); err != nil {
 		return nil, err
 	}
+	var defaultAudits []*auditmutation.Entry
 	if input.IsDefault {
-		if _, err := tx.Exec(ctx, `UPDATE access_groups SET is_default = false WHERE is_default`); err != nil {
-			return nil, fmt.Errorf("clearing previous default access group: %w", err)
+		defaultAudits, err = clearPreviousDefaults(ctx, tx, 0, 201)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -277,8 +280,16 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 	if err != nil {
 		return nil, err
 	}
+	audit, err := recordGroupMutation(ctx, tx, nil, created)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing access group create: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	for _, entry := range defaultAudits {
+		auditmutation.CommitMutation(ctx, entry)
 	}
 	return created, nil
 }
@@ -393,13 +404,11 @@ func (s *GroupStore) UpdateConditional(ctx context.Context, id int64, input Upda
 		return currentGroup, nil
 	}
 	qualityChanged := input.MaxPlaybackQuality != nil && NormalizePlaybackQuality(currentGroup.MaxPlaybackQuality) != NormalizePlaybackQuality(*input.MaxPlaybackQuality)
+	var defaultAudits []*auditmutation.Entry
 	if input.IsDefault != nil && *input.IsDefault {
-		if _, err := tx.Exec(ctx, `
-			UPDATE access_groups
-			SET is_default = false
-			WHERE is_default
-			  AND id <> $1`, id); err != nil {
-			return nil, fmt.Errorf("clearing previous default access group: %w", err)
+		defaultAudits, err = clearPreviousDefaults(ctx, tx, id, 200)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if input.IsDefault != nil && !*input.IsDefault && currentGroup.IsDefault {
@@ -431,8 +440,16 @@ func (s *GroupStore) UpdateConditional(ctx context.Context, id int64, input Upda
 	if err != nil {
 		return nil, err
 	}
+	audit, err := recordGroupMutation(ctx, tx, currentGroup, updated)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing access group update: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	for _, entry := range defaultAudits {
+		auditmutation.CommitMutation(ctx, entry)
 	}
 	return updated, nil
 }
@@ -465,7 +482,15 @@ func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard Grou
 	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := recordGroupMutation(ctx, tx, row, nil)
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
 
 // DeleteMovingMembers deletes a group as DeleteConditional does, but first
@@ -494,33 +519,62 @@ func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard Gr
 	if row.IsDefault {
 		return ErrDefaultGroupRequired
 	}
-	if err = moveGroupMembersToDefault(ctx, tx, id); err != nil {
+	memberAudits, err := moveGroupMembersToDefault(ctx, tx, id)
+	if err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := recordGroupMutation(ctx, tx, row, nil)
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	for _, entry := range memberAudits {
+		auditmutation.CommitMutation(ctx, entry)
+	}
+	return nil
 }
 
 // moveGroupMembersToDefault reassigns every member of group id to the default
 // group. It moves none when there is no default group other than id.
-func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) error {
+func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) ([]*auditmutation.Entry, error) {
 	var defaultID int64
 	err := tx.QueryRow(ctx, `SELECT id FROM access_groups WHERE is_default AND id <> $1`, id).Scan(&defaultID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("finding the default access group: %w", err)
+		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE users
-		SET access_group_id = $1, access_policy_revision = access_policy_revision + 1
-		WHERE access_group_id = $2`, defaultID, id); err != nil {
-		return fmt.Errorf("moving access group members to the default group: %w", err)
+	rows, err := tx.Query(ctx, `UPDATE users SET access_group_id=$1,access_policy_revision=access_policy_revision+1 WHERE access_group_id=$2 RETURNING id`, defaultID, id)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	var members []int
+	for rows.Next() {
+		var member int
+		if err = rows.Scan(&member); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]string, len(members))
+	for i, member := range members {
+		targets[i] = fmt.Sprint(member)
+	}
+	return auditmutation.RecordMutations(ctx, tx, "user.updated", "user", targets, 204,
+		auditmutation.Changes(map[string]any{"access_group_id": id}, map[string]any{"access_group_id": defaultID}))
 }
 
 // GetPolicyForUser returns the access-group policy for a user, or nil when

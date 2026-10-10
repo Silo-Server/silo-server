@@ -50,22 +50,28 @@ func TestAttachNativeSubtitleValidatesRouteAndIdentity(t *testing.T) {
 		delivery    playback.DeliveryV3
 		mode        playback.SubtitleModeV3
 		streamIndex int
-		wantError   bool
+		// fileTrackID is the container track ID on the file now; planTrackID
+		// is the one the frozen plan carries.
+		fileTrackID, planTrackID string
+		wantError                bool
 	}{
-		{"native_original", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 4, false},
-		{"reject_adapted_native", playback.DeliveryRemuxProgressiveV3, playback.SubtitleRenderV3, 4, true},
-		{"reject_converted_native", playback.DeliveryOriginalHTTPV3, playback.SubtitleConvertV3, 4, true},
-		{"reject_changed_index", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 7, true},
-		{"clear_off", playback.DeliveryOriginalHTTPV3, playback.SubtitleOffV3, 4, false},
-		{"clear_burned_in", playback.DeliveryTranscodeHLSV3, playback.SubtitleBurnInV3, 4, false},
+		{"native_original", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 4, "", "", false},
+		{"reject_adapted_native", playback.DeliveryRemuxProgressiveV3, playback.SubtitleRenderV3, 4, "", "", true},
+		{"reject_converted_native", playback.DeliveryOriginalHTTPV3, playback.SubtitleConvertV3, 4, "", "", true},
+		{"reject_changed_index", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 7, "", "", true},
+		{"keep_stream_index_route_after_id_recorded", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 4, "3", "", false},
+		{"reject_changed_container_id", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 4, "5", "3", true},
+		{"reject_lost_container_id", playback.DeliveryOriginalHTTPV3, playback.SubtitleRenderV3, 4, "", "3", true},
+		{"clear_off", playback.DeliveryOriginalHTTPV3, playback.SubtitleOffV3, 4, "", "", false},
+		{"clear_burned_in", playback.DeliveryTranscodeHLSV3, playback.SubtitleBurnInV3, 4, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			file := &models.MediaFile{ID: 42, SubtitleTracks: []models.SubtitleTrack{{Index: 4, Codec: "subrip"}}}
+			file := &models.MediaFile{ID: 42, SubtitleTracks: []models.SubtitleTrack{{Index: 4, Codec: "subrip", ContainerTrackID: tc.fileTrackID}}}
 			plan := &playback.PlanV3{
 				Delivery: tc.delivery,
 				Subtitle: playback.SubtitleDecisionV3{
 					Mode: tc.mode, TrackID: playback.TrackIDV3(file.ID, "subtitle", 0),
-					Embedded:  &playback.EmbeddedSubtitleV3{StreamIndex: tc.streamIndex},
+					Embedded:  &playback.EmbeddedSubtitleV3{StreamIndex: tc.streamIndex, ContainerTrackID: tc.planTrackID},
 					Artifact:  &playback.SubtitleArtifactV3{URL: "/stale.vtt", Format: "vtt"},
 					Inventory: playback.BuildSubtitleInventoryV3(file, nil),
 				},

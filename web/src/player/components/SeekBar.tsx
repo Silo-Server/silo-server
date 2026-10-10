@@ -1,6 +1,8 @@
+import { PreviewImage } from "./PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarkerKind, MarkerRegionView, PlayerChapter } from "../types";
 import { trickplayTile, type PlayerTrickplay } from "../trickplay";
+import { formatTime } from "../utils/formatTime";
 
 interface SeekBarProps {
   currentTime: number;
@@ -81,7 +83,7 @@ function findChapterAtTime(chapters: PlayerChapter[], time: number): PlayerChapt
 function findRegionAtTime(regions: MarkerRegionView[], time: number): MarkerRegionView | null {
   let match: MarkerRegionView | null = null;
   for (const region of regions) {
-    if (time < region.start || time > region.end) {
+    if (time < region.start || time >= region.end) {
       continue;
     }
     if (!match || region.end - region.start < match.end - match.start) {
@@ -89,17 +91,6 @@ function findRegionAtTime(regions: MarkerRegionView[], time: number): MarkerRegi
     }
   }
   return match;
-}
-
-function formatTime(seconds: number): string {
-  const s = Math.floor(seconds);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
-  }
-  return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
 export function SeekBar({
@@ -387,29 +378,14 @@ export function SeekBar({
                 }}
               />
             ) : (
-              hoverChapter &&
-              (hoverChapter.thumbnail_url ? (
-                <img
-                  src={hoverChapter.thumbnail_url}
-                  alt={hoverChapter.title}
+              (hoverRegion || hoverChapter) && (
+                <PreviewImage
+                  src={hoverRegion ? hoverRegion.thumbnail_url : hoverChapter?.thumbnail_url}
+                  alt={hoverRegion ? MARKER_LABELS[hoverRegion.kind] : (hoverChapter?.title ?? "")}
                   className="aspect-video w-full object-cover"
+                  placeholderClassName="flex items-center justify-center bg-gradient-to-b from-white/[0.06] to-white/[0.02]"
                 />
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center bg-gradient-to-b from-white/[0.06] to-white/[0.02]">
-                  <svg
-                    className="h-5 w-5 text-white/[0.12]"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                    <path d="m7 2 0 20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5" />
-                  </svg>
-                </div>
-              ))
+              )
             )}
             <div className="px-2.5 py-1.5">
               {hoverRegion && (
@@ -588,5 +564,3 @@ function MarkerHandle({
     </div>
   );
 }
-
-export { formatTime };

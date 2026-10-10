@@ -76,7 +76,7 @@ func TestPersonalTMDBListImportRejectsNonListURL(t *testing.T) {
 
 func TestPersonalTMDBListSourceURLCanBeEdited(t *testing.T) {
 	store := &lifecycleStore{collection: userstore.Collection{
-		ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"},
+		ID: "c", CreatorProfileID: "owner",
 		CollectionType: "tmdb", SourceURL: "https://www.themoviedb.org/list/310",
 		SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
 	}}
@@ -112,7 +112,7 @@ func TestPersonalTMDBListSourceURLCanBeEdited(t *testing.T) {
 
 func TestPersonalTMDBPresetSourceURLCannotBeEdited(t *testing.T) {
 	store := &lifecycleStore{collection: userstore.Collection{
-		ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"},
+		ID: "c", CreatorProfileID: "owner",
 		CollectionType: "tmdb", SourceConfig: `{"mode":"tmdb_preset","preset":"trending"}`,
 	}}
 	h := NewCollectionHandler(lifecycleProvider{store: store})

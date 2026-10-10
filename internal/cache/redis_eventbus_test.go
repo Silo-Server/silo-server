@@ -1,20 +1,17 @@
 package cache
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
@@ -25,10 +22,11 @@ func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
 		{"redis://localhost:6379", 0},
 		{"redis://localhost:6379/7", 7},
 		{"redis://localhost:6379?db=4", 4},
+		{"redis://sentinel-1:26379/5?master_name=mymaster", 5},
 		// Not a URL: the bus falls back to treating it as an address.
 		{"localhost:6379", 0},
 	} {
-		bus := newRedisEventBus(tc.url)
+		bus := newRedisEventBus(config.RedisConfig{URL: tc.url})
 		if bus.db != tc.want {
 			t.Errorf("newRedisEventBus(%q) scopes channels to database %d, want %d", tc.url, bus.db, tc.want)
 		}
@@ -38,135 +36,74 @@ func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
 	}
 }
 
-// fakeRedis speaks enough RESP2 for a go-redis client to select a database,
-// subscribe and publish. It records each SUBSCRIBE and PUBLISH with the
-// database its connection had selected.
-type fakeRedis struct {
-	addr string
-
-	mu     sync.Mutex
-	conns  []net.Conn
-	pubsub []string
-}
-
-func startFakeRedis(t *testing.T) *fakeRedis {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &fakeRedis{addr: ln.Addr().String()}
-	var wg sync.WaitGroup
-	t.Cleanup(func() {
-		_ = ln.Close()
-		f.mu.Lock()
-		for _, conn := range f.conns {
-			_ = conn.Close()
+func TestRedisClientsTakeDatabaseNumberFromRedisDB(t *testing.T) {
+	for _, cfg := range []config.RedisConfig{
+		{URL: "redis://localhost:6379", DB: "5"},
+		{URL: "redis://localhost:6379/7", DB: "5"},
+		{URL: "redis://sentinel-1:26379/7?master_name=mymaster", DB: "5"},
+	} {
+		bus := newRedisEventBus(cfg)
+		if bus.db != 5 {
+			t.Errorf("newRedisEventBus(%+v) scopes channels to database %d, want redis.db's 5", cfg, bus.db)
 		}
-		f.mu.Unlock()
-		wg.Wait()
-	})
-	wg.Go(func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			f.mu.Lock()
-			f.conns = append(f.conns, conn)
-			f.mu.Unlock()
-			wg.Go(func() { f.serve(conn) })
+		if err := bus.Close(); err != nil {
+			t.Errorf("close bus for %+v: %v", cfg, err)
 		}
-	})
-	return f
-}
 
-func (f *fakeRedis) serve(conn net.Conn) {
-	r := bufio.NewReader(conn)
-	db := 0
-	for {
-		args, err := readRESPCommand(r)
-		if err != nil || len(args) == 0 {
-			return
-		}
-		name := strings.ToUpper(args[0])
-		// HELLO and CLIENT SETINFO: a Redis error keeps go-redis on RESP2.
-		reply := "-ERR unknown command\r\n"
-		switch {
-		case name == "SELECT" && len(args) == 2:
-			if db, err = strconv.Atoi(args[1]); err != nil {
-				return
-			}
-			reply = "+OK\r\n"
-		case (name == "SUBSCRIBE" || name == "PUBLISH") && len(args) >= 2:
-			f.mu.Lock()
-			f.pubsub = append(f.pubsub, fmt.Sprintf("%s %s on database %d", name, args[1], db))
-			f.mu.Unlock()
-			reply = ":0\r\n"
-			if name == "SUBSCRIBE" {
-				reply = fmt.Sprintf("*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:1\r\n", len(args[1]), args[1])
-			}
-		}
-		if _, err := io.WriteString(conn, reply); err != nil {
-			return
-		}
-	}
-}
-
-func (f *fakeRedis) recorded() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.pubsub)
-}
-
-func readRESPCommand(r *bufio.Reader) ([]string, error) {
-	line, err := r.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-	if !strings.HasPrefix(line, "*") {
-		return nil, fmt.Errorf("unexpected RESP line %q", line)
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(line[1:]))
-	if err != nil {
-		return nil, err
-	}
-	args := make([]string, 0, n)
-	for range n {
-		header, err := r.ReadString('\n')
+		client, err := NewRedisClientForRole(cfg, "test")
 		if err != nil {
-			return nil, err
+			t.Fatalf("NewRedisClientForRole(%+v): %v", cfg, err)
 		}
-		size, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(header, "$")))
-		if err != nil {
-			return nil, err
+		if got := client.Options().DB; got != 5 {
+			t.Errorf("NewRedisClientForRole(%+v) selects database %d, want redis.db's 5", cfg, got)
 		}
-		buf := make([]byte, size+2)
-		if _, err := io.ReadFull(r, buf); err != nil {
-			return nil, err
+		if err := client.Close(); err != nil {
+			t.Errorf("close client for %+v: %v", cfg, err)
 		}
-		args = append(args, string(buf[:size]))
 	}
-	return args, nil
+
+	// The URL is fine here, so the error must not blame it.
+	client, err := NewRedisClientForRole(config.RedisConfig{URL: "redis://localhost:6379/7", DB: "five"}, "test")
+	if err == nil {
+		_ = client.Close()
+		t.Fatal("NewRedisClientForRole built a client for a redis.db that is not a number")
+	}
+	if got := err.Error(); !strings.Contains(got, config.RedisDBSettingKey) || strings.Contains(got, "redis URL") {
+		t.Errorf("error for a redis.db that is not a number = %q, want one that names redis.db and not the URL", got)
+	}
 }
 
 // Runs without a Redis server: the name Redis receives must carry the database
 // number that the same connection selected.
 func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
 	bare := []string{"SUBSCRIBE silo:admin on database 0", "PUBLISH silo:admin on database 0"}
+	db5 := []string{"SUBSCRIBE silo:admin@db5 on database 5", "PUBLISH silo:admin@db5 on database 5"}
 	for _, tc := range []struct {
 		name string
 		path string
+		db   string
 		want []string
+		bare bool
 	}{
-		{"database 3", "/3", []string{"SUBSCRIBE silo:admin@db3 on database 3", "PUBLISH silo:admin@db3 on database 3"}},
-		{"database 0", "/0", bare},
-		{"no database number", "", bare},
-		{"negative database number", "/-1", bare},
+		{"database 3", "/3", "", []string{"SUBSCRIBE silo:admin@db3 on database 3", "PUBLISH silo:admin@db3 on database 3"}, false},
+		{"database 0", "/0", "", bare, false},
+		{"no database number", "", "", bare, false},
+		{"negative database number", "/-1", "", bare, false},
+		{"redis.db replaces the number in the URL", "/3", "5", db5, false},
+		{"redis.db on a URL without a number", "", "5", db5, false},
+		{"redis.db 0 replaces the number in the URL", "/3", "0", bare, false},
+		{"redis.db on a bare address", "", "5", db5, true},
+		{"normalized redis.db on a bare address", "", " 05 ", db5, true},
+		{"redis.db 0 on a bare address", "", "0", bare, true},
+		{"no redis.db on a bare address", "", "", bare, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := startFakeRedis(t)
-			bus := newRedisEventBus("redis://" + server.addr + tc.path)
+			server := startRESPTestServer(t, nil, respTestRedis)
+			redisURL := "redis://" + server.addr + tc.path
+			if tc.bare {
+				redisURL = server.addr
+			}
+			bus := newRedisEventBus(config.RedisConfig{URL: redisURL, DB: tc.db})
 			t.Cleanup(func() { _ = bus.Close() })
 
 			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
@@ -175,8 +112,28 @@ func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
 			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err != nil {
 				t.Fatalf("publish: %v", err)
 			}
-			if got := server.recorded(); !slices.Equal(got, tc.want) {
+			if got := server.pubsub(); !slices.Equal(got, tc.want) {
 				t.Errorf("Redis received %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRedisEventBusRejectsInvalidDatabaseOnBareAddress(t *testing.T) {
+	for _, db := range []string{"five", "-1", "999999999999999999999999999999"} {
+		t.Run(db, func(t *testing.T) {
+			server := startRESPTestServer(t, nil, respTestRedis)
+			bus := newRedisEventBus(config.RedisConfig{URL: server.addr, DB: db})
+			t.Cleanup(func() { _ = bus.Close() })
+
+			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("subscribe with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("publish with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if got := server.received(); len(got) != 0 {
+				t.Errorf("Redis received %q for an invalid redis.db, want no commands", got)
 			}
 		})
 	}
@@ -198,7 +155,7 @@ func testRedisOptions(t *testing.T, db int) *redis.Options {
 
 func testEventBus(t *testing.T, db int) *RedisEventBus {
 	t.Helper()
-	bus := newRedisEventBusFromOptions(testRedisOptions(t, db))
+	bus := newRedisEventBusFromClient(redis.NewClient(testRedisOptions(t, db)), false)
 	t.Cleanup(func() { _ = bus.Close() })
 	return bus
 }

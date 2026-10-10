@@ -54,11 +54,15 @@ export default function SectionItemCard({
   return (
     <div ref={cardRef} className="media-card media-card-longpress group/card">
       <div className="group/media relative">
-        <ViewTransitionLink to={itemHref} className="block overflow-hidden rounded-xl">
+        <ViewTransitionLink
+          to={itemHref}
+          aria-label={displayTitle}
+          className="block overflow-hidden rounded-xl"
+        >
           <MediaCardArtwork
             src={item.poster_url}
             alt={item.title}
-            fallbackLabel={item.title}
+            mediaType={item.type}
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             lazy

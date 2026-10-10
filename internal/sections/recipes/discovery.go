@@ -2,7 +2,16 @@ package recipes
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+)
+
+// Minimum TMDB vote counts the rating-led discovery rows require, so a title a
+// handful of people rated cannot lead a row (on a large library, thousands of
+// titles carry a perfect 10 from one to three votes).
+const (
+	AcclaimedMinVotes = 500
+	DiscoveryMinVotes = 100
 )
 
 // HiddenGemsParams configures the hidden_gems resolver.
@@ -36,7 +45,7 @@ func (hiddenGemsRecipe) Definition() RecipeDefinition {
 				Key:              "hidden_gems_default",
 				DisplayName:      "Hidden Gems",
 				Icon:             "💎",
-				DescriptionShort: "Highly rated titles in your library that no one's watched.",
+				DescriptionShort: fmt.Sprintf("Rated 7.5+ on TMDB with %d+ votes, and watched twice or less.", DiscoveryMinVotes),
 				DefaultParams:    json.RawMessage(`{"min_rating":7.5,"max_play_count":2}`),
 			},
 		},
@@ -44,9 +53,10 @@ func (hiddenGemsRecipe) Definition() RecipeDefinition {
 }
 
 // CriticallyAcclaimedParams configures the critically_acclaimed resolver.
+// Older rows also store a "source" key; the resolver always uses the TMDB
+// rating, so it is not read.
 type CriticallyAcclaimedParams struct {
 	MinScore float64 `json:"min_score,omitempty"`
-	Source   string  `json:"source,omitempty"`
 }
 
 type criticallyAcclaimedRecipe struct{}
@@ -74,8 +84,8 @@ func (criticallyAcclaimedRecipe) Definition() RecipeDefinition {
 				Key:              "ca_imdb",
 				DisplayName:      "Critically Acclaimed",
 				Icon:             "🏆",
-				DescriptionShort: "8.0+ rated by IMDb.",
-				DefaultParams:    json.RawMessage(`{"min_score":8.0,"source":"imdb"}`),
+				DescriptionShort: fmt.Sprintf("Rated 8.0+ on TMDB with %d+ votes.", AcclaimedMinVotes),
+				DefaultParams:    json.RawMessage(`{"min_score":8.0}`),
 			},
 		},
 	}
@@ -167,7 +177,7 @@ func (forgottenFavoritesRecipe) Definition() RecipeDefinition {
 				Key:              "ff_default",
 				DisplayName:      "Forgotten Favorites",
 				Icon:             "🕰️",
-				DescriptionShort: "In your library, haven't been watched in a year.",
+				DescriptionShort: fmt.Sprintf("Rated 7.0+ on TMDB with %d+ votes, and not watched in the past year.", DiscoveryMinVotes),
 				DefaultParams:    json.RawMessage(`{"lookback_days":365}`),
 			},
 		},

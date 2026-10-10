@@ -49,7 +49,7 @@ func (s *PostgresUserStore) episodeParentCompletion(ctx context.Context, profile
 			)
 		) AS completed
 		FROM unnest($3::text[]) AS parents(parent_id)`, parentColumn)
-	rows, err := s.pool.Query(ctx, query, s.userID, profileID, parentIDs)
+	rows, err := s.pool.Query(ctx, query, profilePlanArgs(s.userID, profileID, parentIDs)...)
 	if err != nil {
 		return nil, fmt.Errorf("loading episode parent completion: %w", err)
 	}

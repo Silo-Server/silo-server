@@ -127,7 +127,7 @@ func (reg *Registry) createAdminSection(ctx context.Context, in *AdminSectionCre
 	if p != nil {
 		return nil, p
 	}
-	v, err := reg.deps.AdminSections.CreateAdminSection(ctx, handlers.AdminSectionCreate{Scope: in.Body.Scope, LibraryID: library, Position: in.Body.Position, SectionType: in.Body.SectionType, Title: in.Body.Title, Featured: in.Body.Featured, ItemLimit: in.Body.ItemLimit, Config: adminSectionConfig(in.Body.Config), Enabled: in.Body.Enabled})
+	v, err := reg.deps.AdminSections.CreateAdminSection(ctx, handlers.AdminSectionCreate{Scope: in.Body.Scope, LibraryID: library, Position: in.Body.Position, SectionType: in.Body.SectionType, Title: in.Body.Title, Featured: in.Body.Featured, ItemLimit: in.Body.ItemLimit, Config: adminSectionConfig(in.Body.Config), Enabled: in.Body.Enabled, ValidateRecipe: true})
 	if err != nil {
 		return nil, adminSectionError(err)
 	}
@@ -166,7 +166,7 @@ func (reg *Registry) updateAdminSection(ctx context.Context, in *AdminSectionUpd
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
 	}
-	cmd := handlers.AdminSectionUpdate{Position: in.Body.Position, Featured: in.Body.Featured, ItemLimit: in.Body.ItemLimit, Config: adminSectionConfig(in.Body.Config), Enabled: in.Body.Enabled}
+	cmd := handlers.AdminSectionUpdate{Position: in.Body.Position, Featured: in.Body.Featured, ItemLimit: in.Body.ItemLimit, Config: adminSectionConfig(in.Body.Config), Enabled: in.Body.Enabled, ValidateRecipe: true}
 	if in.Body.Title != nil {
 		cmd.Title = *in.Body.Title
 	}

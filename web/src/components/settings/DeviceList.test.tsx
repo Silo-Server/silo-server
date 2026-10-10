@@ -35,7 +35,7 @@ function renderList(
   render(
     <DeviceList
       devices={devices}
-      selectedDeviceId={null}
+      selectedKey={null}
       onSelect={onSelect}
       search=""
       onSearchChange={vi.fn()}
@@ -110,7 +110,7 @@ describe("DeviceList", () => {
           device({ device_id: "tv", device_name: "Living Room", device_platform: "tvOS" }),
           device({ device_id: "web", device_name: "Chrome", device_platform: "macOS Web" }),
         ]}
-        selectedDeviceId={null}
+        selectedKey={null}
         onSelect={vi.fn()}
         search=""
         onSearchChange={onSearchChange}
@@ -124,7 +124,7 @@ describe("DeviceList", () => {
           device({ device_id: "tv", device_name: "Living Room", device_platform: "tvOS" }),
           device({ device_id: "web", device_name: "Chrome", device_platform: "macOS Web" }),
         ]}
-        selectedDeviceId={null}
+        selectedKey={null}
         onSelect={vi.fn()}
         search="tv"
         onSearchChange={onSearchChange}
@@ -188,7 +188,7 @@ describe("DeviceList at scale", () => {
     render(
       <DeviceList
         devices={bigFleet()}
-        selectedDeviceId={null}
+        selectedKey={null}
         onSelect={vi.fn()}
         search="build-7"
         onSearchChange={vi.fn()}

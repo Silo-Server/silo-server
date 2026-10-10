@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
+import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useItemEpisodes, useSeasons } from "@/hooks/queries/episodes";
@@ -35,6 +36,15 @@ import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailL
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
+/** Series lead with their creators; one without Creator credits keeps showing its directors. */
+const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
+
+/**
+ * The series Crew section lists every creator ahead of the usual crew. Season
+ * and episode pages keep CrewList's default jobs, so creators stay on the series.
+ */
+const SERIES_CREW_JOBS = ["Creator", "Director", "Writer", "Producer"] as const;
+
 export default function SeriesContent({
   item,
   showAdvisoryAge,
@@ -45,6 +55,12 @@ export default function SeriesContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { startShuffle } = useStartShuffle();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
@@ -144,7 +160,12 @@ export default function SeriesContent({
             overviewTranslating={overviewTranslating}
             onTranslateOverview={onTranslateOverview}
             crewLine={
-              <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
+              <HeroCrewLine
+                crew={item.crew ?? []}
+                genres={item.genres}
+                jobLabel="Created by"
+                leadJobs={SERIES_LEAD_JOBS}
+              />
             }
             actions={
               <MediaUserActionBar
@@ -160,8 +181,7 @@ export default function SeriesContent({
                         refreshMetadataMutation.mutate({
                           item,
                           mode,
-                          onReplaced: (contentID) =>
-                            navigate(`/item/${contentID}`, { replace: true }),
+                          onReplaced: followReplacedItem,
                         })
                     : undefined
                 }
@@ -173,6 +193,11 @@ export default function SeriesContent({
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
+                onShuffle={
+                  episodeCount > 1
+                    ? () => startShuffle({ kind: "series", id: item.content_id })
+                    : undefined
+                }
               />
             }
           />
@@ -228,6 +253,7 @@ export default function SeriesContent({
               item={item}
               open={matchOpen}
               onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
             />
           )}
           {canCurateMetadata && (
@@ -251,7 +277,7 @@ export default function SeriesContent({
           <CastCarousel cast={item.cast} prefetchPeople />
         </DetailSection>
       )}
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
+      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} jobs={SERIES_CREW_JOBS} />}
 
       {similarLoading ? (
         <RecommendationGridSkeleton />

@@ -909,6 +909,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Allow HDR output on this device.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.match_frame_rate": {
     key: "player.match_frame_rate",
@@ -997,6 +998,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "x",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: 0.25,
     maximum: 3,
     step: 0.05,
@@ -1069,6 +1071,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "milliseconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: -10000,
     maximum: 10000,
   },

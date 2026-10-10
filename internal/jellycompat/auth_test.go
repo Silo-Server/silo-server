@@ -28,7 +28,7 @@ func TestRequireSession_SkipsRefreshWhenNoAuthService(t *testing.T) {
 		StreamAppTokenExpiry:  now.Add(3 * time.Minute),
 	})
 
-	authn := &Authenticator{sessions: store, authService: nil}
+	authn := &Authenticator{sessions: store}
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Emby-Token", "valid-tok")
 	rec := httptest.NewRecorder()
@@ -98,7 +98,7 @@ func TestRequireSession_NoAuthService_PassesThroughExpiredStreamAppToken(t *test
 		StreamAppTokenExpiry: now.Add(-1 * time.Hour), // already expired
 	})
 
-	authn := &Authenticator{sessions: store, authService: nil}
+	authn := &Authenticator{sessions: store}
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Emby-Token", "expired-tok")
 	rec := httptest.NewRecorder()

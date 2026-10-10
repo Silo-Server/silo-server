@@ -313,6 +313,17 @@ func (s *Service) RecordImportedMarkUnplayed(
 	return store.RemoveHistoryItems(ctx, profileID, []string{targetID}, updatedAt)
 }
 
+// Progress returns the profile's watch progress for targetID, or nil when it
+// has none, read from the same user store watch-state writes go to. User
+// stores report UpdatedAt as RFC 3339 in UTC, whole seconds.
+func (s *Service) Progress(ctx context.Context, userID int, profileID, targetID string) (*userstore.WatchProgress, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return store.GetProgress(ctx, profileID, targetID)
+}
+
 func (s *Service) SetFavorite(
 	ctx context.Context,
 	userID int,

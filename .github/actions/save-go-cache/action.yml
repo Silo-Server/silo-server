@@ -1,0 +1,52 @@
+name: Save the Go cache used by this job
+description: Prunes unused build entries and saves the build cache and optional shared module cache.
+
+inputs:
+  job-status:
+    description: The caller's job.status before entering this action.
+    required: true
+
+  cache-key:
+    description: The primary key from setup-go.
+    required: true
+
+  module-cache-key:
+    description: The shared module cache primary key from setup-go; only Go test passes it.
+    required: false
+    default: ''
+
+  module-cache-hit:
+    description: Whether setup-go restored the exact shared module cache key.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Prune unused Go build cache entries
+      if: success() && inputs.job-status == 'success' && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        cache_dir="$(go env GOCACHE)"
+        find "$cache_dir" -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) ! -newermt '@0' -exec rm -rf -- {} +
+
+    - name: Save the Go build cache
+      if: success() && inputs.job-status == 'success' && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/go-build
+        key: ${{ inputs.cache-key }}
+
+    - name: Download and trim the shared Go module cache
+      if: ${{ !cancelled() && inputs.job-status != 'cancelled' && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && inputs.module-cache-key != '' && inputs.module-cache-hit != 'true' }}
+      shell: bash
+      run: |
+        go mod download
+        find "$(go env GOMODCACHE)/cache/download" -name '*.zip' -type f -delete
+
+    - name: Save the shared Go module cache
+      if: ${{ !cancelled() && inputs.job-status != 'cancelled' && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && inputs.module-cache-key != '' && inputs.module-cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ inputs.module-cache-key }}

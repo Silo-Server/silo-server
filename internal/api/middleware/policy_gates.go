@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/go-chi/chi/v5"
@@ -29,7 +30,7 @@ type PermissionDecider interface {
 
 // NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
 // policy PDP while preserving RequireActingAdmin's response contract.
-func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker) func(http.Handler) http.Handler {
+func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker, household HouseholdProfileRequirement) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
@@ -43,7 +44,7 @@ func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker Primar
 				return
 			}
 
-			declaredProfileID, actingAsPrimary, err := resolveActingAdminFacts(r, claims.UserID, primaryChecker)
+			facts, err := resolveActingAdminFacts(r, claims, primaryChecker, household)
 			if err != nil {
 				writeInternalError(w, activeProfileVerificationFailedMsg)
 				return
@@ -54,16 +55,17 @@ func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker Primar
 			}
 
 			decision, _, err := pdp.CheckPermission(r.Context(), policy.PermissionInput{
-				SchemaVersion:     1,
-				UserID:            claims.UserID,
-				Role:              claims.Role,
-				UserEnabled:       true,
-				Permission:        policy.PermissionActingAdmin,
-				DeclaredProfileID: declaredProfileID,
-				ActingAsPrimary:   actingAsPrimary,
-				RequestTime:       policyRequestTime(),
-				DeviceID:          policyDeviceID(r),
-				ClientIP:          clientip.FromContext(r.Context()),
+				SchemaVersion:            1,
+				UserID:                   claims.UserID,
+				Role:                     claims.Role,
+				UserEnabled:              true,
+				Permission:               policy.PermissionActingAdmin,
+				DeclaredProfileID:        facts.declaredProfileID,
+				ActingAsPrimary:          facts.actingAsPrimary,
+				HouseholdRequiresProfile: facts.householdRequiresProfile,
+				RequestTime:              policyRequestTime(),
+				DeviceID:                 policyDeviceID(r),
+				ClientIP:                 clientip.FromContext(r.Context()),
 			})
 			if err != nil {
 				writeInternalError(w, activeProfileVerificationFailedMsg)
@@ -85,6 +87,7 @@ type PolicyPermissionMiddleware struct {
 	users        PermissionUserLoader
 	libraries    MetadataTargetLibraryResolver
 	checkPrimary PrimaryProfileChecker
+	household    HouseholdProfileRequirement
 	pdp          PermissionDecider
 	groups       access.GroupPolicyProvider
 }
@@ -94,6 +97,7 @@ func NewPolicyPermissionMiddleware(
 	users PermissionUserLoader,
 	libraries MetadataTargetLibraryResolver,
 	checkPrimary PrimaryProfileChecker,
+	household HouseholdProfileRequirement,
 	pdp PermissionDecider,
 	groups ...access.GroupPolicyProvider,
 ) *PolicyPermissionMiddleware {
@@ -105,6 +109,7 @@ func NewPolicyPermissionMiddleware(
 		users:        users,
 		libraries:    libraries,
 		checkPrimary: checkPrimary,
+		household:    household,
 		pdp:          pdp,
 		groups:       groupProvider,
 	}
@@ -122,19 +127,20 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 
-		declaredProfileID, actingAsPrimary, err := resolveActingAdminFacts(r, claims.UserID, m.primaryChecker())
+		facts, err := m.actingAdminFacts(r, claims)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 			return
 		}
 		if claims.Role == "admin" {
 			actingAdmin, err := m.checkPermission(r, policy.PermissionInput{
-				UserID:            claims.UserID,
-				Role:              claims.Role,
-				UserEnabled:       true,
-				Permission:        policy.PermissionActingAdmin,
-				DeclaredProfileID: declaredProfileID,
-				ActingAsPrimary:   actingAsPrimary,
+				UserID:                   claims.UserID,
+				Role:                     claims.Role,
+				UserEnabled:              true,
+				Permission:               policy.PermissionActingAdmin,
+				DeclaredProfileID:        facts.declaredProfileID,
+				ActingAsPrimary:          facts.actingAsPrimary,
+				HouseholdRequiresProfile: facts.householdRequiresProfile,
 			})
 			if err != nil {
 				writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
@@ -168,14 +174,15 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 		}
 
 		permissionOnlyInput := policy.PermissionInput{
-			UserID:              user.ID,
-			Role:                user.Role,
-			UserEnabled:         user.Enabled,
-			AssignedPermissions: slices.Clone(effective.Permissions),
-			Permission:          policy.PermissionMetadataCuration,
-			DeclaredProfileID:   declaredProfileID,
-			ActingAsPrimary:     actingAsPrimary,
-			TargetLibraryIDs:    []int{0},
+			UserID:                   user.ID,
+			Role:                     user.Role,
+			UserEnabled:              user.Enabled,
+			AssignedPermissions:      slices.Clone(effective.Permissions),
+			Permission:               policy.PermissionMetadataCuration,
+			DeclaredProfileID:        facts.declaredProfileID,
+			ActingAsPrimary:          facts.actingAsPrimary,
+			HouseholdRequiresProfile: facts.householdRequiresProfile,
+			TargetLibraryIDs:         []int{0},
 		}
 		permissionOnly, err := m.checkPermission(r, permissionOnlyInput)
 		if err != nil {
@@ -198,16 +205,17 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 		}
 
 		decision, err := m.checkPermission(r, policy.PermissionInput{
-			UserID:                  user.ID,
-			Role:                    user.Role,
-			UserEnabled:             user.Enabled,
-			AssignedPermissions:     slices.Clone(effective.Permissions),
-			Permission:              policy.PermissionMetadataCuration,
-			DeclaredProfileID:       declaredProfileID,
-			ActingAsPrimary:         actingAsPrimary,
-			TargetLibraryIDs:        slices.Clone(targetLibraries),
-			UserLibraryIDs:          slices.Clone(effective.LibraryIDs),
-			UserLibrariesRestricted: effective.LibraryIDs != nil,
+			UserID:                   user.ID,
+			Role:                     user.Role,
+			UserEnabled:              user.Enabled,
+			AssignedPermissions:      slices.Clone(effective.Permissions),
+			Permission:               policy.PermissionMetadataCuration,
+			DeclaredProfileID:        facts.declaredProfileID,
+			ActingAsPrimary:          facts.actingAsPrimary,
+			HouseholdRequiresProfile: facts.householdRequiresProfile,
+			TargetLibraryIDs:         slices.Clone(targetLibraries),
+			UserLibraryIDs:           slices.Clone(effective.LibraryIDs),
+			UserLibrariesRestricted:  effective.LibraryIDs != nil,
 		})
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify metadata curation permission")
@@ -241,7 +249,9 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 
-		declaredProfileID, actingAsPrimary, err := resolveActingAdminFacts(r, claims.UserID, m.primaryChecker())
+		// marker_edit reads no household fact (its admin grant is not an
+		// acting-admin decision, #1911), so skip that lookup.
+		facts, err := resolveActingAdminFacts(r, claims, m.checkPrimary, nil)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 			return
@@ -258,13 +268,14 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 		}
 
 		decision, err := m.checkPermission(r, policy.PermissionInput{
-			UserID:              user.ID,
-			Role:                user.Role,
-			UserEnabled:         user.Enabled,
-			AssignedPermissions: slices.Clone(effective.Permissions),
-			Permission:          policy.PermissionMarkerEdit,
-			DeclaredProfileID:   declaredProfileID,
-			ActingAsPrimary:     actingAsPrimary,
+			UserID:                   user.ID,
+			Role:                     user.Role,
+			UserEnabled:              user.Enabled,
+			AssignedPermissions:      slices.Clone(effective.Permissions),
+			Permission:               policy.PermissionMarkerEdit,
+			DeclaredProfileID:        facts.declaredProfileID,
+			ActingAsPrimary:          facts.actingAsPrimary,
+			HouseholdRequiresProfile: facts.householdRequiresProfile,
 		})
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify marker edit permission")
@@ -279,11 +290,11 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 	})
 }
 
-func (m *PolicyPermissionMiddleware) primaryChecker() PrimaryProfileChecker {
+func (m *PolicyPermissionMiddleware) actingAdminFacts(r *http.Request, claims *auth.Claims) (actingAdminFacts, error) {
 	if m == nil {
-		return nil
+		return resolveActingAdminFacts(r, claims, nil, nil)
 	}
-	return m.checkPrimary
+	return resolveActingAdminFacts(r, claims, m.checkPrimary, m.household)
 }
 
 func (m *PolicyPermissionMiddleware) checkPermission(r *http.Request, input policy.PermissionInput) (policy.PermissionDecision, error) {
@@ -304,19 +315,36 @@ func (errMissingPolicyDecider) Error() string {
 	return "missing policy permission decider"
 }
 
-func resolveActingAdminFacts(r *http.Request, userID int, checkPrimary PrimaryProfileChecker) (string, bool, error) {
+// actingAdminFacts are the Go-side lookups the acting-admin policy rule reads:
+// Rego never touches the database.
+type actingAdminFacts struct {
+	declaredProfileID        string
+	actingAsPrimary          bool
+	householdRequiresProfile bool
+}
+
+// resolveActingAdminFacts precomputes the acting-admin inputs. With a declared
+// profile it reports whether that profile is the account's primary. Without
+// one it reports, for an admin login session, whether the household requires
+// a declared profile (profileLessAdminRefused); API keys and non-admins never
+// pay that lookup.
+func resolveActingAdminFacts(r *http.Request, claims *auth.Claims, checkPrimary PrimaryProfileChecker, household HouseholdProfileRequirement) (actingAdminFacts, error) {
 	profileID := declaredProfileID(r)
 	if profileID == "" {
-		return "", false, nil
+		if claims == nil || claims.Role != "admin" {
+			return actingAdminFacts{}, nil
+		}
+		refused, err := profileLessAdminRefused(r.Context(), claims, household)
+		return actingAdminFacts{householdRequiresProfile: refused}, err
 	}
 	if checkPrimary == nil {
-		return profileID, true, nil
+		return actingAdminFacts{declaredProfileID: profileID, actingAsPrimary: true}, nil
 	}
-	isPrimary, found, err := checkPrimary(r.Context(), userID, profileID)
+	isPrimary, found, err := checkPrimary(r.Context(), claims.UserID, profileID)
 	if err != nil {
-		return profileID, false, err
+		return actingAdminFacts{declaredProfileID: profileID}, err
 	}
-	return profileID, found && isPrimary, nil
+	return actingAdminFacts{declaredProfileID: profileID, actingAsPrimary: found && isPrimary}, nil
 }
 
 func policyRequestTime() string {

@@ -57,6 +57,10 @@ func imageKeyGroup(key string) (string, bool) {
 }
 
 func chapterImageIndex(value string) bool {
+	if strings.HasPrefix(value, "marker-") {
+		parts := strings.Split(value, "-")
+		return len(parts) == 3 && lowerHexDigest(parts[1]) && lowerHexDigest(parts[2])
+	}
 	index, digest, hashed := strings.Cut(value, "-")
 	if !canonicalNumber(index, true) {
 		return false
@@ -97,7 +101,7 @@ func referencedImages(ctx context.Context, db blobgc.Querier, keys []string) (ma
 		SELECT DISTINCT chapter->>'thumbnail_path'
 		FROM public.media_files mf
 		CROSS JOIN LATERAL jsonb_array_elements(
-			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			(CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END) || mf.marker_thumbnails
 		) AS chapter
 		WHERE mf.id = ANY($1::bigint[])
 		  AND chapter->>'thumbnail_path' = ANY($2::text[])`, ids, keys)
@@ -163,4 +167,16 @@ func liveImagePrefixes(ctx context.Context, db blobgc.Querier, prefixes []string
 		live[chapterImagesPrefix+strconv.FormatInt(id, 10)+"/"] = true
 	}
 	return live, rows.Err()
+}
+
+func lowerHexDigest(value string) bool {
+	if len(value) != sha256HexLength {
+		return false
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
