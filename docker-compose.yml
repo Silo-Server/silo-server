@@ -81,6 +81,12 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+      # Prepared downloads, when download.artifact_dir is blank and the
+      # transcode directory is the default. They go beside the transcode
+      # directory rather than in it, so they need their own mount to survive
+      # image updates. The directory has no size limit unless an admin sets
+      # Prepared file storage budget (Settings > Downloads > Advanced).
+      - ${SILO_DATA_ROOT:-/opt/silo}/download-artifacts:/tmp/silo-download-artifacts
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
       # Only load-bearing when the Docker host is itself an LXC container, where
       # these three files describe the physical machine and the LXC's own cap
