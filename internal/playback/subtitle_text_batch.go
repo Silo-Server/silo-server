@@ -271,6 +271,9 @@ func (c *SubtitleCache) waitForTextFill(ctx context.Context, inputPath string, t
 	if done == nil {
 		return false
 	}
+	if afterTextFillWaitCapture != nil {
+		afterTextFillWaitCapture()
+	}
 	select {
 	case <-done:
 		return true

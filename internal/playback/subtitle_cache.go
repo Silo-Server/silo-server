@@ -372,6 +372,19 @@ func (c *SubtitleCache) LookupText(inputPath string, trackIndex int, format stri
 	return data, err == nil
 }
 
+// LookupWebVTT returns the complete WebVTT rendition native playback cached
+// for a text track (ServeExtract stores SubRip and forced-VTT extracts under
+// the vtt key), so another reader can reuse it instead of demuxing the source.
+func (c *SubtitleCache) LookupWebVTT(inputPath string, trackIndex int) ([]byte, bool) {
+	f, _, ok := c.lookup(inputPath, trackIndex, SubtitleFormatVTTV3)
+	if !ok {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	return data, err == nil
+}
+
 // ExtractText reuses a complete cached text track or extracts it once for this
 // request. The fill captures source identity before extraction, so a replaced
 // source cannot publish an old extract under the new file's cache key.
@@ -383,10 +396,38 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 	if format == "" {
 		return nil, fmt.Errorf("unsupported cached subtitle format")
 	}
+	// Share another request's extraction rather than demuxing the source a
+	// second time: look the track up, else reserve the fill, else wait for
+	// whoever holds it and look again. A fill that commits between a busy
+	// reservation and the wait is found by the next lookup, and one that
+	// commits during the last wait by the lookup after the loop. The rounds
+	// are bounded, so a cache that can't take a fill (disabled, unwritable)
+	// falls through to extracting without one.
+	var fill *SubtitleCacheFill
+	for round := 0; round < textFillRounds && fill == nil; round++ {
+		if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+			return data, nil
+		}
+		if fill = c.beginFill(inputPath, trackIndex, format); fill != nil {
+			break
+		}
+		if afterBusyTextFill != nil {
+			afterBusyTextFill()
+		}
+		c.waitForTextFill(ctx, inputPath, TextSubtitleTrack{Ordinal: trackIndex, Format: format})
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	// Another filler may have committed since the last lookup: between it
+	// and this reservation, or during the last round's wait. Reuse its entry
+	// rather than extracting again.
 	if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+		if fill != nil {
+			fill.Discard()
+		}
 		return data, nil
 	}
-	fill := c.beginFill(inputPath, trackIndex, format)
 	data, err := extract(ctx)
 	if err != nil {
 		if fill != nil {
@@ -403,6 +444,18 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 	}
 	return data, nil
 }
+
+// textFillRounds bounds ExtractText's lookup, reserve and wait rounds.
+const textFillRounds = 3
+
+// afterBusyTextFill runs when ExtractText finds another fill in progress,
+// before it waits; tests use it to finish that fill in between.
+var afterBusyTextFill func()
+
+// afterTextFillWaitCapture runs once waitForTextFill holds an in-flight
+// fill's done channel, before it blocks on it; tests use it to act while a
+// request is waiting.
+var afterTextFillWaitCapture func()
 
 func normalizeCachedTextSubtitleFormat(format string) string {
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), ".")) {
