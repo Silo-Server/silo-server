@@ -23,6 +23,7 @@ type fakeStore struct {
 	advances       []MarkerAdvance   // every advance attempt, stored or not
 	staleAdvance   bool              // reject advances as if an admin reset the marker
 	recorded       map[string]string // source ID -> error message
+	failures       []PollFailure     // every error write, with the rows the poll read
 	createdEvents  []EventCreate
 	events         []EventFinish
 	createEventErr error
@@ -58,12 +59,13 @@ func (f *fakeStore) AdvanceMarker(_ context.Context, adv MarkerAdvance) (bool, e
 	f.advanced[adv.Source.ID] = adv.NextMarker
 	return true, nil
 }
-func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
+func (f *fakeStore) RecordError(_ context.Context, failure PollFailure) (bool, error) {
+	f.failures = append(f.failures, failure)
 	if f.recorded == nil {
 		f.recorded = map[string]string{}
 	}
-	f.recorded[sourceID] = msg
-	return nil
+	f.recorded[failure.Source.ID] = failure.Message
+	return true, nil
 }
 func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, error) {
 	if f.createEventErr != nil {
@@ -1122,6 +1124,37 @@ func TestPollOnceAdvancesMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	}
 	if event.MarkerAfter != "m1" {
 		t.Fatalf("event marker after = %q, want %q", event.MarkerAfter, "m1")
+	}
+}
+
+// A failed poll's error is written against the rows the poll read, so the
+// store can drop it when an admin reset the source while the poll ran.
+func TestPollOnceRecordsAFailureAgainstTheRowsThePollRead(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"),
+			Marker: strptr("m0"), SourceConfig: map[string]string{"scope": "all"}, Enabled: true,
+		}},
+		connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
+	}
+	prov := &fakeProvider{err: errors.New("dial tcp: i/o timeout")}
+	svc := NewService(store, prov, passthroughConnRes{}, nil, &recordingQueuer{}, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(store.failures) != 1 {
+		t.Fatalf("error writes = %d, want 1", len(store.failures))
+	}
+	failure := store.failures[0]
+	if failure.Source.Marker == nil || *failure.Source.Marker != "m0" || failure.Source.SourceConfig["scope"] != "all" {
+		t.Fatalf("failure source = %+v, want the row the poll read", failure.Source)
+	}
+	if failure.Connection == nil || failure.Connection.ID != "c1" || failure.Connection.BaseURL != "http://sonarr.invalid" {
+		t.Fatalf("failure connection = %+v, want the row the poll resolved", failure.Connection)
+	}
+	if len(store.events) != 1 || store.events[0].Status != EventStatusError || store.events[0].ErrorMessage != failure.Message {
+		t.Fatalf("events = %+v, want the error on the poll's event", store.events)
 	}
 }
 
