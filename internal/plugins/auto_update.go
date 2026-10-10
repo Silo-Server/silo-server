@@ -165,7 +165,8 @@ func (s *AutoUpdateService) SetRequiredPlugins(required func(context.Context) ([
 }
 
 // Check runs a plugin update pass. It can be used by startup, scheduled tasks,
-// and manual admin actions.
+// and manual admin actions. Each per-plugin failure is logged and recorded in
+// the summary; only failures that stop the whole pass are returned.
 func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (AutoUpdateSummary, error) {
 	var summary AutoUpdateSummary
 
@@ -260,6 +261,10 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		s.notifyChanged(ctx)
 	}
 
+	for _, failure := range summary.Failures {
+		s.logger.WarnContext(ctx, "plugin auto-update operation failed", "error", failure)
+	}
+
 	return summary, nil
 }
 
@@ -278,16 +283,11 @@ func (s *AutoUpdateService) notifyChanged(ctx context.Context) {
 // installed plugins according to their update policy. All errors are logged
 // rather than returned so that startup is never blocked.
 func (s *AutoUpdateService) Run(ctx context.Context) error {
-	summary, err := s.Check(ctx, AutoUpdateOptions{
+	if _, err := s.Check(ctx, AutoUpdateOptions{
 		SeedDefaultRepository: true,
 		AutoInstallDefaults:   true,
-	})
-	if err != nil {
+	}); err != nil {
 		s.logger.WarnContext(ctx, "failed to run plugin auto-update", "error", err)
-		return nil
-	}
-	for _, failure := range summary.Failures {
-		s.logger.WarnContext(ctx, "plugin auto-update operation failed", "error", failure)
 	}
 	return nil
 }

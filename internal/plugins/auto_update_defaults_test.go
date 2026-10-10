@@ -1,8 +1,11 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -107,7 +110,9 @@ func TestAutoUpdateKeepsInstallingDefaultsWhenRequiredPluginsFail(t *testing.T) 
 		resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/theintrodb", Checksum: "test-checksum"},
 	}
 	installer := &fakeAutoUpdateInstaller{}
-	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, &fakeAutoUpdateInstallations{}, catalog, installer, nil, nil, nil)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	service := NewAutoUpdateService(&fakeAutoUpdateRepositories{}, &fakeAutoUpdateInstallations{}, catalog, installer, nil, logger, nil)
 	service.SetRequiredPlugins(func(context.Context) ([]string, error) {
 		return nil, errors.New("database unavailable")
 	})
@@ -117,6 +122,9 @@ func TestAutoUpdateKeepsInstallingDefaultsWhenRequiredPluginsFail(t *testing.T) 
 	}
 	if summary.FailedOperations != 1 {
 		t.Fatalf("failed operations = %d, want the required-plugin lookup recorded", summary.FailedOperations)
+	}
+	if !strings.Contains(logs.String(), "database unavailable") {
+		t.Fatalf("logs = %q, want the failure logged by every Check caller", logs.String())
 	}
 	if summary.DefaultPluginsInstalled != 1 || len(installer.binary) != 1 {
 		t.Fatalf("default installs = %d, binary requests = %d, want 1 each", summary.DefaultPluginsInstalled, len(installer.binary))
