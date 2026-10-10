@@ -389,6 +389,8 @@ func TestAdminJobOwnerReadIsSafe(t *testing.T) {
 }
 
 func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
+	f := newFakeAdminTasks()
+	h := adminTasksTestHandler(t, f)
 	for _, body := range []string{
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","max_runtime_ms":null}]}`,
@@ -398,8 +400,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		`{"triggers":[{"type":"startup"},{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			f := newFakeAdminTasks()
-			h := adminTasksTestHandler(t, f)
+			*f = *newFakeAdminTasks()
 			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/tasks/fixture/triggers", body, with(bearer(adminToken), "If-Match", "*")), TypeValidationFailed)
 			if f.writes != 0 || f.schedule.Revision != 2 {
 				t.Fatalf("null changed schedule: %+v", f)
@@ -412,8 +413,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":0,"max_runtime_ms":0}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			f := newFakeAdminTasks()
-			h := adminTasksTestHandler(t, f)
+			*f = *newFakeAdminTasks()
 			response := do(t, h, "PUT", Prefix+"/admin/tasks/fixture/triggers", body, with(bearer(adminToken), "If-Match", "*"))
 			if response.Code != 200 || f.writes != 1 {
 				t.Fatalf("omission/zero rejected: %d %s", response.Code, response.Body)

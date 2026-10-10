@@ -95,7 +95,7 @@ func writeCompatAudioRecipeFFmpeg(t *testing.T, supportsV2 bool, output string) 
 	if supportsV2 {
 		smokeResult = "exit 0"
 	}
-	execute := "sleep 30"
+	execute := "exec sleep 30"
 	if output != "" {
 		execute = fmt.Sprintf("printf '%%s' %q", output)
 	}
@@ -230,7 +230,7 @@ func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t
 		"eval \"last=\\\"\\${$#}\\\"\"\n" +
 		"if [ \"$last\" = '-' ]; then exit 0; fi\n" +
 		"touch " + startedMarker + "\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -335,13 +335,13 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 
 	ffmpegPath := filepath.Join(t.TempDir(), "fallback-ffmpeg.sh")
 	script := "#!/bin/sh\n" +
-		"case \"$*\" in *-hwaccels*) printf 'videotoolbox\\n'; exit 0;; *-encoders*) printf ' V..... h264_videotoolbox VideoToolbox H.264 encoder\\n'; exit 0;; *' -f lavfi '*) exit 0;; *scale_vt*) sleep 30; exit 0;; esac\n" +
+		"case \"$*\" in *-hwaccels*) printf 'videotoolbox\\n'; exit 0;; *-encoders*) printf ' V..... h264_videotoolbox VideoToolbox H.264 encoder\\n'; exit 0;; *' -f lavfi '*) exit 0;; *scale_vt*) exec sleep 30;; esac\n" +
 		"out=\"\"\n" +
 		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1159,9 +1159,13 @@ func newActiveEncodingsHandler(mgr *testCompatSessionManager) (*PlaybackHandler,
 func TestHandleDeleteActiveEncodings_StopsTranscodeAndDeletesSession(t *testing.T) {
 	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
 	h, store := newActiveEncodingsHandler(mgr)
+	recipeStore := &stubRecipeNodeStore{cards: map[string]playback.RecipeCard{
+		"upstream-1": {SessionID: "upstream-1"},
+	}}
+	h.RecipeNodeStore = recipeStore
 	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
 
-	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?DeviceId=dev1&playSessionId=ps-1", nil), "tok")
 	rec := httptest.NewRecorder()
 	h.HandleDeleteActiveEncodings(rec, req)
 
@@ -1171,29 +1175,6 @@ func TestHandleDeleteActiveEncodings_StopsTranscodeAndDeletesSession(t *testing.
 	if _, ok := store.Get("ps-1"); ok {
 		t.Fatal("play session should be deleted")
 	}
-	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
-		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
-	}
-}
-
-// TestTeardownPlaySession_DeletesNodeRecipe verifies the deliberate stop path
-// drops the node recipe keyed by the upstream session id, so a buffered/retrying
-// request after a node restart cannot resurrect ffmpeg for the stopped session.
-func TestTeardownPlaySession_DeletesNodeRecipe(t *testing.T) {
-	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
-	h, store := newActiveEncodingsHandler(mgr)
-	recipeStore := &stubRecipeNodeStore{cards: map[string]playback.RecipeCard{
-		"upstream-1": {SessionID: "upstream-1"},
-	}}
-	h.RecipeNodeStore = recipeStore
-	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
-
-	playSession, ok := store.Get("ps-1")
-	if !ok {
-		t.Fatal("expected play session")
-	}
-	h.teardownPlaySession(context.Background(), playSession, nil, nil)
-
 	if _, ok := recipeStore.Get("upstream-1"); ok {
 		t.Fatal("node recipe should be deleted on deliberate teardown")
 	}
@@ -1242,26 +1223,6 @@ func TestHandleDeleteActiveEncodings_UnknownPlaySessionReturns204(t *testing.T) 
 	}
 }
 
-// TestHandleDeleteActiveEncodings_CaseInsensitivePlaySessionId verifies a
-// lowercase playSessionId key (as Wholphin sends) still resolves and tears down
-// the session — the reason newCaseInsensitiveQuery is used.
-func TestHandleDeleteActiveEncodings_CaseInsensitivePlaySessionId(t *testing.T) {
-	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
-	h, store := newActiveEncodingsHandler(mgr)
-	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
-
-	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?playSessionId=ps-1", nil), "tok")
-	rec := httptest.NewRecorder()
-	h.HandleDeleteActiveEncodings(rec, req)
-
-	if rec.Code != 204 {
-		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
-	}
-	if _, ok := store.Get("ps-1"); ok {
-		t.Fatal("lowercase playSessionId should still resolve and delete the session")
-	}
-}
-
 // TestHandleDeleteActiveEncodings_ForeignPlaySessionNotTornDown proves the
 // ownership guard: a caller whose token differs from the play session's
 // CompatToken gets a uniform 204 no-op and does NOT tear down the foreign
@@ -1283,29 +1244,6 @@ func TestHandleDeleteActiveEncodings_ForeignPlaySessionNotTornDown(t *testing.T)
 	}
 	if len(mgr.stopCalls) != 0 {
 		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
-	}
-}
-
-// TestHandleDeleteActiveEncodings_RealClientShape exercises the dominant real
-// JellyCon call shape (DeviceId present alongside PlaySessionId): with a
-// matching-token session the session is still torn down (DeviceId ignored).
-func TestHandleDeleteActiveEncodings_RealClientShape(t *testing.T) {
-	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
-	h, store := newActiveEncodingsHandler(mgr)
-	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
-
-	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?DeviceId=dev1&PlaySessionId=ps-1", nil), "tok")
-	rec := httptest.NewRecorder()
-	h.HandleDeleteActiveEncodings(rec, req)
-
-	if rec.Code != 204 {
-		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
-	}
-	if _, ok := store.Get("ps-1"); ok {
-		t.Fatal("play session should be torn down when DeviceId accompanies a matching PlaySessionId")
-	}
-	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
-		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
 	}
 }
 

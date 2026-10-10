@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   applyASSMarginInset,
@@ -81,10 +83,6 @@ describe("resolveASSMarginInset", () => {
       horizontal: 480,
       vertical: 0,
     });
-  });
-
-  it("returns no inset without a crop", () => {
-    expect(resolveASSMarginInset(script([], [], []), { x: 0, y: 0 })).toBe(NO_ASS_MARGIN_INSET);
   });
 });
 

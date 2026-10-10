@@ -30,10 +30,12 @@ var RequiredOAuthRefusalScenarios = []string{
 
 // oauthRefusalStatuses pins each case's original v1 status and its v2 status.
 // The v1 side is the frozen oracle; the v2 side records the ratified mapping
-// (identical plain-text handshakes, and Problem statuses for completion).
+// (identical plain-text handshakes for bad parameters, a 302 to the login
+// page's provider_unavailable failure for a provider that cannot start, and
+// Problem statuses for completion).
 var oauthRefusalStatuses = map[string][2]int{
-	"oauth_init.bad_install": {400, 400}, "oauth_init.unknown_plugin": {502, 502}, "oauth_init.status": {502, 502},
-	"oauth_init.raw": {502, 502}, "oauth_init.meaning": {400, 400}, "oauth_init.next_filter": {502, 502}, "oauth_init.shape": {502, 502},
+	"oauth_init.bad_install": {400, 400}, "oauth_init.unknown_plugin": {502, 302}, "oauth_init.status": {502, 302},
+	"oauth_init.raw": {502, 302}, "oauth_init.meaning": {400, 400}, "oauth_init.next_filter": {502, 302}, "oauth_init.shape": {502, 302},
 	"oauth_cb.bad_install": {400, 400}, "oauth_cb.missing_params": {400, 400}, "oauth_cb.bad_state": {302, 302}, "oauth_cb.status": {302, 302},
 	"oauth_cb.meaning": {302, 302}, "oauth_cb.filter": {400, 400}, "oauth_cb.shape": {302, 302},
 	"oauth_complete.not_mounted": {401, 401}, "oauth_complete.missing_code": {400, 422}, "oauth_complete.malformed": {400, 400},

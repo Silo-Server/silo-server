@@ -1,31 +1,31 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { BrowseItem } from "@/api/types";
-import { catalogItemFromV2 } from "@/api/v2/catalog";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { v2 } from "@/api/v2/request";
-import { watchlistKeys } from "./keys";
 import { toast } from "sonner";
 import {
   cancelItemDetailQueries,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
-
-export function useWatchlist() {
-  return useQuery({
-    queryKey: watchlistKeys.list(),
-    queryFn: ({ signal }): Promise<BrowseItem[]> =>
-      v2("GET /api/v2/watchlist", { signal }).then((data) => data.items.map(catalogItemFromV2)),
-  });
-}
+import {
+  PERSONAL_STATE_WRITE_TIMEOUT_MS,
+  personalStateMutationOptions,
+} from "./personalStateWrites";
 
 export function useToggleWatchlist(itemId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...personalStateMutationOptions,
     mutationFn: (currentlyInWatchlist: boolean) =>
       currentlyInWatchlist
-        ? v2("DELETE /api/v2/watchlist/{item_id}", { path: { item_id: itemId } })
-        : v2("PUT /api/v2/watchlist/{item_id}", { path: { item_id: itemId } }),
+        ? v2("DELETE /api/v2/watchlist/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          })
+        : v2("PUT /api/v2/watchlist/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          }),
     onMutate: async (currentlyInWatchlist: boolean) => {
       await cancelItemDetailQueries(queryClient, itemId);
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({

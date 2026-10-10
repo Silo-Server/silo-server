@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -120,7 +121,7 @@ func TestRunPlacesMovieCreditsFromVideo(t *testing.T) {
 		t.Fatalf("silence windows %+v, want one around the video start", sampler.windows)
 	}
 	artifact := repo.artifact(10, ArtifactKindCreditsTail)
-	if artifact.Status != ArtifactComplete || artifact.ArtifactKey != movieCreditsTailKey() || artifact.ItemCount != 300 ||
+	if artifact.Status != mediaartifact.StatusComplete || artifact.Key != movieCreditsTailKey() || artifact.ItemCount != 300 ||
 		artifact.WindowStartSeconds != 6300 || artifact.WindowEndSeconds != 7200 {
 		t.Fatalf("movie tail artifact %+v", artifact)
 	}
@@ -168,7 +169,7 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzeMovie: %v", err)
 	}
-	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete ||
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete ||
 		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 3 {
 		t.Fatalf("artifact status %q, summary %+v, %d tail passes; want the third pass stored with its credits", artifact.Status, summary, sampler.tailCount())
 	}
@@ -287,7 +288,7 @@ func TestAnalyzeMovieStatuses(t *testing.T) {
 	if artifact := repo.artifact(11, ArtifactKindCreditsTail); artifact.Status != "" {
 		t.Fatalf("no-video artifact status %q, want none stored", artifact.Status)
 	}
-	if artifact := repo.artifact(12, ArtifactKindCreditsTail); artifact.Status != ArtifactFailed || artifact.RecordedBy != "node-a" {
+	if artifact := repo.artifact(12, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusFailed || artifact.RecordedBy != "node-a" {
 		t.Fatalf("failed artifact %+v", artifact)
 	}
 
@@ -314,9 +315,9 @@ func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
 		analyzer := movieAnalyzer(repo, sampler)
 		if legacy {
 			spec := movieTailSpec(movie)
-			repo.artifacts = map[artifactSlot]Artifact{{10, ArtifactKindCreditsTail}: {
-				MediaFileID: 10, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(movie),
-				Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+			repo.artifacts = map[artifactSlot]mediaartifact.Artifact{{10, ArtifactKindCreditsTail}: {
+				MediaFileID: 10, Key: spec.key, Identity: spec.window.identity(movie),
+				Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
 			}}
 		} else {
 			summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
@@ -340,14 +341,19 @@ func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
 }
 
 func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	chapterCandidate := movieCandidate(11, 7200)
+	chapterCandidate.Chapters = []models.MediaChapter{{Title: "End Credits", StartSeconds: 6900, EndSeconds: 7200}}
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200), chapterCandidate}}
 	sampler := &fakeMovieSampler{preflight: errors.New("ffmpeg lacks signalstats")}
 	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 0 {
-		t.Fatalf("%d tail passes, summary %+v", sampler.tailCount(), summary)
+	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 1 || len(repo.patches) != 1 {
+		t.Fatalf("%d tail passes, summary %+v, patches %+v", sampler.tailCount(), summary, repo.patches)
+	}
+	if patch := repo.patches[0]; patch.FileID != 11 || patch.Start != 6900 || patch.End != 7200 || patch.Algorithm != CreditsChapterAlgorithm {
+		t.Fatalf("chapter credits patch = %+v, want file 11 at 6900–7200", patch)
 	}
 }
 

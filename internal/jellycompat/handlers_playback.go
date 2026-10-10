@@ -276,6 +276,10 @@ type sessionExpirationHookAdder interface {
 	AddExpirationHook(func(*playback.Session))
 }
 
+type sessionFinisher interface {
+	FinishSession(ctx context.Context, sessionID string) error
+}
+
 // PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
 // shared admin live-session table (playback_sessions_sync). Without it, compat
 // session starts and stops only become visible on the periodic reconciler
@@ -325,9 +329,16 @@ type PlaybackHandler struct {
 	// and node-affinity rule for free. The reconstruction recipe is carried in the
 	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
 	// round-trip a native stream token.
-	tm                     *playback.TranscodeManager
-	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
-	SubtitleBlobs          subtitles.BlobStore   // optional; backs downloaded subtitle reads
+	tm            *playback.TranscodeManager
+	SubtitleRepo  subtitles.Repository // optional; enables downloaded subtitles
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
+	// as they are on disk.
+	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a client is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync               subtitles.PlaySyncer
+	Trickplay              TrickplaySheets       // optional; serves seek-bar preview sheets
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 	WatchScrobbler         PlaybackWatchScrobbler
@@ -356,6 +367,10 @@ type PlaybackHandler struct {
 	// compatAutoTranscodePipeline is a test seam for the hw_accel=auto
 	// fallback pipeline; nil uses playback.NewAutoTranscodePipeline.
 	compatAutoTranscodePipeline func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
+	// compatScrobbleLocks orders each upstream session's start, report, and
+	// terminal-staging scrobbles; see sendCompatResumeStart, applyCompatReport,
+	// and stageCompatStop.
+	compatScrobbleLocks compatScrobbleLocks
 }
 
 func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {
@@ -516,7 +531,10 @@ func (h *PlaybackHandler) toneMapPolicyResult(ctx context.Context) (tonemap.Poli
 	if err != nil {
 		return tonemap.PolicyNone, fmt.Errorf("load software tone-map setting: %w", err)
 	}
-	return tonemap.NewPolicy(strings.EqualFold(hardware, "true"), strings.EqualFold(software, "true")), nil
+	return tonemap.NewPolicy(
+		config.AdminSettingEnabled(config.PlaybackTranscodeHardwareToneMapSettingKey, hardware),
+		config.AdminSettingEnabled(config.PlaybackTranscodeSoftwareToneMapSettingKey, software),
+	), nil
 }
 
 // resolveCompatToneMapRecipe classifies an HDR source and freezes the preferred
@@ -1076,14 +1094,15 @@ func (h *PlaybackHandler) releaseCompatSessionReservation(sessionID string) {
 	}
 }
 
-// allow4KVideoTranscode reads the allow_4k_transcode server setting,
-// defaulting to deny like the native playback handler.
+// allow4KVideoTranscode reads the allow_4k_transcode server setting like the
+// native playback handler: an unset row is the server default, and an
+// unreadable setting denies.
 func (h *PlaybackHandler) allow4KVideoTranscode(ctx context.Context) bool {
 	if h.SettingsRepo == nil {
 		return false
 	}
-	v, _ := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
-	return v == "true"
+	v, err := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.Allow4KTranscodeSettingKey, v)
 }
 
 // allowHEVCVideoEncoding reads opt-in HEVC encoding. Missing or unreadable
@@ -1092,8 +1111,8 @@ func (h *PlaybackHandler) allowHEVCVideoEncoding(ctx context.Context) bool {
 	if h.SettingsRepo == nil {
 		return false
 	}
-	v, _ := h.SettingsRepo.Get(ctx, config.PlaybackAllowHEVCEncodingSettingKey)
-	return strings.EqualFold(strings.TrimSpace(v), "true")
+	v, err := h.SettingsRepo.Get(ctx, config.PlaybackAllowHEVCEncodingSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.PlaybackAllowHEVCEncodingSettingKey, v)
 }
 
 func is4KResolution(res string) bool {
@@ -1147,18 +1166,26 @@ func compatVideoToolboxToneMapBitrateKbps(version catalog.FileVersion, recipe co
 	}
 }
 
-func compatMaxResolutionForBitrateKbps(kbps int64) string {
+// compatTargetResolutionForBitrate is the encoder height a Jellyfin client's
+// bitrate limit earns on Silo's shared ladder (playback.LadderClassForBitrate),
+// fit to the source's aspect ratio. Empty leaves the source unscaled: at 20
+// Mbps and above, and whenever the source already fits the class.
+func compatTargetResolutionForBitrate(kbps int64, track models.VideoTrack) string {
+	if kbps <= 0 {
+		return ""
+	}
+	class := playback.LadderClassForBitrate(int(kbps), parseCompatFrameRate(track.FrameRate), compatTargetVideoCodec)
+	if class >= 2160 {
+		return ""
+	}
+	width, height := playback.FitLadderBox(track.Width, track.Height, class)
 	switch {
-	case kbps <= 0:
+	case height == 0:
+		return strconv.Itoa(class) + "p"
+	case width == track.Width && height == track.Height:
 		return ""
-	case kbps < 2000:
-		return "480p"
-	case kbps < 6000:
-		return compatResolution720p
-	case kbps < 20000:
-		return compatResolution1080p
 	default:
-		return ""
+		return strconv.Itoa(height) + "p"
 	}
 }
 
@@ -2219,9 +2246,16 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			req.MediaSourceID = pathMediaSourceID
 		}
 	}
+	unreadableSkipped := false
 	for _, version := range detail.Versions {
 		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode, allowHEVCEncoding)
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
+			continue
+		}
+		// The native planner refuses a file ffprobe rejected (#1810); offering
+		// it here would hand the client a source that fails in its player.
+		if version.Unreadable {
+			unreadableSkipped = true
 			continue
 		}
 		source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, req, allow4KTranscode)
@@ -2342,6 +2376,18 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 
 	if len(sourceDTOs) == 0 {
+		if unreadableSkipped {
+			// Every version this request could use is unreadable. Answer as
+			// Jellyfin does when nothing can play, so the client says so.
+			slog.InfoContext(r.Context(), "jellycompat playback info found no readable media source", "component", "jellycompat",
+				"content_id", detail.ContentID,
+			)
+			writeJSON(w, http.StatusOK, playbackInfoResponseDTO{
+				MediaSources: []mediaSourceDTO{},
+				ErrorCode:    playbackErrorNoCompatibleStream,
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
 		return
 	}
@@ -2538,14 +2584,10 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		_, audioBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
 		targetBitrateKbps = int(maxBitrate*95/100/1000) - audioBitrateKbps
 	}
-	targetResolution := compatMaxResolutionForBitrateKbps(maxBitrate / 1000)
-	if ceiling, err := strconv.Atoi(strings.TrimSuffix(targetResolution, "p")); err == nil {
-		if height := compatPrimaryVideoTrack(version).Height; height > 0 && height <= ceiling {
-			// FFmpeg scales to an exact height; a bandwidth ceiling must not
-			// enlarge a source already below it.
-			targetResolution = ""
-		}
-	}
+	// The class follows the video's share of the ceiling, the same budget the
+	// encode targets, so a limit near a class floor does not earn a class its
+	// video bitrate cannot fill.
+	targetResolution := compatTargetResolutionForBitrate(int64(max(targetBitrateKbps, 0)), compatPrimaryVideoTrack(version))
 	targetVideoCodec := compatTargetVideoCodec
 	canEncodeOutput := profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
 	// HEVC needs server opt-in and an explicit compatible HLS fMP4 profile.

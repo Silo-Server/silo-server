@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DefaultArtwork from "@/components/DefaultArtwork";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import {
@@ -12,6 +13,8 @@ import { useUICustomization } from "@/hooks/useUICustomization";
 
 export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
   const [loaded, setLoaded] = useState(false);
+  // Keyed by URL so a re-signed poster is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const thumbhashUrl = event.poster_thumbhash ? decodeThumbhash(event.poster_thumbhash) : "";
   const watched = event.watched === true;
   const { cardPresentation } = useUICustomization();
@@ -28,7 +31,11 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
 
   return (
     <div className="media-card group/card">
-      <ViewTransitionLink to={href} className="block overflow-hidden rounded-xl">
+      <ViewTransitionLink
+        to={href}
+        aria-label={event.title}
+        className="block overflow-hidden rounded-xl"
+      >
         <div
           className={`media-card-image relative aspect-[2/3] ${watched ? "opacity-60 grayscale" : ""}`}
           style={
@@ -41,18 +48,20 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
               : undefined
           }
         >
-          {event.poster_url ? (
+          {event.poster_url && failedUrl !== event.poster_url ? (
             <img
               src={event.poster_url}
               alt={event.title}
               className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
               loading="lazy"
               onLoad={() => setLoaded(true)}
+              onError={() => setFailedUrl(event.poster_url ?? null)}
             />
           ) : (
-            <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">
-              <span className="line-clamp-3 font-medium">{event.title || "No Poster"}</span>
-            </div>
+            !thumbhashUrl && (
+              // Every calendar entry that isn't a movie belongs to a series.
+              <DefaultArtwork mediaType={event.type === "movie" ? "movie" : "episode"} />
+            )
           )}
           <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
           {event.badges.length > 0 && (

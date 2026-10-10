@@ -17,9 +17,9 @@ import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { QUOTA_PERIODS, QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 import { cn } from "@/lib/utils";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 
 // ---------------------------------------------------------------------------
@@ -886,7 +886,7 @@ export default function AISettings() {
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={() => void save()}
+        onSave={save}
         onDiscard={discard}
         isSaving={form.isSaving}
       />

@@ -166,7 +166,15 @@ func TestProfileScopedPreludeStatementBudget(t *testing.T) {
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusNoContent, rec.Body.String())
 		}
-		return issued
+		// Login-session activity is recorded off the request path, at most
+		// once a minute per session, so the tracer may or may not see it.
+		prelude := issued[:0]
+		for _, statement := range issued {
+			if !strings.HasPrefix(statement, "UPDATE auth_sessions SET last_seen_at") {
+				prelude = append(prelude, statement)
+			}
+		}
+		return prelude
 	}
 
 	tests := []struct {

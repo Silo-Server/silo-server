@@ -103,30 +103,6 @@ func TestMarkEbookReadPreservesExistingFileAndLocation(t *testing.T) {
 	}
 }
 
-func TestMarkEbookReadUsesDefaultFileWhenNoProgressExists(t *testing.T) {
-	ctx := context.Background()
-	store := newFakeEbookReadStateStore()
-	now := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
-
-	err := markEbookRead(ctx, store, 42, "profile-1", "ebook-1", now, func(context.Context) (int, error) {
-		return 12, nil
-	})
-	if err != nil {
-		t.Fatalf("markEbookRead: %v", err)
-	}
-
-	row, ok := store.rows["ebook-1"]
-	if !ok {
-		t.Fatal("expected a progress row to be created")
-	}
-	if row.Progress != 1.0 || row.FileID != 12 || row.Location != "" {
-		t.Fatalf("row = %+v, want progress 1.0 with file 12 and empty location", row)
-	}
-	if row.UserID != 42 || row.ProfileID != "profile-1" {
-		t.Fatalf("row scope = user %d profile %q, want user 42 profile-1", row.UserID, row.ProfileID)
-	}
-}
-
 func TestMarkEbookReadPropagatesDefaultFileError(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeEbookReadStateStore()
@@ -139,19 +115,6 @@ func TestMarkEbookReadPropagatesDefaultFileError(t *testing.T) {
 	}
 	if len(store.rows) != 0 {
 		t.Fatalf("no row must be written on error, got %+v", store.rows)
-	}
-}
-
-func TestMarkEbookUnreadDeletesProgressRow(t *testing.T) {
-	ctx := context.Background()
-	store := newFakeEbookReadStateStore()
-	store.rows["ebook-1"] = EbookReaderProgress{ContentID: "ebook-1", FileID: 7, Progress: 1.0}
-
-	if err := markEbookUnread(ctx, store, 42, "profile-1", "ebook-1"); err != nil {
-		t.Fatalf("markEbookUnread: %v", err)
-	}
-	if _, ok := store.rows["ebook-1"]; ok {
-		t.Fatal("progress row must be deleted on mark unread")
 	}
 }
 
@@ -202,8 +165,8 @@ func TestSetEbookReadStateMarkReadShowsPlayedUserState(t *testing.T) {
 	// A marked-read book is finished, not in progress: the reader-progress
 	// response derived from the row must exclude it from Continue Reading.
 	row := store.rows["ebook-1"]
-	if row.Progress < models.EbookFinishedProgressThreshold {
-		t.Fatalf("progress %v must cross the finished threshold", row.Progress)
+	if row.Progress != 1 || row.FileID != 5 || row.Location != "" || row.UserID != 42 || row.ProfileID != "profile-1" {
+		t.Fatalf("mark-read progress = %+v, want a completed row for the chosen file and profile", row)
 	}
 
 	if err := handler.setEbookReadState(ctx, 42, "profile-1", "ebook-1", false, catalog.AccessFilter{}); err != nil {

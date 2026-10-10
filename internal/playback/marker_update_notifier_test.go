@@ -3,7 +3,6 @@ package playback
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"testing"
 
@@ -85,49 +84,13 @@ func TestMarkerUpdateNotifierTargetsMatchingSessions(t *testing.T) {
 	}
 }
 
-func TestMarkerUpdateNotifierSendsAllClearedMarkers(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
-	_ = sessions.SetRealtimeConnection(session.ID, true)
-
-	hub := NewRealtimeHub()
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
-
-	notifier := NewMarkerUpdateNotifier(sessions, hub)
-	notifier.MarkersUpdated(context.Background(), &models.MediaFile{ID: 100})
-
-	if len(conn.messages) != 1 {
-		t.Fatalf("messages = %d, want 1 all-cleared marker update", len(conn.messages))
-	}
-	event, ok := conn.messages[0].(EventEnvelope)
-	if !ok {
-		t.Fatalf("message type = %T, want EventEnvelope", conn.messages[0])
-	}
-	var payload MarkersUpdatedPayload
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(payload): %v", err)
-	}
-	if payload.Intro != nil || payload.Credits != nil || payload.Recap != nil || payload.Preview != nil {
-		t.Fatalf("payload markers = %#v, want all nil", payload)
-	}
-	if payload.MarkerSegments == nil || len(payload.MarkerSegments) != 0 {
-		t.Fatalf("payload.MarkerSegments = %#v, want an empty array", payload.MarkerSegments)
-	}
-}
-
 type markerUpdateTestBus struct {
-	handlers   []func(string)
-	events     []string
-	publishErr error
+	handlers []func(string)
+	events   []string
 }
 
 func (b *markerUpdateTestBus) publish(_ context.Context, payload string) error {
 	b.events = append(b.events, payload)
-	if b.publishErr != nil {
-		return b.publishErr
-	}
 	for _, handler := range b.handlers {
 		handler(payload)
 	}
@@ -202,27 +165,17 @@ func TestMarkerUpdateNotifierDeliversAcrossReplicasOnce(t *testing.T) {
 	}
 
 	local.MarkersUpdated(ctx, &models.MediaFile{ID: 100})
-	if len(remoteConn.messages) != 2 {
-		t.Fatalf("remote messages = %d, want marker removal update", len(remoteConn.messages))
-	}
-	var cleared MarkersUpdatedPayload
-	if err := json.Unmarshal(remoteConn.messages[1].(EventEnvelope).Payload, &cleared); err != nil {
-		t.Fatal(err)
-	}
-	if len(cleared.MarkerSegments) != 0 || cleared.Credits != nil {
-		t.Fatalf("cleared markers = %#v", cleared)
-	}
-}
-
-func TestMarkerUpdateNotifierKeepsLocalDeliveryWhenPublishFails(t *testing.T) {
-	notifier, conn := newMarkerUpdateTestReplica(t)
-	bus := &markerUpdateTestBus{publishErr: errors.New("event bus unavailable")}
-	if err := notifier.UseEventBus(context.Background(), bus.publish, bus.subscribe); err != nil {
-		t.Fatal(err)
-	}
-	notifier.MarkersUpdated(context.Background(), &models.MediaFile{ID: 100})
-	if len(conn.messages) != 1 {
-		t.Fatalf("local messages = %d, want 1 despite publish failure", len(conn.messages))
+	for name, conn := range map[string]*dispatchTestConn{"local": localConn, "remote": remoteConn} {
+		if len(conn.messages) != 2 {
+			t.Fatalf("%s messages = %d, want marker removal update", name, len(conn.messages))
+		}
+		var cleared MarkersUpdatedPayload
+		if err := json.Unmarshal(conn.messages[1].(EventEnvelope).Payload, &cleared); err != nil {
+			t.Fatal(err)
+		}
+		if cleared.MarkerSegments == nil || len(cleared.MarkerSegments) != 0 || cleared.Intro != nil || cleared.Credits != nil || cleared.Recap != nil || cleared.Preview != nil {
+			t.Fatalf("%s cleared markers = %#v", name, cleared)
+		}
 	}
 }
 

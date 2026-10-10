@@ -81,6 +81,26 @@ type EventsHandler struct {
 	persistedScans activeScanLister
 	historyImports historyImportActiveLister
 	notifications  *notifications.System
+	// sessionRoles and sessionCheckInterval drive the v1 connection's
+	// periodic login-session check; see SetSessionRoles.
+	sessionRoles         sessionRoleChecker
+	sessionCheckInterval time.Duration
+}
+
+// sessionRoleChecker reports whether a login session is still active and the
+// current role of its account; auth.SessionRepository implements it.
+type sessionRoleChecker interface {
+	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+}
+
+// SetSessionRoles makes the v1 events socket recheck its login session. The
+// connection picks its channels from the access token's role once, at the
+// handshake, so it closes when the session ends or the account's role
+// changes; the client reconnects with a refreshed token.
+func (h *EventsHandler) SetSessionRoles(sessions sessionRoleChecker) {
+	if h != nil {
+		h.sessionRoles = sessions
+	}
 }
 
 // SetNotificationsSystem wires the user-notification system: websocket
@@ -144,10 +164,45 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader)
+	if h.sessionRoles != nil && claims.SessionID != "" {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go h.closeOnSessionChange(ctx, cancel, claims)
+		r = r.WithContext(ctx)
+	}
+	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader, nil)
 }
 
-func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader) {
+// closeOnSessionChange cancels a v1 connection once its login session is no
+// longer active or the account's role differs from the access token's. A
+// failed check is skipped; the next one decides.
+func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims) {
+	interval := h.sessionCheckInterval
+	if interval <= 0 {
+		interval = eventsSessionCheckInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+			role, active, err := h.sessionRoles.ActiveSessionRole(checkCtx, claims.SessionID)
+			stop()
+			if err == nil && (!active || role != claims.Role) {
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+// serveWebSocket runs one events connection. When accessChanged closes, the
+// loop tells the client its access changed and closes the connection with
+// EventsCloseAccessChanged; a nil channel never fires.
+func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
@@ -287,6 +342,9 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 			return
 		case <-readDone:
 			return
+		case <-accessChanged:
+			closeEventsAccessChanged(conn, readDone)
+			return
 		case <-deadlineC:
 			writeWebSocketError(conn, "bad_request", "subscribe is required within "+subscribeGracePeriod.String())
 			_ = writeWebSocketControl(
@@ -322,6 +380,28 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 				return
 			}
 		}
+	}
+}
+
+// closeEventsAccessChanged sends the access_changed frame and close code, then
+// waits briefly for the client's close reply so both frames arrive before the
+// connection is torn down.
+func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
+	if err := writeWebSocketJSON(conn, evt.EventsAccessChangedMessage{Type: eventsAccessChanged}); err != nil {
+		return
+	}
+	if err := writeWebSocketControl(
+		conn,
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(EventsCloseAccessChanged, eventsAccessChanged),
+	); err != nil {
+		return
+	}
+	reply := time.NewTimer(time.Second)
+	defer reply.Stop()
+	select {
+	case <-readDone:
+	case <-reply.C:
 	}
 }
 
@@ -520,6 +600,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 			evt.ChannelTasks,
 			evt.ChannelScans,
 			evt.ChannelSettings,
+			evt.ChannelDownloadPreparations,
 		)
 	}
 	return channels
@@ -564,6 +645,10 @@ func (h *EventsHandler) snapshotForChannel(
 ) (json.RawMessage, error) {
 	switch channel {
 	case evt.ChannelCatalog, evt.ChannelUserState:
+		return json.RawMessage("null"), nil
+	case evt.ChannelDownloadPreparations:
+		// Events only say what changed; clients re-read the admin list, and a
+		// null snapshot tells a reconnecting client to do so.
 		return json.RawMessage("null"), nil
 	case evt.ChannelNotifications:
 		// Recent unread deliveries for the bound profile so reconnecting

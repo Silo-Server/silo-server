@@ -45,6 +45,9 @@ func sourceWriteOutput(row handlers.AdminAutoscanSourceView, err error) (*AdminA
 	switch {
 	case errors.Is(err, handlers.ErrAdminAutoscanSourceWriteUnavailable):
 		return nil, unavailable("autoscan sources")
+	case errors.Is(err, handlers.ErrAdminAutoscanSourceConnectionRequired):
+		return nil, NewProblem(TypeValidationFailed, "This source needs a server. Choose a connection, or save it disabled.").
+			WithErrors(ProblemError{Location: locationBody + ".connection_id", Code: codeRequired, Detail: "An enabled poll source of this type requires a connection."})
 	case errors.Is(err, handlers.ErrAdminAutoscanSourceWriteInvalid):
 		return nil, NewProblem(TypeValidationFailed, "Invalid source identity, delivery mode, interval, rewrites or provider configuration.")
 	case errors.Is(err, autoscan.ErrNotFound):

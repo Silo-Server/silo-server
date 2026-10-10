@@ -23,7 +23,8 @@ var (
 
 // EmailVerificationIntent is a retained domain request. The caller must capture
 // ID, account, profile and address before sending, and reuse them after uncertainty.
-// ProfileName and LinkBase are server observations used only for a new message.
+// ProfileName, LinkBase and Brand are server observations used only for a new
+// message.
 type EmailVerificationIntent struct {
 	ID          string
 	UserID      int
@@ -31,6 +32,7 @@ type EmailVerificationIntent struct {
 	Address     string
 	ProfileName string
 	LinkBase    string
+	Brand       mail.Brand
 }
 
 // EmailVerificationReceipt describes durable admission, never provider delivery.
@@ -118,8 +120,10 @@ func (r *EmailPrefsRepository) QueueVerification(ctx context.Context, in EmailVe
 	}
 	result.ExpiresAt = now.Add(emailVerifyTTL)
 	result.Current = true
-	content := composeVerificationEmail(in.ProfileName, strings.TrimRight(in.LinkBase, "/")+"/api/v2/notifications/email/verify?token="+token)
-	payload, err := json.Marshal(mail.Message{To: []string{address}, Subject: content.Subject, TextBody: content.Text, HTMLBody: content.HTML})
+	content := composeVerificationEmail(in.Brand, in.ProfileName, strings.TrimRight(in.LinkBase, "/")+"/api/v2/notifications/email/verify?token="+token)
+	// The retained message carries its logo so every attempt sends exactly
+	// what was admitted, even if the branding changes in between.
+	payload, err := json.Marshal(mail.Message{To: []string{address}, Subject: content.Subject, TextBody: content.Text, HTMLBody: content.HTML, Inline: in.Brand.InlineImages()})
 	if err != nil {
 		return empty, err
 	}

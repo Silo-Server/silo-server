@@ -25,8 +25,19 @@ func TestRenderLayoutEscapesAndPlacesContent(t *testing.T) {
 	if !strings.Contains(out, `<span id="footer-marker">fine print</span>`) {
 		t.Fatalf("footer HTML not passed through:\n%s", out)
 	}
-	if !strings.Contains(out, "SILO") {
-		t.Fatalf("wordmark missing:\n%s", out)
+	if !strings.Contains(out, `src="cid:silo-logo"`) || !strings.Contains(out, `alt="Silo"`) {
+		t.Fatalf("default logo missing:\n%s", out)
+	}
+}
+
+func TestRenderLayoutShowsBrandLogo(t *testing.T) {
+	out := RenderLayout(LayoutOptions{Brand: Brand{Name: `Rock & "Roll"`}, BodyHTML: "x"})
+	if !strings.Contains(out, `alt="Rock &amp; &#34;Roll&#34;"`) {
+		t.Fatalf("server name not escaped into alt text:\n%s", out)
+	}
+	// The default Silo wordmark (191×100) fits the 48px-high header box.
+	if !strings.Contains(out, `width="92" height="48"`) {
+		t.Fatalf("default logo display size missing:\n%s", out)
 	}
 }
 
@@ -43,12 +54,28 @@ func TestRenderLayoutAddsNoLinks(t *testing.T) {
 }
 
 func TestEmailButtonEscapes(t *testing.T) {
-	out := EmailButton(`Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
+	out := EmailButton(Brand{}, `Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
 	if !strings.Contains(out, `href="https://example.com/?a=1&amp;b=&lt;2&gt;"`) {
 		t.Fatalf("href not escaped: %s", out)
 	}
 	if strings.Contains(out, "<now>") {
 		t.Fatalf("label not escaped: %s", out)
+	}
+}
+
+func TestEmailButtonUsesAccent(t *testing.T) {
+	cases := []struct{ accent, background, label string }{
+		{"", EmailColorAction, EmailColorOnAct},
+		{"#f5a524", "#f5a524", EmailColorOnAct},             // light accent, dark label
+		{"#1d4ed8", "#1d4ed8", "#ffffff"},                   // dark accent, white label
+		{"red;x:url(y)", EmailColorAction, EmailColorOnAct}, // invalid: default
+	}
+	for _, tc := range cases {
+		out := EmailButton(Brand{AccentColor: tc.accent}, "Go", "https://example.com")
+		if !strings.Contains(out, `bgcolor="`+tc.background+`"`) ||
+			!strings.Contains(out, `;color:`+tc.label+`;`) {
+			t.Fatalf("accent %q: want background %s and label %s:\n%s", tc.accent, tc.background, tc.label, out)
+		}
 	}
 }
 

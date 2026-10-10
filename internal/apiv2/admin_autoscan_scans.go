@@ -37,22 +37,44 @@ type AdminAutoscanScansPage struct {
 	Total int                 `json:"total" minimum:"0" doc:"Separate live count; not a snapshot of the page."`
 }
 type AdminAutoscanScan struct {
-	ID               string   `json:"id"`
-	LibraryID        string   `json:"library_id"`
-	Mode             string   `json:"mode"`
-	Path             string   `json:"path,omitempty"`
-	Trigger          string   `json:"trigger"`
-	Status           string   `json:"status"`
-	ErrorMessage     string   `json:"error_message,omitempty"`
-	RequestedAt      *Instant `json:"requested_at,omitempty"`
-	StartedAt        *Instant `json:"started_at,omitempty"`
-	CompletedAt      *Instant `json:"completed_at,omitempty"`
-	AutoscanEventID  *string  `json:"autoscan_event_id,omitempty"`
-	SourceID         *string  `json:"source_id,omitempty"`
-	PluginID         string   `json:"plugin_id,omitempty"`
-	CapabilityID     string   `json:"capability_id,omitempty"`
-	EventStatus      string   `json:"event_status,omitempty"`
-	EventCompletedAt *Instant `json:"event_completed_at,omitempty"`
+	ID               string                   `json:"id"`
+	LibraryID        string                   `json:"library_id"`
+	Mode             string                   `json:"mode"`
+	Path             string                   `json:"path,omitempty"`
+	Trigger          string                   `json:"trigger"`
+	Status           string                   `json:"status"`
+	ErrorMessage     string                   `json:"error_message,omitempty"`
+	RequestedAt      *Instant                 `json:"requested_at,omitempty"`
+	StartedAt        *Instant                 `json:"started_at,omitempty"`
+	CompletedAt      *Instant                 `json:"completed_at,omitempty"`
+	AutoscanEventID  *string                  `json:"autoscan_event_id,omitempty"`
+	SourceID         *string                  `json:"source_id,omitempty"`
+	PluginID         string                   `json:"plugin_id,omitempty"`
+	CapabilityID     string                   `json:"capability_id,omitempty"`
+	EventStatus      string                   `json:"event_status,omitempty"`
+	EventCompletedAt *Instant                 `json:"event_completed_at,omitempty"`
+	Result           *AdminAutoscanScanResult `json:"result,omitempty" doc:"Outcome counters of a completed run; absent until the run completes."`
+}
+
+// AdminAutoscanScanResult is the outcome of a completed autoscan scan run.
+type AdminAutoscanScanResult struct {
+	New                     int `json:"new" minimum:"0" doc:"Files added to the catalog."`
+	Updated                 int `json:"updated" minimum:"0" doc:"Files whose catalog entry changed."`
+	Unchanged               int `json:"unchanged" minimum:"0"`
+	Missing                 int `json:"missing" minimum:"0" doc:"Files marked missing."`
+	MissingSkippedProtected int `json:"missing_skipped_protected" minimum:"0" doc:"Files not marked missing because their storage root was offline or unreadable."`
+	FilesDeleted            int `json:"files_deleted" minimum:"0"`
+	ItemsDeleted            int `json:"items_deleted" minimum:"0"`
+	MembershipsRemoved      int `json:"memberships_removed" minimum:"0" doc:"Titles removed from this library because none of their files remain in it."`
+	Errors                  int `json:"errors" minimum:"0"`
+	Skipped                 int `json:"skipped" minimum:"0" doc:"Non-zero when the run did not scan because an overlapping scan of the same scope was already in progress."`
+}
+
+func adminAutoscanScanResult(result *autoscan.ScanResult) *AdminAutoscanScanResult {
+	if result == nil {
+		return nil
+	}
+	return &AdminAutoscanScanResult{New: result.New, Updated: result.Updated, Unchanged: result.Unchanged, Missing: result.Missing, MissingSkippedProtected: result.MissingSkippedProtected, FilesDeleted: result.FilesDeleted, ItemsDeleted: result.ItemsDeleted, MembershipsRemoved: result.MembershipsRemoved, Errors: result.Errors, Skipped: result.Skipped}
 }
 
 func registerAdminAutoscanScans(reg *Registry) {
@@ -90,7 +112,7 @@ func registerAdminAutoscanScans(reg *Registry) {
 			if r.ID == "" || r.MediaFolderID <= 0 {
 				return nil, NewProblem(TypeInternalError, "Invalid scan history identity.")
 			}
-			row := AdminAutoscanScan{ID: r.ID, LibraryID: strconv.Itoa(r.MediaFolderID), Mode: r.Mode, Path: r.Path, Trigger: r.Trigger, Status: r.Status, ErrorMessage: r.ErrorMessage, RequestedAt: instantPtr(r.RequestedAt), StartedAt: instantPtr(r.StartedAt), CompletedAt: instantPtr(r.CompletedAt), SourceID: r.SourceID, PluginID: r.PluginID, CapabilityID: r.CapabilityID, EventStatus: string(r.EventStatus), EventCompletedAt: instantPtr(r.EventCompletedAt)}
+			row := AdminAutoscanScan{ID: r.ID, LibraryID: strconv.Itoa(r.MediaFolderID), Mode: r.Mode, Path: r.Path, Trigger: r.Trigger, Status: r.Status, ErrorMessage: r.ErrorMessage, RequestedAt: instantPtr(r.RequestedAt), StartedAt: instantPtr(r.StartedAt), CompletedAt: instantPtr(r.CompletedAt), SourceID: r.SourceID, PluginID: r.PluginID, CapabilityID: r.CapabilityID, EventStatus: string(r.EventStatus), EventCompletedAt: instantPtr(r.EventCompletedAt), Result: adminAutoscanScanResult(r.Result)}
 			if r.AutoscanEventID != nil {
 				row.AutoscanEventID = new(strconv.FormatInt(*r.AutoscanEventID, 10))
 			}

@@ -38,6 +38,8 @@ export interface BrowserPlexServer {
   accessToken: string;
   remoteURL: string;
   localURL: string;
+  /** Every address Plex advertised, in the order it advertised them. */
+  connectionURLs: string[];
   owned: boolean;
   hasRemoteURL: boolean;
   hasLocalURL: boolean;
@@ -149,6 +151,7 @@ export async function listPlexResources(token: string): Promise<BrowserPlexServe
         accessToken: entry.accessToken,
         remoteURL: "",
         localURL: "",
+        connectionURLs: entry.connections.map((connection) => connection.uri),
         owned: entry.owned,
         hasRemoteURL: false,
         hasLocalURL: false,
@@ -188,4 +191,29 @@ export async function completePlexAuthentication(
 
 export function getPreferredPlexServerURL(server: BrowserPlexServer): string {
   return server.remoteURL || server.localURL;
+}
+
+/**
+ * The most `plex_base_urls` entries createHistoryImportRun accepts. The server
+ * filters the list by its address policy before choosing which to race, so the
+ * client sends everything up to this bound.
+ */
+export const MAX_PLEX_FALLBACK_URLS = 31;
+
+/**
+ * The other addresses Plex advertised for a server, for a run's
+ * `plex_base_urls`; the preferred one goes in `plex_base_url`. HTTPS addresses
+ * come first so the request limit never cuts one in favor of a cleartext
+ * address, which the server drops whenever an HTTPS one exists.
+ */
+export function getPlexFallbackURLs(server: BrowserPlexServer): string[] {
+  const preferred = getPreferredPlexServerURL(server).trim();
+  const fallbacks = [
+    ...new Set(server.connectionURLs.map((candidate) => candidate.trim()).filter(Boolean)),
+  ].filter((candidate) => candidate !== preferred);
+  const isSecure = (candidate: string) => candidate.toLowerCase().startsWith("https://");
+  return [
+    ...fallbacks.filter(isSecure),
+    ...fallbacks.filter((candidate) => !isSecure(candidate)),
+  ].slice(0, MAX_PLEX_FALLBACK_URLS);
 }

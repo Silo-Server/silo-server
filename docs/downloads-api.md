@@ -59,11 +59,42 @@ Clients request a **quality preset**. The server records the concrete
 | Public quality | Meaning                                                                                                                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `original`     | Prefer source quality. If device caps show the source cannot be delivered directly, the server may transparently prepare a compatibility artifact. |
-| `20mbps`       | Single-file transcode capped at about 20 Mbps.                                                                                                     |
-| `10mbps`       | Single-file transcode capped at about 10 Mbps.                                                                                                     |
-| `5mbps`        | Single-file transcode capped at about 5 Mbps.                                                                                                      |
-| `2mbps`        | Single-file transcode capped at about 2 Mbps.                                                                                                      |
-| `1mbps`        | Single-file transcode capped at about 1 Mbps.                                                                                                      |
+| `20mbps`       | Single-file transcode capped at 20 Mbps, up to 2160p.                                                                                              |
+| `10mbps`       | Single-file transcode capped at 10 Mbps, up to 1080p.                                                                                              |
+| `5mbps`        | Single-file transcode capped at 5 Mbps, up to 1080p (720p above 30 fps).                                                                           |
+| `2mbps`        | Single-file transcode capped at 2 Mbps, up to 720p (540p above 30 fps).                                                                            |
+| `1mbps`        | Single-file transcode capped at 1 Mbps, up to 480p.                                                                                                |
+
+Each bitrate preset is paired with a resolution. The server picks the largest
+resolution the bitrate encodes cleanly, then:
+
+- never enlarges the source, and fits it into the resolution's 16:9 box, so a
+  3840x1600 film at `10mbps` becomes 1920x800;
+- never encodes above the source's own bitrate;
+- steps the resolution down until the device's decoder can take it, using the
+  `video_decode` entries from `caps` when sent, otherwise `max_resolution`.
+  Each decoder is checked for size, frame rate, and its profile and H.264
+  level lists (a hardware decoder at the `platform_attested` tier is exempt
+  from those lists, as in playback). The decoder that reaches the largest
+  resolution is used, and the bitrate stays within its `max_bitrate_kbps` and
+  level. When no H.264 decoder meets every limit, the listed ones' sizes still
+  bound the output;
+- encodes HEVC instead of H.264 when the server's HEVC encoding setting is on
+  and `caps` attest an 8-bit HEVC decoder that reaches at least the same
+  resolution (HEVC also earns `1mbps` 540p instead of 480p);
+- answers `quality_unavailable` when strict `video_decode` entries list no
+  decoder for any codec the server may encode, or none that takes 480p;
+- converts a 4K source only when the server allows 4K transcoding, as streaming
+  does. Otherwise presets stop at 1080p and every preset of a 4K title answers
+  `quality_unavailable`.
+
+When a preset would leave the source unchanged — `caps` prove the device plays
+it, it is SDR, it already fits the preset's resolution, and its total bitrate is
+at or under the preset — the server serves the source instead of re-encoding
+it. The row keeps the requested `quality`; `effective_quality` is `original`.
+
+`quality_options` in the capability (§3) reports each preset's resolution for
+labels.
 
 `remux` is **not** a public quality preset. It is an internal delivery format used
 when `original` is requested but device caps show the source only needs container
@@ -72,7 +103,8 @@ or audio compatibility work. Rows expose both:
 - `quality`: what the client requested.
 - `effective_quality`: what the server actually delivered after compatibility fallback.
 - `delivery_format`: `original`, `remux`, or `transcode`.
-- `target_bitrate_kbps`: `0` for original/remux; bitrate cap for transcodes.
+- `target_bitrate_kbps`: `0` for original/remux; for a transcode, the video bitrate
+  cap it encodes to — the preset's, or less when the source itself is smaller.
 
 The ordered preset ladder is:
 
@@ -80,9 +112,13 @@ The ordered preset ladder is:
 original > 20mbps > 10mbps > 5mbps > 2mbps > 1mbps
 ```
 
-Series and season batch requests are original-quality only. If some episodes do
-not have a local file, the batch response includes them in `skipped` rather than
-failing the whole batch.
+Series and season batch requests and series monitors accept any value in
+`quality_presets` when the capability reports `bulk_quality` and
+`monitor_quality` (§3); before those flags, they were original-quality only.
+The server resolves the preset against each episode's own file, as for a single
+download. Episodes without a local file, and episodes the preset cannot be
+prepared for (for example a 4K source when 4K transcoding is off), are listed in
+`skipped` rather than failing the whole batch.
 
 ### Metadata included offline
 
@@ -91,13 +127,33 @@ Yes, manifests include metadata needed to make the offline item feel native:
 - Title, year, overview, runtime, content rating, genres.
 - Series, season, and episode context for episodes.
 - Poster/backdrop thumbhashes and authenticated artwork proxy URLs for poster,
-  backdrop, and logo when available.
+  backdrop, and logo when available. Episode manifests also carry the parent
+  series poster.
 - Chapters, intro/credits/recap/preview markers.
 - External and downloaded subtitle fetch URLs plus known subtitle file sizes.
 - Container, codecs, resolution, HDR, duration, selected audio track, and audio
   track inventory. For remux/transcode entries these describe the prepared
-  artifact the file endpoint actually delivers (single audio track, target
-  container/codecs), not the catalog source it was prepared from.
+  artifact the file endpoint actually delivers (target container/codecs), not
+  the catalog source it was prepared from.
+
+Prepared remux/transcode files keep every source audio track in source order,
+so `audio_tracks[].index` and `selected_audio_track_index` address positions
+in the delivered MP4. Transcodes encode each track to stereo AAC; remuxes copy
+tracks that share the primary track's codec (or are AAC/MP3) when MP4 can
+store that codec (AAC, MP3, AC-3, E-AC-3, ALAC) and encode the rest to stereo
+AAC. The server records the audio tracks when the file becomes ready, so a
+later rescan of a replaced source does not change `audio_tracks`; a
+`selected_audio_track_index` that no longer names the same-language track
+falls back to the file's default track. Embedded plain-text subtitles (SRT, WebVTT) are carried
+inside the MP4 as timed text, with their language, title, and forced flag.
+MP4 timed text would drop ASS/SSA styling, drawing commands, and overlapping
+events, and MP4 cannot store bitmap subtitles, so each embedded ASS/SSA track is
+listed in `subtitles[]` as an `ass` sidecar and each PGS track as a `sup`
+sidecar, with the track's `title` when it has one; DVD and DVB bitmap subtitles are not carried. MP4 marks the first
+embedded subtitle track as default, so clients choose subtitles from forced
+flags and viewer preference rather than that flag.
+Files prepared before this layout contain only the first audio track and no
+subtitles, and their manifests keep describing them that way.
 - Stable provider identity and integrity metadata for local validation/rescan recovery.
 
 The client still needs to fetch artwork/subtitle bytes once while online and cache
@@ -106,7 +162,9 @@ them locally beside the media file and manifest.
 ### Key invariants
 
 - **No DRM, expiry, or lease.** Already-downloaded files remain playable until the
-  user deletes them. The server can revoke future serves, not reach into a device.
+  user deletes them or an administrator revokes the entry. Revocation asks the app to
+  delete its copy at its next sync (§9.3); the server cannot reach into a device
+  that never syncs.
 - **Device authority is the header only.** A `device_id` in body/query is ignored.
 - **Every managed asset re-checks profile access.** A download id alone never grants
   content access.
@@ -173,6 +231,14 @@ Response:
     "2mbps",
     "1mbps"
   ],
+  "quality_options": [
+    { "preset": "original" },
+    { "preset": "20mbps", "bitrate_kbps": 20000, "max_height": 2160 },
+    { "preset": "10mbps", "bitrate_kbps": 10000, "max_height": 1080 },
+    { "preset": "5mbps", "bitrate_kbps": 5000, "max_height": 1080 },
+    { "preset": "2mbps", "bitrate_kbps": 2000, "max_height": 720 },
+    { "preset": "1mbps", "bitrate_kbps": 1000, "max_height": 480 }
+  ],
   "transcode_enabled": true,
   "transcode_user_allowed": true,
   "season_download": true,
@@ -185,7 +251,13 @@ Response:
   "bounded_manifests": true,
   "subscription_reads": true,
   "subscription_mutations": true,
-  "bounded_subscription_sync": true
+  "bounded_subscription_sync": true,
+  "bulk_quality": true,
+  "monitor_quality": true,
+  "preparation_progress": true,
+  "direct_download_links": true,
+  "prepare_again": true,
+  "revoked_removes_local": true
 }
 ```
 
@@ -194,6 +266,7 @@ Response:
 | `enabled`                | Downloads feature is enabled on the server.                                       |
 | `download_allowed`       | This user may download at all.                                                    |
 | `quality_presets`        | Ordered quality values this user may request now. Only offer values in this list. |
+| `quality_options`        | One entry per `quality_presets` value, same order: `preset`, the video `bitrate_kbps` cap, and `max_height`, the tallest output that preset can produce on this server (for a label such as "10 Mbps · up to 1080p"). Both numbers are omitted for `original`. `max_height` already reflects the server's 4K and HEVC settings and the account's quality ceiling; the actual output can be smaller for a smaller or higher-frame-rate source or a device that decodes less. |
 | `transcode_enabled`      | Server-level transcode-to-file gate.                                              |
 | `transcode_user_allowed` | Per-user transcode-to-file permission.                                            |
 | `season_download`        | Per-season batch downloads are available.                                         |
@@ -203,6 +276,12 @@ Response:
 | `ordered_status`         | Revision-bound status reporting (§4.3) is available.                              |
 | `file_delivery`          | The native byte routes (§4.5) are available.                                      |
 | `bounded_creation`       | The full native creation flow (§4.1) is available.                                |
+| `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
+| `bulk_quality`           | Series and season batches (§4.1) accept any of `quality_presets`. Without it, send `original`. |
+| `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
+| `direct_download_links`  | `POST /api/v2/direct-download/links` (§4.10) mints profile-bound direct-download links. |
+| `prepare_again`          | The server cleans up prepared files after the device finishes; the file route answers `409 prepared_file_expired` for such an entry and `POST /api/v2/downloads/{id}/prepare` (§4.12) prepares it again. |
+| `revoked_removes_local`  | Administrators can revoke entries. A `revoked` entry means: delete the local copy, then delete the entry (§9.3). |
 | `bounded_manifests`      | Bounded manifest and batch-manifest operations (§4.6, §4.7) are available.         |
 | `subscription_reads`     | Subscription reads (§8.3) are available.                                          |
 | `subscription_mutations` | Subscription create/patch/delete (§8.1, §8.3) are available.                       |
@@ -240,7 +319,7 @@ Request body:
 | `episode_id`    | string | Episode content id for an episode download.                                  |
 | `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
-| `series`        | bool   | `true` means download every episode of `content_id` at original quality.     |
+| `series`        | bool   | `true` means download every episode of `content_id` at `quality`.            |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; negative values are rejected with `400`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
 | `caps`          | object | Device decode capabilities. Important for `original` compatibility fallback. |
 | `batch_id`      | string | Client-selected batch identity for a series/season traversal.                |
@@ -381,7 +460,12 @@ optional `season_number` (zero selects Specials). It returns one bounded page:
 The `limit` query defaults to 50 and is capped at 100 examined episodes. Keep batch,
 content, season, quality and device/profile identity unchanged while following
 `page.next_cursor` through the `cursor` query, and continue through empty `items`
-while `page.has_more` is true. Bulk quality remains original only.
+while `page.has_more` is true.
+
+A batch with a bitrate `quality` registers prepared rows that start `preparing`,
+like a single prepared download. An episode the preset cannot reach is listed in
+`skipped` with reason `quality_unavailable`, next to `no_file` for an episode
+without a local file.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion or terminal status, revision and previous batch membership. Use
@@ -456,6 +540,9 @@ Deletes the managed entry owned by `(account, profile, header device)` or cancel
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
 entries return `404`. The client is responsible for deleting local files.
 
+Deleting a `revoked` entry is how the app confirms it removed its copy; the server
+records that in the administrator's history.
+
 Deleting an episode of a series this device monitors also stops that monitor from
 registering the episode again. Creating a download for the episode, its season or its
 series re-allows it. Deleting the monitor, or creating it again, forgets these
@@ -477,7 +564,10 @@ Common responses:
 
 - `200` or `206`: media bytes. Multipart ranges and `416` follow ordinary HTTP
   semantics, as do conditional requests and bodyless `HEAD` metadata.
-- `409`: the entry is revoked or otherwise not servable.
+- `409 prepared_file_expired`: the entry finished and the server has since cleaned
+  up its prepared file. Call `POST /api/v2/downloads/{id}/prepare` (§4.12), wait for
+  `ready`, then fetch again.
+- `409 conflict`: the entry is revoked or otherwise not servable.
 - `404`: entry/content missing or outside profile access.
 - A `preparing` artifact is not servable yet; wait for `ready`.
 
@@ -557,7 +647,9 @@ whole batch in one request.
 GET /api/v2/downloads/{id}/artwork/{kind}
 ```
 
-`kind` is `poster`, `backdrop`, or `logo`, and `X-Silo-Device-Id` is required. The
+`kind` is `poster`, `backdrop`, `logo`, or `series_poster`, and
+`X-Silo-Device-Id` is required. `series_poster` exists only for episode entries and
+serves the parent series poster; access to the series is checked as well. The
 manifest's `artwork_urls` point here. Fetch each available image once while online
 and cache the bytes locally. Artwork and subtitle assets are whole-object,
 privately cached deliveries; they do not advertise byte ranges.
@@ -572,10 +664,21 @@ Other failures, such as `404 not_found`, won't succeed on a retry.
 GET /api/v2/downloads/{id}/subtitles/{ref}
 ```
 
-`ref` comes from `subtitles[].fetch_url` and encodes either `external:{index}` or
-`downloaded:{id}`; `X-Silo-Device-Id` is required. Invalid refs return
-`422 validation_failed`. Current content access is checked before asset delivery,
-and downloaded-subtitle ownership must match the entry's media file.
+`ref` comes from `subtitles[].fetch_url` and encodes `external:{index}`,
+`embedded:{ordinal}`, or `downloaded:{id}`; `X-Silo-Device-Id` is required.
+`embedded` refs name an embedded ASS/SSA or PGS track by subtitle ordinal and
+return the complete track, as an ASS script or a `.sup` elementary stream,
+extracted from the source file.
+Invalid refs return `422 validation_failed`. Current content access is checked
+before asset delivery, and downloaded-subtitle ownership must match the entry's
+media file.
+
+A `downloaded` or `external` subtitle is delivered with its timing correction
+applied, so its bytes change when someone syncs or adjusts its timing (and an
+`external` one also when the file on disk changes). Its response carries
+`Cache-Control: private, no-cache` and a strong `ETag` that changes with the
+delivered bytes; send it back in `If-None-Match` to get `304 Not Modified`
+while they are unchanged.
 
 ### 4.10 Direct download
 
@@ -589,12 +692,58 @@ should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
 
-For browser-friendly links, the endpoint accepts the session access token as a
-`?token=` query parameter in place of the `Authorization` header.
+A browser navigation cannot send headers, so it opens a short-lived link
+instead. Mint one with an ordinary profile-scoped request:
 
-> **Security note:** the query token is the session access token. Treat
-> direct-download URLs as secrets — they end up in browser history and proxy
-> logs. A short-lived download-scoped URL is a planned follow-up.
+```http
+POST /api/v2/direct-download/links
+X-Profile-Id: {profile}
+X-Profile-Token: {pin proof, for a locked profile}
+
+{"file_id": "42"}
+```
+
+```json
+{
+  "url": "/api/v2/direct-download?dl=…&file_id=42",
+  "proxy_url": "/api/v2/direct-download-proxy?dl=…&file_id=42",
+  "expires_at": "2026-01-01T00:05:00Z"
+}
+```
+
+`createDirectDownloadLink` requires `X-Profile-Id`, and the PIN proof for a
+locked profile. It authorizes the file the way the download itself does: the
+download policy, then catalog and file access under the profile's limits. A
+file the profile cannot see, or that does not exist, is `404`; a refused
+download policy is `403 permission_denied`. API keys get `403`, since a link is
+bound to a login session; they call direct download with their key instead.
+Nothing is served or recorded. The URLs are server-relative; use `proxy_url`
+only when `proxy_delivery` is true.
+
+The `dl` link token authorizes one file, as the profile that minted it, for
+five minutes. It is checked when a request arrives, so a transfer that started
+in time may run longer. The direct-download routes authorize the request again
+under that profile's limits; any `X-Profile-Id` or `X-Profile-Token` header is
+ignored. An expired or altered link is `401 invalid_token`, a link for another
+`file_id` is `403 permission_denied`, and a link whose login session was
+revoked is `401 session_expired`. When the session cannot be checked because
+its store is unavailable, the answer is `503 dependency_unavailable` with
+`Retry-After`, as for any other credential. A link is accepted only as `dl` on
+these routes, never as a bearer credential. Do not send `dl` together with
+`token`: the link is checked first, so an invalid one is still `401`, and a
+valid one is refused with `422`.
+
+Without a link, the routes keep the existing credentials: the `Authorization`
+header, or the session access token as a `?token=` query parameter. On an
+account where any profile has a PIN, a rating ceiling, an advisory-age limit or
+library restrictions, such a request must also send `X-Profile-Id`; without it
+the answer is `422 validation_failed` at `header.x-profile-id`, the household
+rule in [the API contract](architecture/api-contract.md). So a `?token=` URL
+works only on accounts whose profiles are all unrestricted. API keys are exempt.
+
+> **Security note:** treat direct-download URLs as secrets until they expire —
+> they end up in browser history and proxy logs. A `?token=` URL carries the
+> session access token itself; prefer a link.
 
 ### 4.11 Distributed proxy delivery
 
@@ -624,6 +773,32 @@ serves source files only and has no artifact case.
 Treat proxy delivery as an advertised capability, not something inferred from a
 server version.
 
+### 4.12 Prepare a finished download again
+
+```http
+POST /api/v2/downloads/{id}/prepare
+```
+
+Managed-only; `X-Silo-Device-Id` is required. Available when the capability reports
+`prepare_again`.
+
+The server keeps a remux or transcode file only while some download still needs it,
+plus a short cache period (`download.artifact_cache_hours`, 72 hours by default).
+After a device finishes, its copy is the one that matters, so the server may delete
+its own. A device that needs the bytes again (it lost its copy, or a transfer resumes
+after the cache period) gets `409 prepared_file_expired` from the file route and calls
+this operation.
+
+The response is `200` with the current `DownloadEntry`. A finished entry whose file
+expired returns to `preparing` and becomes `ready` like a new download, with the same
+`revision`, because the recipe is unchanged. An entry whose file is still on the
+server, an `original` entry (served from the source), and one already preparing come
+back unchanged. A `revoked`, `failed`, or `cancelled` entry answers `409 conflict`;
+create a new download instead. Returning to `preparing` counts toward the account's
+concurrent download cap like a new download (`429 rate_limited` when at the cap), and a
+transcode entry answers `501 capability_unsupported` when transcoding is now off. The
+operation is idempotent.
+
 ---
 
 ## 5. Download row shape
@@ -643,11 +818,29 @@ server version.
 | `quality`             | string | Requested public quality.                                              |
 | `effective_quality`   | string | Actual quality delivered after compatibility fallback.                 |
 | `delivery_format`     | string | `original`, `remux`, or `transcode`.                                   |
-| `target_bitrate_kbps` | int    | `0` for original/remux; bitrate cap for transcode.                     |
+| `target_bitrate_kbps` | int    | `0` for original/remux; the transcode's video bitrate cap (at most the preset's). |
 | `revision`            | int    | Increments when an existing managed row is replaced with a new target. |
 | `created_at`          | string | RFC3339.                                                               |
 | `completed_at`        | string | Present once completed.                                                |
 | `status_event_at`     | string | Latest accepted client status event for the current revision.          |
+| `preparation`         | object | Listed `preparing` entries only, when the capability reports `preparation_progress`. See below. |
+
+`preparation` says where a preparing entry's file is in the server's preparation
+queue:
+
+| Field               | Type   | Notes                                                                                  |
+| ------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `state`             | string | `queued`, `running`, `retrying` (an attempt failed; the job waits out its backoff), or `paused` (an administrator paused the job; it isn't claimed until resumed). |
+| `queue_position`    | int    | While `queued`: 1-based place among every queued preparation on the server, in claim order. |
+| `progress`          | number | While `running` and the encode keeps reporting it: encoded fraction, 0 to 1. Omitted once reports stop for 30 seconds. |
+| `remaining_seconds` | int    | While `running`: estimated seconds left at the encode's reported speed.               |
+
+`GET /api/v2/downloads` attaches it; other answers that return an entry do not.
+Each server node refreshes these values at most every 5 seconds, so polling more
+often than that returns the same numbers.
+It is absent when the job has already finished or failed but the entry's status
+has not caught up, and when progress cannot be read; a client then shows a plain
+preparing state.
 
 Managed lifecycle:
 
@@ -655,15 +848,17 @@ Managed lifecycle:
 original:              ready -> downloading -> completed
 compat/remux:          preparing -> ready -> downloading -> completed
 bitrate/transcode:     preparing -> ready -> downloading -> completed
-revoked:               any -> revoked (reserved)
+revoked:               any -> revoked (administrator)
+prepared again:        completed -> preparing -> ready -> downloading -> completed
 failed artifact job:   preparing -> failed
 ```
 
 Direct original rows are `ready` immediately; remux and transcode rows start at
 `preparing` and become `ready` when the artifact completes. `failed` means the
-artifact job exhausted its retries. `revoked` is reserved: nothing sets it
-today, but an admin revoke flow is planned in a separate effort, so clients
-must handle it. `downloading` and `completed` are set by the client via `PATCH`.
+artifact job exhausted its retries. `revoked` means an administrator revoked the
+entry (§9.3). `completed` returns to `preparing` only when the device asks for an
+expired file again (§4.12). `downloading` and `completed` are set by the client via
+`PATCH`.
 
 ---
 
@@ -772,10 +967,22 @@ Notes:
 - Artwork and subtitle URLs are authenticated proxy paths on this server. Fetch
   them once while online and cache the bytes locally.
 - Thumbhash fields are inline placeholders for fast offline UI rendering.
+- For an episode, `poster` and `poster_thumbhash` are the episode still and
+  `backdrop` is the series backdrop. The series poster arrives separately as
+  `series_poster_thumbhash` and `artwork_urls.series_poster`, present only on
+  episode manifests; use it for series-level screens such as a downloaded
+  series' header.
 - `stable_identity` is for rescan recovery when a server-side `content_id` changes.
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
   refresh the media file and manifest.
+- `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
+  external (`external:{index}`) subtitles; an external subtitle that cannot be
+  read has none. It is an opaque string that changes whenever that subtitle's
+  delivered bytes can change: a timing correction, or an external file edited
+  on disk. When a refreshed manifest shows a different value than the one
+  stored with the cached file, re-fetch that subtitle. An external subtitle's
+  `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as
   "not set."
 
@@ -891,6 +1098,7 @@ POST /api/v2/downloads/subscriptions
 | `season_numbers`    | int[]  | Required for `specific_seasons`.                                                    |
 | `delete_watched`    | bool   | Client deletes finished episodes; sync skips episodes the profile has finished.     |
 | `max_storage_bytes` | int64  | `0` means unlimited. Client-enforced hard cap; server soft-gates auto-registration. |
+| `quality`           | string | Optional, `original` by default. One of `quality_presets`; needs `monitor_quality`. |
 
 The response is the persisted monitor with its `etag` validator. If this device
 already monitors that series, its current options and paused state are returned
@@ -932,6 +1140,14 @@ A `delete_watched` monitor also skips episodes whose progress for the profile is
 `completed`, the same flag the client reads before deleting a finished episode. If
 the progress lookup fails, sync registers without this filter rather than failing.
 
+A monitor with a bitrate `quality` registers prepared rows that start `preparing`.
+Sync resolves the preset for each episode's file without device `caps`, so an
+episode the preset cannot be prepared for is not registered and does not count
+toward `registered`. Prepared rows count toward the account's concurrent download
+limit until they are ready, so one sync registers at most as many prepared
+episodes as the account has free slots; the rest register on a later sync. An
+episode whose capability check fails for now is also left for a later sync.
+
 ### 8.3 List, get, update, delete
 
 ```http
@@ -954,6 +1170,10 @@ unchanged and an explicit null is rejected:
 { "mode": "specific_seasons", "season_numbers": [2, 3], "active": true }
 ```
 
+Changing `quality` applies to episodes registered from then on; downloads already
+registered keep the quality they were created with. A changed `quality` is checked
+against the account's transcode permission; sending the stored value again is not.
+
 Edits preserve the future cutoff and re-anchor latest-season selection only under
 the shared mode-change rules. Delete stops monitoring, retains already-registered
 downloads and forgets the episodes deleted while it existed, so a new monitor for the
@@ -969,6 +1189,7 @@ Subscription shape:
   "target_season": 4,
   "delete_watched": true,
   "max_storage_bytes": 21474836480,
+  "quality": "original",
   "active": true,
   "created_at": "2026-06-19T16:00:00Z",
   "updated_at": "2026-06-19T16:00:00Z"
@@ -987,6 +1208,7 @@ files or existing download rows.
 1. Call `GET /api/v2/capabilities/downloads` and offer only `quality_presets`.
 2. User picks Download: `POST /api/v2/downloads` with `quality`, `caps`, profile, and device headers.
 3. If the row is `preparing`, poll `GET /api/v2/downloads` or listen on events (see 9.4) until `ready`.
+   Show its `preparation` while waiting: the queue position, or the encode's progress and time left.
 4. Fetch and store `GET /api/v2/downloads/{id}/manifest`.
 5. Fetch and store all `artwork_urls` and `subtitles[].fetch_url` assets.
 6. Download `GET /api/v2/downloads/{id}/file` with Range/background support.
@@ -1006,8 +1228,15 @@ files or existing download rows.
 ### 9.3 Robustness rules
 
 - Re-check capability on profile switch.
-- Keep already-downloaded files playable after an entry becomes `revoked` or stops
-  being servable.
+- When the capability reports `revoked_removes_local`, an entry that becomes
+  `revoked` was revoked by an administrator: delete the local media, manifest, and
+  assets, then `DELETE /api/v2/downloads/{id}` (queue the delete if offline). Without
+  the flag, keep the files playable and stop fetching for that row. Check for revoked
+  entries whenever the app reads the registry, including background syncs.
+- Keep already-downloaded files playable when an entry stops being servable for any
+  other reason.
+- A `409 prepared_file_expired` from the file route is not an error to show: call
+  `POST /api/v2/downloads/{id}/prepare`, wait for `ready`, then resume the transfer.
 - Do not automatically retry `POST /api/v2/downloads`. After an uncertain response,
   re-read `GET /api/v2/downloads` and make an explicit new request for work that is
   still missing.
@@ -1055,7 +1284,7 @@ Persist these records in the app's local database:
 | Local model            | Required fields                                                                                                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OfflineDownload`      | `download_id`, `content_id`, `episode_id`, `batch_id`, `quality`, `effective_quality`, `delivery_format`, `target_bitrate_kbps`, `revision`, `status`, local media path, local manifest path, byte count, created/updated timestamps. |
-| `OfflineAsset`         | `download_id`, asset kind (`media`, `poster`, `backdrop`, `logo`, `subtitle`), remote proxy path, local path, expected bytes if known, fetch status.                                                                                  |
+| `OfflineAsset`         | `download_id`, asset kind (`media`, `poster`, `backdrop`, `logo`, `series_poster`, `subtitle`), remote proxy path, local path, expected bytes if known, fetch status.                                                                 |
 | `OfflineProgressEvent` | `media_item_id`, `position`, `duration`, `updated_at`, retry/ack state.                                                                                                                                                               |
 | `DownloadSubscription` | Server subscription id, `series_id`, mode, season filters, retention settings, active state.                                                                                                                                          |
 
@@ -1118,7 +1347,9 @@ has richer playback capability detection.
 Use `max_resolution` and `hdr` from actual device/display capability where known.
 For Apple TV 4K or modern HDR-capable devices, the client may advertise `4k` and
 `hdr: true`; older phones/tablets should stay conservative. These caps affect
-only server-side compatibility decisions and bitrate transcode targets.
+only server-side compatibility decisions and bitrate transcode targets: a
+preset's resolution steps down until the device decodes it, and a client that
+sends no `caps` gets the preset's full resolution.
 
 A client with real decoder facts can send `video_evidence` and `video_decode`
 alongside the flat lists. Note what that changes: detailed entries supersede the
@@ -1172,7 +1403,7 @@ For a single movie or episode:
 For series or season download:
 
 1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, and
-   `quality: "original"`.
+   the chosen `quality` (`original` unless the capability reports `bulk_quality`).
 2. Persist each returned row under the shared `batch_id`.
 3. Record `skipped` entries for user-visible diagnostics.
 4. Fetch `GET /api/v2/downloads/batches/{batch_id}/manifests` after rows are ready, or
@@ -1231,7 +1462,8 @@ Use manifest fields as follows:
 - `series_id`, `series_title`, `season_number`, and `episode_number` drive episode
   grouping.
 - `poster_thumbhash` and `backdrop_thumbhash` are placeholders while local artwork
-  bytes load.
+  bytes load. For an episode, `poster` is the episode still; series-level screens
+  use `series_poster` and `series_poster_thumbhash`.
 - `chapters`, `intro`, `credits`, `recap`, and `preview` drive the same skip and
   chapter UI as online playback.
 - `audio_tracks` and `selected_audio_track_index` seed the audio-track picker when
@@ -1273,8 +1505,10 @@ Deleting from the Apple offline library should:
 4. Call `DELETE /downloads/{id}` while online, or queue that delete for the next
    reconnect.
 
-If the server later reports the entry as `revoked` or not servable, keep existing local
-files playable but stop retrying server fetches for that row.
+If the server later reports the entry as `revoked`, follow §9.3: delete the local files
+and then the entry. If it is not servable for another reason, keep existing local files
+playable but stop retrying server fetches for that row. On `409 prepared_file_expired`,
+call `POST /downloads/{id}/prepare` and resume the transfer once the entry is `ready`.
 
 ---
 
@@ -1362,6 +1596,12 @@ constraints fit the app:
    after the file and required assets are moved into durable storage.
 6. If auth expires while a transfer is queued, recreate the request with a fresh
    token and resume.
+7. On `409 prepared_file_expired`, call `POST /downloads/{id}/prepare` and resume
+   once the row is `ready` again (9.3). Other `409`s are not "still preparing".
+
+When a registry read, including the periodic WorkManager sync in 11.8, returns an
+entry as `revoked` and the capability reports `revoked_removes_local`, delete its
+local files and then the entry (9.3).
 
 ### 11.5 Offline playback
 
@@ -1425,19 +1665,20 @@ operations use:
 | ---- | ------------------------ | ------------------------------------------------------------------------- |
 | 400  | `malformed_request`      | Malformed JSON body.                                                      |
 | 400  | `invalid_cursor`         | A `cursor` value the operation cannot continue from.                      |
-| 401  | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401  | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |
-| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request. |
+| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request; or the entry is revoked or otherwise not servable. |
+| 409  | `prepared_file_expired`  | The file route for a finished entry whose prepared file the server cleaned up. Call `POST /downloads/{id}/prepare` (§4.12). |
 | 413  | `payload_too_large`      | The request body or an encoded manifest exceeds its bound.                |
 | 416  | `range_not_satisfiable`  | An unsatisfiable `Range` on a byte route.                                 |
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
 | 428  | `precondition_required`  | A subscription mutation without `If-Match`.                               |
 | 412  | `precondition_failed`    | A stale `If-Match` validator.                                             |
-| 429  | `rate_limited`           | Concurrent download cap or period quota hit.                              |
+| 429  | `rate_limited`           | Concurrent download cap or period quota hit. New managed entries that register `ready` (original quality, or a prepared file that is already ready) count only toward the period quota; the app queues their transfers. |
 | 500  | `internal_error`         | Unexpected server error.                                                  |
-| 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a non-original bulk quality, or a missing prepare pipeline. |
+| 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a quality the server cannot prepare, or a missing prepare pipeline. |
 | 503  | `dependency_unavailable` | Downloads, offline assets, series monitoring, or capability discovery is temporarily unavailable; retry the same request. |
 
 Access denials intentionally surface as `404` on manifest, artwork, subtitle, and
@@ -1450,10 +1691,11 @@ bytes have been written aborts the stream and never appends JSON to a partial as
 
 ## 13. Out of scope
 
-Cross-device download visibility, DRM/leases, cumulative per-user storage quotas,
-and server-initiated deletion of client files remain out of scope. Artifact garbage
-collection may remove server-side prepared files only when no managed row still
-references them.
+Cross-device download visibility for users, DRM/leases, cumulative per-user storage
+quotas, and enforced deletion of client files remain out of scope. An administrator's
+revoke is a request the app honors at its next sync. The server removes its own
+prepared files once no in-flight download needs them and the cache period has passed;
+finished rows keep the recipe so the file can be prepared again (§4.12).
 
 ---
 
@@ -1480,10 +1722,55 @@ finalization pass), so both go through a prepare-to-file job that writes a
 two devices requesting the same target reuse one encode. The artifact table is
 a durable, leased job queue: transactional claims (`FOR UPDATE SKIP LOCKED`),
 lease heartbeats, attempt counting, and a startup sweep guarantee a crash
-mid-encode cannot strand a download in `preparing` or double-encode. Ready
-artifacts are evicted LRU under a byte budget, but never while a managed row —
-including a completed one representing a device's local library — still
-references them.
+mid-encode cannot strand a download in `preparing` or double-encode. A ready
+artifact is kept while an in-flight download needs it and for a cache period after
+its last use; then its bytes are deleted and the row becomes `expired`. Budgets,
+the disk ceiling, measurement, history, and revocation are described in
+[prepared download storage](architecture/download-storage.md).
+
+### Preparation progress (admin)
+
+The lease owner of a running prepare job records where it runs (`worker_kind`,
+`worker_node_id`, `worker_name`) and its FFmpeg progress on the `download_artifacts`
+row, so every API replica serves the same view. Local encodes read FFmpeg's
+`-progress` stream directly; node encodes are polled through the node's progress
+operation (see [the worker protocol](architecture/worker-http-protocol.md)) while the
+prepare request is open. Progress is written at most every five seconds and only
+while the writer still holds the lease; a claim resets it. A node that predates the
+progress operation marks the attempt `progress_unavailable`.
+
+Administrators read the queue at `GET /api/v2/admin/downloads/preparations`
+(running, queued, and retrying jobs plus failures from the last 24 hours, with
+totals that cover every listed job) and discover it at
+`GET /api/v2/admin/downloads/preparations/capabilities`. The admin-only realtime
+channel `download_preparations` carries `download_preparation.changed` (`{id}`;
+re-read the list) and `download_preparation.progress` (`{id, progress}`); its
+subscription snapshot is `null`. FFmpeg output for every attempt, on the API host
+or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
+`playback_session_id`. None of this changes the client-facing download contract.
+
+### Pausing and canceling preparation (admin)
+
+A paused job keeps its queued status and claim position; `paused_at` hides it
+from the claim query until an administrator resumes it. Pausing a running job
+returns it to its queued status, clears its lease and live state, and refunds
+the attempt. The lost lease fences the worker out: an encode on the replica that
+handled the request is canceled at once, and one on another replica stops at its
+next heartbeat (within about 40 seconds). The row keeps an unowned
+`lease_expires_at` one lease length (two minutes) ahead, and `ClaimNext` waits it
+out even if the job is resumed sooner, because a second attempt would share the
+first one's local output path.
+
+Canceling deletes the job row and fails its `preparing` downloads with
+`Canceled by an administrator` in one transaction, then publishes the usual
+`download` user-state event for each. A running attempt stops the same way as a
+pause; remote attempt bytes go through the orphan cleanup queue, which treats a
+locator whose row is gone as abandoned, and a local encode that finishes after
+its row was deleted removes its own file. Each job writes to a path that includes
+its id, so a job created after a cancel never shares a path with the canceled
+encode. A download linked to the job while the cancel committed fails the same
+way, when its link is confirmed or at the next queue reconciliation. Clients see
+an ordinary failed download and can request it again, which queues a new job.
 
 ### Progress sync ordering
 
@@ -1554,8 +1841,8 @@ unavailable or ineligible proxy targets fall back to existing local delivery.
 
 `GET /api/v2/downloads/{id}/artwork/{kind}` and
 `GET /api/v2/downloads/{id}/subtitles/{ref}` require the device header.
-Artwork kinds are poster, backdrop and logo; subtitle references retain the
-existing external:index and downloaded:id identity. Current content access is
+Artwork kinds are poster, backdrop, logo and series_poster; subtitle references retain the
+external:index, embedded:ordinal, and downloaded:id identity. Current content access is
 checked before asset delivery, and downloaded subtitle ownership must match the
 entry's media file. These two asset routes preserve whole-object delivery and
 private caching; they do not advertise byte ranges.
@@ -1693,13 +1980,13 @@ prevents duplicate ephemeral transfers. The download capability exposes
 
 GET and HEAD `/api/v2/direct-download?file_id={id}` preserve synchronous original-file delivery. GET and HEAD `/api/v2/direct-download-proxy?file_id={id}` preserve the proxy-aware variant. `file_id` is a canonical positive decimal string; `format` may be absent, empty or `original`. Duplicate and unknown query parameters return 422. These routes use the existing download capability/policy service; they do not create a managed download, artifact or playback session.
 
-Every request applies account authentication, viewer/demo gates, account download policy and catalog/file access. Header callers may supply the existing profile and PIN headers. Browser navigation retains the existing account `token` query fallback: the selected profile/PIN does not travel in that URL, and the request uses account-scoped access without a selected profile. This migration introduces no new signed browser grant or profile query credential. Account URLs remain secrets with the limitations described in section 4.10.
+Every request applies authentication, viewer/demo gates, the household profile rule, account download policy and catalog/file access. Header callers may supply the existing profile and PIN headers. Browser navigation uses a link from `POST /api/v2/direct-download/links` (section 4.10): its `dl` token carries the profile that minted it, so the request runs under that profile's limits. The account `token` query fallback remains, but carries no profile, so the household rule refuses it on accounts with a locked or restricted profile. URLs remain secrets with the limitations described in section 4.10.
 
 The service opens the authorized source file and closes it after streaming. Success preserves Content-Disposition, original MIME type, Content-Length, Last-Modified, HEAD, ranges/206 and conditional/304 semantics. Missing files return 404. Malformed input returns 422; invalid range 416 retains Content-Range. Failures before output become redacted v2 problems. A failure after output has begun aborts the stream instead of appending JSON; neither partial bytes nor a lost response prove completion. No replay or durable local-file receipt is provided.
 
 The proxy producer resolves permission before creating a token for the selected FileTarget. The existing planner, short-lived signed target, preflight and local fallback remain authoritative; callers cannot supply a path or proxy URL. A successful proxy preflight may yield 307. HEAD releases its provisional planner reservation; GET retains the existing reservation lifecycle, with no new completion/cleanup guarantee. Preflight failure releases the reservation and falls back to a freshly authorized local serve. A redirect is not proof of delivery, and an issued proxy token retains its existing expiration/revocation limits.
 
-The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, probes once with HEAD, and launches browser GET using the identical captured account URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
+The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, mints a link with those headers, probes the link once with HEAD, and launches browser GET on the identical link URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
 
 ---
 

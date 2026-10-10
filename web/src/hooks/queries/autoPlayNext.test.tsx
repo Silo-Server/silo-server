@@ -83,15 +83,6 @@ describe("useAutoPlayNextSetting", () => {
     v2Mock.mockReset();
   });
 
-  it("resolves an unset key to the contract default", async () => {
-    fakeSettingsServer();
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useAutoPlayNextSetting(), { wrapper });
-
-    await waitFor(() => expect(result.current.enabled).toBe(true));
-    expect(result.current.hasDeviceOverride).toBe(false);
-  });
-
   it("saves at profile scope so both surfaces read the same row", async () => {
     const rows = fakeSettingsServer();
     const { wrapper } = createHarness();
@@ -119,6 +110,8 @@ describe("useAutoPlayNextSetting", () => {
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useAutoPlayNextSetting(), { wrapper });
 
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.hasDeviceOverride).toBe(false);
     await waitFor(() => expect(result.current.enabled).toBe(false));
     expect(result.current.hasDeviceOverride).toBe(true);
 

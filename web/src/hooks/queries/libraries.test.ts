@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UserLibrary } from "@/api/types";
-import { filterVisibleLibraries, normalizeLibraryIDs, parseLibraryIDList } from "./libraries";
+import { filterVisibleLibraries, parseLibraryIDList } from "./libraries";
 
 const libraries: UserLibrary[] = [
   { id: 1, name: "Movies", type: "movies", sort_order: 0 },
@@ -25,12 +25,6 @@ describe("parseLibraryIDList", () => {
   it("keeps only positive integer library ids", () => {
     expect(parseLibraryIDList([1, 2, 2, 0, -1, 3.5, "4"])).toEqual([1, 2]);
     expect(parseLibraryIDList('[1,2,2,0,-1,3.5,"4"]')).toEqual([1, 2]);
-  });
-});
-
-describe("normalizeLibraryIDs", () => {
-  it("produces a normalized id list", () => {
-    expect(normalizeLibraryIDs([3, 1, 3, -1, 0])).toEqual([3, 1]);
   });
 });
 

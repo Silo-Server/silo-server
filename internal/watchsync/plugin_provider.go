@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,10 @@ type WatchSyncPluginClient interface {
 type WatchSyncPluginClientResolver func(context.Context, int, string) (WatchSyncPluginClient, error)
 type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error)
 
+// WatchSyncPluginConfigReady reports whether an installation has the global
+// config its manifest requires.
+type WatchSyncPluginConfigReady func(context.Context, int) (bool, error)
+
 type PluginCredentialRepository interface {
 	UpsertConnection(context.Context, Connection) (Connection, error)
 }
@@ -48,7 +53,9 @@ type PluginProviderOptions struct {
 	ConnectionConfigSchema []*pluginv1.ConfigSchema
 	ResolveClient          WatchSyncPluginClientResolver
 	ResolveConfig          WatchSyncPluginConfigResolver
-	Repository             PluginCredentialRepository
+	// ConfigReady is optional; without it the plugin counts as configured.
+	ConfigReady WatchSyncPluginConfigReady
+	Repository  PluginCredentialRepository
 }
 
 type PluginProvider struct {
@@ -62,6 +69,7 @@ type PluginProvider struct {
 	supportedMedia         map[pluginv1.WatchSyncMediaType]struct{}
 	resolveClient          WatchSyncPluginClientResolver
 	resolveConfig          WatchSyncPluginConfigResolver
+	configReady            WatchSyncPluginConfigReady
 	repository             PluginCredentialRepository
 	now                    func() time.Time
 }
@@ -113,6 +121,7 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		supportedMedia:         supportedMedia,
 		resolveClient:          options.ResolveClient,
 		resolveConfig:          options.ResolveConfig,
+		configReady:            options.ConfigReady,
 		repository:             options.Repository,
 		now:                    time.Now,
 	}, nil
@@ -153,6 +162,16 @@ func (p *PluginProvider) ConnectionConfigSchema() []hostplugins.ConfigSchemaView
 
 func (p *PluginProvider) usesHostPluginConfig() {}
 
+// CredentialsConfigured reports whether the plugin has the global config its
+// manifest requires, such as a provider app's client ID, so a profile can
+// connect.
+func (p *PluginProvider) CredentialsConfigured(ctx context.Context) (bool, error) {
+	if p.configReady == nil {
+		return true, nil
+	}
+	return p.configReady(ctx, p.installationID)
+}
+
 func (p *PluginProvider) authoritativeRefreshProvider() {}
 
 func (p *PluginProvider) ExportBatchSize() int {
@@ -178,6 +197,7 @@ func (p *PluginProvider) Capabilities() Capabilities {
 		ScrobblePlayback:       p.descriptor.GetScrobblePlayback(),
 		ImportRatings:          p.descriptor.GetImportRatings(),
 		ExportRatings:          p.descriptor.GetExportRatings(),
+		SyncDropped:            p.descriptor.GetSyncDropped(),
 	}
 }
 
@@ -215,8 +235,9 @@ func (p *PluginProvider) ConnectWithAPIKeyConfig(
 		return TokenSet{}, ProviderAccount{}, watchSyncRPCError()
 	}
 	faultSecrets := append([]string{apiKey}, connectionSecrets...)
+	faultSecrets = append(faultSecrets, providerConfigSecretStrings(config)...)
 	if err := watchSyncFaultError(p.Key(), response.GetFault(), faultSecrets...); err != nil {
-		return TokenSet{}, ProviderAccount{}, err
+		return TokenSet{}, ProviderAccount{}, connectFaultError(err)
 	}
 	tokens, err := tokenSetFromProto(response.GetCredentials())
 	if err != nil {
@@ -568,6 +589,36 @@ func (p *PluginProvider) authenticatedContext(ctx context.Context, conn Connecti
 	}, nil
 }
 
+// authenticatedContextSecrets lists every secret an RPC carried to the
+// plugin: its tokens, secret credential attributes, and secret config values,
+// such as a provider app's client secret. Text the plugin returns is scrubbed
+// of all of them.
+func authenticatedContextSecrets(authContext *pluginv1.WatchSyncAuthenticatedContext) []string {
+	credentials := authContext.GetCredentials()
+	secrets := []string{credentials.GetAccessToken(), credentials.GetRefreshToken()}
+	for _, value := range credentials.GetSecretAttributes() {
+		secrets = append(secrets, value)
+	}
+	return append(secrets, providerConfigSecretStrings(authContext.GetProviderConfig())...)
+}
+
+// providerConfigSecretStrings lists a provider config's secret values and,
+// for a value holding an encoded JSON object or array, every scalar inside
+// it: a field holding an object is stored encoded, and a plugin can quote one
+// of its members.
+func providerConfigSecretStrings(config *pluginv1.WatchSyncProviderConfig) []string {
+	var secrets []string
+	for _, value := range config.GetSecretValues() {
+		secrets = append(secrets, value)
+		trimmed := strings.TrimSpace(value)
+		var decoded any
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && json.Unmarshal([]byte(trimmed), &decoded) == nil {
+			secrets = append(secrets, connectionConfigSecretStrings(decoded)...)
+		}
+	}
+	return secrets
+}
+
 func (p *PluginProvider) providerConfig(ctx context.Context) (*pluginv1.WatchSyncProviderConfig, error) {
 	if p.resolveConfig == nil {
 		return &pluginv1.WatchSyncProviderConfig{}, nil
@@ -611,7 +662,10 @@ func (p *PluginProvider) connectionConfig(values ConnectionConfigValues) (*plugi
 		value, exists := values[schema.GetKey()]
 		if !exists {
 			if schema.GetRequired() {
-				return nil, nil, fmt.Errorf("watch sync connection config %q is required", schema.GetKey())
+				return nil, nil, sanitizedConnectionConfigError(
+					fmt.Errorf("watch sync connection config %q is required", schema.GetKey()),
+					secrets,
+				)
 			}
 			continue
 		}
@@ -691,11 +745,23 @@ func connectionConfigSecrets(schemas []*pluginv1.ConfigSchema, values Connection
 }
 
 func sanitizedConnectionConfigError(err error, secrets []string) error {
-	return errors.New(sanitizeWatchSyncMessage(
+	return InvalidConnectionInputError{Message: sanitizeWatchSyncMessage(
 		err.Error(),
 		"watch sync connection config is invalid",
 		secrets...,
-	))
+	)}
+}
+
+// connectFaultError classifies a plugin's fault answer to a connect. The
+// profile supplied the API key and connection config, so INVALID_REQUEST and
+// PERMANENT mean that input can't work and the plugin's safe message says why.
+func connectFaultError(err error) error {
+	var fault watchSyncProviderFaultError
+	if errors.As(err, &fault) && (fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_REQUEST ||
+		fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT) {
+		return InvalidConnectionInputError{Message: fault.message}
+	}
+	return err
 }
 
 func connectionConfigSecretStrings(value any) []string {
@@ -1136,8 +1202,8 @@ func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOpe
 		CompletionPercent: completion,
 		Completed:         event.Completed,
 		ProviderItemKey:   event.ProviderItemKey,
-		Media: mediaFromIdentity(event.MediaItemID, event.Kind, "", 0,
-			event.IMDbID, event.TMDBID, event.TVDBID, "", 0,
+		Media: mediaFromIdentity(event.MediaItemID, event.Kind, event.Title, event.Year,
+			event.IMDbID, event.TMDBID, event.TVDBID, event.SeriesTitle, event.SeriesYear,
 			event.SeriesIMDbID, event.SeriesTMDBID, event.SeriesTVDBID, event.SeasonNumber, event.EpisodeNumber),
 	}
 }
@@ -1162,6 +1228,18 @@ func mediaFromIdentity(mediaItemID, kind, title string, year int, imdbID, tmdbID
 // every series rating on each sync and log the rejection.
 func (p *PluginProvider) SyncsRatingKind(kind string) bool {
 	return p.supportsMedia(watchSyncMediaType(kind))
+}
+
+// RatingExportRequiresWatched reports whether the plugin lists the media type
+// of kind in rating_export_requires_watched, meaning its SET_RATING also marks
+// the title watched upstream. Only movie and series ratings are synced.
+func (p *PluginProvider) RatingExportRequiresWatched(kind string) bool {
+	mediaType := watchSyncMediaType(kind)
+	if mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE &&
+		mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES {
+		return false
+	}
+	return slices.Contains(p.descriptor.GetRatingExportRequiresWatched(), mediaType)
 }
 
 // mediaFromLocalFavorite builds list and rating media. A series item carries
@@ -1332,10 +1410,17 @@ func safeApplyMessage(result *pluginv1.WatchSyncApplyResult, secrets ...string) 
 
 func sanitizeWatchSyncMessage(message string, fallback string, secrets ...string) string {
 	message = normalizeWatchSyncText(message)
+	// Longest first, so a secret that contains a shorter one is still
+	// redacted whole.
+	ordered := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
 		if secret = normalizeWatchSyncText(secret); secret != "" {
-			message = strings.ReplaceAll(message, secret, "[REDACTED]")
+			ordered = append(ordered, secret)
 		}
+	}
+	slices.SortFunc(ordered, func(a, b string) int { return len(b) - len(a) })
+	for _, secret := range ordered {
+		message = strings.ReplaceAll(message, secret, "[REDACTED]")
 	}
 	if message == "" {
 		return fallback

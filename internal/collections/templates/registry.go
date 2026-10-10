@@ -113,6 +113,26 @@ func (r *Registry) BundleCatalog() BundleCatalog {
 	return BundleCatalog{Bundles: r.ListBundles()}
 }
 
+// BundlesWithTemplates returns every registered bundle with its templates in
+// the bundle's template_ids order.
+func (r *Registry) BundlesWithTemplates() []BundleWithTemplates {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]BundleWithTemplates, 0, len(r.bundles))
+	for _, b := range r.bundles {
+		listed := make([]Template, 0, len(b.TemplateIDs))
+		for _, id := range b.TemplateIDs {
+			// RegisterBundle panics on unknown template IDs, so every
+			// reference resolves and Templates always matches TemplateIDs.
+			if idx, ok := r.byID[id]; ok {
+				listed = append(listed, r.templates[idx])
+			}
+		}
+		out = append(out, BundleWithTemplates{Bundle: b, Templates: listed})
+	}
+	return out
+}
+
 // Catalog returns templates grouped by category, in display order. Empty
 // categories are omitted. Categories not in the configured order appear last
 // in the order they were first registered.

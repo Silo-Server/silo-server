@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 
 	// A scheduled refresh stores what it found.
 	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{
-		row(models.RatingSourceMDBList, 86, nil, "mdblist"),
+		row("mdblist", 86, nil, "mdblist"),
 		row(models.RatingSourceIMDB, 81, votes(1000), "mdblist"),
 	}, false); err != nil {
 		t.Fatalf("Upsert(fill) error = %v", err)
@@ -43,7 +44,7 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 	// A later fill-empty write keeps stored sources and adds new ones.
 	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{
 		row(models.RatingSourceIMDB, 50, votes(5), "other"),
-		row(models.RatingSourceLetterboxd, 80, votes(20), "other"),
+		row("letterboxd", 80, votes(20), "other"),
 	}, false); err != nil {
 		t.Fatalf("Upsert(fill again) error = %v", err)
 	}
@@ -53,8 +54,8 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 	}
 	want := []models.ItemRatingSource{
 		row(models.RatingSourceIMDB, 81, votes(1000), "mdblist"),
-		row(models.RatingSourceLetterboxd, 80, votes(20), "other"),
-		row(models.RatingSourceMDBList, 86, nil, "mdblist"),
+		row("letterboxd", 80, votes(20), "other"),
+		row("mdblist", 86, nil, "mdblist"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("after fill-empty = %+v, want %+v", got, want)
@@ -132,7 +133,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	for _, id := range []string{movie, other} {
 		if err := repo.Upsert(ctx, id, []models.ItemRatingSource{
 			row(id, models.RatingSourceIMDB, 81, votes(1000)),
-			row(id, models.RatingSourceMyAnimeList, 88, votes(50)),
+			row(id, "myanimelist", 88, votes(50)),
 		}, false); err != nil {
 			t.Fatalf("Upsert(%s) error = %v", id, err)
 		}
@@ -141,7 +142,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	// The new set overwrites the sources it reports and removes the rest.
 	if err := repo.Replace(ctx, movie, []models.ItemRatingSource{
 		row(movie, models.RatingSourceIMDB, 64, votes(20)),
-		row(movie, models.RatingSourceLetterboxd, 70, nil),
+		row(movie, "letterboxd", 70, nil),
 	}); err != nil {
 		t.Fatalf("Replace() error = %v", err)
 	}
@@ -151,7 +152,7 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	}
 	want := []models.ItemRatingSource{
 		row(movie, models.RatingSourceIMDB, 64, votes(20)),
-		row(movie, models.RatingSourceLetterboxd, 70, nil),
+		row(movie, "letterboxd", 70, nil),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("after Replace = %+v, want %+v", got, want)
@@ -166,5 +167,87 @@ func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
 	}
 	if got, err := repo.GetByContentID(ctx, other); err != nil || len(got) != 2 {
 		t.Fatalf("other item after Replace = %+v (err %v), want its 2 sources", got, err)
+	}
+}
+
+// The trigger from migration 20261008200122 keeps media_items' TMDB vote pair
+// in step with the item's 'tmdb' rating source on every write.
+func TestRatingSourceRepositorySyncsTMDBVotesPostgres(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := context.Background()
+	repo := NewRatingSourceRepository(pool)
+
+	movie := fmt.Sprintf("rating-sources-tmdb-votes-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = $1`, movie)
+	})
+	batchEquivExec(t, pool, `
+		INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'movie', 'Rating Sources', '{}'::text[])
+	`, movie)
+
+	votes := func(n int64) *int64 { return &n }
+	tmdb := func(v *int64) models.ItemRatingSource {
+		return models.ItemRatingSource{ContentID: movie, Source: models.RatingSourceTMDB, Score: 84, Votes: v, Provider: "tmdb"}
+	}
+	stored := func() *int64 {
+		t.Helper()
+		var count *int64
+		var average *float64
+		if err := pool.QueryRow(ctx, `SELECT tmdb_vote_count, tmdb_vote_average FROM media_items WHERE content_id = $1`, movie).Scan(&count, &average); err != nil {
+			t.Fatalf("read tmdb vote pair: %v", err)
+		}
+		if (count == nil) != (average == nil) {
+			t.Fatalf("tmdb vote pair is half set: count %v, average %v", count, average)
+		}
+		if average != nil && math.Abs(*average-8.4) > 1e-9 {
+			t.Fatalf("tmdb_vote_average = %v, want 8.4 (the row's score / 10)", *average)
+		}
+		return count
+	}
+
+	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{tmdb(votes(20000))}, false); err != nil {
+		t.Fatalf("Upsert(tmdb) error = %v", err)
+	}
+	if got := stored(); got == nil || *got != 20000 {
+		t.Fatalf("after Upsert tmdb_vote_count = %v, want 20000", got)
+	}
+
+	// A fill-empty write (the enrichment pass) keeps the stored row and pair.
+	other := tmdb(votes(5))
+	other.Provider = "mdblist"
+	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{other}, false); err != nil {
+		t.Fatalf("Upsert(fill, other provider) error = %v", err)
+	}
+	if got := stored(); got == nil || *got != 20000 {
+		t.Fatalf("after fill-empty tmdb_vote_count = %v, want 20000 kept", got)
+	}
+
+	// A refresh's overwrite moves the pair with the row.
+	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{tmdb(votes(21000))}, true); err != nil {
+		t.Fatalf("Upsert(replace) error = %v", err)
+	}
+	if got := stored(); got == nil || *got != 21000 {
+		t.Fatalf("after replace tmdb_vote_count = %v, want 21000", got)
+	}
+
+	// A refresh that no longer reports a count clears the column.
+	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{tmdb(nil)}, true); err != nil {
+		t.Fatalf("Upsert(replace, no votes) error = %v", err)
+	}
+	if got := stored(); got != nil {
+		t.Fatalf("after clearing votes tmdb_vote_count = %d, want NULL", *got)
+	}
+
+	if err := repo.Upsert(ctx, movie, []models.ItemRatingSource{tmdb(votes(300))}, true); err != nil {
+		t.Fatalf("Upsert(replace) error = %v", err)
+	}
+	// Replacing the set without TMDB removes its row and the copied count.
+	if err := repo.Replace(ctx, movie, []models.ItemRatingSource{
+		{ContentID: movie, Source: models.RatingSourceIMDB, Score: 80, Votes: votes(10), Provider: "mdblist"},
+	}); err != nil {
+		t.Fatalf("Replace() error = %v", err)
+	}
+	if got := stored(); got != nil {
+		t.Fatalf("after Replace without tmdb tmdb_vote_count = %d, want NULL", *got)
 	}
 }

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setAccessToken, setRefreshToken } from "@/api/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -64,6 +65,8 @@ function problem(code: number) {
 it.each(["export", "queued", "synchronous", "publish"] as const)(
   "does not retry %s after authentication refusal",
   async (action) => {
+    setAccessToken("synthetic-admin");
+    setRefreshToken("synthetic-refresh");
     const { calls, wrapper } = setup(() => problem(401));
     const { result } = renderHook(useTransfers, { wrapper });
     await act(async () => {

@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -15,16 +16,42 @@ const (
 	refreshMetadataTaskInterval = 6 * time.Hour
 	refreshMetadataBatchSize    = 200
 	refreshMetadataWorkerCount  = 12
+	// refreshClaimMissesBeforeStop is how many claim renewals in a row may fail
+	// before a batch stops. Renewals run every third of the lease, so after two
+	// misses the next one would come after the claims lapse. By then another
+	// node may hold the rows, and this batch's flush would settle them under
+	// that node's claim.
+	refreshClaimMissesBeforeStop = 2
 )
+
+// errRefreshClaimsLost stops a batch whose claims could not be renewed. Its
+// rows are left claimed and are retried once their lease expires.
+var errRefreshClaimsLost = errors.New("refresh claims could not be renewed")
 
 // MetadataRefresher can refresh metadata for a queued target.
 type MetadataRefresher interface {
 	RefreshScheduledTarget(ctx context.Context, targetType, contentID string) error
 }
 
+// MetadataRefreshBatcher is implemented by refreshers that can defer
+// series-wide follow-up work across a claimed batch. Targets refreshed with the
+// returned context share the batch, and the task calls flush once after every
+// target in the batch has returned.
+type MetadataRefreshBatcher interface {
+	BeginScheduledRefreshBatch(ctx context.Context) (context.Context, func(context.Context))
+}
+
 // RefreshCandidateFinder finds items needing metadata refresh.
 type RefreshCandidateFinder interface {
 	FindCandidates(ctx context.Context, limit int) ([]worker.RefreshCandidate, error)
+}
+
+// RefreshClaimRenewer is implemented by finders whose claims expire. The task
+// renews a batch's claims until the batch, including its flush, has finished,
+// so a long batch keeps the rows it has not settled yet.
+type RefreshClaimRenewer interface {
+	RenewClaims(ctx context.Context, candidates []worker.RefreshCandidate) error
+	ClaimRenewInterval() time.Duration
 }
 
 type RefreshDebtPruner interface {
@@ -130,6 +157,25 @@ func (t *RefreshMetadataTask) refreshBatch(
 		workerCount = len(candidates)
 	}
 
+	// The batch stops early when its claims can no longer be renewed. The
+	// flush then runs on the stopped context, so it settles nothing.
+	batchCtx, stopBatch := context.WithCancelCause(ctx)
+	defer stopBatch(nil)
+
+	// Deferred calls run in reverse, so the claims stay renewed through the flush.
+	if renewer, ok := t.finder.(RefreshClaimRenewer); ok {
+		defer renewRefreshClaims(batchCtx, renewer, candidates, stopBatch)()
+	}
+
+	// Every return below happens after the workers have stopped, so the
+	// deferred flush sees the whole batch's refreshes.
+	itemParent := batchCtx
+	if batcher, ok := t.refresher.(MetadataRefreshBatcher); ok {
+		var flush func(context.Context)
+		itemParent, flush = batcher.BeginScheduledRefreshBatch(batchCtx)
+		defer flush(batchCtx)
+	}
+
 	type refreshJob struct {
 		candidate worker.RefreshCandidate
 	}
@@ -144,7 +190,7 @@ func (t *RefreshMetadataTask) refreshBatch(
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				if ctx.Err() != nil {
+				if batchCtx.Err() != nil {
 					return
 				}
 
@@ -163,7 +209,7 @@ func (t *RefreshMetadataTask) refreshBatch(
 					startErrored,
 				))
 
-				itemCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+				itemCtx, cancel := context.WithTimeout(itemParent, 2*time.Minute)
 				err := t.refresher.RefreshScheduledTarget(itemCtx, job.candidate.TargetType, job.candidate.ContentID)
 				cancel()
 
@@ -201,17 +247,62 @@ func (t *RefreshMetadataTask) refreshBatch(
 	for _, candidate := range candidates {
 		select {
 		case jobs <- refreshJob{candidate: candidate}:
-		case <-ctx.Done():
+		case <-batchCtx.Done():
 			close(jobs)
 			wg.Wait()
-			return refreshed, errored, ctx.Err()
+			return refreshed, errored, context.Cause(batchCtx)
 		}
 	}
 	close(jobs)
 	wg.Wait()
 
-	if ctx.Err() != nil {
-		return refreshed, errored, ctx.Err()
+	if batchCtx.Err() != nil {
+		return refreshed, errored, context.Cause(batchCtx)
 	}
 	return refreshed, errored, nil
+}
+
+// renewRefreshClaims renews the batch's claims on the renewer's interval until
+// the returned stop function is called or ctx is done. After
+// refreshClaimMissesBeforeStop failed renewals in a row it stops the batch
+// with errRefreshClaimsLost.
+func renewRefreshClaims(ctx context.Context, renewer RefreshClaimRenewer, candidates []worker.RefreshCandidate, stopBatch context.CancelCauseFunc) func() {
+	interval := renewer.ClaimRenewInterval()
+	if interval <= 0 || len(candidates) == 0 {
+		return func() {}
+	}
+	renewCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		misses := 0
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				err := renewer.RenewClaims(renewCtx, candidates)
+				if renewCtx.Err() != nil {
+					return
+				}
+				if err == nil {
+					misses = 0
+					continue
+				}
+				misses++
+				slog.WarnContext(renewCtx, "refresh task: failed to renew claims", "component", "taskmanager",
+					"claims", len(candidates), "misses", misses, "error", err)
+				if misses >= refreshClaimMissesBeforeStop {
+					stopBatch(fmt.Errorf("%w: %w", errRefreshClaimsLost, err))
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }

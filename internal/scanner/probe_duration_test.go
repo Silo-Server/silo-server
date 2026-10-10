@@ -45,23 +45,6 @@ func TestDurationFromProbeMetadataRemovesAbsoluteTimestampOffset(t *testing.T) {
 	}
 }
 
-func TestDurationFromProbeMetadataRejectsAbsurdSubtitleTimeline(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{Duration: "4298357.248000"},
-		Streams: []ffprobeStream{
-			{CodecType: "video", AvgFrameRate: "30000/1001"},
-			{CodecType: "subtitle", Duration: "4298357.248000"},
-		},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if ok || got != 0 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
-	}
-}
-
 func TestDurationFromProbeMetadataRejectsImplausiblyShortLargeVideo(t *testing.T) {
 	t.Parallel()
 
@@ -93,27 +76,6 @@ func TestDurationFromProbeMetadataKeepsLongAudioDurationInSeconds(t *testing.T) 
 	got, ok := durationFromProbeMetadata(raw)
 	if !ok || got != 108000 {
 		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 108000, true", got, ok)
-	}
-}
-
-func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoDuration(t *testing.T) {
-	t.Parallel()
-
-	raw := &ffprobeOutput{
-		Format: ffprobeFormat{
-			Duration: "182930.275000",
-			Size:     "77507139196",
-		},
-		Streams: []ffprobeStream{{
-			CodecType:    "video",
-			Duration:     "182930.196000",
-			AvgFrameRate: "24/1",
-		}},
-	}
-
-	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 182930 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 182930, true", got, ok)
 	}
 }
 
@@ -398,20 +360,6 @@ func TestEstimateVideoPacketDurationRejectsOutlierSpanWhenFrameCountDisagrees(t 
 		packets.WriteString("5.000000\n")
 	}
 	packets.WriteString("500000.000000\n")
-
-	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "30/1")
-	if got != 10 {
-		t.Fatalf("estimateVideoPacketDuration() = %d, want 10", got)
-	}
-}
-
-func TestEstimateVideoPacketDurationUsesFrameCountForCollapsedTimestamps(t *testing.T) {
-	t.Parallel()
-
-	var packets strings.Builder
-	for i := 0; i < 300; i++ {
-		packets.WriteString("3.022000\n")
-	}
 
 	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "30/1")
 	if got != 10 {

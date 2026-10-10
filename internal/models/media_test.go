@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPersonKindAudiobookRoles(t *testing.T) {
@@ -16,6 +17,18 @@ func TestPersonKindAudiobookRoles(t *testing.T) {
 	for _, tc := range cases {
 		if got := tc.kind.String(); got != tc.want {
 			t.Errorf("%d.String() = %q, want %q", tc.kind, got, tc.want)
+		}
+	}
+}
+
+func TestPersonKindCreator(t *testing.T) {
+	const creator = "Creator"
+	if got := PersonKindCreator.String(); got != creator {
+		t.Errorf("PersonKindCreator.String() = %q, want %q", got, creator)
+	}
+	for _, job := range []string{creator, "creator", " CREATOR "} {
+		if got := PersonKindFromJob(job); got != PersonKindCreator {
+			t.Errorf("PersonKindFromJob(%q) = %v, want PersonKindCreator", job, got)
 		}
 	}
 }
@@ -126,5 +139,27 @@ func TestMediaFileIsAudioOnly(t *testing.T) {
 				t.Fatalf("IsAudioOnly() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMediaFileProbeRejected(t *testing.T) {
+	failedAt := time.Now().UTC()
+	probedAt := failedAt.Add(-time.Hour)
+	cases := []struct {
+		name string
+		file *MediaFile
+		want bool
+	}{
+		{name: "nil", file: nil},
+		{name: "never probed", file: &MediaFile{}},
+		{name: "rejected", file: &MediaFile{ProbeFailedAt: &failedAt}, want: true},
+		{name: "rejected after an earlier successful probe", file: &MediaFile{ProbeFailedAt: &failedAt, ProbeUpdatedAt: &probedAt}},
+		{name: "rejected with imported codec facts", file: &MediaFile{ProbeFailedAt: &failedAt, CodecVideo: "h264"}},
+		{name: "rejected with audio tracks", file: &MediaFile{ProbeFailedAt: &failedAt, AudioTracks: []AudioTrack{{Codec: "aac"}}}},
+	}
+	for _, tc := range cases {
+		if got := tc.file.ProbeRejected(); got != tc.want {
+			t.Errorf("%s: ProbeRejected() = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
