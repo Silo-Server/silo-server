@@ -790,6 +790,13 @@ func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
 	if entry.WatchedAt == "" {
 		entry.WatchedAt = nowUTC()
 	}
+	// Timestamps here are whole-second RFC 3339 text and compare as strings,
+	// so a sub-second time ("…:05.5Z" sorts before "…:05Z") is cut to its
+	// second. A removal's watermark is whole-second too, so an import in the
+	// same second as a removal stays hidden on this store.
+	if watchedAt, err := time.Parse(time.RFC3339Nano, entry.WatchedAt); err == nil {
+		entry.WatchedAt = watchedAt.UTC().Format(time.RFC3339)
+	}
 	if entry.Source == "" {
 		entry.Source = userstore.WatchHistorySourceLegacy
 	}

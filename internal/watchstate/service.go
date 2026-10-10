@@ -634,10 +634,12 @@ func (s *Service) addImportedHistoryIfMissingWithSource(
 	if watchedAt == nil || watchedAt.IsZero() {
 		return false, nil
 	}
+	// The full time lets the store order the import against a history removal
+	// in the same second; the store decides the precision it keeps.
 	entry := userstore.WatchHistoryEntry{
 		ProfileID:       profileID,
 		MediaItemID:     targetID,
-		WatchedAt:       watchedAt.UTC().Format(time.RFC3339),
+		WatchedAt:       watchedAt.UTC().Format(time.RFC3339Nano),
 		DurationSeconds: duration,
 		Completed:       completed,
 		Source:          source,

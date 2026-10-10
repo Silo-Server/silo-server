@@ -170,3 +170,7 @@
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
+
+# A played mark later in the same second as a history removal stays visible.
+./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
+./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
