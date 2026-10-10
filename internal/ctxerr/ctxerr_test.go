@@ -50,6 +50,10 @@ func TestLogLevelNeedsTheCallerGone(t *testing.T) {
 		{"caller gone", canceled, fmt.Errorf("query: %w", context.Canceled), slog.LevelDebug},
 		{"plugin call after the caller left", canceled, status.Error(codes.Canceled, "context canceled"), slog.LevelDebug},
 		{"real failure after the caller left", canceled, errors.New("connection reset"), slog.LevelWarn},
+		{"wrapped plugin call after the caller left", canceled, fmt.Errorf("marker provider: %w", status.Error(codes.Canceled, "context canceled")), slog.LevelDebug},
+		{"joined cancellations", canceled, errors.Join(context.Canceled, status.Error(codes.Canceled, "context canceled")), slog.LevelDebug},
+		{"real failure joined with the cancellation", canceled, errors.Join(errors.New("query failed"), context.Canceled), slog.LevelWarn},
+		{"wrapped join with a real failure", canceled, fmt.Errorf("loading: %w", errors.Join(context.Canceled, errors.New("query failed"))), slog.LevelWarn},
 		{"cancellation while the caller waits", t.Context(), context.Canceled, slog.LevelWarn},
 		{"deadline", expired, context.DeadlineExceeded, slog.LevelWarn},
 	} {

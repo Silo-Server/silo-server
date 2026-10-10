@@ -22,10 +22,35 @@ func IsCanceled(err error) bool {
 }
 
 // Abandoned reports whether err only says that the caller of ctx went away:
-// ctx itself was canceled and err is a cancellation. A real failure that
-// lands after the caller left is not abandoned.
+// ctx itself was canceled and every error err carries is a cancellation. A
+// real failure that lands after the caller left is not abandoned, even when
+// it is joined with the cancellation.
 func Abandoned(ctx context.Context, err error) bool {
-	return errors.Is(ctx.Err(), context.Canceled) && IsCanceled(err)
+	return errors.Is(ctx.Err(), context.Canceled) && onlyCanceled(err)
+}
+
+// onlyCanceled reports whether err is a cancellation and carries nothing
+// else: each error joined into it must be one too.
+func onlyCanceled(err error) bool {
+	switch wrapped := err.(type) { //nolint:errorlint // walks the error tree itself
+	case interface{ Unwrap() []error }:
+		found := false
+		for _, inner := range wrapped.Unwrap() {
+			if inner == nil {
+				continue
+			}
+			if !onlyCanceled(inner) {
+				return false
+			}
+			found = true
+		}
+		return found
+	case interface{ Unwrap() error }:
+		if inner := wrapped.Unwrap(); inner != nil {
+			return onlyCanceled(inner)
+		}
+	}
+	return IsCanceled(err)
 }
 
 // LogLevel is level, or Debug when err only says that the caller of ctx went
