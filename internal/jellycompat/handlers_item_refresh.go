@@ -1,0 +1,218 @@
+package jellycompat
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"path/filepath"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
+)
+
+const itemRefreshTrigger = "jellyfin_item_refresh"
+
+// itemRefreshFileLister lists the live media files behind a catalog item.
+// Episode files carry their series content_id, so a series id lists every
+// episode file and an episode id is matched through episode_id.
+type itemRefreshFileLister interface {
+	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error)
+	GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error)
+}
+
+type itemRefreshSeasonLoader interface {
+	GetByID(ctx context.Context, contentID string) (*models.Season, error)
+}
+
+// HandleItemRefresh handles POST /Items/{id}/Refresh.
+//
+// Jellyfin integrations (subtitle managers, *arr tools) call this after
+// writing files next to an item so the server re-reads that item's folder.
+// Silo answers by queueing a scoped scan of the item's files: a library id
+// scans the library, and a movie, series, season, or episode scans the
+// directories holding its files, which picks up new sidecars such as
+// external subtitles. The Jellyfin refresh-mode query parameters are
+// accepted and ignored; every mode re-validates files, and provider metadata
+// refreshes stay with the native admin API.
+func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.folders == nil || h.queue == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Scanner not available")
+		return
+	}
+	ctx := r.Context()
+	rawID := chi.URLParam(r, "id")
+	// A series refresh resolves every episode file; list the libraries once
+	// for the request instead of once per file.
+	resolver := scantrigger.NewResolver(&requestFolderList{FolderRepository: h.folders})
+
+	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, rawID); err == nil {
+		id := int(libraryID)
+		target, resolveErr := resolver.Resolve(ctx, scantrigger.Request{LibraryID: &id, Trigger: itemRefreshTrigger})
+		if resolveErr != nil {
+			writeScanTriggerError(w, resolveErr)
+			return
+		}
+		h.enqueueItemRefresh(w, r, []scantrigger.Target{*target})
+		return
+	}
+
+	if h.files == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Item refresh not available")
+		return
+	}
+	files, found, err := h.itemRefreshFiles(ctx, rawID)
+	if errors.Is(err, errSeasonRefreshUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Season refresh not available")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "jellycompat item refresh: listing item files", "component", "jellycompat", "item_id", rawID, "error", err)
+		writeError(w, http.StatusInternalServerError, "InternalServerError", "Failed to refresh item")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+
+	targets := make([]scantrigger.Target, 0, len(files))
+	seen := make(map[autoscanTargetKey]struct{}, len(files))
+	// Once a file resolves to a scan of its whole directory, the directory's
+	// other files add nothing, so a series costs one resolve per season folder
+	// rather than per episode. An audiobook file target counts too: the
+	// scanner scans its whole book directory for any one of its files, so a
+	// book in many parts is one scan, not one per part. Other files that
+	// resolve to themselves (files at a library root, say) are each resolved.
+	scannedDirs := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		path := strings.TrimSpace(file.FilePath)
+		if path == "" {
+			continue
+		}
+		dir := filepath.Dir(filepath.Clean(path))
+		if _, covered := scannedDirs[dir]; covered {
+			continue
+		}
+		target, resolveErr := resolveAutoscanPath(ctx, resolver, path, itemRefreshTrigger, "item refresh", "item_id", rawID)
+		if resolveErr != nil {
+			writeScanTriggerError(w, resolveErr)
+			return
+		}
+		if target != nil && target.Mode == scantrigger.ModeSubtree && filepath.Clean(target.Path) == dir {
+			scannedDirs[dir] = struct{}{}
+		}
+		if target != nil && target.Mode == scantrigger.ModeFile && target.Folder != nil && librarykind.IsAudiobook(target.Folder.Type) {
+			scannedDirs[dir] = struct{}{}
+		}
+		targets = appendAutoscanTarget(targets, seen, target)
+	}
+	targets = compactAutoscanTargets(targets)
+	if len(targets) == 0 {
+		// Every file was dropped: it lies outside all libraries, or it vanished
+		// from the library root, whose parent fallback would be a library-wide
+		// scan. Answering 204 would claim a refresh that never runs.
+		writeError(w, http.StatusConflict, "Conflict", "Item files cannot be scanned individually; refresh the library instead")
+		return
+	}
+	h.enqueueItemRefresh(w, r, targets)
+}
+
+// requestFolderList loads the library list on first use and reuses it for the
+// rest of one request. It is not safe for concurrent use.
+type requestFolderList struct {
+	scantrigger.FolderRepository
+	folders []*models.MediaFolder
+	loaded  bool
+}
+
+func (l *requestFolderList) List(ctx context.Context) ([]*models.MediaFolder, error) {
+	if l.loaded {
+		return l.folders, nil
+	}
+	folders, err := l.FolderRepository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l.folders, l.loaded = folders, true
+	return folders, nil
+}
+
+func (h *AutoscanHandler) enqueueItemRefresh(w http.ResponseWriter, r *http.Request, targets []scantrigger.Target) {
+	if err := scantrigger.EnqueueAll(r.Context(), h.queue, targets); err != nil {
+		writeScanTriggerError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// itemRefreshFiles returns the live files behind a compat season or item id.
+// found is false when the id does not name a season or item with files; a
+// Jellyfin server answers 404 for an unknown item, and an item with no live
+// file has nothing Silo could re-validate.
+func (h *AutoscanHandler) itemRefreshFiles(ctx context.Context, rawID string) ([]*models.MediaFile, bool, error) {
+	if seasonID, err := h.codec.DecodeStringID(EncodedIDSeason, rawID); err == nil {
+		files, err := h.seasonRefreshFiles(ctx, seasonID)
+		return files, len(files) > 0, err
+	}
+	contentID, err := decodeItemID(h.codec, rawID)
+	if err != nil {
+		return nil, false, nil //nolint:nilerr // An undecodable id names no item; the caller answers 404.
+	}
+	files, err := h.files.GetByEpisodeID(ctx, contentID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(files) == 0 {
+		if files, err = h.files.GetByContentID(ctx, contentID); err != nil {
+			return nil, false, err
+		}
+	}
+	return files, len(files) > 0, nil
+}
+
+// errSeasonRefreshUnavailable means no season store is wired, so a season id
+// can't be looked up; the handler answers 503 rather than a false 404.
+var errSeasonRefreshUnavailable = errors.New("season refresh not available")
+
+func (h *AutoscanHandler) seasonRefreshFiles(ctx context.Context, seasonID string) ([]*models.MediaFile, error) {
+	if h.seasons == nil {
+		return nil, errSeasonRefreshUnavailable
+	}
+	var seriesID string
+	var seasonNumber int
+	season, err := h.seasons.GetByID(ctx, seasonID)
+	switch {
+	case err == nil:
+		seriesID, seasonNumber = season.SeriesID, season.SeasonNumber
+	case errors.Is(err, catalog.ErrSeasonNotFound):
+		// A series with live episodes but no stored season rows is browsed
+		// through seasons synthesized from its episodes ("<series>-S01"),
+		// which a client can then ask to refresh.
+		var ok bool
+		if seriesID, seasonNumber, ok = catalog.ParseSyntheticSeasonID(seasonID); !ok {
+			return nil, nil
+		}
+	default:
+		return nil, err
+	}
+	seriesFiles, err := h.files.GetByContentID(ctx, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]*models.MediaFile, 0, len(seriesFiles))
+	for _, file := range seriesFiles {
+		if file != nil && file.SeasonNumber == seasonNumber {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
