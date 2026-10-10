@@ -50,7 +50,10 @@
         {
           "kind": "intro",
           "start_seconds": 0,
-          "end_seconds": 90
+          "end_seconds": 90,
+          "thumbnail_url": "https://images.example.test/intro.webp",
+          "thumbnail_thumbhash": "AQID",
+          "thumbnail_capture_seconds": 0
         }
       ],
       "trickplay_available": false

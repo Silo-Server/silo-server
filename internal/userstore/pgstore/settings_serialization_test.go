@@ -20,3 +20,10 @@ func TestPostgresPreferenceSnapshot(t *testing.T) {
 		return newStore(pool, userID)
 	})
 }
+
+func TestPostgresCollectionSharing(t *testing.T) {
+	storetest.RunCollectionSharing(t, func(t *testing.T) userstore.UserStore {
+		pool, userID := newConstraintTestUser(t)
+		return newStore(pool, userID)
+	})
+}

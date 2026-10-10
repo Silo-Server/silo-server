@@ -39,15 +39,29 @@ type FileMarkers struct {
 
 // MarkerOccurrence is one continuous range. A kind can occur more than once.
 type MarkerOccurrence struct {
-	Kind         string  `json:"kind" enum:"intro,credits,recap,preview"`
-	StartSeconds float64 `json:"start_seconds" minimum:"0"`
-	EndSeconds   float64 `json:"end_seconds" minimum:"0"`
+	Kind                    string   `json:"kind" enum:"intro,credits,recap,preview"`
+	StartSeconds            float64  `json:"start_seconds" minimum:"0"`
+	EndSeconds              float64  `json:"end_seconds" minimum:"0"`
+	ThumbnailURL            string   `json:"thumbnail_url,omitempty"`
+	ThumbnailThumbhash      string   `json:"thumbnail_thumbhash,omitempty"`
+	ThumbnailCaptureSeconds *float64 `json:"thumbnail_capture_seconds,omitempty" minimum:"0" doc:"Captured source timestamp; marker previews sample the marker start"`
 }
 
-func markerOccurrences(segments []models.MarkerSegment) []MarkerOccurrence {
+func markerOccurrences(segments []models.MarkerSegment, previews ...[]catalogpkg.VersionMarkerPreview) []MarkerOccurrence {
 	out := make([]MarkerOccurrence, 0, len(segments))
 	for _, segment := range segments {
-		out = append(out, MarkerOccurrence{Kind: segment.Kind, StartSeconds: segment.StartSeconds, EndSeconds: segment.EndSeconds})
+		occurrence := MarkerOccurrence{Kind: segment.Kind, StartSeconds: segment.StartSeconds, EndSeconds: segment.EndSeconds}
+		if len(previews) > 0 {
+			for _, image := range previews[0] {
+				if image.MarkerSegment == segment && image.ThumbnailURL != "" {
+					occurrence.ThumbnailURL = image.ThumbnailURL
+					occurrence.ThumbnailThumbhash = image.ThumbnailThumbhash
+					occurrence.ThumbnailCaptureSeconds = new(image.ThumbnailCaptureSeconds)
+					break
+				}
+			}
+		}
+		out = append(out, occurrence)
 	}
 	return out
 }
@@ -91,10 +105,10 @@ type FileMarkersOutput struct{ Body FileMarkers }
 
 func registerMarkers(reg *Registry) {
 	read := func(path, id string) Operation {
-		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "playback", "Read the file's effective markers and provenance."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "playback", "Read the file's effective markers and provenance."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	}
 	write := func(method, path, id string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+path, id, "playback", "Update supplied manual marker segments atomically."), Class: ClassPermissionGated, Permission: policy.PermissionMarkerEdit, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+		return Operation{Operation: humaOp(method, Prefix+path, id, "playback", "Update supplied manual marker segments atomically."), Class: ClassPermissionGated, Permission: policy.PermissionMarkerEdit, HouseholdProfileGate: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	}
 	Register(reg, read("/markers/files/{file_id}", "getFileMarkers"), func(ctx context.Context, in *FileMarkerInput) (*FileMarkersOutput, error) {
 		id, p := in.FileID.positive("path.file_id")
@@ -184,7 +198,7 @@ func markerOutput(view handlers.FileMarkersView, err error) (*FileMarkersOutput,
 	if err != nil {
 		return nil, catalogProblem(err, "body")
 	}
-	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview), MarkerSegments: markerOccurrences(view.MarkerSegments)}}, nil
+	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview), MarkerSegments: markerOccurrences(view.MarkerSegments, view.MarkerPreviews)}}, nil
 }
 func markerSegment(view handlers.MarkerSegmentView) MarkerSegment {
 	result := MarkerSegment{StartSeconds: view.Start, EndSeconds: view.End, Source: view.Source, Provider: view.Provider, Confidence: view.Confidence, Algorithm: view.Algorithm}

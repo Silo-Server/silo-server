@@ -606,7 +606,7 @@ func (l *compatScrobbleLocks) holdersFor(key string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if entry := l.locks[key]; entry != nil {
-		return entry.holders
+		return 1 + len(entry.waiters)
 	}
 	return 0
 }
@@ -629,6 +629,61 @@ func waitForCompatScrobbleHolders(t *testing.T, h *PlaybackHandler, upstreamID s
 		}
 		runtime.Gosched()
 	}
+}
+
+// Callers queued on an upstream session's scrobble lock take it in the order
+// they queued, so a Stopped report cannot overtake a progress report that was
+// already waiting and stage a stop from the position before it.
+func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
+	h := &PlaybackHandler{}
+	locks := &h.compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	const waiters = 8
+	order := make(chan int, waiters)
+	released := make(chan struct{}, waiters)
+	for i := range waiters {
+		go func() {
+			release := locks.lock("upstream")
+			order <- i
+			release()
+			released <- struct{}{}
+		}()
+		// Queue the next caller only once this one is waiting.
+		waitForCompatScrobbleHolders(t, h, "upstream", i+2)
+	}
+	unlock()
+
+	for want := range waiters {
+		if got := <-order; got != want {
+			t.Fatalf("waiter %d took the lock in position %d, want arrival order", got, want)
+		}
+	}
+	for range waiters {
+		<-released
+	}
+	if n := locks.holdersFor("upstream"); n != 0 {
+		t.Fatalf("lock entry kept %d holders after every caller released it", n)
+	}
+}
+
+// Releasing the same scrobble lock twice panics instead of dropping the entry
+// a later caller now owns, which would let a third caller in beside it.
+func TestCompatScrobbleLocksPanicOnDoubleRelease(t *testing.T) {
+	var locks compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	unlock()
+	relock := locks.lock("upstream")
+	defer relock()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("second release of a scrobble lock did not panic")
+		}
+		if n := locks.holdersFor("upstream"); n != 1 {
+			t.Fatalf("lock entry has %d holders after a rejected double release, want the new owner", n)
+		}
+	}()
+	unlock()
 }
 
 func scrobbleAt(action string, seconds float64) compatScrobbleCall {
@@ -977,35 +1032,28 @@ func TestHandlePlaybackPositionlessStoppedUsesQueuedReportPosition(t *testing.T)
 	f := newResumeScrobbleFixture(0)
 	f.handler.tm = playback.NewTranscodeManager()
 	scrobbler := newGatedCompatWatchScrobbler()
-	scrobbler.blockStart = 1
 	f.handler.WatchScrobbler = &confirmingGatedCompatWatchScrobbler{scrobbler}
+	f.startStream(t)
 
-	started := make(chan error, 1)
-	go func() {
-		_, err := f.handler.ensureUpstreamPlayback(context.Background(), f.session, "play-1", f.source, "direct")
-		started <- err
-	}()
-	<-scrobbler.entered
-	reported := make(chan int, 1)
-	go func() { reported <- f.postReport(551, false) }()
-	waitForCompatScrobbleWaiter(t, f.handler, "upstream-started")
+	// Hold the lock as an in-flight report does and apply its position once
+	// Stopped queues behind it. Mutex waiters can acquire the lock in either order.
+	unlock := sync.OnceFunc(f.handler.compatScrobbleLocks.lock("upstream-started"))
+	defer unlock()
 	stopped := make(chan int, 1)
 	go func() {
 		stopped <- f.postStopped(`{"PlaySessionId":"play-1","MediaSourceId":"` + f.source.ID + `"}`)
 	}()
-	waitForCompatScrobbleHolders(t, f.handler, "upstream-started", 3)
-	close(scrobbler.release)
-	if err := <-started; err != nil {
-		t.Fatalf("ensureUpstreamPlayback: %v", err)
+	waitForCompatScrobbleWaiter(t, f.handler, "upstream-started")
+	if err := f.mgr.UpdateProgress("upstream-started", 551, false); err != nil {
+		t.Fatalf("update progress: %v", err)
 	}
-	for _, done := range []chan int{reported, stopped} {
-		if code := <-done; code != http.StatusNoContent {
-			t.Fatalf("report status = %d", code)
-		}
+	unlock()
+	if code := <-stopped; code != http.StatusNoContent {
+		t.Fatalf("stopped status = %d", code)
 	}
 
 	calls, _ := scrobbler.snapshot()
-	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("start", 551), scrobbleAt("stop", 551))
+	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("stop", 551))
 }
 
 // A position-less Stopped report that waited while another stop staged its

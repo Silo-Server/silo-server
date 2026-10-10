@@ -53,7 +53,7 @@ func newAdminValuesEnv(t *testing.T) adminValuesEnv {
 
 	router := chi.NewRouter()
 	router.Group(func(r chi.Router) {
-		r.Use(apimw.RequireActingAdmin(nil))
+		r.Use(apimw.RequireActingAdmin(nil, nil))
 		r.Get("/admin/users/{id}/settings/values", handler.HandleAdminListUserSettingValues)
 		r.Put("/admin/users/{id}/settings/values/{key}", handler.HandleAdminSetUserSettingValue)
 		r.Delete("/admin/users/{id}/settings/values/{key}", handler.HandleAdminDeleteUserSettingValue)

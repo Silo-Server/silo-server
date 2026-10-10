@@ -525,6 +525,7 @@ func (r *Repository) ReplaceManagedEntry(ctx context.Context, existing *Download
 			completed_at = NULL,
 			revision = revision + 1,
  status_event_at = NULL,
+			revoked_at = NULL, revoked_by = NULL, revoked_reason = '',
 			updated_at = now()
 		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
 		RETURNING ` + downloadColumns
@@ -677,7 +678,7 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 // statement and its commit.
 const deleteManagedSQL = `WITH deleted AS (
 	DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
-	RETURNING content_id, episode_id
+	RETURNING id, user_id, profile_id, device_id, content_id, episode_id, status, file_size, completed_at
 ), monitor AS (
 	SELECT s.id, d.episode_id FROM deleted d
 	JOIN download_subscriptions s
@@ -688,6 +689,22 @@ const deleteManagedSQL = `WITH deleted AS (
 	INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
 	SELECT id, episode_id FROM monitor
 	ON CONFLICT DO NOTHING
+), removed AS (
+	-- A device confirming a revoked row is the copy leaving the device. One
+	-- history row per device per hour groups a sync's confirmations. Only a
+	-- copy the device finished takes space there, as in the revoke event. It
+	-- comes last so the statement's text leads with the delete and the
+	-- exclusion.
+	INSERT INTO download_storage_events
+		(batch_id, reason, location_key, location_name, download_id, user_id, content_id, episode_id, title, bytes)
+	SELECT 'removed:' || d.user_id || ':' || d.profile_id || ':' || d.device_id || ':' || to_char(now(), 'YYYYMMDDHH24'),
+	       'device_removed', 'device', COALESCE(u.device_name, ''), d.id, d.user_id, d.content_id, COALESCE(d.episode_id, ''),
+	       ` + storageEventTitleSQL + `, CASE WHEN d.completed_at IS NULL THEN 0 ELSE GREATEST(d.file_size, 0) END
+	FROM deleted d
+	LEFT JOIN user_devices u ON u.user_id = d.user_id AND u.profile_id = d.profile_id AND u.device_id = d.device_id
+	LEFT JOIN episodes ep ON ep.content_id = d.episode_id
+	LEFT JOIN media_items mi ON mi.content_id = d.content_id
+	WHERE d.status = 'revoked'
 )
 SELECT count(*) FROM deleted`
 

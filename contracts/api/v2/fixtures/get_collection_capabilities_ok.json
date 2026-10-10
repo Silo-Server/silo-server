@@ -1,0 +1,47 @@
+{
+  "revision": "6a87601d9e894507e052de99b434f0e5ab0aac86724c3801b517fef58c4d5aa2",
+  "state": "available",
+  "allowed": true,
+  "groups": false,
+  "login_sharing": true,
+  "imports": false,
+  "import_sources": [],
+  "artwork": false,
+  "item_reorder": false,
+  "display_filter_fields": [
+    "type",
+    "watched"
+  ],
+  "display_filter_presets": {
+    "watched": [
+      "all",
+      "watched",
+      "unwatched"
+    ],
+    "media": [
+      "all",
+      "movie",
+      "series"
+    ]
+  },
+  "collection_default_sort": true,
+  "collection_sort_preferences": true,
+  "effective_collection_sort": true,
+  "sort_preference_kinds": [
+    "library",
+    "user",
+    "watchlist",
+    "favorites"
+  ],
+  "create_description": true,
+  "mdblist_search": true,
+  "schedule_time_zone": {
+    "utc_offset": "-05:00",
+    "abbreviation": "CDT",
+    "name": "America/Chicago"
+  },
+  "sync_schedule_editable": false,
+  "contains_item": true,
+  "preview_posters": true,
+  "poster_collages": false
+}

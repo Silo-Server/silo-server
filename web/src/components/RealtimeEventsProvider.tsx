@@ -51,6 +51,7 @@ import {
   isDownloadPreparationProgressEvent,
   type AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
+import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorage";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -586,12 +587,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
     refreshDownloadPreparations: () => void,
+    refreshDownloadStorage: () => void,
   ) {
     switch (message.channel) {
       case "download_preparations":
         // The channel sends no snapshot body; a (re)subscription means events
-        // may have been missed, so re-read the list.
+        // may have been missed, so re-read the list and the storage views.
         refreshDownloadPreparations();
+        refreshDownloadStorage();
         break;
       case "jobs":
         if (Array.isArray(message.data)) {
@@ -696,9 +699,15 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
     refreshDownloadPreparations: () => void,
+    refreshDownloadStorage: () => void,
   ) {
     switch (message.channel) {
       case "download_preparations":
+        if (message.event === "download_storage.changed") {
+          // Clean-up or a revoke changed what the storage views show.
+          refreshDownloadStorage();
+          break;
+        }
         if (
           message.event === "download_preparation.progress" &&
           isDownloadPreparationProgressEvent(message.data) &&
@@ -853,6 +862,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       if (!authority.profileId) return;
       adminRefresh.schedule({ queryKey: adminDownloadPreparationsKey(authority), exact: true });
     };
+    const refreshDownloadStorage = () => {
+      if (!authority.profileId) return;
+      adminRefresh.schedule({ queryKey: adminDownloadStorageRootKey(authority) });
+    };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
 
@@ -984,6 +997,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               refreshSessions,
               adminRefresh.schedule,
               refreshDownloadPreparations,
+              refreshDownloadStorage,
             );
             return;
           case "event":
@@ -993,6 +1007,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               refreshSessions,
               adminRefresh.schedule,
               refreshDownloadPreparations,
+              refreshDownloadStorage,
             );
             return;
           case "access_changed":

@@ -193,3 +193,17 @@ The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
 `include_artwork` with `400 invalid_include_artwork`. Those paths are frozen, and Silo
 1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
 `client_upgrade_required` problem code. Build against `/api/v2`.
+
+### Marker thumbnail lifecycle
+
+Marker preview state is stored separately from embedded chapters. Served keys
+share the protected chapter-image namespace, using
+`chapter-images/{file_id}/marker-{occurrence_sha256}-{image_sha256}/w{width}.webp`.
+The occurrence digest includes the file identity, path and exact kind/start/end;
+the image digest makes uploads immutable even after worker lock loss.
+
+The chapter-image URL resolver and collector also recognize marker references.
+A database trigger clears stale marker metadata on file/range changes and queues
+displaced images atomically, with at least 48 hours of grace and any later issued
+URL deadline preserved. File deletion retains the existing namespace cleanup.
+Width replacement keeps the previous image usable until the new image commits.

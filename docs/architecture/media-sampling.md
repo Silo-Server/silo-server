@@ -120,7 +120,9 @@ statistics. Rules:
   so a list would decode nothing. They are read as one `KeyframesOnly`
   window from 10 s before the first sample to the last, and each sample
   takes the last keyframe at or before its time: the same frames, at the
-  cost of reading the whole span.
+  cost of reading the whole span. `Sheets` also fall back to that window
+  when the HEVC decoder drops listed keyframes as duplicates (see the
+  `Sheets` rules below).
 - The VP9 decoder ignores `-skip_frame nokey`, so a VP9 sample decodes every
   frame from its keyframe to the outpoint. The first frame is still the one
   kept, but the cost grows with the keyframe interval.
@@ -337,6 +339,28 @@ must use the returned height and reject chunks whose geometry differs.
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,
   which sends a hardware attempt on to software.
+- A list run that fails as `empty` after the HEVC decoder logged "Duplicate
+  POC in a sequence" is read again, in the same attempt, as the
+  keyframes-only window that other containers use. One decoder serves every
+  list entry and nothing resets it between them, so an HEVC CRA keyframe
+  (open GOP) after a jump takes a picture order count derived from the
+  previous sample's. When that count matches a picture still in the
+  decoder's buffer, the decoder drops the keyframe ("Duplicate POC in a
+  sequence", then "Skipping invalid undecodable NALU: 21"), and such a file
+  can lose nearly every sample on every run. A window decodes keyframes in
+  order and keeps the counts consistent, at the cost of reading the whole
+  span. A list that is empty without that message, such as a truncated or
+  damaged file's, still fails without the extra read: damaged pictures log
+  only "Skipping invalid undecodable NALU", and a window would give their
+  samples the last good keyframe instead of failing.
+- Skipped pictures do not advance the decoder's count, so keyframes a whole
+  count cycle apart (256 pictures with the common 8-bit count) collide in the
+  window too. A window that logs "Duplicate POC in a sequence" after a list
+  fallback fails as `empty` rather than give later samples the last keyframe
+  it kept; such files fail as they did without the fallback. If the window
+  fails for any reason, the attempt reports the window's failure, whose
+  reason and log describe the latest read, and its error names the list
+  run's.
 - A sheet is JPEG-encoded in-process (`image/jpeg`, `Quality`) as soon as
   frames land two sheets further on, so at most three sheets are held.
   `Result.Sheets` holds them in order and `Result.SheetFrames` counts the

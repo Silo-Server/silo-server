@@ -329,6 +329,74 @@ func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 	}
 }
 
+// TestRunSheetsOpenGOPHEVCWithRealFFmpeg samples open-GOP HEVC clips whose
+// keyframes after the first are CRA pictures, at 25.6 fps with samples ten
+// seconds apart: 256 frames, a whole cycle of the 8-bit picture order count.
+// After each jump through a list the decoder computes the previous
+// keyframe's count again and drops the keyframe as a duplicate. With a
+// keyframe every 64 frames, the window that reads the samples again decodes
+// every keyframe, and every sample must show its scene. With a keyframe every
+// 256 frames the keyframes collide in the window too, since skipped pictures
+// do not advance the count, and the run must fail rather than repeat the
+// first scene.
+func TestRunSheetsOpenGOPHEVCWithRealFFmpeg(t *testing.T) {
+	ffmpeg, caps := realFFmpeg(t)
+	grays := []int{20, 60, 100, 140, 180, 220}
+	var sources []string
+	var inputs []string
+	for i, gray := range grays {
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=128x72:r=128/5:d=10", gray, gray, gray))
+		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
+	}
+	for _, keyint := range []int{64, 256} {
+		t.Run(fmt.Sprintf("keyint %d", keyint), func(t *testing.T) {
+			clip := filepath.Join(t.TempDir(), "open-gop.mkv")
+			args := append([]string{"-hide_banner", "-loglevel", "error"}, sources...)
+			args = append(args, "-filter_complex", strings.Join(inputs, "")+"concat=n=6:v=1:a=0,format=yuv420p[v]", "-map", "[v]",
+				"-c:v", "libx265", "-preset", "ultrafast",
+				"-x265-params", fmt.Sprintf("keyint=%d:min-keyint=%d:scenecut=0:open-gop=1:bframes=3:log2-max-poc-lsb=8:log-level=error", keyint, keyint), clip)
+			if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+				t.Skipf("cannot encode the clip with libx265: %v: %s", err, output)
+			}
+			req := Request{
+				Input:   clip,
+				Samples: &Samples{Seconds: []float64{5, 15, 25, 35, 45, 55}},
+				Sheets:  &SheetsOutput{TileWidth: 64, TileHeight: 36, Columns: 3, Rows: 2, Quality: 90},
+				Threads: 1,
+			}
+			if err := caps.Require(req); err != nil {
+				t.Skipf("ffmpeg cannot sample sheets: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}.Run(ctx, req)
+			if keyint == 256 {
+				if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonEmpty {
+					t.Fatalf("got frames %+v, error %v; want the run to fail as empty", result.SheetFrames, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if len(result.Sheets) != 1 || result.SheetFrames != (SheetFrames{Decoded: 6}) {
+				t.Fatalf("got %d sheets, frames %+v; want 1 sheet of 6 decoded samples", len(result.Sheets), result.SheetFrames)
+			}
+			img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ycc := img.(*image.YCbCr)
+			for cell, gray := range grays {
+				x, y := (cell%3)*64+32, (cell/3)*36+18
+				if got := int(ycc.Y[ycc.YOffset(x, y)]); got < gray-6 || got > gray+6 {
+					t.Fatalf("cell %d luma %d, want %d", cell, got, gray)
+				}
+			}
+		})
+	}
+}
+
 // TestRunSheetsRejectsPrematureEOFWithRealFFmpeg requests an eight-second
 // timeline from a two-second MPEG-TS source. A complete source's final
 // eight-second GOP must still provide every preview, including when the

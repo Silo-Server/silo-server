@@ -27,6 +27,8 @@ func (p *watchMarkerPopulation) Populate(ctx context.Context, file *models.Media
 	copy := *file
 	copy.MarkerSegments = []models.MarkerSegment{{Kind: "intro", StartSeconds: 10, EndSeconds: 20}, {Kind: "intro", StartSeconds: 40, EndSeconds: 50}}
 	copy.IntroStart, copy.IntroEnd = new(10.0), new(20.0)
+	copy.Duration = 60
+	copy.MarkerThumbnails = []models.MarkerThumbnail{{Identity: models.MarkerThumbnailIdentity(&copy, copy.MarkerSegments[0]), MediaChapter: models.MediaChapter{ThumbnailPath: "marker-key"}}}
 	return &copy, false, p.err
 }
 
@@ -83,5 +85,28 @@ func TestMarkerReadPopulatesAfterAuthorizationAndPreservesExistingOnFailure(t *t
 	view, err := h.GetMarkers(t.Context(), catalog.AccessFilter{}, MarkerTarget{FileID: 5})
 	if err != nil || view.FileID != 5 || len(population.calls) != 1 {
 		t.Fatalf("provider failure disrupted authorized read: view=%+v error=%v calls=%v", view, err, population.calls)
+	}
+}
+
+// The selected file may gain an ephemeral provider range after catalog detail
+// was built. Rebuild image projections from that effective file, not its stored
+// canonical ranges, including nested playback versions.
+type watchMarkerURLs struct{}
+
+func (watchMarkerURLs) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := map[string]catalog.ResolvedImageURL{}
+	for _, key := range keys {
+		out[key] = catalog.ResolvedImageURL{URL: "https://example.test/" + key}
+	}
+	return out
+}
+func TestWatchOnDemandMarkerPreviews(t *testing.T) {
+	h := &ItemsHandler{MarkerPopulation: &watchMarkerPopulation{}, MarkerFileResolver: fakeMarkerFiles{byID: map[int]*models.MediaFile{2: {ID: 2}}}, MarkerImageURLs: watchMarkerURLs{}}
+	detail := &catalog.WatchDetail{Versions: []catalog.FileVersion{{FileID: 2}}, PlaybackVariants: []catalog.PlaybackVariant{{DefaultFileID: 2, Parts: []catalog.PlaybackVariantPart{{Versions: []catalog.FileVersion{{FileID: 2}}}}}}}
+	h.populateWatchMarkers(t.Context(), detail, 2)
+	for _, version := range []catalog.FileVersion{detail.Versions[0], detail.PlaybackVariants[0].Parts[0].Versions[0]} {
+		if len(version.MarkerPreviews) != 1 || version.MarkerPreviews[0].StartSeconds != 10 || version.MarkerPreviews[0].ThumbnailURL == "" {
+			t.Fatalf("previews %+v", version.MarkerPreviews)
+		}
 	}
 }

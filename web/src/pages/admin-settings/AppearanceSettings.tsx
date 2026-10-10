@@ -48,7 +48,7 @@ import { parseVarsJson } from "@/lib/themeTokens";
 import type { ThemeToken, ThemeVarOverrides } from "@/lib/themeTokens";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { SETTINGS_CONTROL_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";

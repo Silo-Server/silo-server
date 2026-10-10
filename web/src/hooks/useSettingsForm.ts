@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
@@ -15,7 +16,7 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading, isError: loadError } = useAdminServerSettings();
+  const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
   const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
   const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
@@ -144,6 +145,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const submittedVersions = new Map(
         submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
       );
+      // Callers must distinguish failed writes from acknowledged saves before
+      // advancing a wizard or performing a dependent mutation.
+      if (!settings) {
+        const error = new Error("Reload settings before saving.");
+        toast.error(error.message);
+        throw error;
+      }
       const result = await updateSettings.mutateAsync(values);
       // An acknowledged save changes the validator even when newer local edits
       // remain dirty. Reconcile only with a refresh matching that write's revision;
@@ -175,7 +183,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         setRestartRequired(true);
       }
     },
-    [dirty, localValues, updateSettings],
+    [dirty, localValues, settings, updateSettings],
   );
 
   const discard = useCallback(() => {
@@ -203,6 +211,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     isPending: settings == null && !loadError,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
+    retryLoad: refetch,
     /** True once the settings snapshot is available to read and save against. */
     loaded: settings != null,
     getValue,

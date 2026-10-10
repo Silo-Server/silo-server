@@ -328,6 +328,7 @@ func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
 // serving a different file, as PlaybackInfo does.
 func TestMediaSourceRouteMissingVersionIsNotFound(t *testing.T) {
 	h, _, _ := newStaticDirectPlayHandler(t)
+	h.downloads = newTestDownloadService(true, true, h.fileResolver.(testCompatFileResolver).file)
 	h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 99: "movie-1"})
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	removed := h.codec.EncodeIntID(EncodedIDMediaSource, 99)

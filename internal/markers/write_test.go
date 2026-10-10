@@ -357,3 +357,23 @@ func TestSameSeasonScoredVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestManualDeletionRejectsAutomaticProjection(t *testing.T) {
+	file := &models.MediaFile{Duration: 1000, IntroMarkersSource: new(models.MarkerSourceManual)}
+	for _, source := range []string{models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceScanner, models.MarkerSourceS3} {
+		result := Result{ProviderID: "provider", SourceClass: source, Markers: []Marker{
+			{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 30 * time.Second},
+			{Kind: MarkerKindRecap, Start: 40 * time.Second, End: 60 * time.Second},
+		}}
+		next := ApplyResult(file, result)
+		if next.IntroStart != nil || next.IntroEnd != nil || next.RecapStart == nil || *next.RecapStart != 40 {
+			t.Fatalf("%s restored deleted intro or suppressed unrelated recap: %+v", source, next.MarkerSegments)
+		}
+		if file.RecapStart != nil {
+			t.Fatal("projection mutated stored snapshot")
+		}
+	}
+	if !CanWriteMarkerUpdate(SegmentPayload{Source: models.MarkerSourceManual}, SegmentPayload{Source: models.MarkerSourceManual, Start: new(12.0), End: new(34.0)}) {
+		t.Fatal("explicit manual replacement must be allowed")
+	}
+}

@@ -404,7 +404,7 @@ func (reg *Registry) pollDeviceLogin(ctx context.Context, in *PollDeviceLoginInp
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
-	result, err := reg.deps.Devices.PollDeviceLogin(ctx, in.Body.DeviceCode)
+	result, err := reg.deps.Devices.PollDeviceLogin(withClientDevice(ctx), in.Body.DeviceCode)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}

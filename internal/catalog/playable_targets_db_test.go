@@ -531,6 +531,11 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 		t.Fatalf("seed deep progress: %v", err)
 	}
 
+	// Refresh bulk-load statistics so stale estimates do not cause quadratic candidate scans.
+	if _, err := pool.Exec(ctx, `ANALYZE episodes, media_files`); err != nil {
+		t.Fatalf("analyze long-series fixtures: %v", err)
+	}
+
 	progressStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("create progress store: %v", err)

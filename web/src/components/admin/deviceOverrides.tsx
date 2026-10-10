@@ -20,9 +20,15 @@ import {
   getSettingDefinition,
   isStructuredSetting,
 } from "@/lib/settingsDisplay";
-import { SETTING_KEYS } from "@/lib/settingsContract";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { manifestPlatformFor, settingAppliesToPlatform } from "@/lib/deviceSettingGroups";
 import { cn } from "@/lib/utils";
-import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
+import type { AdminDeviceSetting, AdminUserSettingEntry } from "@/hooks/queries/admin/users";
+import {
+  deviceInheritedValue,
+  variesScopePhrase,
+  type InheritedValue,
+} from "@/lib/inheritedSettingValue";
 import { formatRelativeTime } from "@/lib/date";
 
 export const UNKNOWN_PROFILE_ID = "unknown-profile";
@@ -288,6 +294,11 @@ export interface DeviceOverrideRowProps {
    * a destructive accent and surfaces the reason inline.
    */
   anomaly?: SettingAnomaly | null;
+  /**
+   * For a row the device does not override: where its value comes from. The
+   * row's `setting.value` is already that value.
+   */
+  inherited?: InheritedValue | null;
   onChange: (setting: AdminDeviceSetting, value: string) => void;
   /**
    * Open the editor for a JSON-shaped setting. The parent decides which
@@ -304,6 +315,7 @@ export function DeviceOverrideRow({
   disabled,
   isOverride,
   anomaly = null,
+  inherited = null,
   onChange,
   onEditJson,
   onReset,
@@ -344,8 +356,13 @@ export function DeviceOverrideRow({
               aria-label="overridden"
             />
           ) : (
-            <span className="text-muted-foreground/60 border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase">
-              default
+            <span
+              className="text-muted-foreground/60 border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
+              title={`Not overridden on this device (${
+                inherited ? inheritedSourceText(inherited) : "app default"
+              })`}
+            >
+              {inherited?.profileName != null ? "profile" : "default"}
             </span>
           )}
           {anomaly && (
@@ -370,12 +387,20 @@ export function DeviceOverrideRow({
           <span className="text-foreground/80">
             {formatSettingValue(setting.key, setting.value)}
           </span>
-          {!isJsonOnly && definition && (
-            <span className="text-muted-foreground/60">
-              {" "}
-              · default {formatSettingValue(setting.key, defaultValueToString(definition))}
-            </span>
-          )}
+          {isOverride
+            ? !isJsonOnly &&
+              definition && (
+                <span className="text-muted-foreground/60">
+                  {" "}
+                  · default {formatSettingValue(setting.key, defaultValueToString(definition))}
+                </span>
+              )
+            : inherited && (
+                <span className="text-muted-foreground/60">
+                  {" "}
+                  · {inheritedSourceText(inherited)}
+                </span>
+              )}
         </div>
         {anomaly && (
           <div className="text-destructive/85 flex items-start gap-1.5 pt-1.5 text-[11.5px] leading-relaxed">
@@ -417,6 +442,15 @@ export function DeviceOverrideRow({
   );
 }
 
+/** "from Alex's profile", "app default", plus where something else may apply. */
+function inheritedSourceText(inherited: InheritedValue): string {
+  const source =
+    inherited.profileName !== null ? `from ${inherited.profileName}'s profile` : "app default";
+  return inherited.orVaries
+    ? `${source}, or ${variesScopePhrase(inherited.orVaries)} setting where one applies`
+    : source;
+}
+
 function profileAccent(profileId: string): string {
   let hash = 0;
   for (let i = 0; i < profileId.length; i++) {
@@ -439,13 +473,20 @@ export interface DeviceProfileTabsProps {
   /**
    * When true, every device-scoped setting from the manifest is rendered in
    * the active profile, regardless of whether an override exists. Rows
-   * without an override are visually muted and use the manifest default
-   * value; changing them creates a new override via the same mutation.
+   * without an override are visually muted and show the value they inherit
+   * (see `storedSettings`); changing them creates a new override via the same
+   * mutation.
    *
    * The admin needs the `device` context to synthesize those rows so the
    * mutation handler has the right (userId, deviceId) keys to call.
    */
   showAllSettings?: boolean;
+  /**
+   * Every value the device's owner stores, at any scope. Rows the device does
+   * not override show what they resolve to from these — the profile's own
+   * value, else the app default — rather than the bare manifest default.
+   */
+  storedSettings?: readonly AdminUserSettingEntry[];
   device?: {
     userId: number;
     deviceId: string;
@@ -469,12 +510,33 @@ export interface DeviceProfileTabsProps {
 interface RenderedRow {
   setting: AdminDeviceSetting;
   isOverride: boolean;
+  inherited?: InheritedValue;
+}
+
+/**
+ * The device settings offered for a device on [devicePlatform], plus any of
+ * [storedKeys] the platform would not otherwise get.
+ *
+ * Settings the platform never reads are left out, as on Your Devices, so an
+ * admin is not invited to set something that changes nothing there. A value
+ * already stored for one stays listed so it can still be seen and reset.
+ */
+export function deviceSettingKeysForPlatform(
+  devicePlatform: string | undefined,
+  storedKeys: Iterable<string> = [],
+): SettingKey[] {
+  const platform = manifestPlatformFor(devicePlatform);
+  const stored = new Set(storedKeys);
+  return ALL_DEVICE_SETTING_KEYS.filter(
+    (key) => stored.has(key) || settingAppliesToPlatform(key, platform),
+  );
 }
 
 function buildRenderedRows(
   profile: DeviceProfileTabEntry,
   showAllSettings: boolean,
   device?: DeviceProfileTabsProps["device"],
+  storedSettings: readonly AdminUserSettingEntry[] = [],
 ): RenderedRow[] {
   const overridden: RenderedRow[] = profile.settings.map((setting) => ({
     setting,
@@ -484,25 +546,36 @@ function buildRenderedRows(
   if (!showAllSettings || !device) return overridden;
 
   const seen = new Set(overridden.map((r) => r.setting.key));
-  const synthetics: RenderedRow[] = ALL_DEVICE_SETTING_KEYS.filter((key) => !seen.has(key)).map(
-    (key) => {
-      const definition = getSettingDefinition(key);
-      return {
-        isOverride: false,
-        setting: {
-          user_id: device.userId,
-          profile_id: profile.profileId,
-          profile_name: profile.profileName,
-          device_id: device.deviceId,
-          device_name: device.deviceName,
-          device_platform: device.devicePlatform,
-          key: key as string,
-          value: definition ? defaultValueToString(definition) : "",
-          updated_at: "",
-        },
-      };
-    },
+  const offered = new Set<string>(deviceSettingKeysForPlatform(device.devicePlatform));
+  const profileAllEntries = storedSettings.filter(
+    (entry) => entry.profile_id === profile.profileId,
   );
+  const profileEntries = profileAllEntries.filter((entry) => entry.scope === "profile");
+  const synthetics: RenderedRow[] = ALL_DEVICE_SETTING_KEYS.filter(
+    (key) => !seen.has(key) && offered.has(key),
+  ).map((key) => {
+    const inherited = deviceInheritedValue(
+      key,
+      profile.profileName,
+      profileEntries,
+      profileAllEntries,
+    );
+    return {
+      isOverride: false,
+      inherited,
+      setting: {
+        user_id: device.userId,
+        profile_id: profile.profileId,
+        profile_name: profile.profileName,
+        device_id: device.deviceId,
+        device_name: device.deviceName,
+        device_platform: device.devicePlatform,
+        key: key as string,
+        value: inherited.raw,
+        updated_at: "",
+      },
+    };
+  });
 
   // Render in canonical manifest order so the layout is stable as overrides
   // are added or removed (rather than "overrides bubble to top, defaults
@@ -521,6 +594,7 @@ export function DeviceProfileTabs({
   profiles,
   initialProfileId,
   showAllSettings = false,
+  storedSettings,
   device,
   deviceStaleDays = null,
   onResetProfile,
@@ -537,8 +611,8 @@ export function DeviceProfileTabs({
     [activeId, profiles],
   );
   const rows = useMemo(
-    () => (active ? buildRenderedRows(active, showAllSettings, device) : []),
-    [active, device, showAllSettings],
+    () => (active ? buildRenderedRows(active, showAllSettings, device, storedSettings) : []),
+    [active, device, showAllSettings, storedSettings],
   );
   // Conflicts depend on the active profile's settings as a whole. Memoize
   // by the active profile's reference + a content hash via the rendered
@@ -652,7 +726,7 @@ export function DeviceProfileTabs({
             {showAllSettings && rows.length > overrideCount && (
               <span className="text-muted-foreground/60">
                 {" "}
-                · {rows.length - overrideCount} default
+                · {rows.length - overrideCount} inherited
               </span>
             )}
           </span>
@@ -684,11 +758,12 @@ export function DeviceProfileTabs({
 
       <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="divide-border/40 divide-y px-4">
-          {rows.map(({ setting, isOverride }) => (
+          {rows.map(({ setting, isOverride, inherited }) => (
             <DeviceOverrideRow
               key={`${setting.profile_id}:${setting.device_id}:${setting.key}`}
               setting={setting}
               isOverride={isOverride}
+              inherited={inherited}
               anomaly={anomaliesByKey.get(setting.key) ?? null}
               disabled={updatePending}
               onChange={onChangeSetting}

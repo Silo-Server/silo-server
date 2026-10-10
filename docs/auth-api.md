@@ -9,6 +9,64 @@
 Commands assume the repository root is the cwd. Unprefixed paths are relative to the
 server's `/api/v2` base URL.
 
+## Login sessions
+
+Login sessions belong to accounts and are separate from household profiles, registered
+devices and playback sessions. All paths below use `/api/v2`; the frozen v1 responses
+remain unchanged.
+
+| Operation | Authorization and behavior |
+| --- | --- |
+| `GET /auth/sessions/capabilities` (`getLoginSessionCapabilities`) | Authenticated account. Reports `available`, `last_seen`, and `admin_management`, with the standard capability state, permission answer and revision. |
+| `GET /auth/sessions` (`listSessions`) | Lists the caller's live, unrevoked login sessions, newest first, with cursor pagination. Account-level access does not require profile selection. |
+| `DELETE /auth/sessions/{id}` (`deleteSession`) | Revokes a session owned by the caller. Unknown or another account's session returns 404. |
+| `GET /admin/users/{user_id}/login-sessions` (`listAdminUserLoginSessions`) | Acting admin. Lists a selected account's live login sessions. The cursor is bound to the operation, administrator and target account. |
+| `DELETE /admin/users/{user_id}/login-sessions/{session_id}` (`deleteAdminUserLoginSession`) | Acting admin. Revokes one session of the selected account; 204 on success, 404 for an unknown or mismatched session. |
+| `DELETE /admin/users/{user_id}/login-sessions` (`deleteAdminUserLoginSessions`) | Acting admin. Revokes all live sessions of the selected account and returns `{ "revoked": N }`. Repeating an account-wide request returns zero when no live sessions remain. |
+
+Session rows expose `id`, `device_name` (the client-reported identifier or User-Agent),
+`ip_address` at sign-in, `created_at`, `expires_at`, `last_seen_at`, and `current`.
+`last_seen_at` is an actual authenticated native API request timestamp, recorded at
+most once a minute per session across API nodes. It is null until activity has been
+recorded, including for sessions created before the migration. Creation and expiry
+are never substituted for activity. Tracking does not extend or reactivate sessions.
+
+Both list responses include `current_session`: the caller's live login session even
+when it falls outside the requested page, or null for API-key callers and an admin
+inspecting another account. Account-wide admin revocation also ends existing sessions
+opened through "View as user" by that account and withdraws its approved, uncollected
+device sign-ins, including temporary remote-playback approvals that would mint a native
+login session. The same transaction revokes the account's Audiobookshelf-compatible
+sessions and deletes its stored Jellyfin-compatible sessions, as a password reset does;
+when any of it fails, nothing is revoked and the request fails. After commit, every node
+drops the Jellyfin-compatible sessions it holds in memory. A node that has not dropped them
+yet cannot write one back: extending a session or storing its refreshed tokens only updates
+an existing row, and ends the session when the row is gone. The response counts revoked
+live login sessions, not withdrawn approvals or
+compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged.
+Other accounts' own sessions remain usable. API keys are not login sessions and are not
+revoked here.
+Creating a "View as user" session locks the originating and viewed accounts in the
+same order as revocation and rechecks the originating session before insertion. A
+request authenticated before revocation cannot create a fresh session after it commits.
+
+Admin mutations recheck the actor's current enabled admin standing and the target's
+owner protection in the same transaction as revocation. Only the owner can revoke
+another admin's sessions; nobody can revoke the owner's sessions except the owner.
+A "View as user" session belongs to the viewed account, so any admin who may manage
+that account can revoke it, even when the owner opened it. Revoking it leaves the
+viewer's own session intact. Any admin can manage its own sessions. Revocation leaves
+passwords, other accounts, profiles and registered device settings unchanged. The next
+authenticated native API request rejects the revoked session, including access-token
+and refresh requests.
+Already issued stream grants are not withdrawn by these operations.
+
+The Web Settings screen and admin user Sign-in tab use these operations. Native
+Apple and Android management screens are outside the 1.0 acceptance scope; their
+existing native authentication requests use the same session validity checks.
+Jellyfin-compatible sessions live in their own store and are not listed here; only
+account-wide revocation ends them.
+
 ## Account passwords
 
 A password belongs to a login account, not to an individual household profile. Every profile on an
@@ -189,8 +247,22 @@ sessions on its other devices. Authentication is required; no active profile is 
 Expired and revoked sessions are excluded before pagination.
 
 The response uses the v2 collection envelope: `items` and `page`. Each item contains `id`,
-`device_name`, `ip_address`, `created_at`, and `expires_at`. Timestamps use UTC with millisecond
+`device_name`, `ip_address`, `created_at`, and `expires_at`, plus `device_id` and
+`device_platform` when the client reported them. Timestamps use UTC with millisecond
 precision. There is no `revoked_at` member because every returned session is active.
+
+A session records the device that opened it. Every sign-in that opens a login session (password
+login, initial setup, signup, invitation acceptance, password-reset completion, OAuth completion,
+network sign-in, and device-code collection, on v1 and v2) reads the request's
+`X-Silo-Device-Id`, `X-Silo-Device-Name`, and `X-Silo-Device-Platform` headers, clamped like the
+settings device headers: name to 120 characters, platform to 40. An id longer than 128 characters
+or not made of letters, digits, `.`, `_`, `:` and `-` is dropped, and the sign-in still succeeds.
+On v2, a repeated header or an id with other characters is refused with `422 validation_failed`
+before the sign-in runs, as on every v2 operation; an id that is only too long is dropped. `device_name` is the
+reported name, else the `User-Agent`; a device-code sign-in falls back to the name the device
+started the request with, then its `User-Agent`, then `This device`. A name or platform that is
+not valid UTF-8 is dropped. These values are client-reported: they serve display and audit, and
+nothing authorizes on them. The v1 session list does not return the id or platform.
 
 - `limit` defaults to 50 and accepts 1 through 200.
 - Results are ordered by `created_at` descending, then `id` descending.
@@ -225,6 +297,75 @@ the client caches the account's role, it reads `GET /account/me` again so role-g
 controls appear or disappear. Long-lived Apple notification display tokens are not
 refused; their requests run with the account's current role.
 
+### When the server cannot check a session
+
+Requests that pass the shared auth gate, media requests included, look up their login
+session (or API key) in the database. When that lookup fails, because the database is
+unreachable or the query errors, the server has not judged the credential and does not
+answer 401. It answers `503` with `Retry-After`: v2 `dependency_unavailable`, v1 error code
+`service_unavailable`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
+cannot read the session or account. Whether the session is still valid is unknown, so a
+client keeps its tokens, waits `Retry-After` seconds and retries; it signs out only on a
+401. Viewer access answers the same `503`, with `Retry-After: 1`, when the policy that
+resolves the viewer's access runs out of its evaluation time (`policy.eval_timeout_ms`):
+the request is refused, but no decision was made, so the client retries. Any other failure
+to resolve viewer access is still `500`. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
+too. The Jellyfin surface keeps its session and answers `503` when its session check or
+its stream and HLS authorization cannot read the session from the database, when a due
+token refresh cannot reach the database, and when that refresh meets an unreachable
+sign-in provider under the `fail_closed` outage policy.
+
+Routes that check credentials outside the shared auth gate, refresh, the proxy media grant
+and the Jellyfin session and stream checks may still treat a failed lookup as no session and
+answer 401 or refuse the request. Examples are plugin content routes, theme-song grants,
+Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), the
+Jellyfin websocket, and the v2 socket-ticket check used by the events, playback-control,
+watch-together and admin-logs sockets (a watch-together re-check that fails closes the
+room). None of them is a token refresh, so a client that signs out only on a refresh 401
+stays signed in and retries.
+
+## Profile PINs
+
+`POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) and v1
+`POST /api/v1/profiles/{id}/verify-pin` check a household profile's PIN. A match
+issues the `X-Profile-Token` that unlocks the profile for the caller's login session; a
+wrong PIN answers 200 with `valid: false`.
+
+Each verification attempt affects the lockout counter. Clients must not
+automatically replay a check after a timeout; v2 declares `verifyProfilePIN` as
+`non_retryable` for this reason.
+
+Wrong PINs are limited per profile, not per client address, because anyone guessing
+already shares the account's sign-in. The limit is
+`ratelimit.ProfilePINPolicy`: five attempts per profile. The first attempt starts a
+five-minute window. The fifth attempt, if it is wrong, locks the profile for five
+minutes from that attempt. While a profile is locked every check is refused, the
+right PIN included, so the lockout cannot be bypassed by guessing on. A correct PIN
+while not locked clears the count, and so does setting or removing the profile's PIN.
+A count that never reaches five expires five minutes after its first attempt.
+Attempts are counted before the PIN is compared, so concurrent guesses cannot overrun
+the limit.
+
+A locked check answers 429 with `Retry-After` giving the seconds left:
+
+- v2: `rate_limited` problem.
+- v1: `{"error":"rate_limited","message":"Too many incorrect PINs. Try again later."}`.
+  This is a v1 change made during the bridge window as a critical security fix.
+
+Jellyfin sign-ins that use the `password#PIN` convention count against the same
+per-profile budget. A locked profile fails there the way a wrong PIN does (401
+`InvalidUsernameOrPassword`), and only the message names the lockout. PIN guesses
+are counted only after the account password matched.
+
+The count lives in Redis whenever the server has Redis configured, so every node
+shares it, independent of `ratelimit.backend` and of whether request rate limiting
+is enabled. Only a server without Redis keeps it in process memory, which is correct
+for a single node. Like the request limiter, a Redis error fails open and is logged;
+a request whose own context was canceled is refused instead, so dropping the
+connection does not buy an uncounted guess. Clients show the lockout from
+`Retry-After`, for example "Too many incorrect PINs. Try again in 5 minutes.",
+instead of "Incorrect PIN".
+
 ## Device sign-in
 
 A TV opens a request, shows its code and QR link, and polls; a person approves
@@ -257,6 +398,10 @@ public) reports which of these operations the server serves, including
 `network_sign_in` (`signInWithNetworkIdentity` and
 `linkAccountIdentityWithNetwork`; see
 [Network identity](architecture/external-sign-in.md#network-identity)).
+`network_link_keeps_password` says linking a network identity keeps the
+account's local password sign-in; clients use it to describe what connecting
+does, because servers without it turn the password off. It describes the
+linking rule whether or not `network_sign_in` is served.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
@@ -265,11 +410,11 @@ public) reports which of these operations the server serves, including
 | `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. |
 | `GET /account/identities` (`listAccountIdentities`) | signed-in account | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). |
 | `POST /account/identities/link-credentials` (`linkAccountIdentityWithCredentials`) | the account's own login session | Links the directory (LDAP) identity. Body, all required and non-null: `installation_id` (the credentials provider from `listAuthProviders`), `password` (the account's local password, 1 to 1024 characters), `username` (directory username, 1 to 256) and `directory_password` (1 to 1024). Answers 201, `Location: /api/v2/account/identities`, and the linked identity as `listAccountIdentities` shows it. Refusals: 422 `validation_failed` at `body.password` (wrong local password) or `body.directory_password` (the directory refused the credentials); 409 `local_password_required`; 403 `not_permitted`, `account_disabled` (the directory account is disabled, locked or expired) or `password_expired`; 403 `permission_denied` (the Silo account is disabled, or an API key or impersonation session); 409 `identity_linked_elsewhere` or `already_linked`; 404 `not_found` (not an enabled credentials provider); 503 `provider_unavailable`; 429. Spends the `login` rate-limit budget. Linking turns local password sign-in off unless the account is break-glass. |
-| `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. |
+| `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. Unlike other linking, the account keeps its local password sign-in, which answers 403 `not_permitted` while the provider refuses the person (break-glass accounts excepted). |
 | `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session | Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403. |
 | `GET /admin/users/{id}/identities` (`listAdminUserIdentities`) | acting admin | Adds `external_subject`, `issuer` and `last_check_status`: what the provider said at `last_checked_at` about the identity, from a sign-in or a re-check (`active`, `not_found`, `disabled`, `not_permitted`, `unsupported`, `unavailable`, or `none` before the first). |
-| `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. |
-| `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass. |
+| `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. A database that cannot be read answers 503 `dependency_unavailable` with `Retry-After` (see [When the server cannot check a session](#when-the-server-cannot-check-a-session)). A provider answer the server received but could not apply, where a retry would not help, is 401 `invalid_token`: a refusal that could not be applied, a role sync that rolled back, or a replacement refresh token that could not be stored (the provider may accept only that token now). A refusal whose revocation rolled back stays on record and ends the session at the next check, and an unapplied active answer stays due. Any other database failure after an active answer is the retryable 503 above. |
+| `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
 | `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`; the v1 route answers `owner_protected`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
 | `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider (empty without a public URL). A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |

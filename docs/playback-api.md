@@ -63,7 +63,10 @@ and S3 with a separate public or token-authenticated delivery endpoint return
 signed `/api/v2/artwork/...` URLs; the server reads the storage API to avoid
 external delivery lag. Standard S3 delivery returns direct presigned URLs.
 See [trickplay](architecture/trickplay.md#serving) for access rules, sheet
-geometry, and revision retention.
+geometry, and revision retention. Like `getWatchState`, the manifest read
+accepts a request without `X-Profile-Id` only while no profile on the account
+is PIN-protected or access-restricted; otherwise it answers `422
+validation_failed` at `header.x-profile-id`.
 
 ## Start
 
@@ -99,6 +102,15 @@ with `outcome: "adaptation_unavailable"`, `terminal.reason: "session_expired"`
 and `terminal.retryable: true`; mint a new attempt. Local direct and HLS media
 URLs in the plan are projected into the `/api/v2` namespace; the signed `st`
 query they carry is unchanged.
+
+A start that returns a playable decision registers the device the client
+declares in `X-Silo-Device-Id` (with the optional `X-Silo-Device-Name` and
+`X-Silo-Device-Platform`) for the acting profile and refreshes its
+`last_seen_at`, as described in the
+[device registry](settings-api.md#device-registry). The v1 start route reads the
+same headers. A refused start, or one that returns a terminal decision,
+registers nothing. These headers do not change the playback device that
+`X-Device-ID` names.
 
 Two terminal reasons describe a source without stream metadata.
 `source_metadata_incomplete` (`retryable: true`) means the file has not been
@@ -144,6 +156,23 @@ client's lower bandwidth preference still wins. If no compliant encode route
 exists, the server tries the item's other versions as it does for 4K and HDR
 refusals. When none fits, the decision is terminal with
 `bitrate_policy_unavailable`; it never falls back to the oversized original.
+The ceiling measures encoded media rate, not HTTP fetch speed. Units are decimal
+kbps. Original-file admission uses the catalog's integer kbps probe value, so
+rounding can admit less than 1 kbps above an integer boundary. For a transcode,
+let V be the selected video maxrate and A the selected audio target, in bits/s.
+The encoder recipe budgets V + A below the location cap, including its mux
+reserve, and sets video VBV capacity to 2V bits. Validation measures encoded
+video/audio packets over their media timestamps, allowing the VBV burst:
+`encoded bits <= (V + A)*T + 2V` over a contiguous media interval T. Audio packet
+boundary rounding is allowed by one encoded audio frame at each end.
+Container delivery is measured separately: for MPEG-TS allow up to 10% above
+that encoded-packet envelope for packetization, headers and padding on the
+supported synthetic validation fixture. This allowance is not a new network
+quota or a promise for arbitrary container recipes. Segment download speed
+may exceed the nominal media rate; a single two-second segment is not a steady
+rate measurement. Recheck the complete encode and representative intervals,
+and record codec, duration, video/audio recipe and container overhead.
+
 The selected limit is frozen on a new playback attempt and reused through
 replans, so later policy edits do not interrupt it.
 `server_remote_stream_bitrate_policy_v1` and
@@ -269,6 +298,64 @@ The realtime control socket (`/api/v2/playback/sessions/{session_id}/control/ws`
 is documented in the [realtime API](realtime-api.md); ownership is the session's
 account and profile.
 
+## Shuffle
+
+A shuffle plays random movies and episodes from one scope until the profile
+stops. The server picks every item, so any client or API process can continue
+a shuffle another one started.
+
+| Operation | Method and path | Success |
+| --- | --- | --- |
+| `getShuffleCapability` | GET `/api/v2/shuffles/capabilities` | 200 capability state and `scope_kinds` |
+| `createShuffle` | POST `/api/v2/shuffles` | 201 shuffle, `Location` |
+| `getShuffle` | GET `/api/v2/shuffles/{shuffle_id}` | 200 shuffle |
+| `advanceShuffle` | POST `/api/v2/shuffles/{shuffle_id}/advance` | 200 shuffle |
+| `skipShuffleItem` | POST `/api/v2/shuffles/{shuffle_id}/skip` | 200 shuffle |
+| `deleteShuffle` | DELETE `/api/v2/shuffles/{shuffle_id}` | 204 |
+
+`createShuffle` takes `{scope: {kind, id}}`. `kind` is `library` (a library
+ID; movie, TV, and mixed libraries), `series` or `season` (a content ID,
+including the `<series>-S<number>` IDs of seasons without stored metadata), or
+`library_collection` or `user_collection` (a collection ID). A collection plays
+its movies, its series' episodes, and any episodes it lists itself. Specials
+play like any other episode.
+A scope the profile cannot see is `404`. A library with no movies or episodes,
+or a scope with nothing the profile can play, is `409 conflict`.
+
+A shuffle is `{id, scope: {kind, id, title, parent_title?}, current, next,
+created_at, updated_at}`. `current` and `next` are catalog item cards; `next`
+equals `current` only when one item can play. `title` names the scope when the
+shuffle started, and `parent_title` is a season's series title.
+
+Picks never repeat an item until every playable item in the scope has played.
+The next cycle never starts with the item that just played. Each pick
+re-applies the profile's library access, file access, playback quality ceiling,
+and parental limits. An item needs a present file in an enabled library.
+
+Play `current`. When it ends, call `advanceShuffle` with `from_content_id` set
+to the item that played: `next` becomes `current` and a new `next` is picked.
+`skipShuffleItem` with `next_content_id` replaces the announced `next` with
+another pick. The skipped item never played, so it stays in the cycle and can
+come up later; when it is the only item the cycle has not played, it stays
+`next`. Advance and skip act only while the named item still holds that
+position, so a retry after a lost response returns the same shuffle unchanged.
+A retried `createShuffle` starts a second shuffle; the first is never read
+again.
+
+If the announced `next` can no longer play when the shuffle is read or moves
+on, because its file went missing or the profile lost access, another pick
+replaces it. When nothing in the scope can play any more, `getShuffle` answers
+`409 conflict`. A shuffle belongs to the profile that started it, and every
+operation re-checks that the profile can still see its scope; another
+profile's shuffle, or one whose scope the profile lost, is `404`. There is no
+separate expiry job: whenever a new shuffle is created, shuffles untouched for
+seven days are deleted.
+
+The web client carries the shuffle in the watch URL as `?shuffle=<id>` and
+plays every pick from the beginning, ignoring saved progress. While a shuffle
+is set, the post-roll screen shows `next` instead of the next episode, and the
+player offers no sequential next or previous episode.
+
 ## v1 bridge
 
 `/api/v1/playback/start`, `/{session_id}/progress`, `DELETE /{session_id}`,
@@ -279,3 +366,19 @@ code, the deny marker and the attempt row with v2. Apple and Android use this
 surface until they adopt v2; it is retired with the rest of `/api/v1` under the
 `410 client_upgrade_required` tombstone
 ([API contract](architecture/api-contract.md)).
+
+### Marker preview delivery
+
+Native v2 playback capabilities also advertise `marker_thumbnails_v1`. The web
+player opts into that feature at playback start to receive `marker_thumbnail_ready`
+updates; negotiation stays fixed for the attempt. Canonical watch reads return
+the same durable optional preview fields on `marker_segments`, so reconnects
+and clients without the realtime feature can refresh through the normal read.
+The frozen v1 listener does not advertise or negotiate this feature.
+
+A marker preview is captured at its start timestamp. It does not replace an
+embedded chapter, change seek boundaries, or enable timeline trickplay. Native
+clients can ignore the optional preview fields while keeping chapter navigation.
+Jellyfin chapter names, ticks and image mappings continue to represent embedded
+chapters; marker images are not projected as invented Jellyfin chapters. Offline
+marker inventories do not include these remotely served preview images.

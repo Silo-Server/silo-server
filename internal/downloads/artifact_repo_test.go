@@ -446,8 +446,8 @@ func TestTrackRecipeArtifactQueueRejectsMergeBaseWorkers(t *testing.T) {
 	if !reflect.DeepEqual(ready.PreparedAudioTracks, preparedAudio) {
 		t.Fatalf("prepared audio tracks = %+v, want %+v", ready.PreparedAudioTracks, preparedAudio)
 	}
-	if total, err := repo.TotalReadyBytes(ctx); err != nil || total < 4242 {
-		t.Fatalf("TotalReadyBytes = (%d, %v), want the tracks artifact counted", total, err)
+	if totals, err := repo.ReadyBytesByLocation(ctx); err != nil || totals[0] < 4242 {
+		t.Fatalf("ReadyBytesByLocation = (%v, %v), want the tracks artifact counted", totals, err)
 	}
 
 	var legacyReadyID string
@@ -465,9 +465,7 @@ func TestTrackRecipeArtifactQueueRejectsMergeBaseWorkers(t *testing.T) {
 	if err != nil || legacyRequeue.Status != ArtifactTracksQueued {
 		t.Fatalf("legacy requeue = (%+v, %v), want database-normalized tracks queued", legacyRequeue, err)
 	}
-	if err := repo.Requeue(ctx, row.ID); err != nil {
-		t.Fatal(err)
-	}
+	requeueForTest(t, pool, row.ID)
 	if requeued, err := repo.GetByID(ctx, row.ID); err != nil || requeued.Status != ArtifactTracksQueued {
 		t.Fatalf("Requeue = (%+v, %v), want tracks queued", requeued, err)
 	}
@@ -555,7 +553,7 @@ func TestArtifactMarkFencedByOwner(t *testing.T) {
 }
 
 func TestArtifactRemoteLocatorRoundTripsAndRequeueClearsIt(t *testing.T) {
-	repo, _, fileID := newArtifactTestRepo(t)
+	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-remote-locator"))
 	if err != nil {
@@ -586,9 +584,7 @@ func TestArtifactRemoteLocatorRoundTripsAndRequeueClearsIt(t *testing.T) {
 	if refreshed.OriginNodeURL != "http://transcode-new" || refreshed.OriginNodeGroup != "host-new" {
 		t.Fatalf("refreshed artifact = %+v", refreshed)
 	}
-	if err := repo.Requeue(ctx, row.ID); err != nil {
-		t.Fatal(err)
-	}
+	requeueForTest(t, pool, row.ID)
 	queued, err := repo.GetByID(ctx, row.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -848,7 +844,7 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	downloadID := fmt.Sprintf("requeue-download-%d", time.Now().UnixNano())
 	if err := NewRepository(pool).Create(ctx, &Download{
 		ID: downloadID, UserID: userID, MediaFileID: fileID,
-		ContentID: "requeue-content", Kind: KindQueued, Status: StatusCompleted,
+		ContentID: "requeue-content", Kind: KindQueued, Status: StatusReady,
 		Format: FormatTranscode, ArtifactID: row.ID, FileSize: ready.FileSize,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}); err != nil {
@@ -1061,16 +1057,21 @@ func TestListRemoteOrphansDueIsFairAcrossOrigins(t *testing.T) {
 	}
 }
 
-// TestHasActiveLinkCoversEphemeralRows pins the eviction guard: an ephemeral
-// (device-less web) download row must protect its artifact from LRU cleanup
-// exactly like a managed row does, and terminal rows must not.
-func TestHasActiveLinkCoversEphemeralRows(t *testing.T) {
+// TestExpiryHonorsInFlightLinks pins the cache rule: a download that still
+// needs the file (here an ephemeral web row that is ready to fetch) keeps it,
+// while a completed or canceled row does not — the device already holds its
+// copy. Expiry keeps the row, so the completed download's manifest survives.
+func TestExpiryHonorsInFlightLinks(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 
 	art := newArtifact(t, fileID, fmt.Sprintf("hash-link-%d", time.Now().UnixNano()))
 	if _, _, err := repo.EnsureQueued(ctx, art); err != nil {
 		t.Fatalf("ensure artifact: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'ready', file_size = 1024, completed_at = now(),
+		last_used_at = now() - interval '2 hours' WHERE id = $1`, art.ID); err != nil {
+		t.Fatalf("mark artifact ready: %v", err)
 	}
 
 	var userID int
@@ -1096,24 +1097,51 @@ func TestHasActiveLinkCoversEphemeralRows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create ephemeral download: %v", err)
 	}
-
-	active, err := repo.HasActiveLink(ctx, art.ID)
+	expirable := func() bool {
+		t.Helper()
+		rows, err := repo.ListExpirable(ctx, 0, time.Now().Add(-time.Hour), 1000)
+		if err != nil {
+			t.Fatalf("ListExpirable: %v", err)
+		}
+		for _, a := range rows {
+			if a.ID == art.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if expirable() {
+		t.Fatal("a download waiting to fetch the file must keep it")
+	}
+	ready, err := repo.GetByID(ctx, art.ID)
 	if err != nil {
-		t.Fatalf("HasActiveLink: %v", err)
+		t.Fatal(err)
 	}
-	if !active {
-		t.Fatal("ephemeral ready row must protect its artifact from eviction")
+	if applied, err := repo.ExpireReady(ctx, ready, missingArtifactRetireGrace); err != nil || applied {
+		t.Fatalf("ExpireReady with an in-flight link = (%v, %v), want refused", applied, err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE downloads SET status = 'cancelled' WHERE id = $1`, dlID); err != nil {
-		t.Fatalf("cancel download: %v", err)
+	if _, err := pool.Exec(ctx, `UPDATE downloads SET status = 'completed', completed_at = now() WHERE id = $1`, dlID); err != nil {
+		t.Fatalf("complete download: %v", err)
 	}
-	active, err = repo.HasActiveLink(ctx, art.ID)
-	if err != nil {
-		t.Fatalf("HasActiveLink after cancel: %v", err)
+	if !expirable() {
+		t.Fatal("a completed download must not keep the server's file")
 	}
-	if active {
-		t.Fatal("terminal-only links must not protect an artifact")
+	if applied, err := repo.ExpireReady(ctx, ready, missingArtifactRetireGrace); err != nil || !applied {
+		t.Fatalf("ExpireReady = (%v, %v), want applied", applied, err)
+	}
+	expired, err := repo.GetByID(ctx, art.ID)
+	if err != nil || expired.Status != ArtifactExpired {
+		t.Fatalf("expired row = %+v (%v), want kept as expired", expired, err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM downloads WHERE id = $1`, dlID).Scan(&status); err != nil || status != StatusCompleted {
+		t.Fatalf("completed download after expiry = %q (%v)", status, err)
+	}
+	if n, err := repo.DeleteUnreferencedExpired(ctx); err != nil {
+		t.Fatal(err)
+	} else if _, err := repo.GetByID(ctx, art.ID); err != nil {
+		t.Fatalf("an expired row a download references was deleted (%d rows): %v", n, err)
 	}
 }
 
@@ -1181,7 +1209,9 @@ func TestRecoverMissingRetiresOnlyUnusedLocalArtifacts(t *testing.T) {
 	}{
 		{name: "no downloads", want: artifactRetired},
 		{name: "only a canceled download", downloadStatus: StatusCancelled, want: artifactRetired},
-		{name: "completed download", downloadStatus: StatusCompleted, want: artifactRequeued},
+		// The device holds its copy; a missing server file is not rebuilt for it.
+		{name: "completed download", downloadStatus: StatusCompleted, want: artifactRetired},
+		{name: "download waiting to fetch", downloadStatus: StatusReady, want: artifactRequeued},
 		{name: "used within the grace period", recentlyUsed: true, want: artifactRequeued},
 	}
 	for _, tc := range cases {
@@ -1201,17 +1231,19 @@ func TestRecoverMissingRetiresOnlyUnusedLocalArtifacts(t *testing.T) {
 			if err != nil || got != tc.want {
 				t.Fatalf("RecoverMissing = (%v, %v), want %v", got, err, tc.want)
 			}
-			// A requeue returns the live download to preparing in the same
+			// A requeue returns the waiting download to preparing in the same
 			// transaction.
-			wantReset := tc.want == artifactRequeued && tc.downloadStatus == StatusCompleted
+			wantReset := tc.want == artifactRequeued && tc.downloadStatus == StatusReady
 			if gotReset := len(linked) == 1 && linked[0].Status == StatusPreparing; gotReset != wantReset || len(linked) > 1 {
 				t.Fatalf("reset downloads = %+v, want reset=%v", linked, wantReset)
 			}
 			row, err := repo.GetByID(ctx, ready.ID)
 			switch tc.want {
 			case artifactRetired:
-				if !errors.Is(err, ErrNotFound) {
-					t.Fatalf("retired artifact = %+v (%v), want ErrNotFound", row, err)
+				// Retired rows stay as expired so a finished device keeps its
+				// manifest; the hygiene sweep deletes the unreferenced ones.
+				if err != nil || row.Status != ArtifactExpired {
+					t.Fatalf("retired artifact = %+v (%v), want expired", row, err)
 				}
 				// A download create that read the row before retirement must not
 				// link to it; TouchReady tells Ensure to queue a fresh job.
@@ -1237,8 +1269,8 @@ func TestRemoteMissingRetiresUnusedArtifactAndQueuesCleanup(t *testing.T) {
 
 	manager.recoverReadyArtifacts(ctx)
 
-	if row, err := repo.GetByID(ctx, ready.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unused remote artifact = %+v (%v), want retired", row, err)
+	if row, err := repo.GetByID(ctx, ready.ID); err != nil || row.Status != ArtifactExpired || row.OriginArtifactID != "" {
+		t.Fatalf("unused remote artifact = %+v (%v), want expired with its locator cleared", row, err)
 	}
 	orphans, err := repo.ListRemoteOrphansDue(ctx, 100)
 	if err != nil {
@@ -1260,7 +1292,7 @@ func TestRemoteMissingRequeuesArtifactWithActiveDownload(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 	ready := readyArtifactForRecovery(t, repo, pool, fileID, fmt.Sprintf("artifact-used-%d", time.Now().UnixNano()))
-	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
 	manager := NewArtifactManager(repo, nil, nil, nil, "recovery-test", nil, nil)
 
 	if err := manager.ReportRemoteArtifactMissing(ctx, ready.ID, ready.OriginNodeURL, ready.OriginArtifactID); err != nil {
@@ -1301,9 +1333,7 @@ func TestConfirmArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) {
 	// Simulate recovery requeuing the artifact after the create read it:
 	// requeue without the linked-download reset, as a racing requeue whose
 	// reset ran before this row was inserted would leave it.
-	if err := repo.Requeue(ctx, ready.ID); err != nil {
-		t.Fatal(err)
-	}
+	requeueForTest(t, pool, ready.ID)
 	got, err := downloads.ConfirmArtifactLink(ctx, &d)
 	if err != nil || got.Status != StatusPreparing || got.ID != d.ID {
 		t.Fatalf("link to a requeued artifact = %+v (%v), want preparing", got, err)
@@ -1317,7 +1347,7 @@ func TestConfirmArtifactLinkReturnsRowResetByRecovery(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
-	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
 	var stale Download
 	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
 		t.Fatal(err)
@@ -1343,9 +1373,7 @@ func TestConfirmArtifactLinkIgnoresRowRelinkedConcurrently(t *testing.T) {
 	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Requeue(ctx, ready.ID); err != nil {
-		t.Fatal(err)
-	}
+	requeueForTest(t, pool, ready.ID)
 	if _, err := pool.Exec(ctx, `UPDATE downloads SET artifact_id = NULL, format = 'original' WHERE id = $1`, stale.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1392,5 +1420,17 @@ func TestRecoverReadyArtifactsSkipsIndeterminateStatErrors(t *testing.T) {
 	row, err := repo.GetByID(ctx, ready.ID)
 	if err != nil || row.Status != ArtifactReady {
 		t.Fatalf("artifact after indeterminate stat error = %+v (%v), want unchanged", row, err)
+	}
+}
+
+// requeueForTest forces an artifact back to queued the way recovery does,
+// whatever its status. Requeue itself only takes a failed or expired row.
+func requeueForTest(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `UPDATE download_artifacts SET status = 'failed' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewArtifactRepository(pool).Requeue(context.Background(), id); err != nil {
+		t.Fatal(err)
 	}
 }

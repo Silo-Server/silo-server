@@ -442,3 +442,35 @@ describe("realtime protocol", () => {
     });
   });
 });
+
+it("validates marker preview identity and captured source time", () => {
+  const event = {
+    type: "event",
+    session_id: "s",
+    name: "marker_thumbnail_ready",
+    payload: {
+      session_id: "s",
+      file_id: 7,
+      kind: "intro",
+      start_seconds: 6,
+      end_seconds: 9,
+      thumbnail_url: "/yellow.webp",
+      thumbnail_capture_seconds: 6,
+    },
+  };
+  expect(parsePlaybackRealtimeMessage(JSON.stringify(event))).toMatchObject(event);
+  for (const patch of [
+    { kind: "other" },
+    { end_seconds: 5 },
+    { thumbnail_capture_seconds: 9 },
+    { file_id: -1 },
+    { thumbnail_url: "" },
+    { thumbnail_thumbhash: 42 },
+  ]) {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({ ...event, payload: { ...event.payload, ...patch } }),
+      ),
+    ).toBeNull();
+  }
+});

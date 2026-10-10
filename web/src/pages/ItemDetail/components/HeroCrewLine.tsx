@@ -6,7 +6,15 @@ interface HeroCrewLineProps {
   crew: CrewMember[];
   genres?: string[];
   jobLabel?: string;
+  /**
+   * Crew jobs that can fill the leading credit, in order of preference. The
+   * first job with any credits is used. Series pass Creator, then Director,
+   * so a series without Creator credits keeps showing its directors.
+   */
+  leadJobs?: readonly string[];
 }
+
+const DEFAULT_LEAD_JOBS = ["Director"] as const;
 
 interface CrewPerson {
   name: string;
@@ -39,9 +47,11 @@ export default function HeroCrewLine({
   crew,
   genres,
   jobLabel = "Directed by",
+  leadJobs = DEFAULT_LEAD_JOBS,
 }: HeroCrewLineProps) {
+  const leadJob = leadJobs.find((job) => crew.some((c) => c.job === job));
   const directors = crew
-    .filter((c) => c.job === "Director")
+    .filter((c) => c.job === leadJob)
     .map((c): CrewPerson => ({ name: c.name, personId: c.person_id }))
     .slice(0, 2);
 

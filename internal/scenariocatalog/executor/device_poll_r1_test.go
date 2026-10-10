@@ -591,6 +591,13 @@ func assertDevicePollCollection(t *testing.T, e *Env, id, transport string, resp
 		t.Error("profile token identity differs from the collected account/session/profile/policy")
 	}
 	profile := find(rows(before["user_profiles"]), string(encode(profilePrimary)))
+	var pinRevision int64
+	if err := json.Unmarshal(profile["pin_revision"], &pinRevision); err != nil {
+		t.Fatal(err)
+	}
+	if profileClaims.PINRevision != pinRevision {
+		t.Error("profile token is not bound to the collected profile's PIN revision")
+	}
 	var owner int
 	if err := json.Unmarshal(profile["user_id"], &owner); err != nil || owner != memberID {
 		t.Error("approved profile is not owned by the approving member")

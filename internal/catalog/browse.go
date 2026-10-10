@@ -92,11 +92,19 @@ type BrowseResult struct {
 // BrowseRepository provides browse/filter queries on the media_items table.
 type BrowseRepository struct {
 	pool *pgxpool.Pool
+	// facetValues caches facet value lists for typeahead; every resolver
+	// over this repository shares it.
+	facetValues *facetValueCache
 }
 
 // NewBrowseRepository creates a new BrowseRepository.
 func NewBrowseRepository(pool *pgxpool.Pool) *BrowseRepository {
-	return &BrowseRepository{pool: pool}
+	return &BrowseRepository{pool: pool, facetValues: newFacetValueCache(facetValueCacheTTL, facetValueCacheBudget)}
+}
+
+// facetFetcher returns the production facetFetcher over this repository.
+func (r *BrowseRepository) facetFetcher() *pgxFacetFetcher {
+	return &pgxFacetFetcher{pool: r.pool, values: r.facetValues}
 }
 
 // Pool returns the underlying pgx pool for ad-hoc queries.
@@ -1106,91 +1114,10 @@ func listDistinctAudiobookSeriesWithSource(
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
-// searchDistinctArrayColumnWithSource prefix-searches the distinct values
-// of an array column (genres, studios, networks, countries) within the
-// scoped result set. Returns up to limit matches in alphabetical order
-// plus a hasMore flag (true when the underlying result set held more
-// rows than limit).
-func searchDistinctArrayColumnWithSource(
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	column string,
-	filters BrowseFilters,
-	baseRelation string,
-	mediaScope string,
-	prefix string,
-	limit int,
-) ([]string, bool, error) {
-	prefix = strings.TrimSpace(prefix)
-	if limit <= 0 {
-		return []string{}, false, nil
-	}
-	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
-	if empty {
-		return []string{}, false, nil
-	}
-	args = append(args, prefix+"%")
-	prefixIdx := len(args)
-	// LOWER() in ORDER BY: this query is already wrapped in a subquery
-	// (the DISTINCT UNNEST), so the outer ORDER BY can reference any
-	// expression freely.
-	query := fmt.Sprintf(`
-		SELECT name FROM (
-			SELECT DISTINCT UNNEST(mi.%s) AS name
-			FROM %s
-			%s
-		) vals
-		WHERE name IS NOT NULL
-		  AND BTRIM(name) <> ''
-		  AND LOWER(name) LIKE LOWER($%d)
-		ORDER BY LOWER(name) ASC
-		LIMIT %d
-	`, column, fromClause, whereClause, prefixIdx, limit+1)
-	return queryFacetSearchResults(ctx, pool, query, args, limit)
-}
-
-// searchDistinctScalarColumnWithSource is the scalar (e.g. content_rating)
-// variant of searchDistinctArrayColumnWithSource.
-func searchDistinctScalarColumnWithSource(
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	column string,
-	filters BrowseFilters,
-	baseRelation string,
-	mediaScope string,
-	prefix string,
-	limit int,
-) ([]string, bool, error) {
-	prefix = strings.TrimSpace(prefix)
-	if limit <= 0 {
-		return []string{}, false, nil
-	}
-	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
-	if empty {
-		return []string{}, false, nil
-	}
-	args = append(args, prefix+"%")
-	prefixIdx := len(args)
-	// DISTINCT in an inline subquery so the outer ORDER BY can apply
-	// LOWER() without violating the SELECT DISTINCT rule.
-	query := fmt.Sprintf(`
-		SELECT name FROM (
-			SELECT DISTINCT mi.%s AS name
-			FROM %s
-			%s
-			  AND mi.%s IS NOT NULL
-			  AND BTRIM(mi.%s) <> ''
-			  AND LOWER(mi.%s) LIKE LOWER($%d)
-		) matches
-		ORDER BY LOWER(name) ASC
-		LIMIT %d
-	`, column, fromClause, browseFilterPrefix(whereClause), column, column, column, prefixIdx, limit+1)
-	return queryFacetSearchResults(ctx, pool, query, args, limit)
-}
-
 // searchDistinctPeopleByKindWithSource is the typeahead equivalent of
-// listDistinctPeopleByKindWithSource; powers /api/v1/catalog/filters/search
-// for facet=author and facet=narrator.
+// listDistinctPeopleByKindWithSource, for facet=author and facet=narrator:
+// names whose lowercased form matches the LIKE pattern, ordered by
+// LOWER(name), each with its title count. The pattern is lowercased in SQL.
 func searchDistinctPeopleByKindWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -1198,76 +1125,74 @@ func searchDistinctPeopleByKindWithSource(
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
-	prefix string,
+	pattern string,
 	limit int,
-) ([]string, bool, error) {
-	prefix = strings.TrimSpace(prefix)
+) ([]FacetValue, bool, error) {
 	if limit <= 0 {
-		return []string{}, false, nil
+		return []FacetValue{}, false, nil
 	}
 	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
 	if empty {
-		return []string{}, false, nil
+		return []FacetValue{}, false, nil
 	}
 	args = append(args, int(kind))
 	kindIdx := len(args)
-	args = append(args, prefix+"%")
-	prefixIdx := len(args)
-	// DISTINCT in an inline subquery so the outer ORDER BY can apply
-	// LOWER() without violating Postgres' "ORDER BY expressions must
-	// appear in select list" rule for SELECT DISTINCT.
+	args = append(args, pattern)
+	patternIdx := len(args)
 	query := fmt.Sprintf(`
-		SELECT name FROM (
-			SELECT DISTINCT p.name AS name
+		SELECT name, n FROM (
+			SELECT p.name AS name, count(DISTINCT mi.content_id) AS n
 			FROM %s
 			JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
 			JOIN people p ON p.id = ip.person_id
 			%s
 			  AND p.name IS NOT NULL
 			  AND BTRIM(p.name) <> ''
-			  AND LOWER(p.name) LIKE LOWER($%d)
+			  AND LOWER(p.name) LIKE LOWER($%d) ESCAPE '\'
+			GROUP BY p.name
 		) matches
-		ORDER BY LOWER(name) ASC
+		ORDER BY LOWER(name), name
 		LIMIT %d
-	`, fromClause, kindIdx, browseFilterPrefix(whereClause), prefixIdx, limit+1)
-	return queryFacetSearchResults(ctx, pool, query, args, limit)
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause), patternIdx, limit+1)
+	return searchFacetValues(ctx, pool, query, args, limit)
 }
 
 // searchDistinctAudiobookSeriesWithSource is the typeahead equivalent of
-// listDistinctAudiobookSeriesWithSource.
+// listDistinctAudiobookSeriesWithSource, matching and ordering like
+// searchDistinctPeopleByKindWithSource.
 func searchDistinctAudiobookSeriesWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
-	prefix string,
+	pattern string,
 	limit int,
-) ([]string, bool, error) {
-	prefix = strings.TrimSpace(prefix)
+) ([]FacetValue, bool, error) {
 	if limit <= 0 {
-		return []string{}, false, nil
+		return []FacetValue{}, false, nil
 	}
 	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
 	if empty {
-		return []string{}, false, nil
+		return []FacetValue{}, false, nil
 	}
-	args = append(args, prefix+"%")
-	prefixIdx := len(args)
+	args = append(args, pattern)
+	patternIdx := len(args)
 	query := fmt.Sprintf(`
-		SELECT name FROM (
-			SELECT DISTINCT BTRIM(s.series_name) AS name
+		SELECT name, n FROM (
+			SELECT BTRIM(s.series_name) AS name, count(DISTINCT mi.content_id) AS n
 			FROM %s
 			JOIN %s s ON s.content_id = mi.content_id
 			%s
 			  AND s.series_name IS NOT NULL
 			  AND BTRIM(s.series_name) <> ''
-			  AND LOWER(BTRIM(s.series_name)) LIKE LOWER($%d)
+			  AND LOWER(BTRIM(s.series_name)) LIKE LOWER($%d) ESCAPE '\'
+			GROUP BY 1
 		) names
-		ORDER BY LOWER(name) ASC
+		ORDER BY LOWER(name), name
 		LIMIT %d
-	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), prefixIdx, limit+1)
-	return queryFacetSearchResults(ctx, pool, query, args, limit)
+	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), patternIdx, limit+1)
+	return searchFacetValues(ctx, pool, query, args, limit)
 }
 
 func bookSeriesTableForMediaScope(mediaScope string) string {
@@ -1275,39 +1200,6 @@ func bookSeriesTableForMediaScope(mediaScope string) string {
 		return "ebook_series"
 	}
 	return "audiobook_series"
-}
-
-// queryFacetSearchResults executes a facet search query that was built
-// with LIMIT N+1 and returns the first N rows plus a hasMore flag
-// indicating whether an additional row was present (i.e. the result set
-// exceeded the requested limit).
-func queryFacetSearchResults(ctx context.Context, pool *pgxpool.Pool, query string, args []any, limit int) ([]string, bool, error) {
-	rows, err := pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
-	values := make([]string, 0, limit)
-	hasMore := false
-	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
-			return nil, false, err
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if len(values) >= limit {
-			hasMore = true
-			continue
-		}
-		values = append(values, value)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	return values, hasMore, nil
 }
 
 func listDistinctJSONBLanguageWithSource(
