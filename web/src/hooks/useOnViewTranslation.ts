@@ -10,6 +10,12 @@ import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 const TRANSLATE_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 2_000;
 
+/** What the hook needs from a page: a detail document, or a season's episode list. */
+export type OnViewTranslationTarget = Pick<
+  ItemDetail,
+  "content_id" | "pending_translation_language" | "series_id" | "season_number"
+>;
+
 /**
  * Viewer-facing on-demand description translation for the detail page.
  *
@@ -22,7 +28,7 @@ const POLL_INTERVAL_MS = 2_000;
  * Completion is observed as the flag clearing on refetch — the job's first
  * batch translates the item's own overview, so this lands in seconds.
  */
-export function useOnViewTranslation(item: ItemDetail | undefined) {
+export function useOnViewTranslation(item: OnViewTranslationTarget | undefined) {
   const queryClient = useQueryClient();
   const { data: status } = useMetadataAIStatus();
   const mode = status?.on_view ?? "off";

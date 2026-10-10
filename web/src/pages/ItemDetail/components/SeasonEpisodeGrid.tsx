@@ -15,6 +15,8 @@ import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
+import MachineTranslatedLabel from "./MachineTranslatedLabel";
+import { hasMachineTranslation } from "./machineTranslation";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -181,6 +183,9 @@ function SeasonEpisodeCard({
                   year: "numeric",
                 }).format(new Date(episode.air_date))}
               </span>
+            )}
+            {episode.overview && hasMachineTranslation(episode.machine_translated_fields) && (
+              <MachineTranslatedLabel compact />
             )}
           </div>
           {episode.overview && (

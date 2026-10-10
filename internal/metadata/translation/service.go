@@ -237,11 +237,15 @@ func (s *Service) RequestOnView(ctx context.Context, targetKind TargetKind, cont
 		break // most recent job for this language decides; older history is irrelevant
 	}
 
+	// A view translates what that page shows: a movie or series its own
+	// description, a season its overview and its episode list, an episode
+	// itself. A series page therefore never translates a whole long-running
+	// show; each season is translated when someone opens it.
 	return s.Enqueue(ctx, JobRequest{
 		TargetKind:      targetKind,
 		ContentID:       contentID,
 		TargetLanguage:  target,
-		IncludeChildren: targetKind == TargetItem,
+		IncludeChildren: targetKind == TargetSeason,
 		RequestedBy:     requestedBy,
 	})
 }
@@ -475,7 +479,18 @@ func (s *Service) collectFields(ctx context.Context, job *Job) ([]field, jobMeta
 			return nil, meta, err
 		}
 		fields, err := s.filterSeasons(ctx, job, []ChildText{*season})
-		return fields, meta, err
+		if err != nil || !job.IncludeChildren {
+			return fields, meta, err
+		}
+		seasonEpisodes, err := s.content.SeasonEpisodeTexts(ctx, season.ContentID)
+		if err != nil {
+			return nil, meta, fmt.Errorf("load episodes: %w", err)
+		}
+		episodeFields, err := s.filterEpisodes(ctx, job, seasonEpisodes)
+		if err != nil {
+			return nil, meta, err
+		}
+		return append(fields, episodeFields...), meta, nil
 
 	case TargetEpisode:
 		episode, seriesID, err := s.content.EpisodeByID(ctx, job.ContentID)
@@ -508,6 +523,15 @@ func (s *Service) parentMeta(ctx context.Context, job *Job, seriesID string) (jo
 		job.SourceLanguage = item.DefaultLanguage
 	}
 	return meta, nil
+}
+
+// sameLanguage reports whether text in language a already reads as language
+// b. It matches the catalog's pending check (case-insensitive, whole tag), so
+// a field the catalog reports as missing is never skipped here. An unknown
+// source language never matches.
+func sameLanguage(a, b string) bool {
+	a = strings.TrimSpace(a)
+	return a != "" && strings.EqualFold(a, strings.TrimSpace(b))
 }
 
 // translatableField reports whether a field with base text and an existing
@@ -585,6 +609,9 @@ func (s *Service) filterSeasons(ctx context.Context, job *Job, seasons []ChildTe
 		if loc := locs[season.ContentID]; loc != nil {
 			locOverview, locSource = loc.Overview, loc.OverviewSource
 		}
+		if sameLanguage(season.DefaultLanguage, job.TargetLanguage) {
+			continue
+		}
 		if translatableField(season.Overview, locOverview, locSource, job.Force) {
 			fields = append(fields, field{kind: TargetSeason, contentID: season.ContentID, text: season.Overview})
 		}
@@ -606,6 +633,9 @@ func (s *Service) filterEpisodes(ctx context.Context, job *Job, episodes []Child
 		var locOverview, locSource string
 		if loc := locs[episode.ContentID]; loc != nil {
 			locOverview, locSource = loc.Overview, loc.OverviewSource
+		}
+		if sameLanguage(episode.DefaultLanguage, job.TargetLanguage) {
+			continue
 		}
 		if translatableField(episode.Overview, locOverview, locSource, job.Force) {
 			fields = append(fields, field{kind: TargetEpisode, contentID: episode.ContentID, text: episode.Overview})
