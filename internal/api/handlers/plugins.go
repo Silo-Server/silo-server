@@ -200,7 +200,8 @@ type PluginInstallationView struct {
 
 // PluginRuntimeView is one installation's process state. Resident marks a
 // plugin the supervisor keeps running (network access providers); State is
-// the supervisor's machine for those and running/stopped for lazily started
+// the supervisor's machine for those and running, stopped, or failed (the
+// last launch on this host failed, LastError says why) for lazily started
 // plugins.
 type PluginRuntimeView struct {
 	Resident      bool
@@ -1426,7 +1427,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}
 	var runtime *PluginRuntimeView
 	if h.service != nil {
-		state := h.service.RuntimeState(installation.ID)
+		state := h.service.RuntimeStateOf(installation)
 		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
 		// Before the supervisor arms (boot) the capability says what will be
 		// resident. Once armed, its entries are the truth: an enabled

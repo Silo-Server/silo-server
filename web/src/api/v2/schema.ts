@@ -16669,7 +16669,7 @@ export interface components {
        */
       restart_count: number;
       /**
-       * @description Process state; backoff and failed occur only for resident plugins
+       * @description Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed
        * @enum {string}
        */
       state: "stopped" | "starting" | "running" | "backoff" | "failed";

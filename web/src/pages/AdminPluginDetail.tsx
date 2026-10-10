@@ -284,8 +284,7 @@ function InstalledPluginPage({
   const jobs = capabilityListLabel(capabilities);
   const runtimeProblem =
     installation.enabled &&
-    runtime.resident &&
-    (runtime.state === "failed" || runtime.state === "backoff");
+    (runtime.state === "failed" || (runtime.resident && runtime.state === "backoff"));
 
   const restartButton = (
     <Button
@@ -402,24 +401,31 @@ function InstalledPluginPage({
             <AlertTriangle aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
           }
         >
-          <p>
-            <strong className="font-semibold">
-              {runtime.state === "failed"
-                ? `${name} stopped and won't restart on its own.`
-                : `${name} keeps stopping.`}
-            </strong>{" "}
-            Silo has restarted it {runtime.restart_count}{" "}
-            {runtime.restart_count === 1 ? "time" : "times"}
-            {runtime.state === "backoff" && runtime.next_restart_at
-              ? `. The next attempt is at ${formatDateTime(runtime.next_restart_at)}.`
-              : "."}
-          </p>
+          {runtime.resident ? (
+            <p>
+              <strong className="font-semibold">
+                {runtime.state === "failed"
+                  ? `${name} stopped and won't restart on its own.`
+                  : `${name} keeps stopping.`}
+              </strong>{" "}
+              Silo has restarted it {runtime.restart_count}{" "}
+              {runtime.restart_count === 1 ? "time" : "times"}
+              {runtime.state === "backoff" && runtime.next_restart_at
+                ? `. The next attempt is at ${formatDateTime(runtime.next_restart_at)}.`
+                : "."}
+            </p>
+          ) : (
+            <p>
+              <strong className="font-semibold">{name} failed to start.</strong> Silo tries again
+              the next time it needs the plugin.
+            </p>
+          )}
           {runtime.last_error ? (
             <pre className="bg-background/60 rounded-lg border px-3 py-2 font-mono text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
               {runtime.last_error}
             </pre>
           ) : null}
-          <div>{restartButton}</div>
+          {canRestart ? <div>{restartButton}</div> : null}
         </Banner>
       ) : null}
 

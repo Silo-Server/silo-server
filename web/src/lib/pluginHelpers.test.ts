@@ -239,6 +239,34 @@ describe("pluginStatusIndicator", () => {
       }),
     ).toMatchObject({ dotClass: "bg-muted-foreground", label: "Off" });
   });
+
+  it("shows a non-resident plugin whose last launch failed as Failed with the error", () => {
+    const base = installation();
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: false, state: "failed", restart_count: 0, last_error: "exit 2" },
+      }),
+    ).toMatchObject({ dotClass: "bg-destructive", label: "Failed", title: "exit 2" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: false, state: "running", restart_count: 0 },
+      }),
+    ).toMatchObject({ dotClass: "bg-success", label: "Active" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        enabled: false,
+        runtime: { resident: false, state: "failed", restart_count: 0, last_error: "exit 2" },
+      }),
+    ).toMatchObject({ label: "Off" });
+    expect(
+      pluginStatus(
+        installation({ runtime: { resident: false, state: "failed", restart_count: 0 } }),
+      ),
+    ).toMatchObject({ label: "Failed", attention: true, rank: 0 });
+  });
 });
 
 describe("taskTrigger", () => {

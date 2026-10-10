@@ -91,6 +91,9 @@ type Service struct {
 	launchGroup      singleflight.Group
 	runtimeRefreshMu sync.RWMutex
 	resident         *ResidentSupervisor
+	// lazyStartFailures records failed launches of non-resident plugins for
+	// the admin runtime state; see RuntimeState.
+	lazyStartFailures lazyStartFailures
 	// lifecycleBus, when set by PublishLifecycleChanges, carries every
 	// lifecycle change to the proxy nodes running the same installations.
 	lifecycleBus cache.EventBus
@@ -547,12 +550,33 @@ func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, 
 	return s.start(ctx, installationID, true)
 }
 
-func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
+func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (client pluginClient, err error) {
+	// Record why a lazy launch failed, including an archive or config that
+	// cannot be loaded, so the admin API can show a plugin that cannot start.
+	// Only the resident supervisor launches with allowResident and it reports
+	// its own failures; a refused resident says nothing about the plugin.
+	var installation *Installation
+	refusedResident := false
+	defer func() {
+		switch {
+		case err == nil:
+			s.lazyStartFailures.clear(installationID)
+		case !allowResident && !refusedResident:
+			failed := installation
+			if failed == nil {
+				failed, _ = s.installations.GetByID(ctx, installationID)
+			}
+			if failed != nil {
+				s.lazyStartFailures.record(failed, err)
+			}
+		}
+	}()
 	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
 	if err != nil {
 		return nil, err
 	}
 	if !allowResident && isResidentManifest(manifest) {
+		refusedResident = true
 		return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
 	}
 	configEntries, err := s.globalConfigEntries(ctx, installation.ID)
