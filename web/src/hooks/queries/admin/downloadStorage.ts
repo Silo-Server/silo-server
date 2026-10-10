@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
+import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorageCache";
 import {
   ADMIN_DOWNLOAD_STORAGE_PAGE_SIZE,
-  adminDownloadStorageRootKey,
   cleanUpAdminDownloadStorageLocation,
   deleteAdminDownloadStorageFiles,
   deleteAdminDownloadStorageUntrackedFiles,
