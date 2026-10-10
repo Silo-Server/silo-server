@@ -26319,6 +26319,12 @@
       "DiagnosticsCapabilities": {
         "additionalProperties": false,
         "properties": {
+          "accepted_crash_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "accepted_schema_versions": {
             "items": {
               "format": "int64",
@@ -26382,6 +26388,7 @@
           "retention_days",
           "consent_notice_version",
           "upload_chunk_bytes",
+          "accepted_crash_sources",
           "allowed"
         ],
         "type": "object"

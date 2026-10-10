@@ -55,6 +55,50 @@
       "position_ms": {
         "type": "integer",
         "description": "Current playback position in milliseconds."
+      },
+      "first_frame_ms": {
+        "type": "integer",
+        "description": "Milliseconds from the start of a playback session to its first rendered video frame."
+      },
+      "stall_count": {
+        "type": "integer",
+        "description": "Playback session summary: times playback waited for data after the first frame, including waits caused by a seek or a reload."
+      },
+      "stall_total_ms": {
+        "type": "integer",
+        "description": "Playback session summary: total milliseconds spent in the waits counted by stall_count."
+      },
+      "rebuffer_count": {
+        "type": "integer",
+        "description": "Playback session summary: waits for data that no seek or reload caused."
+      },
+      "rebuffer_total_ms": {
+        "type": "integer",
+        "description": "Playback session summary: total milliseconds spent in the waits counted by rebuffer_count."
+      },
+      "rebuffer_max_ms": {
+        "type": "integer",
+        "description": "Playback session summary: longest single wait counted by rebuffer_count, in milliseconds."
+      },
+      "bitrate_change_count": {
+        "type": "integer",
+        "description": "Playback session summary: times the source video bitrate changed between loads of one session."
+      },
+      "plan_change_count": {
+        "type": "integer",
+        "description": "Playback session summary: times the session reloaded with a new playback plan, such as a quality, audio, or route change."
+      },
+      "error_count": {
+        "type": "integer",
+        "description": "Playback session summary: playback errors reported during the session."
+      },
+      "failure_code": {
+        "type": "string",
+        "description": "Stable token for the most recent playback failure; never a message or URL."
+      },
+      "session_ms": {
+        "type": "integer",
+        "description": "Playback session summary: milliseconds from the start of the session to this summary."
       }
     },
     "focus": {
@@ -121,6 +165,10 @@
       "launch_type": {
         "type": "string",
         "description": "Launch classification, such as cold or warm."
+      },
+      "resident_mb": {
+        "type": "integer",
+        "description": "Memory the app process was using, in megabytes (physical footprint)."
       }
     },
     "crash": {
