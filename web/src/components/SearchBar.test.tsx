@@ -93,6 +93,22 @@ function OpenQueryButton({ query }: { query: string }) {
   );
 }
 
+function VideoScopeButton() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = new URLSearchParams(searchParams);
+        next.set("type", "video");
+        setSearchParams(next);
+      }}
+    >
+      Videos only
+    </button>
+  );
+}
+
 function renderSearchPage(initialEntry: string, externalQuery = "dune") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -100,6 +116,7 @@ function renderSearchPage(initialEntry: string, externalQuery = "dune") {
         <SearchPage />
         <LocationProbe />
         <OpenQueryButton query={externalQuery} />
+        <VideoScopeButton />
       </Suspense>
     </MemoryRouter>,
   );
@@ -181,37 +198,59 @@ describe("SearchBar", () => {
     expect(screen.getByRole("textbox")).toHaveValue("sta");
   });
 
-  it("ignores late echoes of every query it sent and still follows outside navigation", () => {
+  it("keeps text typed while several of its searches land together", async () => {
     vi.useFakeTimers();
-    const { rerender } = render(
-      <MemoryRouter initialEntries={["/catalog?source=query&q=st"]}>
-        <SearchBar prominent initialQuery="st" />
-      </MemoryRouter>,
-    );
-    const renderWithUrlQuery = (query: string) =>
-      rerender(
-        <MemoryRouter initialEntries={["/catalog?source=query&q=st"]}>
-          <SearchBar prominent initialQuery={query} />
-        </MemoryRouter>,
-      );
+    renderSearchPage("/catalog?source=query&q=st");
 
     const input = screen.getByRole("textbox");
+    startSlowSearch("sta");
+    startSlowSearch("star");
     fireEvent.change(input, { target: { value: "sta" } });
     act(() => vi.advanceTimersByTime(201));
     fireEvent.change(input, { target: { value: "star" } });
     act(() => vi.advanceTimersByTime(201));
     fireEvent.change(input, { target: { value: "stars" } });
 
-    // Both navigations land after the newest keystroke, oldest first.
-    renderWithUrlQuery("sta");
-    expect(input).toHaveValue("stars");
-    renderWithUrlQuery("star");
-    expect(input).toHaveValue("stars");
+    await finishSlowSearch("sta");
+    await finishSlowSearch("star");
 
-    // A query this bar never sent (history, a link, another search entry
-    // point) still replaces the text.
-    renderWithUrlQuery("dune");
-    expect(input).toHaveValue("dune");
+    expect(currentQueryParam()).toBe("star");
+    expect(screen.getByRole("textbox")).toHaveValue("stars");
+  });
+
+  it("follows a link to the query it is still loading", async () => {
+    vi.useFakeTimers();
+    renderSearchPage("/catalog?source=query&q=st", "sta");
+
+    const input = screen.getByRole("textbox");
+    startSlowSearch("sta");
+    fireEvent.change(input, { target: { value: "sta" } });
+    act(() => vi.advanceTimersByTime(201));
+    fireEvent.change(input, { target: { value: "star" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open sta" }));
+
+    await finishSlowSearch("sta");
+
+    expect(currentQueryParam()).toBe("sta");
+    expect(screen.getByRole("textbox")).toHaveValue("sta");
+    act(() => vi.advanceTimersByTime(500));
+    expect(currentQueryParam()).toBe("sta");
+    expect(screen.getByRole("textbox")).toHaveValue("sta");
+  });
+
+  it("keeps typed text when a navigation leaves the query alone", () => {
+    vi.useFakeTimers();
+    renderSearchPage("/catalog?source=query&q=th");
+
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "the " } });
+    act(() => vi.advanceTimersByTime(201));
+    fireEvent.click(screen.getByRole("button", { name: "Videos only" }));
+
+    const location = new URL(`http://example.test${screen.getByLabelText("location").textContent}`);
+    expect(location.searchParams.get("type")).toBe("video");
+    expect(location.searchParams.get("q")).toBe("the");
+    expect(input).toHaveValue("the ");
   });
 
   it("shows a query from outside navigation", () => {
