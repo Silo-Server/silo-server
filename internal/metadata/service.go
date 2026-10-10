@@ -1917,6 +1917,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		allImages = append(allImages, images...)
 	}
+	if !s.localArtworkUsable() {
+		allImages = withoutLocalImages(allImages)
+	}
 
 	// Phase 4a: Seasons — resolve with "season" content level.
 	var allSeasons []SeasonResult
@@ -1967,6 +1970,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				continue
+			}
+			if !s.localArtworkUsable() {
+				dropLocalSeasonArtwork(seasons)
 			}
 			accumulateSeasonResults(seasonResults, seasons)
 		}
@@ -2021,6 +2027,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						continue
+					}
+					if !s.localArtworkUsable() {
+						dropLocalEpisodeArtwork(episodes)
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
 				}
@@ -2714,21 +2723,26 @@ func (s *MetadataService) mergeAndPersist(
 
 	// Persist per-source ratings. The item row does not carry them, so the
 	// merge above saw no stored sources and passed every reported one through
-	// (or none, under a FieldRating lock). The stored rows are merged by the
-	// write instead: fill-empty keeps each source already stored, and
-	// replace-unlocked overwrites the sources this refresh reported. Identify
-	// replaces the whole set, even with an empty one, because it keeps the
-	// content_id while changing the title: a source only the previous match
-	// reported would otherwise stay on the item for good. Like the rating
-	// columns, they are provider-invariant and written for every language.
+	// (or none, under a FieldRating lock); the chain's provider order already
+	// picked one entry per source. The stored rows are merged by the write
+	// instead. A manual or scheduled refresh overwrites the sources this
+	// refresh reported: scores and vote counts keep moving after release, and
+	// discovery rows rank by the TMDB count. The enrichment-only bulk pass
+	// carries one provider's answer, so it only fills sources the item lacks
+	// and never overwrites the chain's choice. Identify replaces the whole set,
+	// even with an empty one, because it keeps the content_id while changing
+	// the title: a source only the previous match reported would otherwise
+	// stay on the item for good. Like the rating columns, they are
+	// provider-invariant and written for every language.
 	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
 		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
+		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
 		case req.Mode == ModeIdentify:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
-			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, mergeMode == MergeReplaceUnlocked)
+			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to store rating sources", "component", "metadata", "content_id", contentID, "error", err)
@@ -4115,6 +4129,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
+		if !s.localArtworkUsable() {
+			dropLocalSeasonArtwork(seasons)
+		}
 		for _, season := range seasons {
 			if season.SeasonNumber != seasonNumber {
 				continue
@@ -4150,6 +4167,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			slog.WarnContext(ctx, "metadata: target episode provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
+		}
+		if !s.localArtworkUsable() {
+			dropLocalEpisodeArtwork(episodes)
 		}
 		for _, episode := range episodes {
 			if episode.SeasonNumber != seasonNumber {
@@ -4233,6 +4253,50 @@ func isRemoteImageSourcePath(path string) bool {
 // cache by the processor; they are never served directly.
 func isLocalImageSourcePath(path string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(path)), "file://")
+}
+
+// localArtworkUsable reports whether refreshes may select local sidecar
+// artwork. A file:// source is never served directly: only an image-cache job
+// copies it into artwork storage. With caching off (metadata.cache_images) or
+// unwired, a chosen local image would leave the slot empty instead of falling
+// back to provider artwork, so refreshes ignore local art altogether.
+func (s *MetadataService) localArtworkUsable() bool {
+	return s != nil && s.autoCacheImages.Load() && s.imageCacheJobs != nil
+}
+
+// withoutLocalImages returns images minus local sidecar candidates. It returns
+// images itself when none are local.
+func withoutLocalImages(images []RemoteImage) []RemoteImage {
+	if !slices.ContainsFunc(images, func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) }) {
+		return images
+	}
+	remote := make([]RemoteImage, 0, len(images))
+	for _, img := range images {
+		if !isLocalImageSourcePath(img.URL) {
+			remote = append(remote, img)
+		}
+	}
+	return remote
+}
+
+// dropLocalSeasonArtwork clears local sidecar posters so a later provider in
+// the chain can fill the slot.
+func dropLocalSeasonArtwork(seasons []SeasonResult) {
+	for i := range seasons {
+		if isLocalImageSourcePath(seasons[i].PosterPath) {
+			seasons[i].PosterPath = ""
+		}
+	}
+}
+
+// dropLocalEpisodeArtwork clears local sidecar stills so a later provider in
+// the chain can fill the slot.
+func dropLocalEpisodeArtwork(episodes []EpisodeResult) {
+	for i := range episodes {
+		if isLocalImageSourcePath(episodes[i].StillPath) {
+			episodes[i].StillPath = ""
+		}
+	}
 }
 
 // isCacheableImageSourcePath gates the image-cache enqueue paths: remote
@@ -4443,19 +4507,7 @@ func buildItemLocalizationRecord(
 	}
 	// Local sidecar art is language-neutral: it must not duplicate into every
 	// localization row, so local candidates only compete at the item level.
-	remoteImages := images
-	for _, img := range images {
-		if isLocalImageSourcePath(img.URL) {
-			remoteImages = make([]RemoteImage, 0, len(images))
-			for _, candidate := range images {
-				if !isLocalImageSourcePath(candidate.URL) {
-					remoteImages = append(remoteImages, candidate)
-				}
-			}
-			break
-		}
-	}
-	applyBestImages(locItem, remoteImages, mergeMode, preferredLanguage)
+	applyBestImages(locItem, withoutLocalImages(images), mergeMode, preferredLanguage)
 	prepareItemImagesForQueue(locItem, existingLocItem)
 
 	loc.PosterPath = locItem.PosterPath

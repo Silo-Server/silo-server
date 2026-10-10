@@ -234,6 +234,29 @@ func TestPlaybackV2ProblemMapping(t *testing.T) {
 	}
 }
 
+// The start forwards the declared X-Silo-Device-* headers, which the service
+// records in the profile's device registry; the playback device X-Device-ID
+// names is unaffected.
+func TestPlaybackV2StartForwardsDeclaredDevice(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &fakePlaybackService{}
+	deps.Playback = fake
+	headers := with(viewerHeaders(), "X-Silo-Device-Id", "phone-1")
+	headers = with(headers, "X-Silo-Device-Name", "Pocket")
+	headers = with(headers, "X-Silo-Device-Platform", "iOS")
+	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, playbackStartFixture(t)), headers)
+	if response.Code != 201 {
+		t.Fatalf("start: %d %s", response.Code, response.Body.String())
+	}
+	want := handlers.DeviceMetadata{DeviceID: "phone-1", DeviceName: "Pocket", DevicePlatform: "iOS"}
+	if fake.caller.DeclaredDevice != want {
+		t.Fatalf("declared device = %+v, want %+v", fake.caller.DeclaredDevice, want)
+	}
+	if fake.caller.DeviceID != "" {
+		t.Fatalf("playback device id = %q, want it left to X-Device-ID", fake.caller.DeviceID)
+	}
+}
+
 // v2 names every source entry, video or audio-only, without touching other
 // entries or the shared plan that v1 serializes.
 func TestPlaybackQualitiesNamesTheSourceEntry(t *testing.T) {

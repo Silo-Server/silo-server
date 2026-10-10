@@ -579,7 +579,12 @@ func (e *QueryExecutor) buildPreviewPageSQL(
 // escapePrefixForLike lower-cases the prefix and escapes %, _, and \ so the
 // resulting string is safe to use as a LIKE pattern with ESCAPE '\'.
 func escapePrefixForLike(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
+	return escapeLikeLiteral(strings.ToLower(strings.TrimSpace(s)))
+}
+
+// escapeLikeLiteral escapes LIKE wildcards and the escape character itself
+// for use with ESCAPE '\', leaving case to the database.
+func escapeLikeLiteral(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)

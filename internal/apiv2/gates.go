@@ -274,8 +274,13 @@ func (d *denialWriter) problem() *Problem {
 		}
 	case apimw.CodeServiceUnavailable:
 		// The credential could not be checked (the session store did not
-		// answer). Not a 401: the client keeps its session and retries.
-		p = NewProblem(TypeDependencyUnavailable, "The sign-in could not be checked right now; retry after the Retry-After delay.")
+		// answer), or the viewer's access policy ran out of time. Not a 401
+		// or 403: the client keeps its session and retries.
+		detail := "The sign-in could not be checked right now; retry after the Retry-After delay."
+		if d.reason == apimw.ReasonViewerAccessUnavailable {
+			detail = "The viewer's access could not be resolved right now; retry after the Retry-After delay."
+		}
+		p = NewProblem(TypeDependencyUnavailable, detail)
 		if ra := d.header.Get("Retry-After"); ra != "" {
 			p = p.WithHeader("Retry-After", ra)
 		} else {

@@ -914,7 +914,7 @@ func TestSentinelURLFollowsFailover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
-	client, _, err := newRedisClient(config.RedisConfig{URL: rawURL})
+	client, _, err := newRedisClient(config.RedisConfig{URL: rawURL}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

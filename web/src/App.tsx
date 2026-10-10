@@ -61,6 +61,7 @@ import {
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
 import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
+import LegacyAdminHomeRowsRedirect from "@/pages/LegacyAdminHomeRowsRedirect";
 import LegacyRequestDetailRedirect from "@/pages/LegacyRequestDetailRedirect";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { guardRedirectTarget } from "@/lib/authRedirect";
@@ -93,7 +94,7 @@ const ItemDetail = lazy(importItemDetail);
 const EbookReader = lazy(() => import("@/pages/EbookReader"));
 const PersonDetail = lazy(importPersonDetail);
 const Collections = lazy(importCollections);
-const CollectionEditor = lazy(() => import("@/pages/CollectionEditor"));
+const CollectionEditorPage = lazy(() => import("@/pages/CollectionEditorPage"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
@@ -113,9 +114,9 @@ const AdminDevices = lazy(() => import("@/pages/AdminDevices"));
 const AdminLibraries = lazy(() => import("@/pages/AdminLibraries"));
 const AdminSettingsLayout = lazy(() => import("@/pages/admin-settings/AdminSettingsLayout"));
 const AdminNodes = lazy(() => import("@/pages/AdminNodes"));
-const AdminSections = lazy(() => import("@/pages/AdminSections"));
+const AdminDownloads = lazy(() => import("@/pages/AdminDownloads"));
+const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
-const AdminCollectionEditor = lazy(() => import("@/pages/AdminCollectionEditor"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
@@ -159,7 +160,6 @@ const WatchPartyHub = lazy(() => import("@/pages/watchtogether/WatchPartyHub"));
 const WatchPartyInvite = lazy(() => import("@/pages/watchtogether/WatchPartyInvite"));
 const WatchTogetherRoomPage = lazy(() => import("@/pages/watchtogether/WatchTogetherRoomPage"));
 const WatchRoute = lazy(() => import("@/pages/WatchRoute"));
-const ProfileCustomizeHome = lazy(() => import("@/pages/ProfileCustomizeHome"));
 
 /**
  * Routes a browsing session reaches within the first few interactions. Home
@@ -344,6 +344,8 @@ export function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["libraryPlaybackPreferences"] });
       qc.removeQueries({ queryKey: ["progress"] });
       qc.removeQueries({ queryKey: ["sections"] });
+      // Home rows poster peeks (lib/homeRows/peek) show rows as the profile sees them.
+      qc.removeQueries({ queryKey: ["home-row-peek"] });
       qc.removeQueries({ queryKey: ["calendar"] });
       qc.removeQueries({ queryKey: ["requests"] });
       qc.removeQueries({ queryKey: ["notifications"] });
@@ -521,8 +523,11 @@ function AppRoutes() {
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
                   <Route path="collections" element={<AdminCollections />} />
-                  <Route path="collections/new" element={<AdminCollectionEditor />} />
-                  <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
+                  {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
+                  <Route element={<CollectionEditorPage scope="server" />}>
+                    <Route path="collections/new" />
+                    <Route path="collections/:id/edit" />
+                  </Route>
                   <Route path="requests" element={<AdminRequests />} />
                   {/* Autoscan is a tab on Libraries now; keep old links working. */}
                   <Route path="autoscan" element={<LegacyAutoscanRedirect />} />
@@ -536,7 +541,9 @@ function AppRoutes() {
                   <Route path="devices" element={<AdminDevices />} />
                   <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
                   <Route path="nodes" element={<AdminNodes />} />
-                  <Route path="sections" element={<AdminSections />} />
+                  <Route path="downloads" element={<AdminDownloads />} />
+                  <Route path="sections" element={<AdminHomeRows />} />
+                  <Route path="home-rows" element={<LegacyAdminHomeRowsRedirect />} />
                   <Route path="plugins" element={<AdminPlugins />} />
                   <Route path="plugins/:pluginId" element={<AdminPluginDetail />} />
                   <Route path="settings/*" element={<AdminSettingsLayout />} />
@@ -659,8 +666,10 @@ function AppRoutes() {
                             element={<LegacyPersonalCatalogRedirect source="history" />}
                           />
                           <Route path="/collections" element={<Collections />} />
-                          <Route path="/collections/new" element={<CollectionEditor />} />
-                          <Route path="/collections/:id/edit" element={<CollectionEditor />} />
+                          <Route element={<CollectionEditorPage scope="personal" />}>
+                            <Route path="/collections/new" />
+                            <Route path="/collections/:id/edit" />
+                          </Route>
                           <Route
                             path="/collections/:id"
                             element={<LegacyUserCollectionRedirect />}
@@ -728,9 +737,10 @@ function AppRoutes() {
                           />
                           <Route path="/calendar" element={<Calendar />} />
                           <Route path="/notifications" element={<Notifications />} />
+                          {/* Retired second profile Home editor; keep old links working. */}
                           <Route
                             path="/profile/customize-home"
-                            element={<ProfileCustomizeHome />}
+                            element={<Navigate to="/settings/home-screen" replace />}
                           />
                           <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>

@@ -1,19 +1,14 @@
-import { useAdminCollectionsBoard } from "./collectionGroups";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useCollectionItems,
   useRemoveCollectionItem,
   useReorderCollectionItems,
 } from "../collections";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { v2Problem } from "@/api/v2/problems.test-support";
-import {
-  useUpdateAdminCollection,
-  useQueueCollectionTemplateBundleApply,
-  useTemplateBundleApplyJobs,
-} from "./collections";
+import { useAdminCollectionsBoard } from "./collectionGroups";
+import { useQueueCollectionTemplateBundleApply, useTemplateBundleApplyJobs } from "./collections";
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   api: vi.fn(),
@@ -44,32 +39,6 @@ beforeEach(() => {
   mocks.api.mockResolvedValue({ jobs: [] });
 });
 describe("guarded admin lifecycle", () => {
-  it("submits only the captured tag and preserves a 412 failure without retrying", async () => {
-    mocks.request.mockRejectedValue(v2Problem(412, "precondition_failed", "Changed"));
-    const { result } = renderHook(() => useUpdateAdminCollection(), { wrapper });
-    await act(async () => {
-      await expect(
-        result.current.mutateAsync({
-          id: "c",
-          etag: '"captured"',
-          body: { title: "My draft", poster_source_url: "https://example.test/image" },
-        }),
-      ).rejects.toMatchObject({ status: 412 });
-    });
-    expect(mocks.request.mock.calls).toEqual([
-      [
-        "PATCH /api/v2/admin/collections/{id}",
-        {
-          path: { id: "c" },
-          headers: { "If-Match": '"captured"' },
-          body: { title: "My draft", library_ids: undefined },
-        },
-      ],
-    ]);
-    expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/Reload and review/));
-    expect(mocks.invalidate).toHaveBeenCalled();
-    await waitFor(() => expect(result.current.variables?.body.title).toBe("My draft"));
-  });
   it("polls the accepted job through the dedicated endpoint and exposes its safe result", async () => {
     const job = {
       id: "job",

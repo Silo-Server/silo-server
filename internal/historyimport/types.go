@@ -201,7 +201,43 @@ type Record struct {
 	Favorite     bool
 	FavoriteOnly bool
 	PreferTMDB   bool
-	UpdatedAt    time.Time
+	// HiddenFromResume marks an in-progress item the user hid from the
+	// source's Continue Watching. Its progress is still imported, and the
+	// profile gets a matching Continue Watching dismissal. A show between
+	// episodes has no such item; see ContinueWatchingRow.
+	HiddenFromResume bool
+	// SourceSeriesID is the source's own ID of an episode's series, which
+	// ties the episode to the source's Continue Watching row.
+	SourceSeriesID string
+	UpdatedAt      time.Time
+}
+
+// ContinueWatchingRow is the shows a source's own Continue Watching row lists.
+// A show the import brought into the profile's Continue Watching or Next Up
+// that the row leaves out was hidden at the source, and is dropped (see
+// Service.reconcileContinueWatching).
+type ContinueWatchingRow struct {
+	// SourceSeriesIDs are the source's IDs of the listed shows.
+	SourceSeriesIDs map[string]bool
+	// Series identifies the listed shows by provider ID (Kind KindSeries),
+	// so a show the source holds under several IDs, such as one per library,
+	// counts as listed whichever copy the user watched.
+	Series []Record
+	// IncludesNextUp reports that the row lists at least one unstarted
+	// episode, so it shows shows between episodes. Without it only shows
+	// with an episode in progress can be judged from the row.
+	IncludesNextUp bool
+	// UnfinishedSourceSeries are the source's IDs of shows it counts as
+	// having episodes left to watch. A finished show is missing from the row
+	// without having been hidden.
+	UnfinishedSourceSeries map[string]bool
+}
+
+// ContinueWatchingRowReporter is a Provider that can report its source's
+// Continue Watching row after Fetch. ok is false when the row was not read
+// reliably; nothing is hidden then.
+type ContinueWatchingRowReporter interface {
+	ContinueWatchingRow() (row ContinueWatchingRow, ok bool)
 }
 
 type Match struct {
@@ -273,10 +309,6 @@ type ExecutionSummary struct {
 	Warnings              []string
 	UnmatchedSamples      []UnmatchedSample
 	UnmatchedReasonCounts map[string]int
-}
-
-type localProgressRow struct {
-	UpdatedAt time.Time
 }
 
 // --- Admin types ---

@@ -20,14 +20,16 @@ func argsContainPair(args []string, a, b string) bool {
 	return false
 }
 
-// Profile 7 remuxes drop the enhancement-layer track (-map 0:v:0 keeps only
-// the base layer), which leaves dangling dual-layer RPU metadata on the BL.
-// Stripping the RPUs yields a clean HDR10 stream — both a correctness fix and
-// the Apple-parity fallback presentation for devices without a P7 decoder.
+// A profile 7 remux keeps only the HDR10 base layer. A dual-track source's
+// enhancement layer is dropped by -map 0:V:0, but a single-track source
+// interleaves it in the same stream as NAL unit type 63, so the filter chain
+// removes those units as well as the RPUs. The result is a clean HDR10 stream,
+// which is both a correctness fix and the Apple-parity fallback for devices
+// without a P7 decoder.
 func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
 	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
-	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
-		t.Fatalf("profile 7 remux must strip DV RPUs from the base layer, args=%v", strings.Join(args, " "))
+	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1,filter_units=remove_types=63") {
+		t.Fatalf("profile 7 remux must strip DV RPUs and enhancement-layer units from the base layer, args=%v", strings.Join(args, " "))
 	}
 	if argsContainPair(args, "-tag:v", "hvc1") || argsContainPair(args, "-tag:v", "dvh1") || argsContainPair(args, "-strict", "unofficial") {
 		t.Fatalf("legacy strip consumers must keep hev1 labeling without DV signaling, args=%v", strings.Join(args, " "))
@@ -146,7 +148,7 @@ func TestRemuxDVProfileFallsBackWithoutFilterSupport(t *testing.T) {
 func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 8} {
 		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false, false)
-		if argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
+		if strings.Contains(strings.Join(args, " "), "dovi_rpu") || strings.Contains(strings.Join(args, " "), "filter_units") {
 			t.Fatalf("profile %d remux must not strip DV RPUs, args=%v", profile, strings.Join(args, " "))
 		}
 		if argsContainPair(args, "-tag:v", "dvh1") || argsContainPair(args, "-strict", "unofficial") {
@@ -191,7 +193,7 @@ func writeProbeAwareFFmpeg(t *testing.T) (bin, argLog string) {
 	argLog = filepath.Join(dir, "args")
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
-		"  *-bsfs*) echo dovi_rpu; exit 0;;\n" +
+		"  *-bsfs*) printf 'dovi_rpu\\nfilter_units\\n'; exit 0;;\n" +
 		"  *'-f null'*) echo '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2; exit 0;;\n" +
 		"esac\n" +
 		"echo \"$*\" >> " + argLog + "\n" +
@@ -212,7 +214,7 @@ func writeRecordingFFmpeg(t *testing.T) (bin, argLog string) {
 	argLog = filepath.Join(dir, "args")
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
-		"  *-bsfs*) echo dovi_rpu; exit 0;;\n" +
+		"  *-bsfs*) printf 'dovi_rpu\\nfilter_units\\n'; exit 0;;\n" +
 		"  *'-f null'*) exit 0;;\n" +
 		"esac\n" +
 		"echo \"$*\" >> " + argLog + "\n" +
@@ -259,8 +261,8 @@ func TestExplicitStripModeTagsHVC1(t *testing.T) {
 			t.Fatalf("strip remux refused profile %d: %v", profile, err)
 		}
 		recorded := recordedRemuxArgs(t, session, argLog)
-		if !strings.Contains(recorded, "dovi_rpu=strip=1") || !strings.Contains(recorded, "-tag:v hvc1") {
-			t.Fatalf("explicit strip must map to dovi_rpu + hvc1 for profile %d: %s", profile, recorded)
+		if !strings.Contains(recorded, "dovi_rpu=strip=1,filter_units=remove_types=63") || !strings.Contains(recorded, "-tag:v hvc1") {
+			t.Fatalf("explicit strip must map to dovi_rpu + filter_units + hvc1 for profile %d: %s", profile, recorded)
 		}
 		if strings.Contains(recorded, "dvh1") || strings.Contains(recorded, "-strict unofficial") {
 			t.Fatalf("stripped output must not carry DV signaling for profile %d: %s", profile, recorded)
@@ -319,5 +321,27 @@ func TestExplicitStripRecipeRefusesAnUnstrippableSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be stripped") {
 		t.Fatalf("error = %v, want it to name the unstrippable source", err)
+	}
+}
+
+// The remux strip runs DV7ToHDR10BitstreamFilter, so an FFmpeg that has
+// dovi_rpu but not filter_units cannot run it.
+func TestSupportsDoviRPUFilterNeedsFilterUnits(t *testing.T) {
+	for _, test := range []struct {
+		name, bsfs string
+		want       bool
+	}{
+		{"both filters", "printf 'dovi_rpu\\nfilter_units\\n'", true},
+		{"dovi_rpu only", "echo dovi_rpu", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\ncase \"$*\" in\n  *-bsfs*) "+test.bsfs+"; exit 0;;\nesac\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if got := supportsDoviRPUFilter(bin); got != test.want {
+				t.Fatalf("supportsDoviRPUFilter = %v, want %v", got, test.want)
+			}
+		})
 	}
 }

@@ -94,6 +94,12 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+# Silo runs database migrations before its HTTP listener starts, and an
+# upgrade on a large library can migrate for many minutes. The start period
+# covers the default 20-minute migration budget (SILO_MIGRATE_TIMEOUT) so a
+# migrating server is not reported unhealthy and restarted mid-migration; the
+# first passing check still marks it healthy at once. A deployment that raises
+# SILO_MIGRATE_TIMEOUT should raise the start period to match.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20m --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 ENTRYPOINT ["silo"]

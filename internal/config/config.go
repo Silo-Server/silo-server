@@ -349,7 +349,15 @@ type DownloadConfig struct {
 	TranscodeEnabled      bool   `yaml:"-"` // server gate for transcode-to-file (default false)
 	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
 	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
-	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
+	ArtifactMaxBytes      int64  `yaml:"-"` // storage budget for prepared artifacts at each location (0 = none)
+	// ArtifactCacheHours is how long a prepared file no download is waiting
+	// on stays after its last use; 0 deletes it once nothing needs it and it
+	// has gone unused for ten minutes, the grace that protects a download
+	// being linked to it.
+	ArtifactCacheHours int `yaml:"-"`
+	// ArtifactDiskCeilingPercent is the filesystem fill at which clean-up
+	// deletes cached prepared files early, whatever the budget says.
+	ArtifactDiskCeilingPercent int `yaml:"-"`
 
 	// Playback transcode switches that also govern converted downloads, read
 	// from their playback setting keys so both surfaces follow one toggle.
@@ -455,6 +463,19 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 
 const playbackTranscodeDirSettingKey = "playback.transcode_dir"
 const downloadArtifactDirSettingKey = "download.artifact_dir"
+
+// Prepared-download retention settings.
+const (
+	DownloadArtifactCacheHoursSettingKey      = "download.artifact_cache_hours"
+	DownloadArtifactDiskCeilingSettingKey     = "download.artifact_disk_ceiling_percent"
+	DefaultDownloadArtifactCacheHours         = 72
+	MaxDownloadArtifactCacheHours             = 720
+	DefaultDownloadArtifactDiskCeilingPercent = 85
+	// The ceiling stays at or below the 95% scratch fill at which a node stops
+	// taking playback sessions, so prepared files alone never trip it.
+	MinDownloadArtifactDiskCeilingPercent = 50
+	MaxDownloadArtifactDiskCeilingPercent = 95
+)
 
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
 // artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).

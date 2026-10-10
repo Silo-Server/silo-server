@@ -1,10 +1,12 @@
 {
-  "revision": "ec966ce0e901578a98aa51e9daae0db0ee834c5b59dd7845b80ecc81bcae7203",
+  "revision": "8710ba863b31c3358c814452a1512152d2466d48a8a806a1ababca33ef71d41c",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
+  "facet_value_search": true,
   "person_prefetch": true,
   "video_with_episodes_scope": true,
+  "extended_query_rules": true,
   "provider": "meilisearch",
   "result_window_limit": 1000,
   "session_ttl_seconds": 900,

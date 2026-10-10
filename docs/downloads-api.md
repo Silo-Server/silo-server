@@ -162,7 +162,9 @@ them locally beside the media file and manifest.
 ### Key invariants
 
 - **No DRM, expiry, or lease.** Already-downloaded files remain playable until the
-  user deletes them. The server can revoke future serves, not reach into a device.
+  user deletes them or an administrator revokes the entry. Revocation asks the app to
+  delete its copy at its next sync (§9.3); the server cannot reach into a device
+  that never syncs.
 - **Device authority is the header only.** A `device_id` in body/query is ignored.
 - **Every managed asset re-checks profile access.** A download id alone never grants
   content access.
@@ -253,7 +255,9 @@ Response:
   "bulk_quality": true,
   "monitor_quality": true,
   "preparation_progress": true,
-  "direct_download_links": true
+  "direct_download_links": true,
+  "prepare_again": true,
+  "revoked_removes_local": true
 }
 ```
 
@@ -276,6 +280,8 @@ Response:
 | `bulk_quality`           | Series and season batches (§4.1) accept any of `quality_presets`. Without it, send `original`. |
 | `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
 | `direct_download_links`  | `POST /api/v2/direct-download/links` (§4.10) mints profile-bound direct-download links. |
+| `prepare_again`          | The server cleans up prepared files after the device finishes; the file route answers `409 prepared_file_expired` for such an entry and `POST /api/v2/downloads/{id}/prepare` (§4.12) prepares it again. |
+| `revoked_removes_local`  | Administrators can revoke entries. A `revoked` entry means: delete the local copy, then delete the entry (§9.3). |
 | `bounded_manifests`      | Bounded manifest and batch-manifest operations (§4.6, §4.7) are available.         |
 | `subscription_reads`     | Subscription reads (§8.3) are available.                                          |
 | `subscription_mutations` | Subscription create/patch/delete (§8.1, §8.3) are available.                       |
@@ -534,6 +540,9 @@ Deletes the managed entry owned by `(account, profile, header device)` or cancel
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
 entries return `404`. The client is responsible for deleting local files.
 
+Deleting a `revoked` entry is how the app confirms it removed its copy; the server
+records that in the administrator's history.
+
 Deleting an episode of a series this device monitors also stops that monitor from
 registering the episode again. Creating a download for the episode, its season or its
 series re-allows it. Deleting the monitor, or creating it again, forgets these
@@ -555,7 +564,10 @@ Common responses:
 
 - `200` or `206`: media bytes. Multipart ranges and `416` follow ordinary HTTP
   semantics, as do conditional requests and bodyless `HEAD` metadata.
-- `409`: the entry is revoked or otherwise not servable.
+- `409 prepared_file_expired`: the entry finished and the server has since cleaned
+  up its prepared file. Call `POST /api/v2/downloads/{id}/prepare` (§4.12), wait for
+  `ready`, then fetch again.
+- `409 conflict`: the entry is revoked or otherwise not servable.
 - `404`: entry/content missing or outside profile access.
 - A `preparing` artifact is not servable yet; wait for `ready`.
 
@@ -761,6 +773,32 @@ serves source files only and has no artifact case.
 Treat proxy delivery as an advertised capability, not something inferred from a
 server version.
 
+### 4.12 Prepare a finished download again
+
+```http
+POST /api/v2/downloads/{id}/prepare
+```
+
+Managed-only; `X-Silo-Device-Id` is required. Available when the capability reports
+`prepare_again`.
+
+The server keeps a remux or transcode file only while some download still needs it,
+plus a short cache period (`download.artifact_cache_hours`, 72 hours by default).
+After a device finishes, its copy is the one that matters, so the server may delete
+its own. A device that needs the bytes again (it lost its copy, or a transfer resumes
+after the cache period) gets `409 prepared_file_expired` from the file route and calls
+this operation.
+
+The response is `200` with the current `DownloadEntry`. A finished entry whose file
+expired returns to `preparing` and becomes `ready` like a new download, with the same
+`revision`, because the recipe is unchanged. An entry whose file is still on the
+server, an `original` entry (served from the source), and one already preparing come
+back unchanged. A `revoked`, `failed`, or `cancelled` entry answers `409 conflict`;
+create a new download instead. Returning to `preparing` counts toward the account's
+concurrent download cap like a new download (`429 rate_limited` when at the cap), and a
+transcode entry answers `501 capability_unsupported` when transcoding is now off. The
+operation is idempotent.
+
 ---
 
 ## 5. Download row shape
@@ -810,15 +848,17 @@ Managed lifecycle:
 original:              ready -> downloading -> completed
 compat/remux:          preparing -> ready -> downloading -> completed
 bitrate/transcode:     preparing -> ready -> downloading -> completed
-revoked:               any -> revoked (reserved)
+revoked:               any -> revoked (administrator)
+prepared again:        completed -> preparing -> ready -> downloading -> completed
 failed artifact job:   preparing -> failed
 ```
 
 Direct original rows are `ready` immediately; remux and transcode rows start at
 `preparing` and become `ready` when the artifact completes. `failed` means the
-artifact job exhausted its retries. `revoked` is reserved: nothing sets it
-today, but an admin revoke flow is planned in a separate effort, so clients
-must handle it. `downloading` and `completed` are set by the client via `PATCH`.
+artifact job exhausted its retries. `revoked` means an administrator revoked the
+entry (§9.3). `completed` returns to `preparing` only when the device asks for an
+expired file again (§4.12). `downloading` and `completed` are set by the client via
+`PATCH`.
 
 ---
 
@@ -1188,8 +1228,15 @@ files or existing download rows.
 ### 9.3 Robustness rules
 
 - Re-check capability on profile switch.
-- Keep already-downloaded files playable after an entry becomes `revoked` or stops
-  being servable.
+- When the capability reports `revoked_removes_local`, an entry that becomes
+  `revoked` was revoked by an administrator: delete the local media, manifest, and
+  assets, then `DELETE /api/v2/downloads/{id}` (queue the delete if offline). Without
+  the flag, keep the files playable and stop fetching for that row. Check for revoked
+  entries whenever the app reads the registry, including background syncs.
+- Keep already-downloaded files playable when an entry stops being servable for any
+  other reason.
+- A `409 prepared_file_expired` from the file route is not an error to show: call
+  `POST /api/v2/downloads/{id}/prepare`, wait for `ready`, then resume the transfer.
 - Do not automatically retry `POST /api/v2/downloads`. After an uncertain response,
   re-read `GET /api/v2/downloads` and make an explicit new request for work that is
   still missing.
@@ -1458,8 +1505,10 @@ Deleting from the Apple offline library should:
 4. Call `DELETE /downloads/{id}` while online, or queue that delete for the next
    reconnect.
 
-If the server later reports the entry as `revoked` or not servable, keep existing local
-files playable but stop retrying server fetches for that row.
+If the server later reports the entry as `revoked`, follow §9.3: delete the local files
+and then the entry. If it is not servable for another reason, keep existing local files
+playable but stop retrying server fetches for that row. On `409 prepared_file_expired`,
+call `POST /downloads/{id}/prepare` and resume the transfer once the entry is `ready`.
 
 ---
 
@@ -1547,6 +1596,12 @@ constraints fit the app:
    after the file and required assets are moved into durable storage.
 6. If auth expires while a transfer is queued, recreate the request with a fresh
    token and resume.
+7. On `409 prepared_file_expired`, call `POST /downloads/{id}/prepare` and resume
+   once the row is `ready` again (9.3). Other `409`s are not "still preparing".
+
+When a registry read, including the periodic WorkManager sync in 11.8, returns an
+entry as `revoked` and the capability reports `revoked_removes_local`, delete its
+local files and then the entry (9.3).
 
 ### 11.5 Offline playback
 
@@ -1614,7 +1669,8 @@ operations use:
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |
-| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request. |
+| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request; or the entry is revoked or otherwise not servable. |
+| 409  | `prepared_file_expired`  | The file route for a finished entry whose prepared file the server cleaned up. Call `POST /downloads/{id}/prepare` (§4.12). |
 | 413  | `payload_too_large`      | The request body or an encoded manifest exceeds its bound.                |
 | 416  | `range_not_satisfiable`  | An unsatisfiable `Range` on a byte route.                                 |
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
@@ -1635,10 +1691,11 @@ bytes have been written aborts the stream and never appends JSON to a partial as
 
 ## 13. Out of scope
 
-Cross-device download visibility, DRM/leases, cumulative per-user storage quotas,
-and server-initiated deletion of client files remain out of scope. Artifact garbage
-collection may remove server-side prepared files only when no managed row still
-references them.
+Cross-device download visibility for users, DRM/leases, cumulative per-user storage
+quotas, and enforced deletion of client files remain out of scope. An administrator's
+revoke is a request the app honors at its next sync. The server removes its own
+prepared files once no in-flight download needs them and the cache period has passed;
+finished rows keep the recipe so the file can be prepared again (§4.12).
 
 ---
 
@@ -1665,10 +1722,11 @@ finalization pass), so both go through a prepare-to-file job that writes a
 two devices requesting the same target reuse one encode. The artifact table is
 a durable, leased job queue: transactional claims (`FOR UPDATE SKIP LOCKED`),
 lease heartbeats, attempt counting, and a startup sweep guarantee a crash
-mid-encode cannot strand a download in `preparing` or double-encode. Ready
-artifacts are evicted LRU under a byte budget, but never while a managed row —
-including a completed one representing a device's local library — still
-references them.
+mid-encode cannot strand a download in `preparing` or double-encode. A ready
+artifact is kept while an in-flight download needs it and for a cache period after
+its last use; then its bytes are deleted and the row becomes `expired`. Budgets,
+the disk ceiling, measurement, history, and revocation are described in
+[prepared download storage](architecture/download-storage.md).
 
 ### Preparation progress (admin)
 

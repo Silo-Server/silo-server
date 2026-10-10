@@ -43,7 +43,16 @@ Existing installations retain their configured marker mode, which accepts `off`,
   background synchronization. Request leases, failures, and quota cooldowns are
   still shared through the database. Previously stored markers remain available.
 
-Both paths honor provider priority, manual edits, and provider quota limits.
+Both paths honor provider priority, manual edits and deletions, and provider quota limits.
+
+A manual deletion removes every occurrence of that kind for the selected file.
+The empty range retains manual provenance: provider lookups, local detection,
+rescans, and file-identity changes cannot restore it. An explicit manual set
+adds the kind again. Other marker kinds are unchanged.
+
+Manual writes require a Movie or Series library, including their mixed-library
+variants. Unsupported library kinds return `422 validation_failed` without
+changing markers, contributing them, or emitting a playback update.
 
 Local detection finds episode intros and end credits, and movie end credits on
 a best-effort basis: from chapters and the picture near the end, never intros.

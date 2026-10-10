@@ -330,6 +330,9 @@ type SessionManager struct {
 	finishHooks          []func(context.Context, *Session)
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
+	// deliveryActivityReader reports media that another node served for a
+	// remote-transport session. See SetDeliveryActivityReader.
+	deliveryActivityReader SessionActivityReader
 	// transportStops holds the stop channels of media transports this replica
 	// is currently serving, keyed by session ID. See WatchTransportStop.
 	transportStops map[string]map[chan struct{}]struct{}
@@ -1781,6 +1784,7 @@ func (m *SessionManager) CleanStale() []*Session {
 // provided grace period. Sessions with an active media transport request are
 // preserved even if they have not emitted a recent heartbeat yet.
 func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*Session {
+	m.refreshDeliveryActivity(activeIdle, pausedIdle)
 	protected := m.refreshCompatActivity(activeIdle, pausedIdle)
 	m.mu.Lock()
 
@@ -1839,9 +1843,10 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 // served by another node.
 //
 // A locally-served stream is held open by an in-flight transport request. A
-// proxy-served one has no such request here, so it is protected only by the
-// client's progress heartbeats — and a gap longer than the active grace would
-// reap it while media is still flowing. The windows are widened rather than
+// proxy-served one has no such request here, so it is protected by the
+// client's progress heartbeats and by the serving node's delivery records (see
+// SetDeliveryActivityReader) — and a gap in both longer than the active grace
+// would reap it while media is still flowing. The windows are widened rather than
 // made infinite: there is no absolute session lifetime cap in this manager, so
 // unconditional immunity would leak a session forever whenever a client
 // disappears without stopping. A client that has gone quiet for this long has

@@ -887,6 +887,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/collections/{id}/sections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the administrator Home and library page rows that show a collection. Rows profiles added themselves are not listed. */
+    get: operations["listAdminCollectionSections"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/collections/{id}/sync": {
     parameters: {
       query?: never;
@@ -1031,7 +1048,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List collection template bundles. */
+    /** List collection template bundles, each with a summary of its templates. */
     get: operations["listAdminCollectionTemplateBundles"];
     put?: never;
     post?: never;
@@ -1082,7 +1099,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List supported collection templates. */
+    /** List the collection templates with an mdblist, tmdb or tmdb_list source. */
     get: operations["listAdminCollectionTemplates"];
     put?: never;
     post?: never;
@@ -1231,6 +1248,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/downloads/devices": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List every device that holds managed downloads, across accounts. */
+    get: operations["listAdminDownloadDevices"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/entries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List managed device downloads across accounts, newest first, optionally for one account, profile, device or status. */
+    get: operations["listAdminDownloadEntries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/downloads/preparations": {
     parameters: {
       query?: never;
@@ -1310,6 +1361,142 @@ export interface paths {
     put?: never;
     /** Resume paused offline-download preparation jobs. Each job returns to the queue at its original position, or waits out a pending retry backoff. */
     post: operations["resumeAdminDownloadPreparations"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/revoke": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Revoke device downloads. The Silo app deletes each copy the next time the device syncs and confirms by deleting the download. The server stops serving the file at once. A revoked episode is excluded from its series monitor; a preparation only revoked downloads waited on is canceled. */
+    post: operations["revokeAdminDownloads"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read prepared-download storage at the server and every transcode node: what is on disk, what Silo's records say, budgets, and files nothing accounts for. */
+    get: operations["getAdminDownloadStorage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover the admin view of prepared-download storage. */
+    get: operations["getAdminDownloadStorageCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the prepared-file clean-up and device revocation history, newest first. A row is one batch (a maintenance pass or an administrator action) at one location for one reason and account. */
+    get: operations["listAdminDownloadStorageEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List prepared download files with what they are, where they are, and who they serve. */
+    get: operations["listAdminDownloadStorageFiles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/files/delete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Delete prepared download files. Devices that finished keep their copies. A file a download is waiting on or fetching is refused unless include_in_use is set; then it is deleted and prepared again. */
+    post: operations["deleteAdminDownloadStorageFiles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/locations/{location}/cleanup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Run prepared-file clean-up at one location now: expire files past their cache period and enforce the budget and disk ceiling. */
+    post: operations["cleanUpAdminDownloadStorageLocation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/storage/locations/{location}/untracked/delete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** List one location's prepared-file directory now and delete the files no prepared-file record accounts for and that nothing has written to for an hour. Only files named like Silo's prepared files are considered. */
+    post: operations["deleteAdminDownloadStorageUntrackedFiles"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4363,24 +4550,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/admin/settings/sections": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read section permission configuration; read failures retain the disabled default. */
-    get: operations["getAdminSectionSettings"];
-    /** Replace section permission configuration under the existing settings transaction guard. */
-    put: operations["updateAdminSectionSettings"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/admin/settings/sensitive-status": {
     parameters: {
       query?: never;
@@ -6137,7 +6306,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Prefix typeahead over one facet of a scope. */
+    /** Typeahead over one facet of a scope, with title counts. */
     get: operations["searchCatalogFacet"];
     put?: never;
     post?: never;
@@ -6459,7 +6628,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the collections the acting profile owns or may see, with the account's collection groups. */
+    /** List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order. */
     get: operations["listCollections"];
     put?: never;
     /** Create a manual or smart collection for the acting profile. Not idempotent: a retry after a lost response creates a second collection. */
@@ -6485,7 +6654,7 @@ export interface paths {
     delete: operations["deleteCollection"];
     options?: never;
     head?: never;
-    /** Update the creator's collection; omitted fields are unchanged. */
+    /** Update the creator's collection; omitted fields are unchanged. Another profile's shared collection answers permission_denied. */
     patch: operations["updateCollection"];
     trace?: never;
   };
@@ -6619,7 +6788,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create an account-wide collection group. Not idempotent: a retry after a lost response creates a second group. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     post: operations["createCollectionGroup"];
     delete?: never;
     options?: never;
@@ -6634,15 +6803,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the canonical collection editor state and its strong validator. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     get: operations["getCollectionGroup"];
     put?: never;
     post?: never;
-    /** Delete a collection group; its collections become ungrouped. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     delete: operations["deleteCollectionGroup"];
     options?: never;
     head?: never;
-    /** Update a collection group; omitted members are unchanged. Retries are not safe after an intervening mutation. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     patch: operations["updateCollectionGroup"];
     trace?: never;
   };
@@ -6653,9 +6822,9 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the canonical collection editor state and its strong validator. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     get: operations["getCollectionGroupsOrder"];
-    /** Replace the order of the account's collection groups. Retries are not safe after an intervening mutation. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     put: operations["reorderCollectionGroups"];
     post?: never;
     delete?: never;
@@ -6775,7 +6944,7 @@ export interface paths {
     };
     /** Read the canonical collection editor state and its strong validator. */
     get: operations["getCollectionOrder"];
-    /** Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation. */
+    /** Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation. */
     put: operations["reorderCollections"];
     post?: never;
     delete?: never;
@@ -7296,6 +7465,26 @@ export interface paths {
     get: operations["getDownloadManifest"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/downloads/{id}/prepare": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Prepare a finished download's file again after the server cleaned up its copy; the entry returns to preparing and becomes ready like a new download.
+     * @description Use after the file route answers 409 prepared_file_expired. The revision does not change: the recipe is the same. An entry whose file is still on the server, an original-quality entry, or one already preparing returns unchanged.
+     */
+    post: operations["prepareDownloadAgain"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12329,7 +12518,14 @@ export interface components {
       /** @description Whether the storage lock state was read successfully. When false, clients must not treat locked=false as permission to edit storage locations. */
       status_known: boolean;
     };
+    AdminAuditChange: {
+      after?: string;
+      before?: string;
+      field: string;
+    };
     AdminAuditLog: {
+      action?: string;
+      changes?: components["schemas"]["AdminAuditChange"][];
       client_ip: string;
       /** Format: int64 */
       duration_ms: number;
@@ -12344,6 +12540,8 @@ export interface components {
       session_id?: string;
       /** Format: int64 */
       status_code: number;
+      target_id?: string;
+      target_type?: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -12958,6 +13156,11 @@ export interface components {
        */
       group_id: string | null;
       /**
+       * Format: int64
+       * @description Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.
+       */
+      home_row_count?: number;
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -12985,9 +13188,19 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       next_sync_at?: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       poster_url: string;
       query_definition: unknown;
+      /**
+       * Format: int64
+       * @description Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted.
+       */
+      row_count?: number;
       slug: string;
       sort_config: unknown;
       /** Format: int64 */
@@ -13029,13 +13242,29 @@ export interface components {
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       imports: boolean;
       item_reorder: boolean;
+      /**
+       * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
+       * @example true
+       */
+      mdblist_search: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      schedule_time_zone: components["schemas"]["CollectionScheduleTimeZone"];
+      /**
+       * @description listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count
+       * @example true
+       */
+      section_references: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description listAdminCollectionTemplateBundles returns each bundle's templates
+       * @example true
+       */
+      template_summaries: boolean;
     };
     AdminCollectionCreate: {
       backdrop_url?: string;
@@ -13165,6 +13394,32 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
       /** Format: int64 */
       total: number;
+    };
+    AdminCollectionSection: {
+      enabled: boolean;
+      /** @description The row is its page's hero banner. */
+      featured: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /**
+       * @description The library whose page holds the row; null for a Home row.
+       * @example 1
+       */
+      library_id: string | null;
+      /**
+       * Format: int64
+       * @description Rows on the page that holds this row, turned-off rows included.
+       */
+      page_row_count: number;
+      /** Format: int64 */
+      position: number;
+      /** @enum {string} */
+      scope: "home" | "library";
+      section_type: string;
+      title: string;
     };
     AdminCollectionSyncRun: {
       /**
@@ -13623,6 +13878,138 @@ export interface components {
       /** Format: double */
       used_gb: number;
     };
+    AdminDownloadDevice: {
+      /**
+       * Format: int64
+       * @description Size of the finished copies
+       */
+      bytes_on_device: number;
+      /**
+       * Format: int64
+       * @description Downloads that are not revoked
+       */
+      copies: number;
+      device_id: string;
+      device_name: string;
+      /** Format: int64 */
+      failed: number;
+      /** Format: int64 */
+      finished: number;
+      /**
+       * Format: date-time
+       * @description Last registry sync or download request
+       */
+      last_seen_at?: string;
+      /**
+       * Format: int64
+       * @description Active series monitors
+       */
+      monitors: number;
+      platform: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      profile_name: string;
+      /**
+       * Format: int64
+       * @description Revoked and waiting for the device to delete its copy
+       */
+      revoked: number;
+      /** @description Not seen within stale_device_days */
+      stale: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+      /**
+       * Format: int64
+       * @description Preparing, ready or downloading
+       */
+      waiting: number;
+    };
+    AdminDownloadEntry: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      batch_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      completed_at: string | null;
+      /** @description Movie, or the series for an episode */
+      content_id: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      delivery_format: string;
+      device_id: string;
+      device_name: string;
+      effective_quality: string;
+      /** @description Null unless episode_id resolves to a catalog episode */
+      episode: {
+        /** Format: int64 */
+        episode_number: number;
+        /** Format: int64 */
+        season_number: number;
+        /** @description Empty when unknown */
+        title: string;
+      } | null;
+      episode_id?: string;
+      /** Format: int64 */
+      file_size: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /** @description Where its prepared file is: server or node:<id>; absent when it has none */
+      location?: string;
+      location_name?: string;
+      /** @description Catalog type of content_id (movie, series, …); empty when unknown */
+      media_type: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      profile_id: string;
+      quality: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      revoked_at?: string;
+      revoked_reason?: string;
+      /** @description preparing, ready, downloading, completed, failed or revoked. More values may be added */
+      status: string;
+      /**
+       * Format: date-time
+       * @description Latest accepted client status report; null when the app never reported
+       */
+      status_event_at: string | null;
+      /** Format: int64 */
+      target_bitrate_kbps: number;
+      /** @description Catalog title of content_id; empty when the item left the catalog */
+      title: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      updated_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+    };
     AdminDownloadPreparation: {
       /** Format: int64 */
       attempts: number;
@@ -13845,6 +14232,388 @@ export interface components {
        * @example 1
        */
       node_id?: string;
+    };
+    AdminDownloadRevokeInputBody: {
+      device_id?: string;
+      /** @description Download ids to revoke. Leave empty with user_id, profile_id and device_id to revoke everything on one device. */
+      ids?: string[];
+      /** @description Whole-device revoke only: also pause the device's series monitors */
+      pause_monitors?: boolean;
+      profile_id?: string;
+      /** @description Kept in the clean-up history */
+      reason?: string;
+      user_id?: string;
+    };
+    AdminDownloadRevokeOutputBody: {
+      /**
+       * Format: int64
+       * @description Size of the revoked copies the device had finished downloading
+       */
+      bytes: number;
+      /** @description The revoked downloads */
+      download_ids: string[];
+      /** Format: int64 */
+      paused_monitors: number;
+      /**
+       * Format: int64
+       * @description Downloads newly revoked; already revoked ones are not counted
+       */
+      revoked: number;
+    };
+    AdminDownloadStorage: {
+      /**
+       * Format: int64
+       * @description How long a prepared file nothing is waiting on stays after its last use
+       */
+      cache_hours: number;
+      /**
+       * Format: int64
+       * @description download.artifact_max_bytes, the budget at every location without its own; 0 means none
+       */
+      default_budget_bytes: number;
+      /**
+       * Format: int64
+       * @description Filesystem fill at which clean-up deletes cached files early
+       */
+      disk_ceiling_percent: number;
+      /**
+       * Format: int64
+       * @description Bytes clean-up and administrators removed from the server and nodes in the last 30 days
+       */
+      freed_last_30_days_bytes: number;
+      /** @description The server first, then transcode nodes by name */
+      locations: components["schemas"]["AdminDownloadStorageLocation"][];
+      /**
+       * Format: int64
+       * @description Unfinished preparation jobs (see the preparation queue)
+       */
+      preparing_jobs: number;
+      /**
+       * Format: int64
+       * @description Devices not seen for this long are counted as stale
+       */
+      stale_device_days: number;
+    };
+    AdminDownloadStorageCapabilitiesOutputBody: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      available: boolean;
+      /** @description Device copies can be listed */
+      devices: boolean;
+      /** @description Admin realtime channel carrying download_storage.changed */
+      realtime_channel: string;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /** @description Device copies can be revoked */
+      revocation: boolean;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    AdminDownloadStorageCleanupOutputBody: {
+      /**
+       * Format: int64
+       * @description Bytes this run deleted. 0 when nothing was due or another replica was already cleaning up.
+       */
+      freed_bytes: number;
+    };
+    AdminDownloadStorageDeleteInputBody: {
+      /** @description Prepared file ids. A repeated id is reported once. */
+      ids: string[];
+      /** @description Also delete files a download is waiting on or fetching. Each such file is queued to be prepared again and those downloads wait for the new copy. */
+      include_in_use?: boolean;
+    };
+    AdminDownloadStorageDeleteOutputBody: {
+      /** @description One result per distinct requested id, in request order */
+      results: components["schemas"]["AdminDownloadStorageDeleteResult"][];
+    };
+    AdminDownloadStorageDeleteResult: {
+      /** Format: int64 */
+      bytes: number;
+      id: string;
+      /**
+       * @description deleted: the file is gone; finished devices keep their copies. requeued: it was in use; it was deleted and queued to be prepared again. in_use: refused because a download is waiting on or fetching it (set include_in_use to delete it anyway) or it was used in the last minute. not_found: no such prepared file. not_ready: it is still being prepared, failed, or was already deleted. failed: an error stopped this file's delete; the others went on. A file left on disk is reported as untracked.
+       * @enum {string}
+       */
+      outcome: "deleted" | "requeued" | "in_use" | "not_found" | "not_ready" | "failed";
+    };
+    AdminDownloadStorageEvent: {
+      /** @description Whose device a revocation or removal concerned */
+      account?: components["schemas"]["AdminDownloadStorageUser"];
+      /** @description The administrator; absent for automatic clean-up */
+      actor?: components["schemas"]["AdminDownloadStorageUser"];
+      /** Format: int64 */
+      bytes: number;
+      /**
+       * Format: int64
+       * @description Files or downloads the batch touched
+       */
+      count: number;
+      /** @description The administrator's reason, or a note such as a file count */
+      detail?: string;
+      /** @description Opaque row id: one batch at one location for one reason and account */
+      id: string;
+      /** @description server, node:<id>, or device */
+      location: string;
+      /** @description Node or device name */
+      location_name: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      occurred_at: string;
+      /** @description cache_expired, budget, disk_ceiling, admin_delete, untracked, missing, revoked or device_removed. More values may be added. */
+      reason: string;
+      /** @description The first catalog titles it touched */
+      titles: string[];
+    };
+    AdminDownloadStorageFile: {
+      audio_codec: string;
+      /** Format: int64 */
+      bitrate_kbps?: number;
+      /** Format: int64 */
+      bytes: number;
+      container: string;
+      /** @description The movie, or the series an episode belongs to */
+      content_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** Format: int64 */
+      downloading: number;
+      episode_id?: string;
+      /** Format: int64 */
+      episode_number?: number;
+      episode_title?: string;
+      /**
+       * Format: date-time
+       * @description When a cached file's cache period ends
+       */
+      expires_at?: string;
+      /**
+       * Format: int64
+       * @description Devices that already hold their copy
+       */
+      finished: number;
+      /** @enum {string} */
+      format: "remux" | "transcode";
+      /**
+       * @description Prepared file id (the preparation job id)
+       * @example 1
+       */
+      id: string;
+      /**
+       * Format: date-time
+       * @description Last served, linked, or finished by a device
+       */
+      last_used_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id?: string;
+      /** @description server, or node:<id> */
+      location: string;
+      location_name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      media_file_id: string;
+      media_type: string;
+      /** @description The longest-unseen device a stale waiting download belongs to */
+      oldest_waiting?: components["schemas"]["AdminDownloadWaitingDevice"];
+      resolution?: string;
+      /** Format: int64 */
+      season_number?: number;
+      /**
+       * Format: int64
+       * @description Waiting downloads on devices not seen within stale_device_days
+       */
+      stale_waiting: number;
+      /**
+       * @description in_use: a download is waiting on or fetching it. cached: nothing is; it is deleted when expires_at passes. expired: its bytes were deleted; finished devices keep their copies.
+       * @enum {string}
+       */
+      state: "in_use" | "cached" | "expired";
+      /** @description Catalog title; empty when the item left the catalog */
+      title: string;
+      /** @description Target video codec, or copy for a remux */
+      video_codec: string;
+      /**
+       * Format: int64
+       * @description Downloads that have not started fetching it
+       */
+      waiting: number;
+      /** Format: int64 */
+      year?: number;
+    };
+    AdminDownloadStorageLocation: {
+      /**
+       * Format: int64
+       * @description Storage budget for prepared files here; 0 means none
+       */
+      budget_bytes: number;
+      /** @enum {string} */
+      budget_source: "setting" | "override" | "none";
+      /** Format: int64 */
+      cached_bytes: number;
+      /**
+       * Format: int64
+       * @description Files nothing is waiting on; deleted when their cache period ends
+       */
+      cached_files: number;
+      /**
+       * Format: int64
+       * @description Node files queued for deletion and not yet deleted
+       */
+      cleanup_backlog: number;
+      /** @description Directory of prepared files. For a node, the one it was last listed in, which is the one it uses; before its first listing, the configured one, or empty when that is the default. */
+      dir?: string;
+      /**
+       * @description Where the configured directory comes from. default: the built-in location. setting: download.artifact_dir. override: this node's own directory.
+       * @enum {string}
+       */
+      dir_source: "default" | "setting" | "override";
+      enabled: boolean;
+      /** Format: int64 */
+      in_use_bytes: number;
+      /**
+       * Format: int64
+       * @description Files a download is waiting on or fetching, by Silo's records
+       */
+      in_use_files: number;
+      /** @description server, or node:<id> */
+      key: string;
+      /** @enum {string} */
+      kind: "server" | "node";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      last_health_check?: string;
+      name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      node_id?: string;
+      /** @description The server, or an enabled node whose last health check succeeded */
+      online: boolean;
+      /** @description A node's configured directory when it differs from the one it was last listed in. The node moves to it when it restarts; files are not moved. */
+      pending_dir?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      reconciled_at?: string;
+      /** @description API replicas report different directories or filesystems for the server's prepared files; they should share one volume */
+      replicas_disagree: boolean;
+      /**
+       * Format: int64
+       * @description In-use bytes kept only for devices not seen within stale_device_days
+       */
+      stale_waiting_bytes: number;
+      /** @description Over its budget or the disk ceiling with nothing left to free. A full node gets no new preparations; while the server is full, jobs that would be prepared on it wait. */
+      storage_full: boolean;
+      /** Format: int64 */
+      untracked_bytes: number;
+      /**
+       * Format: int64
+       * @description Files on disk that no prepared-file record accounts for, at the last reconciliation
+       */
+      untracked_files: number;
+      /** @description Latest measurement of the files on disk; absent until one is reported */
+      usage?: components["schemas"]["AdminDownloadStorageUsage"];
+      /**
+       * Format: int64
+       * @description Downloads waiting on or fetching files here
+       */
+      waiting_downloads: number;
+    };
+    AdminDownloadStorageUntrackedOutputBody: {
+      /** Format: int64 */
+      bytes: number;
+      /**
+       * Format: int64
+       * @description Untracked files that could not be deleted, for example on a read-only directory; they stay untracked
+       */
+      failed_files: number;
+      /**
+       * Format: int64
+       * @description Untracked files deleted
+       */
+      files: number;
+    };
+    AdminDownloadStorageUsage: {
+      /**
+       * Format: int64
+       * @description Size of the finished prepared files
+       */
+      bytes: number;
+      /** @description Files here do not survive a restart (tmpfs) or a container recreation (the container's overlay layer) */
+      ephemeral: boolean;
+      /** @description Why the last measurement failed */
+      error?: string;
+      /**
+       * Format: int64
+       * @description Finished prepared files
+       */
+      files: number;
+      /**
+       * Format: int64
+       * @description Capacity of that filesystem available to Silo; 0 when unknown
+       */
+      fs_total_bytes: number;
+      /** @description ext4, xfs, tmpfs, overlay, nfs and so on; empty when unknown */
+      fs_type?: string;
+      /**
+       * Format: int64
+       * @description Bytes used on the filesystem the directory is on, as df counts them
+       */
+      fs_used_bytes: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      measured_at: string;
+      /**
+       * Format: int64
+       * @description Receipts and other small files
+       */
+      other_bytes: number;
+      /** Format: int64 */
+      partial_bytes: number;
+      /**
+       * Format: int64
+       * @description Files an encode is writing, or left behind
+       */
+      partial_files: number;
+      /** @description The directory is on the same filesystem as the transcode scratch directory */
+      shares_scratch: boolean;
+      /** @description The last measurement did not finish or failed; the numbers are older */
+      stale: boolean;
+    };
+    AdminDownloadStorageUser: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      username: string;
+    };
+    AdminDownloadWaitingDevice: {
+      device_name: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      last_seen_at?: string;
+      username: string;
     };
     AdminEmailTestInputBody: {
       to: string;
@@ -14649,6 +15418,8 @@ export interface components {
     AdminLogsSocketCapabilitiesOutputBody: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      audit_actions: string[];
+      audit_change_details: boolean;
       available: boolean;
       protocol: string;
       /** @description Opaque revision of this document */
@@ -14927,6 +15698,13 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description This node's own prepared-download directory; absent when inherited. */
+      download_artifact_dir_override?: string;
+      /**
+       * Format: int64
+       * @description This node's own prepared-download budget in bytes (0 for none); absent when inherited.
+       */
+      download_artifact_max_bytes_override?: number;
       /** Format: int64 */
       egress_kbps: number;
       enabled: boolean;
@@ -15078,6 +15856,13 @@ export interface components {
       undecodable: number;
     };
     AdminNodeUpdateBody: {
+      /** @description Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts. */
+      download_artifact_dir_override?: string | null;
+      /**
+       * Format: int64
+       * @description Storage budget in bytes for this node's prepared download files; 0 means no budget. Null or -1 restores download.artifact_max_bytes.
+       */
+      download_artifact_max_bytes_override?: number | null;
       enabled?: boolean;
       group?: string;
       hw_accel_override?: string | null;
@@ -19137,10 +19922,24 @@ export interface components {
       order: string;
     };
     CatalogFacetMatches: {
-      /** @description Whether more values matched than limit */
+      /** @description Whether more values than limit start with q */
       has_more: boolean;
-      /** @description Empty, never null */
+      /** @description Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null */
       matches: string[];
+      /** @description The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null */
+      values: components["schemas"]["CatalogFacetValue"][];
+      /** @description Whether more values matched than limit for values */
+      values_has_more: boolean;
+    };
+    CatalogFacetValue: {
+      /**
+       * Format: int64
+       * @description Titles in the scope with this value; values can lag catalog changes by up to two minutes
+       * @example 42
+       */
+      count: number;
+      /** @example Warner Bros. Pictures */
+      value: string;
     };
     CatalogFilters: {
       /** @description First 1000 alphabetically; searchCatalogFacet pages the rest */
@@ -19676,6 +20475,10 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields */
+      extended_query_rules?: boolean;
+      /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
+      facet_value_search?: boolean;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -19856,6 +20659,12 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    CollectionAdminCollectionSection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminCollectionSection"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
     CollectionAdminDeviceMetadata: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminDeviceMetadata"][];
@@ -19865,6 +20674,30 @@ export interface components {
     CollectionAdminDiagnosticSummary: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminDiagnosticSummary"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminDownloadDevice: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminDownloadDevice"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminDownloadEntry: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminDownloadEntry"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminDownloadStorageEvent: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminDownloadStorageEvent"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminDownloadStorageFile: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminDownloadStorageFile"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -20058,6 +20891,16 @@ export interface components {
       /** @example true */
       collection_sort_preferences: boolean;
       /**
+       * @description listCollections accepts contains_item and marks the acting profile's own manual collections with contains
+       * @example true
+       */
+      contains_item: boolean;
+      /**
+       * @description createCollection stores a description for the acting account
+       * @example true
+       */
+      create_description: boolean;
+      /**
        * @description Catalog query fields a display filter may use
        * @example [
        *       "type",
@@ -20068,7 +20911,7 @@ export interface components {
       display_filter_presets: components["schemas"]["CollectionDisplayFilterPresets"];
       /** @example true */
       effective_collection_sort: boolean;
-      /** @description The acting account supports collection groups */
+      /** @description Always false: personal collection groups are no longer supported */
       groups: boolean;
       /**
        * @description Import sources the acting account can create a collection from; empty when imports is false
@@ -20083,8 +20926,26 @@ export interface components {
       imports: boolean;
       /** @description The acting account supports reordering collection items */
       item_reorder: boolean;
+      /** @description is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it */
+      login_sharing: boolean;
+      /**
+       * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
+       * @example true
+       */
+      mdblist_search: boolean;
+      /**
+       * @description A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork
+       * @example true
+       */
+      poster_collages: boolean;
+      /**
+       * @description previewCollection items carry poster_url when the title has a poster
+       * @example true
+       */
+      preview_posters: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      schedule_time_zone: components["schemas"]["CollectionScheduleTimeZone"];
       /**
        * @description collection_kind values the sort-preference operations accept
        * @example [
@@ -20100,6 +20961,11 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description updateCollection accepts sync_schedule on a synced list; false when imports is false
+       * @example true
+       */
+      sync_schedule_editable: boolean;
     };
     CollectionDisplayFilterPresets: {
       /**
@@ -20238,12 +21104,12 @@ export interface components {
     };
     CollectionOrder: {
       /**
-       * @description The group whose collections are ordered; omitted or null orders the ungrouped section
+       * @description Omit or send null: personal collection groups are no longer supported, and any other value is a validation failure
        * @example g1
        */
       group_id?: string | null;
       /**
-       * @description Every visible collection in the scope, exactly once, in the new order
+       * @description Each of the acting profile's own collections, exactly once, in the new order; another profile's collection is a validation failure
        * @example [
        *       "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
        *     ]
@@ -20267,6 +21133,23 @@ export interface components {
       items: components["schemas"]["PlaybackSubtitleFont"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+    };
+    CollectionScheduleTimeZone: {
+      /**
+       * @description Current zone abbreviation as the node's time zone database reports it; some zones report a numeric form such as -03
+       * @example CDT
+       */
+      abbreviation: string;
+      /**
+       * @description IANA zone name, from the node's TZ environment variable or UTC when TZ is empty or names no known zone; omitted when the node uses its system default zone or a TZ file path
+       * @example America/Chicago
+       */
+      name?: string;
+      /**
+       * @description Current offset from UTC, daylight saving time included
+       * @example -05:00
+       */
+      utc_offset: string;
     };
     CollectionSortPreference: {
       /**
@@ -20339,10 +21222,24 @@ export interface components {
       description: string;
       id: string;
       template_ids: string[];
+      /** @description The bundle's templates, in template_ids order. */
+      templates: components["schemas"]["CollectionTemplateSummary"][];
       title: string;
     };
     CollectionTemplateCatalog: {
       categories: components["schemas"]["CategoryGroup"][];
+    };
+    CollectionTemplateSummary: {
+      /** @description Collections created from this template are pinned first on their shelf. */
+      featured: boolean;
+      id: string;
+      media_kind: string;
+      /** @description Applying the template creates an empty collection that cannot sync until an administrator sets its source. */
+      needs_setup: boolean;
+      /** @description Server-relative path of the template's poster image. */
+      poster_path?: string;
+      source: string;
+      title: string;
     };
     CollectionUserLibrary: {
       /** @description The page's items; empty, never null */
@@ -20481,6 +21378,11 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       next_sync_at?: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived; empty when none */
       poster_url: string;
@@ -21022,11 +21924,13 @@ export interface components {
       monitoring_modes: string[];
       ordered_status: boolean;
       preparation_progress: boolean;
+      prepare_again: boolean;
       proxy_delivery: boolean;
       quality_options: components["schemas"]["DownloadQualityOption"][];
       quality_presets: string[];
       /** @description Opaque revision of this document */
       revision: string;
+      revoked_removes_local: boolean;
       season_download: boolean;
       series_monitoring: boolean;
       /**
@@ -22857,6 +23761,11 @@ export interface components {
        * @example 12
        */
       item_count: number;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived; empty when none */
       poster_url: string;
@@ -23675,10 +24584,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -25000,15 +25912,15 @@ export interface components {
     };
     PersonalCollection: {
       /**
-       * @description Profiles a shared collection is limited to; empty means every profile on the account
-       * @example []
-       */
-      allowed_profile_ids: string[];
-      /**
        * @description manual, smart, or an import source (mdblist, tmdb, trakt)
        * @example manual
        */
       collection_type: string;
+      /**
+       * @description Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access
+       * @example true
+       */
+      contains?: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -25025,7 +25937,7 @@ export interface components {
       /** @description Display filter fragment; absent when none */
       display_query_definition?: unknown;
       /**
-       * @description null when ungrouped
+       * @description Always null: personal collection groups are no longer supported
        * @example g1
        */
       group_id: string | null;
@@ -25036,7 +25948,10 @@ export interface components {
       id: string;
       /** @example false */
       include_in_server_collections: boolean;
-      /** @example false */
+      /**
+       * @description Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does
+       * @example false
+       */
       is_shared: boolean;
       /**
        * Format: int64
@@ -25064,6 +25979,11 @@ export interface components {
        * @example 2026-01-02T03:04:05.678Z
        */
       next_sync_at: string | null;
+      /**
+       * @description poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       /** @example  */
       poster_thumbhash: string;
       /**
@@ -25082,6 +26002,7 @@ export interface components {
       sort_config: unknown;
       /**
        * Format: int64
+       * @description Position in its creator's own order of collections
        * @example 0
        */
       sort_order: number;
@@ -25092,6 +26013,12 @@ export interface components {
        * @example
        */
       source_url: string;
+      /**
+       * @description The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces
+       * @example
+       * @enum {string}
+       */
+      sync_cadence: "" | "daily" | "weekly" | "monthly" | "custom";
       /**
        * @description Empty when the collection is not synced
        * @example
@@ -25109,7 +26036,7 @@ export interface components {
       position: number;
     };
     PersonalCollectionCollection: {
-      /** @description The account's collection groups in sort order; empty, never null */
+      /** @description Always empty: personal collection groups are no longer supported */
       groups: components["schemas"]["CollectionGroup"][];
       /** @description The page's items; empty, never null */
       items: components["schemas"]["PersonalCollection"][];
@@ -25118,21 +26045,24 @@ export interface components {
     };
     PersonalCollectionCreate: {
       /**
-       * @description Profiles a shared collection is limited to
-       * @example []
-       */
-      allowed_profile_ids?: string[];
-      /**
        * @description Defaults to manual
        * @example manual
        * @enum {string}
        */
       collection_type?: "manual" | "smart";
+      /**
+       * @description Empty when omitted. Send only when getCollectionCapabilities reports create_description; otherwise the request fails
+       * @example For wet afternoons
+       */
+      description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
       /** @example false */
       include_in_server_collections?: boolean;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /** @example Rainy days */
       name: string;
@@ -25189,6 +26119,8 @@ export interface components {
        * @example 1
        */
       content_id: string;
+      /** @description Card-size poster URL; omitted when the item has none */
+      poster_url?: string;
       title: string;
       type: string;
     };
@@ -25201,15 +26133,15 @@ export interface components {
       total: number;
     };
     PersonalCollectionUpdate: {
-      allowed_profile_ids?: string[];
       description?: string;
       display_query_definition?: unknown;
       /**
-       * @description Null removes the group; omitted leaves it unchanged
+       * @description Omit: personal collection groups are no longer supported, and setting it answers capability_unsupported
        * @example 1
        */
       group_id?: string | null;
       include_in_server_collections?: boolean;
+      /** @description Show the collection to every profile on the login */
       is_shared?: boolean;
       library_ids?: string[];
       /** Format: int64 */
@@ -25219,6 +26151,12 @@ export interface components {
       query_definition?: unknown;
       sort_config?: unknown;
       source_url?: string;
+      /**
+       * @description A synced list's cadence; empty stops scheduled syncs. Cron expressions are refused. Accepted when getCollectionCapabilities reports sync_schedule_editable
+       * @example weekly
+       * @enum {string}
+       */
+      sync_schedule?: "" | "daily" | "weekly" | "monthly";
     };
     PersonCollection: {
       /** @description The page's items; empty, never null */
@@ -26472,8 +27410,9 @@ export interface components {
     };
     ProfileSectionFlags: {
       /**
-       * @description Whether non-admin profiles may build sections from admin-only recipes
-       * @example false
+       * @deprecated
+       * @description Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it.
+       * @example true
        */
       allow_profile_custom_sections: boolean;
     };
@@ -26487,6 +27426,11 @@ export interface components {
        * @example true
        */
       customized: boolean;
+      /**
+       * @description The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built
+       * @example Continue Watching
+       */
+      default_title: string;
       /** @example false */
       featured: boolean;
       /**
@@ -26516,7 +27460,10 @@ export interface components {
        * @example continue_watching
        */
       section_type: string;
-      /** @example Continue Watching */
+      /**
+       * @description The title this profile sees: its own title override, or the administrator's title
+       * @example Continue Watching
+       */
       title: string;
     };
     ProfileSectionSettingCollection: {
@@ -26982,7 +27929,10 @@ export interface components {
       recipes: components["schemas"]["RecipeDefinition"][];
     };
     RecipeDefinition: {
-      /** @example false */
+      /**
+       * @description Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has
+       * @example false
+       */
       admin_only: boolean;
       /** @example true */
       avoid_duplicates: boolean;
@@ -29061,10 +30011,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29137,10 +30090,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29246,10 +30202,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29368,6 +30327,11 @@ export interface components {
       item_count: number;
       /** @example Rainy days */
       name: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -39891,6 +40855,117 @@ export interface operations {
       };
     };
   };
+  listAdminCollectionSections: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminCollectionSection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   syncAdminCollection: {
     parameters: {
       query?: never;
@@ -42911,6 +43986,237 @@ export interface operations {
       };
     };
   };
+  listAdminDownloadDevices: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        platform?: string;
+        /** @description Account, profile or device name */
+        q?: string;
+        /** @description last_seen: longest unseen first. size: most bytes on the device first. */
+        sort?: "last_seen" | "size";
+        /** @description Only devices not seen within stale_device_days */
+        stale?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminDownloadDevice"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminDownloadEntries: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        device_id?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        profile_id?: string;
+        status?: string;
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminDownloadEntry"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminDownloadPreparations: {
     parameters: {
       query?: {
@@ -43518,6 +44824,974 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  revokeAdminDownloads: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminDownloadRevokeInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadRevokeOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDownloadStorage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadStorage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDownloadStorageCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadStorageCapabilitiesOutputBody"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminDownloadStorageEvents: {
+    parameters: {
+      query?: {
+        cursor?: string;
+        /** @description Only the last N days; 0 for all kept history (90 days) */
+        days?: number;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        location?: string;
+        /** @description Only this reason */
+        reason?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminDownloadStorageEvent"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminDownloadStorageFiles: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Only files of this format */
+        format?: "remux" | "transcode" | "";
+        /** @description Only files from this library */
+        library_id?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Only files at this location */
+        location?: string;
+        /** @description Title search */
+        q?: string;
+        /** @description size: largest first. last_used: least recently used first. created: newest first. */
+        sort?: "size" | "last_used" | "created";
+        /** @description Only files in this state; ready files by default */
+        state?: "in_use" | "cached" | "expired" | "";
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminDownloadStorageFile"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminDownloadStorageFiles: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminDownloadStorageDeleteInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadStorageDeleteOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  cleanUpAdminDownloadStorageLocation: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description server, or node:<id> */
+        location: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadStorageCleanupOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminDownloadStorageUntrackedFiles: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description server, or node:<id> */
+        location: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadStorageUntrackedOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -52816,6 +55090,8 @@ export interface operations {
   listAdminAuditLogs: {
     parameters: {
       query?: {
+        action?: string;
+        actor_user_id?: string;
         client_ip?: string;
         cursor?: string;
         from?: string;
@@ -52827,6 +55103,8 @@ export interface operations {
         request_id?: string;
         session_id?: string;
         status_code?: string;
+        target_id?: string;
+        target_type?: string;
         to?: string;
         user_id?: string;
       };
@@ -52936,6 +55214,10 @@ export interface operations {
   connectAdminLogsSocket: {
     parameters: {
       query: {
+        /** @description audit: domain action filter. */
+        action?: string;
+        /** @description audit: acting account, including an impersonator. */
+        actor_user_id?: string;
         /** @description audit: client address or prefix filter. */
         client_ip?: string;
         /** @description app: component filter. */
@@ -52966,6 +55248,10 @@ export interface operations {
         status_code?: number;
         /** @description Which log stream to snapshot and follow. */
         stream: "app" | "audit";
+        /** @description audit: affected entity identifier. */
+        target_id?: string;
+        /** @description audit: affected entity type. */
+        target_type?: string;
         /** @description Inclusive upper time bound. */
         to?: string;
         /** @description Account filter. */
@@ -71599,300 +73885,6 @@ export interface operations {
       };
     };
   };
-  getAdminSectionSettings: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
-        "If-Match"?: string;
-        "If-None-Match"?: string;
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProfileSectionFlags"];
-        };
-      };
-      /** @description The representation named by If-None-Match is current; no body. */
-      304: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  updateAdminSectionSettings: {
-    parameters: {
-      query?: never;
-      header: {
-        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
-        "If-Match": string;
-        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
-        "If-None-Match"?: string;
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ProfileSectionFlags"];
-      };
-    };
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProfileSectionFlags"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Timeout */
-      408: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Entity Too Large */
-      413: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unsupported Media Type */
-      415: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Required */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
   getAdminSensitiveSettingsStatus: {
     parameters: {
       query?: never;
@@ -84877,6 +86869,8 @@ export interface operations {
         collection_id?: string;
         /** @description Opaque identifier */
         library_id?: string;
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
         /** @description Opaque identifier */
         person_id?: string;
         scope?: "home" | "library";
@@ -85016,11 +87010,13 @@ export interface operations {
           | "series";
         /** @description Opaque identifier */
         library_id?: string;
-        /** @description Most matches to return; default 20, maximum 100 */
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
+        /** @description Most values to return in matches and in values; default 20, maximum 100 */
         limit?: number;
         /** @description Opaque identifier */
         person_id?: string;
-        /** @description Case-insensitive prefix */
+        /** @description Case-insensitive search text; see matches and values for how each answers it */
         q?: string;
         scope?: "home" | "library";
         section_id?: string;
@@ -86298,7 +88294,7 @@ export interface operations {
           | "audiobook"
           | "ebook"
           | "manga";
-        /** @description Name prefix or fragment; empty lists the first people */
+        /** @description Name to match: each word must start a word of the name, case-insensitively, and only the first eight distinct words count; empty lists the first people */
         q?: string;
       };
       header: {
@@ -87484,7 +89480,10 @@ export interface operations {
   };
   listCollections: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item */
+        contains_item?: string;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -87708,6 +89707,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -88117,6 +90125,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89395,6 +91412,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -89500,6 +91526,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89631,6 +91666,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89804,6 +91848,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -89904,6 +91957,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -90067,6 +92129,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -90855,6 +92926,7 @@ export interface operations {
   getCollectionOrder: {
     parameters: {
       query?: {
+        /** @description Omit: personal collection groups are no longer supported, and any value is a validation failure */
         group_id?: string;
       };
       header: {
@@ -95789,6 +97861,133 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  prepareDownloadAgain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        "X-Silo-Device-Id": string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DownloadEntry"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -112662,6 +114861,12 @@ export interface operations {
         "X-Silo-Client-Channel"?: string;
         /** @description Marketing version paired with X-Silo-Client */
         "X-Silo-Client-Version"?: string;
+        /** @description The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters) */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional display name recorded on the device registry (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the device registry (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
       };
       path?: never;
       cookie?: never;

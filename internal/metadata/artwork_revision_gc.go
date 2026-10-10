@@ -20,10 +20,10 @@ import (
 const (
 	artworkRevisionGCBatchSize = 10000
 	artworkRevisionGCLease     = 15 * time.Minute
-	// artworkRevisionDormantRecheck bounds how stale a parked (referenced)
-	// revision may get before the sweep re-verifies it. Displacement triggers
-	// are the fast path; the sweep guarantees a reference that disappears
-	// through an untriggered surface still becomes collectible eventually.
+	// artworkRevisionDormantRecheck is how often the sweep starts another pass
+	// over the parked (referenced) revisions. Displacement triggers are the fast
+	// path; the sweep guarantees a reference that disappears through an
+	// untriggered surface still becomes collectible eventually.
 	artworkRevisionDormantRecheck = 24 * time.Hour
 )
 
@@ -457,16 +457,38 @@ func referencedArtworkPaths(ctx context.Context, q interface {
 }
 
 // sweepDormant re-verifies a bounded batch of parked revisions whose last
-// check is older than the recheck interval, re-arming any that lost every
-// reference through a surface without a displacement trigger.
+// change is older than the recheck interval, re-arming any that lost every
+// reference through a surface without a displacement trigger. A persisted
+// keyset cursor walks the parked rows in id order, so a still referenced row
+// is read once per cycle but never rewritten. A new cycle starts at most once
+// per recheck interval and covers only rows that last changed before it
+// started, so rows that keep maturing above the cursor cannot hold it open.
 func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limit int) (checked, requeued int, err error) {
+	var afterID int64
+	var cycleDue bool
+	var cycleStartedAt *time.Time
+	err = g.pool.QueryRow(ctx, `
+		SELECT after_id, cycle_started_at <= NOW() - ($1 * interval '1 second'),
+			CASE WHEN after_id > 0 THEN cycle_started_at END
+		FROM artwork_revision_gc_dormant_cursor`,
+		int64(artworkRevisionDormantRecheck/time.Second)).Scan(&afterID, &cycleDue, &cycleStartedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		afterID, cycleDue, cycleStartedAt, err = 0, true, nil, nil
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("artwork revision GC: read dormant cursor: %w", err)
+	}
+	if afterID == 0 && !cycleDue {
+		return 0, 0, nil
+	}
+
 	rows, err := g.pool.Query(ctx, `
 		SELECT id, original_path
 		FROM artwork_revision_gc_candidates
-		WHERE next_attempt_at IS NULL
-		  AND updated_at < NOW() - ($2 * interval '1 second')
-		ORDER BY updated_at, id
-		LIMIT $1`, limit, int64(artworkRevisionDormantRecheck/time.Second))
+		WHERE next_attempt_at IS NULL AND id > $1
+		  AND updated_at < LEAST(NOW() - ($3 * interval '1 second'), $4::timestamptz)
+		ORDER BY id
+		LIMIT $2`, afterID, limit, int64(artworkRevisionDormantRecheck/time.Second), cycleStartedAt)
 	if err != nil {
 		return 0, 0, fmt.Errorf("artwork revision GC: list dormant revisions: %w", err)
 	}
@@ -474,6 +496,7 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 
 	ids := make(map[string][]int64)
 	var paths []string
+	lastID := afterID
 	for rows.Next() {
 		var id int64
 		var path string
@@ -484,44 +507,51 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 			paths = append(paths, path)
 		}
 		ids[path] = append(ids[path], id)
+		lastID = id
 		checked++
 	}
 	if err := rows.Err(); err != nil {
 		return 0, 0, fmt.Errorf("artwork revision GC: dormant revisions: %w", err)
 	}
-	if checked == 0 {
-		return 0, 0, nil
+
+	if checked > 0 {
+		referenced, err := g.referencedPaths(ctx, paths)
+		if err != nil {
+			return checked, 0, err
+		}
+		var requeue []int64
+		for path, pathIDs := range ids {
+			if _, ok := referenced[path]; !ok {
+				requeue = append(requeue, pathIDs...)
+			}
+		}
+		if len(requeue) > 0 {
+			if _, err := g.pool.Exec(ctx, `
+				UPDATE artwork_revision_gc_candidates
+				SET next_attempt_at = GREATEST(not_before, NOW()),
+					updated_at = NOW()
+				WHERE id = ANY($1) AND next_attempt_at IS NULL`, requeue); err != nil {
+				return checked, 0, fmt.Errorf("artwork revision GC: requeue dormant revisions: %w", err)
+			}
+			requeued = len(requeue)
+		}
 	}
 
-	referenced, err := g.referencedPaths(ctx, paths)
-	if err != nil {
-		return checked, 0, err
+	// A short batch ends the cycle. The cursor only moves from the position
+	// this sweep read, so a concurrent sweep of the same batch is harmless.
+	nextID := lastID
+	if checked < limit {
+		nextID = 0
 	}
-	var touch, requeue []int64
-	for path, pathIDs := range ids {
-		if _, ok := referenced[path]; ok {
-			touch = append(touch, pathIDs...)
-			continue
-		}
-		requeue = append(requeue, pathIDs...)
-	}
-	if len(requeue) > 0 {
-		if _, err := g.pool.Exec(ctx, `
-			UPDATE artwork_revision_gc_candidates
-			SET next_attempt_at = GREATEST(not_before, NOW()),
-				updated_at = NOW()
-			WHERE id = ANY($1) AND next_attempt_at IS NULL`, requeue); err != nil {
-			return checked, 0, fmt.Errorf("artwork revision GC: requeue dormant revisions: %w", err)
-		}
-		requeued = len(requeue)
-	}
-	if len(touch) > 0 {
-		if _, err := g.pool.Exec(ctx, `
-			UPDATE artwork_revision_gc_candidates
-			SET updated_at = NOW()
-			WHERE id = ANY($1) AND next_attempt_at IS NULL`, touch); err != nil {
-			return checked, requeued, fmt.Errorf("artwork revision GC: touch dormant revisions: %w", err)
-		}
+	if _, err := g.pool.Exec(ctx, `
+		INSERT INTO artwork_revision_gc_dormant_cursor AS c (singleton, after_id, cycle_started_at, updated_at)
+		VALUES (true, $2, NOW(), NOW())
+		ON CONFLICT (singleton) DO UPDATE SET
+			after_id = EXCLUDED.after_id,
+			cycle_started_at = CASE WHEN c.after_id = 0 THEN NOW() ELSE c.cycle_started_at END,
+			updated_at = NOW()
+		WHERE c.after_id = $1`, afterID, nextID); err != nil {
+		return checked, requeued, fmt.Errorf("artwork revision GC: advance dormant cursor: %w", err)
 	}
 	return checked, requeued, nil
 }

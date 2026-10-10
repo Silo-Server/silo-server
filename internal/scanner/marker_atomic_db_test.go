@@ -195,3 +195,97 @@ func TestMarkerMixedMutationAtomicAuditPostgres(t *testing.T) {
 		t.Fatal("identical replay changed file timestamps or appended audit rows")
 	}
 }
+
+func TestMarkerManualDeletionPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var folderID, fileID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name) VALUES ('tv','Marker deletion test') RETURNING id`).Scan(&folderID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM marker_edit_audit WHERE media_file_id IN (SELECT id FROM media_files WHERE media_folder_id=$1)`,
+			`DELETE FROM media_files WHERE media_folder_id=$1`,
+			`DELETE FROM media_folders WHERE id=$1`,
+		} {
+			if _, err := pool.Exec(context.Background(), stmt, folderID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err := pool.QueryRow(ctx, `INSERT INTO media_files (media_folder_id,file_path,duration,file_hash,file_size) VALUES ($1,$2,1000,'original',1000) RETURNING id`, folderID, fmt.Sprintf("/marker-deletion-%d.mkv", time.Now().UnixNano())).Scan(&fileID); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewFileRepository(pool)
+	read := func() *models.MediaFile {
+		t.Helper()
+		f, err := repo.GetByID(ctx, fileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	result := markers.Result{ProviderID: "provider", SourceClass: models.MarkerSourceOnline, RefreshedProviders: []string{"provider"}, Markers: []markers.Marker{
+		{Kind: markers.MarkerKindIntro, Start: 10 * time.Second, End: 30 * time.Second, Confidence: 0.9},
+		{Kind: markers.MarkerKindRecap, Start: 40 * time.Second, End: 60 * time.Second, Confidence: 0.9},
+		{Kind: markers.MarkerKindCredits, Start: 900 * time.Second, End: 950 * time.Second, Confidence: 0.9},
+	}}
+	incoming := MarkerUpdateFromPayload(markers.BuildUpdatePayload(result))
+	incoming.ExpectedFile = read()
+	if wrote, err := repo.UpsertMarkers(ctx, fileID, incoming); err != nil || !wrote {
+		t.Fatalf("seed: %v %v", wrote, err)
+	}
+	incoming.ExpectedFile = read() // A provider request began before the manual deletion.
+	if wrote, err := repo.ClearMarkers(ctx, fileID, []string{"intro", "credits"}); err != nil || !wrote {
+		t.Fatalf("clear: %v %v", wrote, err)
+	}
+	check := func() {
+		t.Helper()
+		f := read()
+		if f.IntroStart != nil || f.CreditsStart != nil || f.IntroMarkersSource == nil || *f.IntroMarkersSource != models.MarkerSourceManual || f.CreditsMarkersSource == nil || *f.CreditsMarkersSource != models.MarkerSourceManual || f.RecapStart == nil || *f.RecapStart != 40 || len(f.MarkerSegments) != 1 {
+			t.Fatalf("lost deletion intent or unrelated range: %+v", f)
+		}
+	}
+	check()
+	if wrote, err := repo.UpsertMarkers(ctx, fileID, incoming); err != nil || wrote {
+		t.Fatalf("in-flight provider resurrected markers: %v %v", wrote, err)
+	}
+	if wrote, err := repo.UpsertMarkers(ctx, fileID, MarkerUpdate{MarkersSource: models.MarkerSourceScanner, IntroStart: new(15.0), IntroEnd: new(35.0), CreditsStart: new(910.0), CreditsEnd: new(960.0)}); err != nil || wrote {
+		t.Fatalf("local detection resurrected markers: %v %v", wrote, err)
+	}
+	if wrote, err := repo.ClearMarkers(ctx, fileID, []string{"intro", "credits"}); err != nil || wrote {
+		t.Fatalf("repeated deletion must be idempotent: %v %v", wrote, err)
+	}
+	check()
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET file_hash='replacement',file_size=2000 WHERE id=$1`, fileID); err != nil {
+		t.Fatal(err)
+	}
+	repo = NewFileRepository(pool)
+	f := read()
+	if f.IntroStart != nil || f.CreditsStart != nil || f.IntroMarkersSource == nil || *f.IntroMarkersSource != models.MarkerSourceManual || f.CreditsMarkersSource == nil || *f.CreditsMarkersSource != models.MarkerSourceManual {
+		t.Fatal("replacement/reload lost manual deletion")
+	}
+	incoming.ExpectedFile = f
+	if _, err := repo.UpsertMarkers(ctx, fileID, incoming); err != nil {
+		t.Fatal(err)
+	}
+	f = read()
+	if f.IntroStart != nil || f.CreditsStart != nil || f.RecapStart == nil {
+		t.Fatal("replacement refresh resurrected deleted markers or lost unrelated recap")
+	}
+	if wrote, err := repo.UpsertMarkers(ctx, fileID, MarkerUpdate{MarkersSource: models.MarkerSourceManual, IntroStart: new(20.0), IntroEnd: new(44.0)}); err != nil || !wrote {
+		t.Fatalf("manual restoration: %v %v", wrote, err)
+	}
+	if got := read(); got.IntroStart == nil || *got.IntroStart != 20 || *got.IntroEnd != 44 {
+		t.Fatal("explicit manual restoration failed")
+	}
+}

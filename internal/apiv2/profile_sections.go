@@ -116,16 +116,17 @@ type SectionOverridesReplaceInput struct {
 // the customization screen: the admin definition with the profile's
 // overrides applied.
 type ProfileSectionSetting struct {
-	ID          string        `json:"id" example:"s-continue-watching"`
-	SectionType string        `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
-	Title       string        `json:"title" example:"Continue Watching"`
-	Featured    bool          `json:"featured" example:"false"`
-	ItemLimit   int           `json:"item_limit" example:"20"`
-	Hidden      bool          `json:"hidden" doc:"Hidden by the profile" example:"false"`
-	IsCustom    bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
-	Customized  bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
-	Position    int           `json:"position" example:"0"`
-	Config      SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
+	ID           string        `json:"id" example:"s-continue-watching"`
+	SectionType  string        `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
+	Title        string        `json:"title" doc:"The title this profile sees: its own title override, or the administrator's title" example:"Continue Watching"`
+	DefaultTitle string        `json:"default_title" doc:"The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built" example:"Continue Watching"`
+	Featured     bool          `json:"featured" example:"false"`
+	ItemLimit    int           `json:"item_limit" example:"20"`
+	Hidden       bool          `json:"hidden" doc:"Hidden by the profile" example:"false"`
+	IsCustom     bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
+	Customized   bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
+	Position     int           `json:"position" example:"0"`
+	Config       SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
 }
 
 // ProfileSectionSettingCollection is the getProfileSectionSettings envelope.
@@ -140,7 +141,7 @@ type ProfileSectionSettingCollectionOutput struct {
 
 // ProfileSectionFlags is what this server lets profiles do to their pages.
 type ProfileSectionFlags struct {
-	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Whether non-admin profiles may build sections from admin-only recipes" example:"false"`
+	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it." example:"true" deprecated:"true"`
 }
 
 // ProfileSectionFlagsOutput is the getProfileSectionFlags response.
@@ -174,9 +175,9 @@ func registerProfileSections(reg *Registry) {
 
 	replace := humaOp(http.MethodPut, Prefix+"/profile/sections", "replaceProfileSectionOverrides", "profile_sections",
 		"Replace the acting profile's section overrides for one page.")
-	// v1 refuses a profile-built section of an admin-only recipe with 403
-	// custom_disabled unless the server allows it; the status is this
-	// operation's own, not one the class implies.
+	// A profile that is not an admin adding a new section of an admin-only
+	// recipe (Editor's picks) is refused with 403 custom_disabled, as on v1;
+	// the status is this operation's own, not one the class implies.
 	replace.Errors = []int{http.StatusForbidden}
 	Register(reg, Operation{
 		Operation:      replace,
@@ -205,8 +206,7 @@ func registerProfileSections(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profile/sections/flags", "getProfileSectionFlags", "profile_sections",
 			"Get what this server lets profiles do to their pages."),
-		Class:         ClassProfileScoped,
-		ServiceBacked: true,
+		Class: ClassProfileScoped,
 	}, reg.getProfileSectionFlags)
 }
 
@@ -357,28 +357,26 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 			return nil, p
 		}
 		items = append(items, ProfileSectionSetting{
-			ID:          s.ID,
-			SectionType: string(s.SectionType),
-			Title:       s.Title,
-			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
-			Hidden:      s.Hidden,
-			IsCustom:    s.IsCustom,
-			Customized:  s.Customized,
-			Position:    s.Position,
-			Config:      config,
+			ID:           s.ID,
+			SectionType:  string(s.SectionType),
+			Title:        s.Title,
+			DefaultTitle: s.DefaultTitle,
+			Featured:     s.Featured,
+			ItemLimit:    s.ItemLimit,
+			Hidden:       s.Hidden,
+			IsCustom:     s.IsCustom,
+			Customized:   s.Customized,
+			Position:     s.Position,
+			Config:       config,
 		})
 	}
 	return &ProfileSectionSettingCollectionOutput{Body: ProfileSectionSettingCollection{Collection: NewCollection(items)}}, nil
 }
 
-// getProfileSectionFlags reads the same setting v1 GET /profile/sections/flags
-// does.
-func (reg *Registry) getProfileSectionFlags(ctx context.Context, _ *struct{}) (*ProfileSectionFlagsOutput, error) {
-	if reg.deps.SectionFlags == nil {
-		return nil, unavailable("section")
-	}
-	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: reg.deps.SectionFlags.AllowProfileCustomSections(ctx)}}, nil
+// getProfileSectionFlags answers what v1 GET /profile/sections/flags does:
+// profiles may always add rule rows, so the flag is always true.
+func (reg *Registry) getProfileSectionFlags(context.Context, *struct{}) (*ProfileSectionFlagsOutput, error) {
+	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true}}, nil
 }
 
 // sectionProblem maps the v1 decision onto problem types: a rejected recipe
@@ -389,9 +387,13 @@ func sectionProblem(err error) *Problem {
 	if !ok {
 		return serviceProblem(err)
 	}
-	if apiErr.Status == http.StatusBadRequest {
+	switch {
+	case apiErr.Status == http.StatusBadRequest:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationOverrides, Code: codeInvalid, Detail: apiErr.Message})
+	case apiErr.Code == "custom_disabled":
+		// v1 keeps the message from when a server setting decided this.
+		return NewProblem(TypePermissionDenied, "Only an admin can add an Editor's picks row.")
 	}
 	return serviceProblem(err)
 }

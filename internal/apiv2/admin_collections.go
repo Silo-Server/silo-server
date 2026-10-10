@@ -126,9 +126,13 @@ type AdminCollectionCapabilityOutputBody struct {
 	Groups  bool `json:"groups"`
 	Imports bool `json:"imports"`
 	// ImportSources lists the sources a new collection can be imported from.
-	ImportSources []string `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources a new collection can be created from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
-	Artwork       bool     `json:"artwork"`
-	ItemReorder   bool     `json:"item_reorder"`
+	ImportSources     []string                   `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources a new collection can be created from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
+	Artwork           bool                       `json:"artwork"`
+	ItemReorder       bool                       `json:"item_reorder"`
+	TemplateSummaries bool                       `json:"template_summaries" doc:"listAdminCollectionTemplateBundles returns each bundle's templates" example:"true"`
+	MDBListSearch     bool                       `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
+	ScheduleTimeZone  CollectionScheduleTimeZone `json:"schedule_time_zone"`
+	SectionReferences bool                       `json:"section_references" doc:"listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count" example:"true"`
 }
 
 func adminCollectionOperation(method, path, id, summary string, guarded bool) Operation {
@@ -158,20 +162,26 @@ func registerAdminCollections(reg *Registry) {
 		svc, ok := reg.deps.AdminCollections.(interface {
 			AdminCollectionFeatures(context.Context) userstore.CollectionFeatures
 		})
+		out := &AdminCollectionCapabilityOutput{}
+		out.Body.MDBListSearch = reg.mdblistSearch()
+		out.Body.ScheduleTimeZone = reg.scheduleTimeZone()
+		out.Body.SectionReferences = reg.adminCollectionSections() != nil
 		if !ok {
-			return &AdminCollectionCapabilityOutput{Body: AdminCollectionCapabilityOutputBody{Capability: Capability{State: StateNotConfigured}}}, nil
+			out.Body.State = StateNotConfigured
+			return out, nil
 		}
 		v := svc.AdminCollectionFeatures(ctx)
-		out := &AdminCollectionCapabilityOutput{}
 		out.Body.Groups = v.Groups
 		out.Body.Imports = v.Imports
 		out.Body.ImportSources = collectionImportSources(v.Imports)
 		out.Body.Artwork = v.Artwork
 		out.Body.ItemReorder = v.ItemReorder
+		out.Body.TemplateSummaries = true
 		return out, nil
 	})
 	registerAdminCollectionGroups(reg)
 	registerAdminCollectionExtras(reg)
+	registerAdminCollectionSections(reg)
 }
 func adminGroupOf(g handlers.AdminCollectionGroupView) AdminCollectionGroup {
 	return AdminCollectionGroup{ID: ID(g.ID), LibraryID: IDFromInt(int64(g.LibraryID)), Name: g.Name, Slug: g.Slug, Kind: g.Kind, DefaultSortMode: g.DefaultSortMode, SortOrder: g.SortOrder}
@@ -197,7 +207,7 @@ func adminCollectionError(err error) *Problem {
 		return NewProblem(TypeValidationFailed, "ordered_ids must include every collection in the target group.")
 	}
 	switch {
-	case errors.Is(err, catalogsvc.ErrLibraryCollectionSyncModeUnsupported):
+	case errors.Is(err, catalogsvc.ErrLibraryCollectionSyncModeUnsupported), errors.Is(err, catalogsvc.ErrLibraryCollectionSyncUnsupported):
 		return NewProblem(TypeValidationFailed, "This collection has no import source to synchronize.")
 	case errors.Is(err, catalogsvc.ErrLibraryCollectionNotManual):
 		return NewProblem(TypeConflict, "Only manual collections support manual items.")
@@ -246,6 +256,9 @@ func (reg *Registry) listAdminCollections(ctx context.Context, in *AdminCollecti
 	groups := make([]AdminCollectionGroup, 0, len(v.Groups))
 	for _, c := range v.Collections {
 		items = append(items, adminCollectionOf(c))
+	}
+	if e := reg.withAdminCollectionRowCounts(ctx, items); e != nil {
+		return nil, adminCollectionError(e)
 	}
 	for _, g := range v.Groups {
 		groups = append(groups, adminGroupOf(g))

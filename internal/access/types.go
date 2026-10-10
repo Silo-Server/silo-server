@@ -120,6 +120,11 @@ type ResolveInput struct {
 	ProfileID           string
 	ProfileToken        string
 	SkipPINVerification bool
+	// ContentAccessOnly resolves what the profile may access, leaving out
+	// the libraries it hides from its own browsing (ui.disabled_library_ids).
+	// Reading another profile's shared personal collection uses it: the
+	// owner's browsing preference does not limit what the collection shows.
+	ContentAccessOnly bool
 }
 
 // ProfileTokenClaims are the claims embedded in a verified profile token.

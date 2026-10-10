@@ -117,7 +117,7 @@ func TestLeadingPictureDropScopeIsHEVCOnly(t *testing.T) {
 
 // Pin the exact argv token: Quick104 validated this string against real
 // open-GOP HEVC media, including the escaped comma when it is chained with
-// dovi_rpu=strip=1.
+// DV7ToHDR10BitstreamFilter.
 func TestResumeLeadingPictureDropFilterString(t *testing.T) {
 	if ResumeLeadingPictureDropBitstreamFilter != `noise=drop=lt(pts\,startpts)*not(key)` {
 		t.Fatalf("filter = %q", ResumeLeadingPictureDropBitstreamFilter)

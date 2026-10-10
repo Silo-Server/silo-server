@@ -1,7 +1,7 @@
 name: Feature request
 description: Suggest an improvement or something Silo doesn't do yet
 title: "[feature] "
-labels: ["enhancement"]
+labels: ["enhancement", "feature-request"]
 body:
   - type: markdown
     attributes:

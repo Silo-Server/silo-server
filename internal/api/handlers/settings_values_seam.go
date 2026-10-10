@@ -255,8 +255,9 @@ func (h *SettingValuesHandler) mayActFor(
 // unknown device: a 403 would confirm the id exists somewhere.
 //
 // The caller's own header device is deliberately not checked. Registration is
-// lazy — a device's first write is what registers it — so requiring a row there
-// would reject every new device's first setting.
+// lazy — a device's first effective read, playback start or write is what
+// registers it — so requiring a row there would reject a new device's first
+// request.
 func (h *SettingValuesHandler) deviceBelongs(
 	ctx context.Context, store userstore.UserStore, profileID, deviceID string,
 ) *APIError {
@@ -543,7 +544,7 @@ func (h *SettingValuesHandler) writeSettingValue(
 		// behalf — is not. Registering here would invent a device nobody holds:
 		// the parent's browser filed under the child's profile.
 		if identity.DeviceID == device.DeviceID && identity.ProfileID == acting {
-			h.registerWritingDevice(ctx, store, identity.ProfileID, device)
+			h.DeviceSightings.Record(ctx, store, identity.ProfileID, device)
 		}
 	}
 	publishUserSettingsEvent(ctx, h.EventsHub,
@@ -826,6 +827,14 @@ func (h *SettingValuesHandler) resolveEffective(
 		return nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal,
 			Message: "Failed to resolve settings", cause: err}
 	}
+	// A client reads its effective settings on launch and on every settings
+	// screen, so this read is what registers a device that never writes an
+	// override. Only for the caller's own device on the caller's own profile:
+	// a read that names another device or profile is a household parent
+	// inspecting it, not evidence the profile is holding the device.
+	if rc.ProfileID == strings.TrimSpace(q.ActiveProfileID) && rc.DeviceID == q.Device.DeviceID {
+		h.DeviceSightings.Record(ctx, store, rc.ProfileID, q.Device)
+	}
 	return h.effectiveResponses(ctx, resolved), nil
 }
 
@@ -909,6 +918,9 @@ func (h *SettingValuesHandler) resolveEffectiveContexts(
 		return nil, &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal,
 			Message: "Failed to resolve settings", cause: err}
 	}
+	// The batched read always resolves the caller's own profile and declared
+	// device, so it registers that device as the single-context read does.
+	h.DeviceSightings.Record(ctx, store, profileID, q.Device)
 	allResolved := make([]settingsresolve.Effective, 0)
 	for _, values := range resolved {
 		allResolved = append(allResolved, values...)

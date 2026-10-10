@@ -16,7 +16,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -41,10 +40,10 @@ type SettingValuesHandler struct {
 	libraryLookup  libraryLookup
 	languageSource languageSuggestionSource
 
-	// deviceSeen throttles device-registry refreshes, one upsert per
-	// deviceSeenThrottle window per (profile, device) — the same shape the
-	// legacy SettingsHandler uses.
-	deviceSeen *cache.TTLCache[struct{}]
+	// DeviceSightings registers the caller's own device on device-scope
+	// writes and effective reads; the router shares one instance with the
+	// legacy SettingsHandler and playback so they throttle together.
+	DeviceSightings *DeviceSightings
 
 	// EventsHub, when set, receives a user_settings.changed event after every
 	// successful write or delete. Nil (as in tests) simply skips publishing.
@@ -89,10 +88,10 @@ func NewSettingValuesHandler(
 	contract *settingscontract.Manifest,
 ) *SettingValuesHandler {
 	return &SettingValuesHandler{
-		storeProvider: provider,
-		contract:      contract,
-		resolver:      settingsresolve.New(contract),
-		deviceSeen:    cache.NewTTLCache[struct{}](),
+		storeProvider:   provider,
+		contract:        contract,
+		resolver:        settingsresolve.New(contract),
+		DeviceSightings: NewDeviceSightings(),
 	}
 }
 

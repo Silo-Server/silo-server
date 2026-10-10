@@ -151,3 +151,32 @@ func TestCachedEditorialCandidatesCoalescesConcurrentMisses(t *testing.T) {
 		t.Fatalf("loader calls = %d, want 1", calls)
 	}
 }
+
+func TestCachedEditorialCandidatesDoesNotCacheAnEmptySet(t *testing.T) {
+	t.Parallel()
+
+	f := &Fetcher{
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+	}
+	calls := 0
+	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil
+		}
+		return []string{"Drama"}, nil
+	}
+
+	for range 2 {
+		if _, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader); err != nil {
+			t.Fatalf("cachedEditorialCandidates: %v", err)
+		}
+	}
+	got, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader)
+	if err != nil {
+		t.Fatalf("cachedEditorialCandidates: %v", err)
+	}
+	if calls != 2 || len(got) != 1 || got[0] != "Drama" {
+		t.Fatalf("calls = %d, candidates = %v; want the empty set reloaded once, then the cached genre", calls, got)
+	}
+}

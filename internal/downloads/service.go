@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1245,7 +1246,10 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 
 	if err := s.serveDownloadBytes(ctx, w, r, dl, userID, filter); err != nil {
 		if dl.Format == FormatOriginal {
-			if updateErr := s.repo.UpdateStatus(ctx, dl.ID, StatusFailed, 0, nil); updateErr != nil {
+			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			updateErr := s.repo.TransitionStatus(failureCtx, dl.ID, StatusDownloading, StatusFailed, 0, nil)
+			cancel()
+			if updateErr != nil && !errors.Is(updateErr, ErrStatusConflict) {
 				slog.ErrorContext(ctx, "failed to mark download as failed", "component", "downloads", "download_id", dl.ID, "error", updateErr)
 			}
 		}
@@ -1517,8 +1521,78 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 		reader = s.bandwidth.ThrottledReader(ctx, f, userID)
 	}
 
-	http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
+	observed := &observedDownloadReader{ReadSeeker: reader}
+	response := &observedDownloadResponse{ResponseWriter: w}
+	http.ServeContent(response, r, stat.Name(), stat.ModTime(), observed)
+	if transferErr := errors.Join(observed.readError(), response.err); transferErr != nil {
+		return fmt.Errorf("%w: serving download: %w", ErrResponseCommitted, transferErr)
+	}
+	if r.Method != http.MethodHead && (response.status == http.StatusOK || response.status == http.StatusPartialContent) && response.expected >= 0 && response.written < response.expected {
+		return fmt.Errorf("%w: serving download: %w", ErrResponseCommitted, io.ErrUnexpectedEOF)
+	}
 	return nil
+}
+
+// ServeContent does not return its copy error. Retain it so an interrupted
+// transfer cannot be reported as completed or have a JSON error appended.
+type observedDownloadReader struct {
+	io.ReadSeeker
+	mu  sync.Mutex
+	err error
+}
+
+func (r *observedDownloadReader) Read(p []byte) (int, error) {
+	n, err := r.ReadSeeker.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.mu.Lock()
+		r.err = err
+		r.mu.Unlock()
+	}
+	return n, err
+}
+
+func (r *observedDownloadReader) readError() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.err
+}
+
+// Retain write failures and the declared byte count: ServeContent hides both
+// copy failures and an early EOF. HEAD and non-body responses do not require
+// the file's Content-Length to be written.
+type observedDownloadResponse struct {
+	http.ResponseWriter
+	status   int
+	expected int64
+	written  int64
+	err      error
+}
+
+func (w *observedDownloadResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *observedDownloadResponse) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.expected = -1
+	if length, err := strconv.ParseInt(w.Header().Get("Content-Length"), 10, 64); err == nil {
+		w.expected = length
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *observedDownloadResponse) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(p)
+	w.written += int64(n)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+	}
+	return n, err
 }
 
 func attachmentDisposition(path string) string {

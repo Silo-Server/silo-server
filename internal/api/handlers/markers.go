@@ -60,6 +60,7 @@ type MarkerAuditLister interface {
 // (see maybeContribute) so corrected markers reach enabled providers.
 type MarkersHandler struct {
 	Files            MarkerFileResolver
+	Libraries        libraryLookup
 	Writer           ManualMarkerWriter
 	Contributor      MarkerContributor
 	Contributions    MarkerContributionLister
@@ -395,6 +396,15 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 	segment := chi.URLParam(r, "segment")
 	if !isMarkerSegment(segment) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown marker segment")
+		return
+	}
+	if err := h.ensureMarkerEditable(r.Context(), file); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check marker library")
+		}
 		return
 	}
 	if _, err := h.Writer.ClearMarkers(h.auditContext(r), file.ID, []string{segment}); err != nil {

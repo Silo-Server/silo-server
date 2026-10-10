@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Profile, User } from "@/api/types";
 import type { useAuth } from "@/hooks/useAuth";
+import { profilePeekKey } from "@/lib/homeRows/peek";
+import type { HomeRow } from "@/lib/homeRows/types";
 
 type AuthState = ReturnType<typeof useAuth>;
 
@@ -47,7 +49,7 @@ function renderManager() {
       </QueryClientProvider>,
     );
   };
-  return { clear, signIn };
+  return { queryClient, clear, signIn };
 }
 
 describe("QueryCacheManager", () => {
@@ -73,5 +75,17 @@ describe("QueryCacheManager", () => {
     signIn({ user: makeUser(2), profile: null });
 
     expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("drops the last profile's Home rows poster peeks on a profile switch", () => {
+    const { queryClient, signIn } = renderManager();
+    signIn({ user: makeUser(1), profile: makeProfile("p-1") });
+    const row = { id: "r1", sectionType: "continue_watching", config: {}, itemLimit: 20 };
+    const key = profilePeekKey({ kind: "home" }, row as HomeRow);
+    queryClient.setQueryData(key, [{ id: "movie-1", title: "Heat" }]);
+
+    signIn({ user: makeUser(1), profile: makeProfile("p-2") });
+
+    expect(queryClient.getQueryData(key)).toBeUndefined();
   });
 });

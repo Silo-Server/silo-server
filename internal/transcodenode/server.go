@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -209,6 +210,10 @@ type HealthResponse struct {
 	// the fleet is on the same revision as the server. Diagnostic only, like
 	// `server_version` on the API's own system route; nothing routes on it.
 	Build buildinfo.Info `json:"build"`
+	// Artifacts is the last measurement of this node's prepared-download
+	// directory, path removed for the same reason as the disk entries. Absent
+	// until the first measurement finishes.
+	Artifacts *downloadstorage.Usage `json:"artifacts,omitempty"`
 }
 
 // sessionIdleTTL is how long a job may go without a manifest or segment
@@ -259,17 +264,22 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher                   *nodeconfig.Watcher
-	streamDeny                *playback.StreamDeny
-	nodeRowID                 func() (int, bool)
-	registeredNodeURL         func() (string, bool)
-	tracker                   sessionTracker
-	ffmpegSink                playback.FFmpegLogSink
-	prepareProgress           prepareProgressRegistry
-	inputPaths                InputPathAuthorizer
-	themeInputs               ThemeInputApprover
-	transcodeDir              string
-	artifactRoot              string
+	watcher           *nodeconfig.Watcher
+	streamDeny        *playback.StreamDeny
+	nodeRowID         func() (int, bool)
+	registeredNodeURL func() (string, bool)
+	tracker           sessionTracker
+	ffmpegSink        playback.FFmpegLogSink
+	prepareProgress   prepareProgressRegistry
+	inputPaths        InputPathAuthorizer
+	themeInputs       ThemeInputApprover
+	transcodeDir      string
+	artifactRoot      string
+	// artifactProber measures artifactRoot in the background for health,
+	// status, and the artifact listing.
+	artifactProber *downloadstorage.Prober
+	// artifactLister lists artifactRoot for the API, one read at a time.
+	artifactLister            downloadstorage.DirGuard
 	telemetry                 *streamtelemetry.Registry
 	sessions                  map[string]*playback.TranscodeSession
 	progressiveRemuxes        map[string]progressiveRemuxRequest
@@ -511,6 +521,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		tracker:                   trackerImpl,
 		transcodeDir:              transcodeDir,
 		artifactRoot:              artifactRoot,
+		artifactProber:            downloadstorage.NewProber(0),
 		sessions:                  make(map[string]*playback.TranscodeSession),
 		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
@@ -906,6 +917,7 @@ func (s *Server) router() chi.Router {
 		r.Head("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodHead, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Get("/downloads/artifacts/{artifact_id}", observeNode(s.telemetry, http.MethodGet, "/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact))
 		r.Delete("/downloads/artifacts/{artifact_id}", s.handleDeleteDownloadArtifact)
+		r.Get("/downloads/artifacts", s.handleListDownloadArtifacts)
 		r.Post("/transcode/start", s.handleStart)
 		r.Delete("/transcode/{session_id}", s.handleStop)
 		r.Head("/remux/{session_id}", observeNode(s.telemetry, http.MethodHead, "/remux/{session_id}", s.handleRemux))
@@ -1257,6 +1269,11 @@ func (s *Server) trackDownloadPrepare(ctx context.Context, info nodesessions.Ses
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	snapshot := s.metrics.Snapshot().RedactPaths()
+	var artifacts *downloadstorage.Usage
+	if usage, ok := s.artifactUsage(); ok {
+		redacted := usage.RedactPath()
+		artifacts = &redacted
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
 		Status:           "ok",
@@ -1267,7 +1284,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Attribution:      snapshot.Attribution,
 		SampledAt:        snapshot.SampledAt,
 		Build:            buildinfo.Current(),
+		Artifacts:        artifacts,
 	})
+}
+
+// artifactUsage answers from the background measurement of the artifact
+// directory and starts a new one when the last is due. It never measures on
+// the caller's goroutine: health must answer at the same speed whether or not
+// the artifact volume is a hung network mount.
+func (s *Server) artifactUsage() (downloadstorage.Usage, bool) {
+	if s == nil || s.artifactProber == nil || s.artifactRoot == "" {
+		return downloadstorage.Usage{}, false
+	}
+	return s.artifactProber.Current(s.artifactRoot, s.transcodeDir)
 }
 
 // StartMetricsSampler begins background resource sampling until ctx is
@@ -2971,6 +3000,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	snapshot := s.metrics.Snapshot()
+	var artifacts *downloadstorage.Usage
+	if usage, ok := s.artifactUsage(); ok {
+		artifacts = &usage
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(statusResponse{
 		Status:      "ok",
@@ -2980,5 +3013,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		GPU:         snapshot.GPU,
 		Attribution: snapshot.Attribution,
 		SampledAt:   snapshot.SampledAt,
+		Artifacts:   artifacts,
 	})
 }

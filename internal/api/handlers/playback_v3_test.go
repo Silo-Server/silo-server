@@ -2038,7 +2038,7 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "2", Available: true},
 		{Name: "video_to_h264", RecipeVersion: "2", Available: true},
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
+		{Name: "server_dv7_to_hdr10", RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 	}))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -6586,7 +6586,7 @@ func capableProxyStubV3(t *testing.T) *httptest.Server {
 			TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxRelayV1},
 			Transformations: []playback.TransformationV3{
 				{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-				{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+				{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3},
 			},
 		})
 	}))

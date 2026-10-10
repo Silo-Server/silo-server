@@ -117,7 +117,6 @@ type Dependencies struct {
 	WatchTogetherPicker              WatchTogetherPickerService
 	WatchTogetherCapability          WatchTogetherCapabilityService
 	WatchTogetherSuggestions         WatchTogetherSuggestionService
-	AdminSectionSettingsWrite        AdminSectionSettingsWriteService
 	AdminDashboardStats              AdminDashboardStatsService
 	AdminHardwareAcceleration        AdminHardwareAccelerationService
 	AdminDashboardLayout             AdminDashboardLayoutService
@@ -128,109 +127,113 @@ type Dependencies struct {
 	AdminPlaybackSessions            AdminPlaybackSessionService
 	AdminDownloadPreparations        AdminDownloadPreparationService
 	AdminDownloadPreparationControls AdminDownloadPreparationControlService
-	AdminNodeSessions                AdminNodeSessionService
-	AdminPlaybackCommands            AdminPlaybackCommandService
-	AdminPlaybackTerminate           AdminPlaybackTerminateService
-	AdminAutoscanConnections         AdminAutoscanConnectionsService
-	AdminAutoscanInspection          AdminAutoscanInspectionService
-	AdminAutoscanSources             AdminAutoscanSourcesService
-	AutoscanDelivery                 AutoscanDeliveryService
-	Onboarding                       OnboardingService
-	DownloadCreation                 DownloadCreationService
-	AdminJellyfinCompatStatus        AdminJellyfinCompatStatusService
-	AdminSettingRead                 AdminSettingReadService
-	AdminJellyfinCompatWeb           AdminJellyfinCompatWebService
-	AdminRateLimitsWrite             AdminRateLimitWriteService
-	AdminRateLimits                  AdminRateLimitReadService
-	DownloadSubscriptionMutations    DownloadSubscriptionMutationService
-	DownloadSubscriptionSync         DownloadSubscriptionSyncService
-	DiagnosticsChunks                DiagnosticsChunksService
-	DiagnosticsIngress               DiagnosticsIngressService
-	EventsSocket                     EventsSocketService
-	AdminLogsSocket                  AdminLogsSocketService
-	PlaybackControlSocket            PlaybackControlSocketService
-	EventsCapability                 EventsCapabilityService
-	NetworkAccess                    NetworkAccessService
-	ServerIdentity                   ServerIdentityService
-	ServerConnections                ServerConnections
-	NotificationDestinationCreate    NotificationDestinationCreateService
-	AdminUnmatchedFiles              AdminUnmatchedFilesService
-	AdminCatalogImages               AdminCatalogImagesService
-	AdminCatalogMatch                AdminCatalogMatchService
-	AdminCatalogSplit                AdminCatalogSplitService
-	AdminMarkerContributions         AdminMarkerContributionsService
-	AdminMarkerProviders             AdminMarkerProvidersService
-	AdminMarkerHistory               AdminMarkerHistoryService
-	AdminEpisodeMarkers              AdminEpisodeMarkersService
-	DownloadSubscriptions            DownloadSubscriptionService
-	DownloadManifests                DownloadManifestService
-	DownloadDelivery                 DownloadDeliveryService
-	Downloads                        DownloadRegistryService
-	DownloadProxyDelivery            func() bool
-	WebhookReceiver                  WebhookReceiverService
-	SubtitleAIReads                  SubtitleAIReadService
-	NotificationDiscordLinks         NotificationDiscordLinkService
-	NotificationEmailLinks           NotificationEmailLinkService
-	NotificationDestinationTests     NotificationDestinationTestService
-	AdminDevices                     AdminDeviceService
-	UserLibraries                    UserLibraryService
-	EbookAnnotations                 EbookAnnotationService
-	AdminNotificationDiscord         AdminNotificationDiscordService
-	NotificationDestinations         NotificationDestinationService
-	EbookFiles                       EbookFileService
-	EbookConfig                      EbookConfigService
-	EbookProgress                    EbookProgressService
-	AdminItemMetadata                AdminItemMetadataService
-	AdminMetadataTranslation         AdminMetadataTranslationService
-	AdminPeople                      AdminPeopleService
-	AdminDiagnosticDownloads         AdminDiagnosticDownloadService
-	AdminJobArtifacts                AdminJobArtifactService
-	AdminJobArtifactSigner           *artworkurl.Signer
-	AdminDiagnosticReads             AdminDiagnosticReadsService
-	AdminDashboardInsights           AdminDashboardInsightsService
-	AdminNodesRead                   AdminNodesReadService
-	AdminNodeCommands                AdminNodeCommandsService
-	AdminNodeReload                  AdminNodeReloadService
-	AdminNodeConfiguration           AdminNodeConfigurationService
-	AdminServerStatus                AdminServerStatusService
-	AdminServerRestart               AdminServerRestartService
-	AdminBrandingAssets              AdminBrandingAssetService
-	AdminEmailTests                  AdminEmailTestService
-	AdminSourceWebhookLifecycle      AdminAutoscanWebhookLifecycleService
-	AdminAutoscanSettingsUpdates     AdminAutoscanSettingsUpdateService
-	AdminDiagnosticDeletes           AdminDiagnosticDeleteService
-	AdminAutoscanConnectionTests     AdminAutoscanConnectionTestService
-	AdminPluginRepositoryCreation    AdminPluginRepositoryCreationService
-	AdminPluginRepositoryUpdates     AdminPluginRepositoryUpdateService
-	AdminPluginRepositoryDeletes     AdminPluginRepositoryDeleteService
-	AdminPluginInventory             AdminPluginInventoryService
-	AdminPluginConfiguration         AdminPluginConfigurationService
-	AdminPluginLifecycle             AdminPluginLifecycleService
-	AdminPluginUploads               AdminPluginUploadService
-	AdminTelemetryParity             AdminTelemetryParityService
-	AdminPluginRepositories          AdminPluginRepositoriesService
-	AdminPluginCatalogSettings       AdminPluginCatalogSettingsService
-	AdminRecommendations             AdminRecommendationsService
-	AdminLiteraryWorks               AdminLiteraryWorkService
-	NotificationChannels             NotificationChannelService
-	NotificationRelay                NotificationRelayService
-	AdminNotificationPush            AdminNotificationPushService
-	NotificationInbox                NotificationInboxService
-	CompatConnectInfo                CompatConnectInfoService
-	AdminCatalogTransfer             AdminCatalogTransferService
-	AdminCatalogSearch               AdminCatalogSearchService
-	AdminSettingsChecks              AdminSettingsCheckService
-	AdminSettingsInspection          AdminSettingsInspectionService
-	AdminResourceSampler             AdminResourceSampler
-	AdminTaskJobs                    AdminTaskJobsService
-	AdminStorageTransition           AdminStorageTransitionService
-	AdminCatalogSources              AdminCatalogSourcesService
-	AdminFilesystem                  AdminFilesystemService
-	AdminTaskMetrics                 AdminTaskMetricsService
-	AdminTasks                       AdminTaskService
-	AdminTaskHistory                 AdminTaskHistoryService
-	Devices                          DeviceLoginService
-	Sessions                         SessionService
+	AdminDownloadStorage             AdminDownloadStorageService
+	AdminDownloadDevices             AdminDownloadDeviceService
+	// DownloadPrepareAgain prepares a finished download's expired file again.
+	DownloadPrepareAgain          DownloadPrepareAgainService
+	AdminNodeSessions             AdminNodeSessionService
+	AdminPlaybackCommands         AdminPlaybackCommandService
+	AdminPlaybackTerminate        AdminPlaybackTerminateService
+	AdminAutoscanConnections      AdminAutoscanConnectionsService
+	AdminAutoscanInspection       AdminAutoscanInspectionService
+	AdminAutoscanSources          AdminAutoscanSourcesService
+	AutoscanDelivery              AutoscanDeliveryService
+	Onboarding                    OnboardingService
+	DownloadCreation              DownloadCreationService
+	AdminJellyfinCompatStatus     AdminJellyfinCompatStatusService
+	AdminSettingRead              AdminSettingReadService
+	AdminJellyfinCompatWeb        AdminJellyfinCompatWebService
+	AdminRateLimitsWrite          AdminRateLimitWriteService
+	AdminRateLimits               AdminRateLimitReadService
+	DownloadSubscriptionMutations DownloadSubscriptionMutationService
+	DownloadSubscriptionSync      DownloadSubscriptionSyncService
+	DiagnosticsChunks             DiagnosticsChunksService
+	DiagnosticsIngress            DiagnosticsIngressService
+	EventsSocket                  EventsSocketService
+	AdminLogsSocket               AdminLogsSocketService
+	PlaybackControlSocket         PlaybackControlSocketService
+	EventsCapability              EventsCapabilityService
+	NetworkAccess                 NetworkAccessService
+	ServerIdentity                ServerIdentityService
+	ServerConnections             ServerConnections
+	NotificationDestinationCreate NotificationDestinationCreateService
+	AdminUnmatchedFiles           AdminUnmatchedFilesService
+	AdminCatalogImages            AdminCatalogImagesService
+	AdminCatalogMatch             AdminCatalogMatchService
+	AdminCatalogSplit             AdminCatalogSplitService
+	AdminMarkerContributions      AdminMarkerContributionsService
+	AdminMarkerProviders          AdminMarkerProvidersService
+	AdminMarkerHistory            AdminMarkerHistoryService
+	AdminEpisodeMarkers           AdminEpisodeMarkersService
+	DownloadSubscriptions         DownloadSubscriptionService
+	DownloadManifests             DownloadManifestService
+	DownloadDelivery              DownloadDeliveryService
+	Downloads                     DownloadRegistryService
+	DownloadProxyDelivery         func() bool
+	WebhookReceiver               WebhookReceiverService
+	SubtitleAIReads               SubtitleAIReadService
+	NotificationDiscordLinks      NotificationDiscordLinkService
+	NotificationEmailLinks        NotificationEmailLinkService
+	NotificationDestinationTests  NotificationDestinationTestService
+	AdminDevices                  AdminDeviceService
+	UserLibraries                 UserLibraryService
+	EbookAnnotations              EbookAnnotationService
+	AdminNotificationDiscord      AdminNotificationDiscordService
+	NotificationDestinations      NotificationDestinationService
+	EbookFiles                    EbookFileService
+	EbookConfig                   EbookConfigService
+	EbookProgress                 EbookProgressService
+	AdminItemMetadata             AdminItemMetadataService
+	AdminMetadataTranslation      AdminMetadataTranslationService
+	AdminPeople                   AdminPeopleService
+	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
+	AdminJobArtifacts             AdminJobArtifactService
+	AdminJobArtifactSigner        *artworkurl.Signer
+	AdminDiagnosticReads          AdminDiagnosticReadsService
+	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminNodesRead                AdminNodesReadService
+	AdminNodeCommands             AdminNodeCommandsService
+	AdminNodeReload               AdminNodeReloadService
+	AdminNodeConfiguration        AdminNodeConfigurationService
+	AdminServerStatus             AdminServerStatusService
+	AdminServerRestart            AdminServerRestartService
+	AdminBrandingAssets           AdminBrandingAssetService
+	AdminEmailTests               AdminEmailTestService
+	AdminSourceWebhookLifecycle   AdminAutoscanWebhookLifecycleService
+	AdminAutoscanSettingsUpdates  AdminAutoscanSettingsUpdateService
+	AdminDiagnosticDeletes        AdminDiagnosticDeleteService
+	AdminAutoscanConnectionTests  AdminAutoscanConnectionTestService
+	AdminPluginRepositoryCreation AdminPluginRepositoryCreationService
+	AdminPluginRepositoryUpdates  AdminPluginRepositoryUpdateService
+	AdminPluginRepositoryDeletes  AdminPluginRepositoryDeleteService
+	AdminPluginInventory          AdminPluginInventoryService
+	AdminPluginConfiguration      AdminPluginConfigurationService
+	AdminPluginLifecycle          AdminPluginLifecycleService
+	AdminPluginUploads            AdminPluginUploadService
+	AdminTelemetryParity          AdminTelemetryParityService
+	AdminPluginRepositories       AdminPluginRepositoriesService
+	AdminPluginCatalogSettings    AdminPluginCatalogSettingsService
+	AdminRecommendations          AdminRecommendationsService
+	AdminLiteraryWorks            AdminLiteraryWorkService
+	NotificationChannels          NotificationChannelService
+	NotificationRelay             NotificationRelayService
+	AdminNotificationPush         AdminNotificationPushService
+	NotificationInbox             NotificationInboxService
+	CompatConnectInfo             CompatConnectInfoService
+	AdminCatalogTransfer          AdminCatalogTransferService
+	AdminCatalogSearch            AdminCatalogSearchService
+	AdminSettingsChecks           AdminSettingsCheckService
+	AdminSettingsInspection       AdminSettingsInspectionService
+	AdminResourceSampler          AdminResourceSampler
+	AdminTaskJobs                 AdminTaskJobsService
+	AdminStorageTransition        AdminStorageTransitionService
+	AdminCatalogSources           AdminCatalogSourcesService
+	AdminFilesystem               AdminFilesystemService
+	AdminTaskMetrics              AdminTaskMetricsService
+	AdminTasks                    AdminTaskService
+	AdminTaskHistory              AdminTaskHistoryService
+	Devices                       DeviceLoginService
+	Sessions                      SessionService
 	// PluginLaunch mints the plugin access cookie token (*handlers.AuthHandler).
 	PluginLaunch          PluginLaunchService
 	OAuth                 OAuthService
@@ -395,9 +398,6 @@ type Dependencies struct {
 	// AdminProfileSections reads and writes any account's profile page
 	// layouts for an administrator (*handlers.SectionHandler).
 	AdminProfileSections AdminProfileSectionService
-	// SectionFlags reads the profile-facing sections settings
-	// (*handlers.SectionSettingsHandler).
-	SectionFlags SectionFlagService
 	// Requests serves media requests and the discovery surface
 	// (*requests.Service, the value *handlers.RequestsHandler wraps).
 	AdminSubtitleInspection            AdminSubtitleInspectionService
@@ -430,6 +430,9 @@ type Dependencies struct {
 	// CollectionImports creates synced collections from external lists and
 	// searches MDBList (*handlers.UserCollectionImportHandler).
 	CollectionImports CollectionImportService
+	// ScheduleZone reports the time zone cron collection schedules run in on
+	// this node; nil reads the process's local zone. Fixtures pin it.
+	ScheduleZone func() CollectionScheduleTimeZone
 	// CatalogAccess resolves a viewer's access filter (*handlers.ItemsHandler);
 	// every catalog read needs it alongside its own seam.
 	CatalogAccess CatalogAccessService
@@ -841,12 +844,6 @@ type ProfileSectionService interface {
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
 }
 
-// SectionFlagService is the slice of *handlers.SectionSettingsHandler
-// getProfileSectionFlags uses.
-type SectionFlagService interface {
-	AllowProfileCustomSections(ctx context.Context) bool
-}
-
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
 // uses to validate a library allowlist before the store sees it.
 type LibraryService interface {
@@ -1091,7 +1088,7 @@ type CatalogAccessService interface {
 type CatalogBrowseService interface {
 	Browse(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, groupedByWork bool) (handlers.CatalogBrowseView, error)
 	Filters(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, includeTechnical bool) (handlers.CatalogFiltersView, error)
-	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error)
+	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error)
 	AudiobookGroups(ctx context.Context, v handlers.ItemViewer, query mediacatalog.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error)
 }
 

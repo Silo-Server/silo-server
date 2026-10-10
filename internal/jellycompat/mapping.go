@@ -360,7 +360,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if len(firstVersion.VideoTracks) > 0 {
 			dto.Width = firstVersion.VideoTracks[0].Width
 			dto.Height = firstVersion.VideoTracks[0].Height
-			dto.IsHD = firstVersion.VideoTracks[0].Height >= 720 || firstVersion.VideoTracks[0].Width >= 1280
+			dto.IsHD = isHDVideo(firstVersion.VideoTracks[0])
 		}
 		routeItemID := m.codec.EncodeStringID(EncodedIDItem, item.ContentID)
 		wantMediaSources := wantField("mediasources")
@@ -652,6 +652,12 @@ func primaryAspectRatio(native string) *float64 {
 	default:
 		return nil
 	}
+}
+
+// isHDVideo reports Jellyfin's IsHD for a video track: 720 lines and up, as
+// Jellyfin 12 reports it (a 1280x536 scope encode is not HD there).
+func isHDVideo(track models.VideoTrack) bool {
+	return track.Height >= 720
 }
 
 func versionsHaveSubtitles(versions []catalog.FileVersion) bool {

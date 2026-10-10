@@ -41,7 +41,6 @@ type SectionHandler struct {
 	UserRepo              *auth.UserRepository
 	AccessGroups          access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	DetailSvc             *catalog.DetailService
-	Settings              catalog.SettingsStore
 	CollectionRepo        *catalog.LibraryCollectionRepository
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
 	EbookProgress         EbookReaderProgressLister
@@ -107,6 +106,12 @@ type createSectionRequest struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
+	// ValidateRecipe runs the section type's own config check. Only /api/v2
+	// sets it; the frozen /api/v1 routes keep accepting what they always did.
+	ValidateRecipe bool `json:"-"`
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
+	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
+	V1Rules bool `json:"-"`
 }
 
 type updateSectionRequest struct {
@@ -117,6 +122,10 @@ type updateSectionRequest struct {
 	ItemLimit   *int            `json:"item_limit"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Enabled     *bool           `json:"enabled"`
+	// ValidateRecipe: see createSectionRequest.
+	ValidateRecipe bool `json:"-"`
+	// V1Rules: see createSectionRequest.
+	V1Rules bool `json:"-"`
 }
 
 type reorderSectionsRequest struct {
@@ -166,7 +175,7 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 }
 
 // validateSectionConfig checks config requirements for the given section type.
-func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage, v1Rules bool) (string, bool) {
 	if sectionType == sections.SectionCollection {
 		collectionConfig := sections.ParseCollectionConfig(config)
 		if strings.TrimSpace(collectionConfig.LibraryCollectionID) == "" {
@@ -198,9 +207,29 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		}
 	}
 	if sectionType == sections.SectionCustomFilter || sectionType == sections.SectionGenre || sectionType == sections.SectionRandom || len(config) > 0 {
-		if _, err := sections.ParseQueryDefinition(config); err != nil {
+		def, err := sections.ParseQueryDefinition(config)
+		if err != nil {
 			return err.Error(), false
 		}
+		if v1Rules {
+			if err := catalog.ValidateV1Rules(def); err != nil {
+				return err.Error(), false
+			}
+		}
+	}
+	return "", true
+}
+
+// validateRecipeConfig runs the section type's own recipe check, which bulk
+// create and profile saves also run; validateSectionConfig only checks the
+// keys every section type shares.
+func validateRecipeConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+	rec, ok := recipes.Get(string(sectionType))
+	if !ok {
+		return "", true
+	}
+	if err := rec.Validate(config); err != nil {
+		return err.Error(), false
 	}
 	return "", true
 }
@@ -256,6 +285,7 @@ func (h *SectionHandler) HandleCreateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 
 	resp, err := h.CreateAdminSection(r.Context(), req)
 	if err != nil {
@@ -273,6 +303,7 @@ func (h *SectionHandler) HandleUpdateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.UpdateAdminSection(r.Context(), id, req)
 	if err != nil {
 		writeAPIError(w, adminSectionServiceError(err))
@@ -524,6 +555,25 @@ func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, homeSectionItemsResponse{Section: section})
 }
 
+// loadProfileSectionOverrides fails closed so a settings outage cannot restore
+// a hidden row or replace the profile's chosen collection with the server row.
+func (h *SectionHandler) loadProfileSectionOverrides(ctx context.Context, userID int, profileID, scope, libraryID string) ([]sections.ProfileSectionOverride, error) {
+	if h.StoreProvider == nil || profileID == "" {
+		return nil, nil
+	}
+	store, err := h.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "accessing user store for profile sections", "component", "api", "scope", scope, "error", err)
+		return nil, err
+	}
+	overrides, err := store.ListSectionOverrides(ctx, profileID, scope, libraryID)
+	if err != nil {
+		slog.ErrorContext(ctx, "loading profile section overrides", "component", "api", "scope", scope, "error", err)
+		return nil, err
+	}
+	return toSectionOverrides(overrides), nil
+}
+
 func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sections.ResolvedSection, []int, catalog.AccessFilter, string, error) {
 	profileID := apimw.GetProfileID(ctx)
 	userID := apimw.GetUserID(ctx)
@@ -541,13 +591,9 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		}
 	}
 
-	var overrides []sections.ProfileSectionOverride
-	if h.StoreProvider != nil && profileID != "" {
-		store, storeErr := h.StoreProvider.ForUser(ctx, userID)
-		if storeErr == nil {
-			userOverrides, _ := store.ListSectionOverrides(ctx, profileID, "home", "")
-			overrides = toSectionOverrides(userOverrides)
-		}
+	overrides, err := h.loadProfileSectionOverrides(ctx, userID, profileID, adminSectionScopeHome, "")
+	if err != nil {
+		return nil, nil, catalog.AccessFilter{}, profileID, err
 	}
 
 	resolved := sections.Resolve(adminSections, overrides)
@@ -606,14 +652,9 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 		}
 	}
 
-	var overrides []sections.ProfileSectionOverride
-	if h.StoreProvider != nil && profileID != "" {
-		store, storeErr := h.StoreProvider.ForUser(ctx, userID)
-		if storeErr == nil {
-			libStr := strconv.Itoa(libraryID)
-			userOverrides, _ := store.ListSectionOverrides(ctx, profileID, "library", libStr)
-			overrides = toSectionOverrides(userOverrides)
-		}
+	overrides, err := h.loadProfileSectionOverrides(ctx, userID, profileID, adminSectionScopeLibrary, strconv.Itoa(libraryID))
+	if err != nil {
+		return nil, catalog.AccessFilter{}, profileID, err
 	}
 
 	resolved := sections.Resolve(adminSections, overrides)
@@ -761,12 +802,28 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// adminOnlyRecipeError refuses a new section of an admin-only recipe
+// (Editor's picks) from a profile that is not an admin. The code and message
+// are the frozen v1 ones from when a server setting decided this.
+func adminOnlyRecipeError() *APIError {
+	return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+}
+
+// userAddedRecipe is the recipe a stored user-added override runs, read the
+// way the resolver reads it.
+func userAddedRecipe(o userstore.SectionOverride) string {
+	if o.UserSectionType != "" {
+		return o.UserSectionType
+	}
+	return o.SectionType
+}
+
 // SaveProfileOverrides replaces the profile's override set for one page:
-// the recipe gate on user-added sections (registered recipe, admin-only
-// recipes need the admin role or the allow-custom setting, config validated
-// by the recipe), then the store write. v1 PUT /profile/sections and v2
-// replaceProfileSectionOverrides both call it; a failure is an *APIError
-// carrying the v1 status, code and message.
+// the recipe gate on user-added sections (registered recipe, config
+// validated by the recipe, and a profile that is not an admin may keep but
+// not add a section of an admin-only recipe), then the store write. v1 PUT
+// /profile/sections and v2 replaceProfileSectionOverrides both call it; a
+// failure is an *APIError carrying the v1 status, code and message.
 func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite) error {
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
@@ -779,11 +836,9 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 // own routes, the owning account's for an administrator's write.
 func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite, isAdmin bool) error {
 	// Gate: validate user-added overrides before touching the store.
-	allowCustom := false
-	if h.Settings != nil {
-		v, _ := h.Settings.Get(ctx, SectionsAllowProfileCustomSettingKey)
-		allowCustom = v == "true"
-	}
+	// ID -> recipe of the admin-only sections a non-admin sends; each must
+	// already be saved on this page with the same recipe.
+	keptAdminOnly := make(map[string]string)
 
 	type trendingCandidate struct {
 		id     string
@@ -867,8 +922,11 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		if !ok {
 			return apiError(http.StatusBadRequest, "unknown_recipe", "section_type not registered: "+recipeType)
 		}
-		if rec.Definition().AdminOnly && !isAdmin && !allowCustom {
-			return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+		if rec.Definition().AdminOnly && !isAdmin {
+			if o.ID == "" {
+				return adminOnlyRecipeError()
+			}
+			keptAdminOnly[o.ID] = recipeType
 		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
@@ -907,6 +965,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	}
 	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, retainedSectionIDs); err != nil {
 		return err
+	}
+	for id, recipeType := range keptAdminOnly {
+		old, ok := existingByID[id]
+		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
+			return adminOnlyRecipeError()
+		}
 	}
 	for id, write := range sourceWrites {
 		old, ok := existingByID[id]

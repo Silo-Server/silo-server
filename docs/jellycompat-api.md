@@ -170,7 +170,12 @@ requests list the members.
 real detail are hydrated from the catalog; list responses no longer invent
 media-source IDs or person IDs from titles. When `Fields` requests
 `MediaSourceCount`, library, Latest, and NextUp lists report the number of
-present, accessible versions of each movie or episode.
+present, accessible versions of each movie or episode. When it requests
+`Width`, `Height`, or `IsHD`, the same lists report the first video track of
+the version the item's detail response lists first (the widest), so a client
+can show quality across a library without fetching each item. `IsHD` means
+720 lines and up, on lists and detail alike, as in Jellyfin; series and seasons
+carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
@@ -339,10 +344,11 @@ gain this Dolby Vision-preserving route. Original-file direct play is unchanged.
 When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
 an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
 accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
-RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does, and removes a profile 7
+enhancement layer's NAL units with `filter_units`. The client receives the
 HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
 tone mapping. The strip runs only where the remux routing policy allows: on
-the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+the API server when its FFmpeg has both filters (FFmpeg 7.1 or later), or on a
 transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.

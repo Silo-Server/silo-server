@@ -2832,7 +2832,7 @@ func TestPlanPlaybackV3AbandonsStripForAnUnstrippableSource(t *testing.T) {
 func TestPlanPlaybackV3ToneMapEscapeRequiresExecutableTranscode(t *testing.T) {
 	file := unstrippableProfile7FixtureV3()
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},

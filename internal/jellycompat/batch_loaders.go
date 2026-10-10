@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -581,14 +582,24 @@ const (
 	compatDTOTypeEpisode = "Episode"
 )
 
-// applyListMediaSourceCounts replaces the list path's assumed single source
-// with the real number of accessible, present versions when the client asked
-// for MediaSourceCount (Jellyfin Web's multi-version badge on library grids).
-// It counts the same files the detail path lists as versions: a movie's files
-// by content_id, an episode's by episode_id. One grouped query per kind covers
-// the whole page; any failure keeps the list default.
-func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *Session, items []baseItemDTO, query itemsQuery) {
-	if len(items) == 0 || !query.requestedFields["mediasourcecount"] || h.codec == nil {
+// listPrimaryVideoWidthSQL is a file's first video track width, or 0 like
+// compatPrimaryVideoTrack when the file has no probed track.
+const listPrimaryVideoWidthSQL = "CASE WHEN jsonb_typeof(mf.video_tracks->0->'width') = 'number' THEN (mf.video_tracks->0->>'width')::numeric ELSE 0 END"
+
+// applyListFileFields fills the list-path Fields that depend on an item's
+// files. MediaSourceCount (Jellyfin Web's multi-version badge on library
+// grids) replaces the list path's assumed single source with the real number
+// of accessible, present versions. Width, Height, and IsHD (quality badges and
+// sorting in clients that sync a whole library) come from the first video
+// track of the version the detail path lists first, so list and detail agree.
+// It reads the same files the detail path lists as versions: a movie's files
+// by content_id, an episode's by episode_id. One query per kind covers the
+// whole page; any failure keeps the list default.
+func (h *ItemsHandler) applyListFileFields(ctx context.Context, session *Session, items []baseItemDTO, query itemsQuery) {
+	fields := query.requestedFields
+	wantCount := fields["mediasourcecount"]
+	wantVideo := fields[fieldWidth] || fields[fieldHeight] || fields[fieldIsHD]
+	if len(items) == 0 || (!wantCount && !wantVideo) || h.codec == nil {
 		return
 	}
 	pool := h.compatPool()
@@ -619,19 +630,31 @@ func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *
 		args := []any{ids}
 		conditions, args := catalog.MediaFileAccessSQL("mf", access, args)
 		conditions = append([]string{"mf." + column + " = ANY($1)", "mf.missing_since IS NULL"}, conditions...)
-		rows, err := pool.Query(ctx, "SELECT mf."+column+", COUNT(*) FROM media_files mf WHERE "+strings.Join(conditions, " AND ")+" GROUP BY mf."+column, args...)
+		where := " FROM media_files mf WHERE " + strings.Join(conditions, " AND ")
+		sql := "SELECT mf." + column + ", COUNT(*), NULL::jsonb" + where + " GROUP BY mf." + column
+		if wantVideo {
+			// DISTINCT ON keeps the version itemDetailToUpstream lists first:
+			// widest first track, ties in file id order. The window count is
+			// taken over every matching file before that.
+			sql = "SELECT DISTINCT ON (mf." + column + ") mf." + column + ", COUNT(*) OVER (PARTITION BY mf." + column + "), mf.video_tracks->0" +
+				where + " ORDER BY mf." + column + ", " + listPrimaryVideoWidthSQL + " DESC, mf.id"
+		}
+		rows, err := pool.Query(ctx, sql, args...)
 		if err != nil {
-			slog.DebugContext(ctx, "jellycompat media source count failed", "component", "jellycompat", "error", err)
+			slog.DebugContext(ctx, "jellycompat list file fields failed", "component", "jellycompat", "error", err)
 			continue
 		}
-		counts := make(map[string]int, len(ids))
+		found := make(map[string]listFileRow, len(ids))
 		for rows.Next() {
 			var contentID string
-			var count int
-			if err := rows.Scan(&contentID, &count); err != nil {
+			var row listFileRow
+			var trackJSON []byte
+			if err := rows.Scan(&contentID, &row.count, &trackJSON); err != nil {
 				break
 			}
-			counts[contentID] = count
+			// A malformed track only costs the quality fields.
+			row.hasTrack = len(trackJSON) > 0 && json.Unmarshal(trackJSON, &row.track) == nil
+			found[contentID] = row
 		}
 		rows.Close()
 		if rows.Err() != nil {
@@ -640,9 +663,32 @@ func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *
 		// An item with no file the viewer may play leaves the count unset
 		// rather than keeping the mapper's single-source assumption.
 		for _, contentID := range ids {
+			row := found[contentID]
 			for _, i := range indexes[column+"\x00"+contentID] {
-				items[i].MediaSourceCount = counts[contentID]
+				if wantCount {
+					items[i].MediaSourceCount = row.count
+				}
+				// Items hydrated through the detail path already carry the
+				// size of their first version.
+				if !row.hasTrack || items[i].Width != 0 || items[i].Height != 0 {
+					continue
+				}
+				if fields[fieldWidth] {
+					items[i].Width = row.track.Width
+				}
+				if fields[fieldHeight] {
+					items[i].Height = row.track.Height
+				}
+				if fields[fieldIsHD] {
+					items[i].IsHD = isHDVideo(row.track)
+				}
 			}
 		}
 	}
+}
+
+type listFileRow struct {
+	count    int
+	track    models.VideoTrack
+	hasTrack bool
 }

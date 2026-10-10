@@ -86,6 +86,9 @@ function TierLine({
       { options: options.data, fields },
     );
     outcome = decider ? `${where} (${decider})` : where;
+  } else if (tier.route_id && tier.quality === "1080p") {
+    // No HD server, so HD is skipped; the note says why and who that leaves out.
+    outcome = "none";
   } else if (isStandardRoute(tier.route_id)) {
     outcome = "none (no server is marked 4K)";
   } else if (tier.route_id) {
@@ -101,7 +104,7 @@ function TierLine({
       <p>
         <span className="font-medium">{label} →</span> {outcome}
       </p>
-      {tier.note && (tier.integration_id || !tier.route_id) ? (
+      {tier.note && (tier.integration_id || !tier.route_id || tier.quality === "1080p") ? (
         <p
           className={
             tier.integration_id

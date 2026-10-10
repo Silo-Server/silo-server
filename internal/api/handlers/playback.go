@@ -186,6 +186,7 @@ type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver            // optional; enables stream_url in responses
 	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
+	DeviceSightings         *DeviceSightings            // optional; registers the device that starts playback
 	WatchScrobbler          PlaybackWatchScrobbler
 	StableIdentityResolver  *watchstate.StableIdentityResolver
 	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist

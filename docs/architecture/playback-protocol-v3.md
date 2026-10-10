@@ -324,15 +324,34 @@ on the 45-second window. Both windows are fixed. These count as activity:
 | The `POST /playback/start` that created the session | Starts the clock |
 | A `POST /playback/{session_id}/replan` that returns a playable plan | Counts once; it is not a heartbeat |
 | `POST /playback/{session_id}/progress` | The heartbeat. Progress reports are the only way to report a pause |
-| A request for an HLS playlist or segment (`server_remux_hls`, `server_transcode_hls`) | Each request counts |
-| A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count |
+| A request for an HLS playlist or segment (`server_remux_hls`, `server_transcode_hls`) | Each request counts. Through a proxy node, see below |
+| A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count. Through a proxy node, see below |
 | A valid `hello`, `ack`, or `result` frame on the control socket (below), and the socket closing after a `hello` | Opening the socket, its pings, and frames that fail validation do not count |
 
 `capability`, `route-events`, `/sync/progress`, subtitle sidecar requests, and a
 `replan` that is refused, ends in a terminal, or replays an earlier answer do
-not count. When a proxy node serves the media, this server never sees the media
-requests, so it waits at least five minutes before ending such a session; the
-pause state still comes only from progress reports. Whether progress reports
+not count.
+
+When a proxy node serves the media, this server does not see the media
+requests. Instead the node records delivery in Redis
+(`silo:playback-delivery:{session_id}`) as media bytes reach the client: only
+a playlist, segment, or progressive response with a 2xx status that actually
+sends bytes counts, and a long progressive response keeps counting while it
+flows. The node writes at most once every 20 seconds per session, and a record
+expires six minutes after its last write. Delivery writes use a two-second
+deadline that also bounds socket I/O, even when Redis socket timeouts are
+disabled. On every sweep this server reads the records of its proxy-served
+sessions and counts a live record as activity at
+the time it was written. Such a session therefore ends five minutes after its
+last delivery or other activity, give or take the 20-second write interval and
+the sweep interval, or after the paused grace if its last progress report was a
+pause. A record lives longer than five minutes so that even a late sweep still
+finds the last delivery. The pause state still comes only from progress reports.
+A client that fetches media without reporting progress, such as a Cast receiver
+whose sender phone went to sleep, therefore keeps its session while it plays.
+If Redis cannot be read, the sweep falls back to the other activity. Sessions
+created through the Jellyfin compatibility layer are not marked as
+proxy-served and do not read these records. Whether progress reports
 alone should keep alive a session whose media requests have stopped is raised
 in [#666](https://github.com/Silo-Server/silo-server/issues/666).
 
@@ -1368,7 +1387,9 @@ Native embedded selection requires `embedded_subtitles_v1` in `client_features` 
 }
 ```
 
-`track_identity` is either `ffmpeg_stream_index` (the absolute probed AVStream index) or `container_track_id` (the canonical positive decimal container track ID, when available from probing). Neither is a combined subtitle ordinal. Missing or ambiguous identity metadata disqualifies the native route. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
+`track_identity` is either `ffmpeg_stream_index` (the absolute probed AVStream index) or `container_track_id` (the canonical positive decimal container track ID, when available from probing). Neither is a combined subtitle ordinal. Missing or ambiguous identity metadata disqualifies the native route.
+
+The scanner records `container_track_id` as the MP4 track ID (`tkhd`) that FFprobe reports and, for Matroska, as the TrackEntry's `TrackNumber`, which FFprobe does not report. The scanner reads the Matroska `Tracks` element itself and maps each entry to its FFmpeg stream the way FFmpeg's demuxer creates streams. It records a number only when the per-type stream counts, the subtitle positions, and the subtitle codecs all agree with the probe. A track number is often not stream index + 1, because remuxes keep the original numbers. Tracks with the legacy codec IDs `S_ASS` and `S_SSA` get no ID: FFmpeg reports them as `ass`, but Media3 drops them, so a client could not resolve the number and its capability cannot exclude them. Files probed before Matroska numbers were recorded get them from the `backfill_matroska_track_numbers` task, which reads only the `Tracks` element and writes only when the file and the row still match the stored probe. It reads only files with a SubRip or ASS track lacking an ID, the codecs a client currently plays by track number, and records each file it reads in `matroska_track_backfill_checks` against the file's size, mtime and stored tracks. A recorded file is read again only after one of those changes or the matching rules do; a file storage could not open, or that differs on disk from its row until a scan rewrites it, is retried on the next start. A file skipped for its codecs, such as a PGS-only one, gets an ID from its next reprobe, or from the backfill once its codec is added to that list. Container and codec support must match; authored ASS preservation additionally requires styling and font support. The old `embedded_text` flag alone never authorizes native selection. Text sidecar rendering depends on `sidecar_text`, regardless of the source being embedded or external.
 
 The native decision is `subtitle: {"mode":"render", "track_id":"file:42:subtitle:0", "embedded":{"stream_index":3,"container_track_id":"4"}, "inventory":[...]}`. The client selects that exact stream from the original media and does not mount the inventory's fallback URL. Native selection applies only to `original_http`; remux and transcode plans use sidecars or burn-in. Inventory `delivery` continues to describe the available server representation, so even a `burn_in_only` entry can be selected natively when the client attests the exact bitmap codec.
 
@@ -1555,7 +1576,13 @@ A transformation is a named, versioned media operation with claims attached.
 | `audio_to_aac` | `server` | `2` | — | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
-| `server_dv7_to_hdr10` | `server` | `1` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+
+`server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
+enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby
+Vision RPUs with `dovi_rpu`. An executor on recipe 1 is never offered a recipe 2
+plan, and a copy started under recipe 1 cannot be reopened on an upgraded
+executor, so that session replans.
 
 `audio_to_aac` recipe version 2 treats the selected source channel count as a
 byte-affecting input. When a source with more than two channels is encoded to
@@ -1618,7 +1645,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 
 | Transformation | Probe |
 | --- | --- |
-| `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` |
+| `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and a bounded silent-frame smoke test executes the exact stereo-downmix limiter graph |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor |

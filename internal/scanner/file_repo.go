@@ -1522,8 +1522,7 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 }
 
 // ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, including their provenance columns. Used by the admin manual-marker
-// API to remove a marker so detection/online fetch can repopulate it. Returns
+// a file, retaining manual provenance to prevent automatic rediscovery. Returns
 // whether a row was updated.
 func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
@@ -1762,16 +1761,16 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 		changed.preview = changed.preview || applied.preview
 	}
 	if clearFlags.intro {
-		changed.intro = clearSegmentState(&state.intro) || changed.intro
+		changed.intro = clearManualSegmentState(&state.intro, mutationAt) || changed.intro
 	}
 	if clearFlags.credits {
-		changed.credits = clearSegmentState(&state.credits) || changed.credits
+		changed.credits = clearManualSegmentState(&state.credits, mutationAt) || changed.credits
 	}
 	if clearFlags.recap {
-		changed.recap = clearSegmentState(&state.recap) || changed.recap
+		changed.recap = clearManualSegmentState(&state.recap, mutationAt) || changed.recap
 	}
 	if clearFlags.preview {
-		changed.preview = clearSegmentState(&state.preview) || changed.preview
+		changed.preview = clearManualSegmentState(&state.preview, mutationAt) || changed.preview
 	}
 	if !changed.any() {
 		if err := tx.Commit(ctx); err != nil {
@@ -2026,6 +2025,16 @@ func clearSegmentState(state *segmentState) bool {
 	state.confidence = nil
 	state.algorithm = nil
 	state.detectedAt = nil
+	return true
+}
+
+func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
+	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
+	if segmentEqual(*state, next) {
+		return false
+	}
+	*state = next
 	return true
 }
 
@@ -3251,17 +3260,26 @@ func (r *FileRepository) GetByFolder(ctx context.Context, folderID int) ([]*mode
 // GetByFolderAndPathPrefix returns all files for a folder that live under a
 // subtree path.
 func (r *FileRepository) GetByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*models.MediaFile, error) {
-	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	query, args := folderPathPrefixQuery(fileColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by folder and path prefix: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// folderPathPrefixQuery selects columns for the files of a folder at or under
+// pathPrefix. The range bounds let the (media_folder_id, file_path
+// text_pattern_ops) index narrow the subtree even under a generic plan, which
+// a parameterized LIKE cannot do.
+func folderPathPrefixQuery(columns string, folderID int, pathPrefix string) (string, []any) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT ` + columns + ` FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
+		ORDER BY file_path ASC`
+	return query, append([]any{folderID}, args...)
 }
 
 // ListByGroupKey returns all present media files in a logical content group.

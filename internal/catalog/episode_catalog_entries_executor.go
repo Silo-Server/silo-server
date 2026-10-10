@@ -977,12 +977,8 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		return fmt.Sprintf("%s = %s", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
 	case "is_not":
 		return fmt.Sprintf("NOT (%s = %s)", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", nil, argIdx, true, fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
+	case ruleOpInLast, ruleOpNotInLast:
+		interval, err := ruleInterval(rule)
 		if err != nil {
 			return "", nil, argIdx, true, err
 		}
@@ -990,7 +986,7 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		if cast == "date" {
 			cutoff = fmt.Sprintf("(CURRENT_DATE - INTERVAL '%s')::date", interval)
 		}
-		return fmt.Sprintf("%s >= %s", column, cutoff), nil, argIdx, true, nil
+		return relativeDateClause(column, rule.Op, cutoff), nil, argIdx, true, nil
 	default:
 		return "", nil, argIdx, true, fmt.Errorf("unsupported comparison operator %q", rule.Op)
 	}

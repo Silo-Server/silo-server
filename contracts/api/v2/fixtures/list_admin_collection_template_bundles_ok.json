@@ -1,0 +1,32 @@
+{
+  "bundles": [
+    {
+      "id": "franchise_collections",
+      "title": "Franchise Collections",
+      "description": "TMDB franchise and saga collections.",
+      "template_ids": [
+        "tmdb_franchise_star_wars",
+        "tmdb_franchise_placeholder"
+      ],
+      "templates": [
+        {
+          "id": "tmdb_franchise_star_wars",
+          "title": "Star Wars",
+          "source": "tmdb_collection",
+          "media_kind": "movie",
+          "featured": true,
+          "poster_path": "/images/collection-templates/tmdb_franchise_star_wars.jpg",
+          "needs_setup": false
+        },
+        {
+          "id": "tmdb_franchise_placeholder",
+          "title": "TMDB Franchise",
+          "source": "tmdb_collection",
+          "media_kind": "movie",
+          "featured": false,
+          "needs_setup": true
+        }
+      ]
+    }
+  ]
+}

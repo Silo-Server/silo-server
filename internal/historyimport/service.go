@@ -47,6 +47,13 @@ type Service struct {
 	runCancels   map[string]context.CancelFunc
 	runCancelsMu sync.Mutex
 	observers    []Observer
+
+	// seriesDrops and nextUp run the pass hiding the shows a source hid from
+	// its Continue Watching (see SetContinueWatchingStores).
+	seriesDrops SeriesDropStore
+	nextUp      NextUpLister
+	// now dates the drops that pass writes; nil means time.Now.
+	now func() time.Time
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -371,6 +378,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 
 	hiddenSuppressed := 0
 	hiddenWarningAt := -1
+	var importedEpisodes []importedEpisode
 	for i, record := range records {
 		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 			s.failClaim(ctx, claim, summary, err)
@@ -450,6 +458,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
+			if record.Kind == KindEpisode {
+				importedEpisodes = append(importedEpisodes, newImportedEpisode(match.MediaItemID, record))
+			}
 			if outcome.ProgressWritten {
 				summary.ProgressUpdated++
 			} else {
@@ -466,6 +477,22 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		}
 
 		s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
+	}
+
+	if reporter, ok := provider.(ContinueWatchingRowReporter); ok {
+		if row, ok := reporter.ContinueWatchingRow(); ok {
+			if err := s.repo.validateRunClaim(ctx, claim); err != nil {
+				s.failClaim(ctx, claim, summary, err)
+				return
+			}
+			dropped, err := s.reconcileContinueWatching(ctx, run.UserID, run.ProfileID, row, importedEpisodes)
+			if err != nil {
+				slog.WarnContext(ctx, "history import: hiding shows hidden at the source failed", "run_id", run.ID, "dropped", dropped, "error", err)
+				summary.Warnings = append(summary.Warnings, warnContinueWatchingNotReconciled)
+			} else if dropped > 0 {
+				slog.InfoContext(ctx, "history import: hid shows hidden from the source's continue watching", "run_id", run.ID, "dropped", dropped)
+			}
+		}
 	}
 
 	if err := s.repo.validateRunClaim(ctx, claim); err != nil {
@@ -525,7 +552,9 @@ func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID,
 	if err != nil {
 		return outcome, err
 	}
-	if record.UpdatedAt.IsZero() {
+	importedAt := record.UpdatedAt
+	if importedAt.IsZero() {
+		importedAt = undatedImportTime
 		outcome.ProgressWritten, outcome.HiddenSuppressed, err = s.seedUndatedProgress(ctx, store, profileID, itemID, record)
 	} else {
 		outcome.ProgressWritten, err = store.SetProgressIfNewer(
@@ -536,7 +565,41 @@ func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID,
 	}
 	outcome.HistoryCreated, err = s.watchState.RecordImportedHistory(
 		ctx, userID, profileID, itemID, record.DurationSeconds, record.Played, record.LastPlayedAt)
-	return outcome, err
+	if err != nil || !record.HiddenFromResume {
+		return outcome, err
+	}
+	return outcome, dismissImportedResume(ctx, store, profileID, itemID, importedPosition(record), importedAt)
+}
+
+// undatedImportTime dates progress from a record the source gave no play time
+// for, so it loses every freshness comparison.
+var undatedImportTime = time.Unix(0, 0).UTC()
+
+// dismissImportedResume keeps an item the source hid from its Continue Watching
+// out of the profile's Continue Watching, with a dismissal anchored to the
+// imported progress stamp. It acts only while the progress row still holds the
+// imported position and date, written by this run or an earlier one: newer
+// playback in Silo is never hidden, and re-running an import hides entries an
+// earlier run brought in.
+func dismissImportedResume(ctx context.Context, store userstore.UserStore, profileID, itemID string, position float64, importedAt time.Time) error {
+	progress, err := store.GetProgress(ctx, profileID, itemID)
+	// Continue Watching lists any row with a resume point, including a rewatch
+	// of a completed item.
+	if err != nil || progress == nil || progress.PositionSeconds <= 0 {
+		return err
+	}
+	// User stores report updated_at as RFC 3339 in UTC, whole seconds, so the
+	// position tells the import apart from playback within the same second.
+	if progress.PositionSeconds != position || progress.UpdatedAt != importedAt.UTC().Format(time.RFC3339) {
+		return nil
+	}
+	return store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+		ProfileID:         profileID,
+		Surface:           userstore.HomeSurfaceContinueWatching,
+		MediaItemID:       itemID,
+		ProgressUpdatedAt: &progress.UpdatedAt,
+		DismissedAt:       time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // seedUndatedProgress imports a record the source gave no play time for. The
@@ -557,7 +620,7 @@ func (s *Service) seedUndatedProgress(
 	record Record,
 ) (written, hiddenSuppressed bool, err error) {
 	written, err = store.SetProgressIfNewer(
-		ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, time.Unix(0, 0).UTC())
+		ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, undatedImportTime)
 	if err != nil || written {
 		return written, false, err
 	}

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,9 +29,10 @@ func NewPersonRepository(pool *pgxpool.Pool) *PersonRepository {
 	return &PersonRepository{pool: pool}
 }
 
-// FindOrCreate looks up a person by tmdb_id, imdb_id, or case-insensitive name.
-// If found, it enriches empty fields with new data and returns the existing ID.
-// If not found, it creates a new person and returns the new ID.
+// FindOrCreate looks up a person by tmdb_id, imdb_id, or a provider-safe
+// case-insensitive name match. If found, it enriches empty fields with new data
+// and returns the existing ID. If not found, it creates a new person and
+// returns the new ID.
 func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (int64, error) {
 	var existingID int64
 
@@ -54,13 +57,31 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 	}
 
 	if p.Name != "" {
-		err := r.pool.QueryRow(ctx, "SELECT id FROM people WHERE LOWER(name) = LOWER($1)", p.Name).Scan(&existingID)
-		if err == nil {
-			return r.enrichExisting(ctx, existingID, p)
-		}
-		if err != pgx.ErrNoRows {
+		rows, err := r.pool.Query(ctx, `
+			SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
+			FROM people
+			WHERE LOWER(name) = LOWER($1)
+			ORDER BY id`, p.Name)
+		if err != nil {
 			return 0, fmt.Errorf("lookup by name: %w", err)
 		}
+		for rows.Next() {
+			candidate := models.Person{}
+			if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
+				rows.Close()
+				return 0, fmt.Errorf("scan name lookup: %w", err)
+			}
+			if !canResolvePersonByName(p, candidate) {
+				continue
+			}
+			rows.Close()
+			return r.enrichExisting(ctx, candidate.ID, p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("iterate name lookup: %w", err)
+		}
+		rows.Close()
 	}
 
 	// Not found — create new person
@@ -213,8 +234,9 @@ func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p model
 }
 
 // BatchFindOrCreate resolves a batch of people in 5 phases: lookup by tmdb_id,
-// imdb_id, and name; enrich found people; insert new people. Returns a slice
-// of IDs positionally matching the input. Zero values indicate failures.
+// imdb_id, and provider-safe name matching; enrich found people; insert new
+// people. Returns a slice of IDs positionally matching the input. Zero values
+// indicate failures.
 func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []models.Person) ([]int64, error) {
 	if len(people) == 0 {
 		return nil, nil
@@ -319,7 +341,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 		rows.Close()
 	}
 
-	// Phase 3: Batch lookup by name (remaining).
+	// Phase 3: Batch lookup by name (remaining). A name is not identity: only a
+	// shared provider id, or two records with no provider identity at all, may
+	// resolve here. This prevents unrelated namesakes from being folded together.
 	var nameValues []string
 	nameLookup := make(map[string][]int) // LOWER(name) → unique indices
 	for i, p := range uniquePeople {
@@ -331,24 +355,27 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 	}
 	if len(nameValues) > 0 {
 		rows, err := r.pool.Query(ctx,
-			"SELECT id, LOWER(name) FROM people WHERE LOWER(name) = ANY($1::text[])",
+			`SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
+			 FROM people
+			 WHERE LOWER(name) = ANY($1::text[])
+			 ORDER BY id`,
 			nameValues)
 		if err != nil {
 			return nil, fmt.Errorf("batch lookup by name: %w", err)
 		}
 		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
+			candidate := models.Person{}
+			if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scanning name result: %w", err)
 			}
-			for _, ui := range nameLookup[name] {
-				if !resolved[ui] {
-					uniqueIDs[ui] = id
-					resolved[ui] = true
-					toEnrich = append(toEnrich, enrichEntry{id, uniquePeople[ui]})
+			for _, ui := range nameLookup[strings.ToLower(candidate.Name)] {
+				if resolved[ui] || !canResolvePersonByName(uniquePeople[ui], candidate) {
+					continue
 				}
+				uniqueIDs[ui] = candidate.ID
+				resolved[ui] = true
+				toEnrich = append(toEnrich, enrichEntry{candidate.ID, uniquePeople[ui]})
 			}
 		}
 		rows.Close()
@@ -582,29 +609,46 @@ func (r *PersonRepository) SearchAlphabetical(ctx context.Context, query string,
 
 // SearchScoped ranks exact names first and restricts people to credits in the
 // selected media scope and viewer access before applying the limit. Empty scope
-// includes accessible credits across all media types.
+// includes accessible credits across all media types. Every query word must
+// start a word of the name, so "hacks" finds "Lark Hackshaw" but not
+// "Chad Thackston", while a partial last word still serves typeahead.
 func (r *PersonRepository) SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter) ([]models.Person, error) {
 	return r.search(ctx, strings.TrimSpace(query), limit, mediaScope, filter, true)
 }
 
-// search runs a name search over the people the viewer can see. rankExact
-// puts exact name matches first, as v2 search does.
-func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter, rankExact bool) ([]models.Person, error) {
+// search runs a name search over the people the viewer can see. scoped
+// selects the v2 rules: word-start matching with exact names first. Without
+// it the query matches anywhere in the name, as the v1 bridge search does.
+func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter, scoped bool) ([]models.Person, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	args := []any{query, limit}
-	argIdx := 3
-	where := "name ILIKE '%' || $1 || '%' AND " + personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx)
+	// The query binds only where the SQL reads it: Postgres cannot type an
+	// unreferenced parameter, which a scoped empty query would leave.
+	args := []any{limit}
+	argIdx := 2
+	var conditions []string
+	if scoped {
+		conditions = personNameWordStartConditions(query, &args, &argIdx)
+	} else {
+		conditions = []string{fmt.Sprintf("name ILIKE '%%' || $%d || '%%'", argIdx)}
+		args = append(args, query)
+		argIdx++
+	}
+	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx))
+	where := strings.Join(conditions, " AND ")
 	order := "name ASC, id ASC"
-	if rankExact && query != "" {
-		order = "(LOWER(name) = LOWER($1)) DESC, " + order
+	if scoped && query != "" {
+		// Words match however they are spaced, so a name equal to the query
+		// as typed or with its whitespace collapsed counts as exact.
+		order = fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d))) DESC, ", argIdx, argIdx+1) + order
+		args = append(args, query, strings.Join(strings.Fields(query), " "))
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
 			metadata_refresh_attempted_at
-		FROM people WHERE `+where+` ORDER BY `+order+` LIMIT $2`, args...,
+		FROM people WHERE `+where+` ORDER BY `+order+` LIMIT $1`, args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
@@ -623,6 +667,46 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		people = append(people, p)
 	}
 	return people, rows.Err()
+}
+
+// maxPersonSearchWords caps the distinct query words people search matches
+// on, so a long query cannot add predicates without bound.
+const maxPersonSearchWords = 8
+
+// personNameWordStartConditions matches people whose name has, for every
+// distinct whitespace-separated word of query, a word starting with it. A word
+// starts at the beginning of the name or after a character that is not a
+// letter or digit, so "luc" finds "Jean-Luc" and "brien" finds "O'Brien"; a
+// query word that opens with punctuation, like "'brien", carries its own
+// boundary. Each word also carries a substring ILIKE, which lets
+// idx_people_name_trgm narrow the rows the regex checks. Both predicates leave
+// case folding to the database: ~* folds one character at a time and Go's
+// lowercasing ignores the collation, so either would drop matches ILIKE keeps
+// (a name spelled "GROẞ" for "groß", a Turkish dotted I). An empty query adds
+// no conditions.
+func personNameWordStartConditions(query string, args *[]any, argIdx *int) []string {
+	var conditions []string
+	seen := map[string]bool{}
+	for _, word := range strings.Fields(query) {
+		// Only identical words repeat: case pairs depend on the collation.
+		if seen[word] {
+			continue
+		}
+		if len(seen) == maxPersonSearchWords {
+			break
+		}
+		seen[word] = true
+		pattern := escapeRegexLiteral(word)
+		if first, _ := utf8.DecodeRuneInString(word); unicode.IsLetter(first) || unicode.IsDigit(first) {
+			pattern = "(^|[^[:alnum:]])" + pattern
+		}
+		conditions = append(conditions,
+			fmt.Sprintf(`name ILIKE $%d ESCAPE '\'`, *argIdx),
+			fmt.Sprintf("LOWER(name) ~ LOWER($%d)", *argIdx+1))
+		*args = append(*args, "%"+escapeLikeLiteral(word)+"%", pattern)
+		*argIdx += 2
+	}
+	return conditions
 }
 
 // personCreditVisibleSQL renders an EXISTS predicate that holds when the person
@@ -1019,6 +1103,36 @@ func externalIDsCompatible(a, b models.Person) bool {
 		idsCompatible(a.ImdbID, b.ImdbID) &&
 		idsCompatible(a.TvdbID, b.TvdbID) &&
 		idsCompatible(a.PlexGUID, b.PlexGUID)
+}
+
+// canResolvePersonByName permits the legacy name fallback only when it has an
+// identity signal stronger than the name itself. A shared provider id proves
+// the rows refer to the same provider entity; two entirely unidentified rows
+// may also reuse one name-only placeholder. Disjoint provider identities never
+// match merely because two people have the same name.
+func canResolvePersonByName(a, b models.Person) bool {
+	if !personNamesMatch(a.Name, b.Name) || !externalIDsCompatible(a, b) {
+		return false
+	}
+	if !hasExternalPersonID(a) && !hasExternalPersonID(b) {
+		return true
+	}
+	return sharedExternalPersonID(a, b)
+}
+
+func hasExternalPersonID(p models.Person) bool {
+	return p.TmdbID != "" || p.ImdbID != "" || p.TvdbID != "" || p.PlexGUID != ""
+}
+
+func sharedExternalPersonID(a, b models.Person) bool {
+	return sharedNonEmptyID(a.TmdbID, b.TmdbID) ||
+		sharedNonEmptyID(a.ImdbID, b.ImdbID) ||
+		sharedNonEmptyID(a.TvdbID, b.TvdbID) ||
+		sharedNonEmptyID(a.PlexGUID, b.PlexGUID)
+}
+
+func sharedNonEmptyID(x, y string) bool {
+	return x != "" && x == y
 }
 
 func idsCompatible(x, y string) bool {

@@ -1293,3 +1293,23 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T)
 		t.Fatalf("node was asked %d times, want a second read after the invalidation", hits.Load())
 	}
 }
+
+// With local fallback off, a job whose only nodes are full of prepared files
+// waits for space instead of failing as if no node existed.
+func TestNodeAwarePreparerWaitsWhenEveryNodeIsFull(t *testing.T) {
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{{ID: 5, URL: "http://full", Enabled: true, Healthy: true}})
+	local := &recordingEncodePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.SetStorageGate(func(nodeID int) bool { return nodeID == 5 })
+	p.SetSettingsReader(staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"})
+
+	if _, err := p.PrepareFile(context.Background(), "artifact-nodes-full", playback.TranscodeOpts{}, "/artifacts/job.mp4"); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("err = %v, want ErrStorageFull", err)
+	}
+	if local.calls != 0 {
+		t.Fatalf("local calls = %d, want 0", local.calls)
+	}
+}

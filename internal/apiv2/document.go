@@ -640,7 +640,6 @@ func registerAll(reg *Registry) {
 
 	registerAdminJellyfinCompatStatus(reg)
 	registerAdminJellyfinCompatSettings(reg)
-	registerAdminSectionSettings(reg)
 	registerAdminAutoscanSources(reg)
 	registerAdminAutoscanConnections(reg)
 	registerAdminAutoscanAvailableSources(reg)
@@ -727,6 +726,7 @@ func registerAll(reg *Registry) {
 	registerAdminDevices(reg)
 	registerAdminPlaybackSessions(reg)
 	registerAdminDownloadPreparations(reg)
+	registerAdminDownloadStorage(reg)
 	registerAdminPlaybackCommands(reg)
 	registerAdminPlaybackTerminate(reg)
 	registerAdminNodeSessions(reg)

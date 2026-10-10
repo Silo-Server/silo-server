@@ -384,6 +384,8 @@ var adminSettingDefaults = map[string]string{
 	DownloadLocalTranscodeFallbackSettingKey: "true",
 	"download.max_concurrent_prepares":       "2",
 	"download.artifact_max_bytes":            "0",
+	DownloadArtifactCacheHoursSettingKey:     "72",
+	DownloadArtifactDiskCeilingSettingKey:    "85",
 
 	"policy.editor_enabled":                 "false",
 	"policy.eval_timeout_ms":                "100",
@@ -678,6 +680,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	case "download.max_concurrent_per_user", "download.max_per_period",
 		"download.max_concurrent_prepares", "download.artifact_max_bytes":
 		return normalizeAdminInt64(key, value, 0, math.MaxInt64)
+	case DownloadArtifactCacheHoursSettingKey:
+		return normalizeAdminInt(key, value, 0, MaxDownloadArtifactCacheHours)
+	case DownloadArtifactDiskCeilingSettingKey:
+		return normalizeAdminInt(key, value, MinDownloadArtifactDiskCeilingPercent, MaxDownloadArtifactDiskCeilingPercent)
 	case "policy.decision_log_scope_sample_rate", "policy.decision_log_retention_days":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
 	case "policy.eval_timeout_ms":
@@ -1057,6 +1063,9 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 		if err != nil {
 			return nil, nil, redisURLError(err)
 		}
+		if options.PoolSize < 0 {
+			return nil, nil, errRedisNegativePoolSize
+		}
 		return options, nil, nil
 	}
 
@@ -1071,6 +1080,9 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 	}
 	if strings.TrimSpace(failover.MasterName) == "" {
 		return nil, nil, fmt.Errorf("redis: %s must name the Sentinel master", redisSentinelMasterParam)
+	}
+	if failover.PoolSize < 0 {
+		return nil, nil, errRedisNegativePoolSize
 	}
 	if host, port, err := net.SplitHostPort(u.Host); err != nil || host == "" || port == "" {
 		// go-redis would fall back to port 6379, the Redis port.
@@ -1098,6 +1110,11 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 	}
 	return nil, failover, nil
 }
+
+// errRedisNegativePoolSize refuses a negative pool_size. go-redis replaces
+// only 0 with its default and panics building a client from a negative size,
+// which the connection check and every start would then do.
+var errRedisNegativePoolSize = errors.New("redis: pool_size must be 0 or more; leave it out for the default")
 
 // percentDecoded decodes the escapes in s that are valid and keeps the rest as
 // they are. url.QueryUnescape gives up at the first invalid one.

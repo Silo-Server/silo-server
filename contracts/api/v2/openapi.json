@@ -1577,9 +1577,36 @@
         ],
         "type": "object"
       },
+      "AdminAuditChange": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "type": "object"
+      },
       "AdminAuditLog": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditChange"
+            },
+            "type": "array"
+          },
           "client_ip": {
             "type": "string"
           },
@@ -1617,6 +1644,12 @@
           "status_code": {
             "format": "int64",
             "type": "integer"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
           },
           "timestamp": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
@@ -3394,6 +3427,12 @@
               "null"
             ]
           },
+          "home_row_count": {
+            "description": "Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -3455,6 +3494,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -3462,6 +3508,12 @@
             "type": "string"
           },
           "query_definition": {},
+          "row_count": {
+            "description": "Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "slug": {
             "type": "string"
           },
@@ -3505,6 +3557,7 @@
           "featured",
           "poster_url",
           "backdrop_url",
+          "poster_is_collage",
           "source_url",
           "query_definition",
           "sort_config",
@@ -3588,9 +3641,26 @@
           "item_reorder": {
             "type": "boolean"
           },
+          "mdblist_search": {
+            "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "schedule_time_zone": {
+            "$ref": "#/components/schemas/CollectionScheduleTimeZone"
+          },
+          "section_references": {
+            "description": "listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -3601,6 +3671,13 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "template_summaries": {
+            "description": "listAdminCollectionTemplateBundles returns each bundle's templates",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
@@ -3609,6 +3686,10 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "template_summaries",
+          "mdblist_search",
+          "schedule_time_zone",
+          "section_references",
           "revision",
           "state",
           "allowed"
@@ -3997,6 +4078,71 @@
         "required": [
           "total",
           "items"
+        ],
+        "type": "object"
+      },
+      "AdminCollectionSection": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "featured": {
+            "description": "The row is its page's hero banner.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "library_id": {
+            "description": "The library whose page holds the row; null for a Home row.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_row_count": {
+            "description": "Rows on the page that holds this row, turned-off rows included.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "position": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "home",
+              "library"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "library_id",
+          "section_type",
+          "title",
+          "featured",
+          "enabled",
+          "position",
+          "page_row_count"
         ],
         "type": "object"
       },
@@ -5226,6 +5372,294 @@
         ],
         "type": "object"
       },
+      "AdminDownloadDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_on_device": {
+            "description": "Size of the finished copies",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "copies": {
+            "description": "Downloads that are not revoked",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "finished": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "description": "Last registry sync or download request",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "monitors": {
+            "description": "Active series monitors",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "revoked": {
+            "description": "Revoked and waiting for the device to delete its copy",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stale": {
+            "description": "Not seen within stale_device_days",
+            "type": "boolean"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "waiting": {
+            "description": "Preparing, ready or downloading",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "profile_id",
+          "profile_name",
+          "device_id",
+          "device_name",
+          "platform",
+          "stale",
+          "copies",
+          "finished",
+          "waiting",
+          "failed",
+          "revoked",
+          "bytes_on_device",
+          "monitors"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "completed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_id": {
+            "description": "Movie, or the series for an episode",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "delivery_format": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "effective_quality": {
+            "type": "string"
+          },
+          "episode": {
+            "additionalProperties": false,
+            "description": "Null unless episode_id resolves to a catalog episode",
+            "properties": {
+              "episode_number": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "season_number": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "title": {
+                "description": "Empty when unknown",
+                "type": "string"
+              }
+            },
+            "required": [
+              "season_number",
+              "episode_number",
+              "title"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "episode_id": {
+            "type": "string"
+          },
+          "file_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "location": {
+            "description": "Where its prepared file is: server or node:\u003cid\u003e; absent when it has none",
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Catalog type of content_id (movie, series, …); empty when unknown",
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "revoked_reason": {
+            "type": "string"
+          },
+          "status": {
+            "description": "preparing, ready, downloading, completed, failed or revoked. More values may be added",
+            "type": "string"
+          },
+          "status_event_at": {
+            "description": "Latest accepted client status report; null when the app never reported",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Catalog title of content_id; empty when the item left the catalog",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "device_name",
+          "id",
+          "profile_id",
+          "device_id",
+          "content_id",
+          "title",
+          "media_type",
+          "episode",
+          "status",
+          "quality",
+          "effective_quality",
+          "delivery_format",
+          "target_bitrate_kbps",
+          "file_size",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "status_event_at"
+        ],
+        "type": "object"
+      },
       "AdminDownloadPreparation": {
         "additionalProperties": false,
         "properties": {
@@ -5770,6 +6204,835 @@
         "required": [
           "counts",
           "items"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadRevokeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "ids": {
+            "description": "Download ids to revoke. Leave empty with user_id, profile_id and device_id to revoke everything on one device.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "pause_monitors": {
+            "description": "Whole-device revoke only: also pause the device's series monitors",
+            "type": "boolean"
+          },
+          "profile_id": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Kept in the clean-up history",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "user_id": {
+            "maxLength": 10,
+            "pattern": "^([1-9][0-9]*)?$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminDownloadRevokeOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Size of the revoked copies the device had finished downloading",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "download_ids": {
+            "description": "The revoked downloads",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "paused_monitors": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revoked": {
+            "description": "Downloads newly revoked; already revoked ones are not counted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revoked",
+          "bytes",
+          "paused_monitors",
+          "download_ids"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorage": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_hours": {
+            "description": "How long a prepared file nothing is waiting on stays after its last use",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default_budget_bytes": {
+            "description": "download.artifact_max_bytes, the budget at every location without its own; 0 means none",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "disk_ceiling_percent": {
+            "description": "Filesystem fill at which clean-up deletes cached files early",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "freed_last_30_days_bytes": {
+            "description": "Bytes clean-up and administrators removed from the server and nodes in the last 30 days",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "locations": {
+            "description": "The server first, then transcode nodes by name",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadStorageLocation"
+            },
+            "type": "array"
+          },
+          "preparing_jobs": {
+            "description": "Unfinished preparation jobs (see the preparation queue)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stale_device_days": {
+            "description": "Devices not seen for this long are counted as stale",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "locations",
+          "cache_hours",
+          "disk_ceiling_percent",
+          "default_budget_bytes",
+          "stale_device_days",
+          "preparing_jobs",
+          "freed_last_30_days_bytes"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageCapabilitiesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "devices": {
+            "description": "Device copies can be listed",
+            "type": "boolean"
+          },
+          "realtime_channel": {
+            "description": "Admin realtime channel carrying download_storage.changed",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "revocation": {
+            "description": "Device copies can be revoked",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "realtime_channel",
+          "devices",
+          "revocation",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageCleanupOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "freed_bytes": {
+            "description": "Bytes this run deleted. 0 when nothing was due or another replica was already cleaning up.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "freed_bytes"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageDeleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Prepared file ids. A repeated id is reported once.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "include_in_use": {
+            "description": "Also delete files a download is waiting on or fetching. Each such file is queued to be prepared again and those downloads wait for the new copy.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageDeleteOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "description": "One result per distinct requested id, in request order",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadStorageDeleteResult"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageDeleteResult": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "description": "deleted: the file is gone; finished devices keep their copies. requeued: it was in use; it was deleted and queued to be prepared again. in_use: refused because a download is waiting on or fetching it (set include_in_use to delete it anyway) or it was used in the last minute. not_found: no such prepared file. not_ready: it is still being prepared, failed, or was already deleted. failed: an error stopped this file's delete; the others went on. A file left on disk is reported as untracked.",
+            "enum": [
+              "deleted",
+              "requeued",
+              "in_use",
+              "not_found",
+              "not_ready",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "outcome",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AdminDownloadStorageUser",
+            "description": "Whose device a revocation or removal concerned"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/AdminDownloadStorageUser",
+            "description": "The administrator; absent for automatic clean-up"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "count": {
+            "description": "Files or downloads the batch touched",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "detail": {
+            "description": "The administrator's reason, or a note such as a file count",
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque row id: one batch at one location for one reason and account",
+            "type": "string"
+          },
+          "location": {
+            "description": "server, node:\u003cid\u003e, or device",
+            "type": "string"
+          },
+          "location_name": {
+            "description": "Node or device name",
+            "type": "string"
+          },
+          "occurred_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "reason": {
+            "description": "cache_expired, budget, disk_ceiling, admin_delete, untracked, missing, revoked or device_removed. More values may be added.",
+            "type": "string"
+          },
+          "titles": {
+            "description": "The first catalog titles it touched",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "reason",
+          "location",
+          "location_name",
+          "occurred_at",
+          "count",
+          "bytes",
+          "titles"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageFile": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_codec": {
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "content_id": {
+            "description": "The movie, or the series an episode belongs to",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "downloading": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "episode_id": {
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "episode_title": {
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When a cached file's cache period ends",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "finished": {
+            "description": "Devices that already hold their copy",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              "remux",
+              "transcode"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Prepared file id (the preparation job id)",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "Last served, linked, or finished by a device",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "location": {
+            "description": "server, or node:\u003cid\u003e",
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string"
+          },
+          "media_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "oldest_waiting": {
+            "$ref": "#/components/schemas/AdminDownloadWaitingDevice",
+            "description": "The longest-unseen device a stale waiting download belongs to"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stale_waiting": {
+            "description": "Waiting downloads on devices not seen within stale_device_days",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "description": "in_use: a download is waiting on or fetching it. cached: nothing is; it is deleted when expires_at passes. expired: its bytes were deleted; finished devices keep their copies.",
+            "enum": [
+              "in_use",
+              "cached",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Catalog title; empty when the item left the catalog",
+            "type": "string"
+          },
+          "video_codec": {
+            "description": "Target video codec, or copy for a remux",
+            "type": "string"
+          },
+          "waiting": {
+            "description": "Downloads that have not started fetching it",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "year": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "format",
+          "location",
+          "location_name",
+          "media_file_id",
+          "title",
+          "media_type",
+          "container",
+          "video_codec",
+          "audio_codec",
+          "bytes",
+          "created_at",
+          "last_used_at",
+          "waiting",
+          "downloading",
+          "finished",
+          "stale_waiting"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "budget_bytes": {
+            "description": "Storage budget for prepared files here; 0 means none",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "budget_source": {
+            "enum": [
+              "setting",
+              "override",
+              "none"
+            ],
+            "type": "string"
+          },
+          "cached_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cached_files": {
+            "description": "Files nothing is waiting on; deleted when their cache period ends",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cleanup_backlog": {
+            "description": "Node files queued for deletion and not yet deleted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dir": {
+            "description": "Directory of prepared files. For a node, the one it was last listed in, which is the one it uses; before its first listing, the configured one, or empty when that is the default.",
+            "type": "string"
+          },
+          "dir_source": {
+            "description": "Where the configured directory comes from. default: the built-in location. setting: download.artifact_dir. override: this node's own directory.",
+            "enum": [
+              "default",
+              "setting",
+              "override"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "in_use_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "in_use_files": {
+            "description": "Files a download is waiting on or fetching, by Silo's records",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "description": "server, or node:\u003cid\u003e",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "server",
+              "node"
+            ],
+            "type": "string"
+          },
+          "last_health_check": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "online": {
+            "description": "The server, or an enabled node whose last health check succeeded",
+            "type": "boolean"
+          },
+          "pending_dir": {
+            "description": "A node's configured directory when it differs from the one it was last listed in. The node moves to it when it restarts; files are not moved.",
+            "type": "string"
+          },
+          "reconciled_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "replicas_disagree": {
+            "description": "API replicas report different directories or filesystems for the server's prepared files; they should share one volume",
+            "type": "boolean"
+          },
+          "stale_waiting_bytes": {
+            "description": "In-use bytes kept only for devices not seen within stale_device_days",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "storage_full": {
+            "description": "Over its budget or the disk ceiling with nothing left to free. A full node gets no new preparations; while the server is full, jobs that would be prepared on it wait.",
+            "type": "boolean"
+          },
+          "untracked_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "untracked_files": {
+            "description": "Files on disk that no prepared-file record accounts for, at the last reconciliation",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AdminDownloadStorageUsage",
+            "description": "Latest measurement of the files on disk; absent until one is reported"
+          },
+          "waiting_downloads": {
+            "description": "Downloads waiting on or fetching files here",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "name",
+          "enabled",
+          "online",
+          "dir_source",
+          "in_use_files",
+          "in_use_bytes",
+          "cached_files",
+          "cached_bytes",
+          "waiting_downloads",
+          "stale_waiting_bytes",
+          "untracked_files",
+          "untracked_bytes",
+          "budget_bytes",
+          "budget_source",
+          "cleanup_backlog",
+          "storage_full",
+          "replicas_disagree"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageUntrackedOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed_files": {
+            "description": "Untracked files that could not be deleted, for example on a read-only directory; they stay untracked",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "files": {
+            "description": "Untracked files deleted",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files",
+          "bytes",
+          "failed_files"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Size of the finished prepared files",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ephemeral": {
+            "description": "Files here do not survive a restart (tmpfs) or a container recreation (the container's overlay layer)",
+            "type": "boolean"
+          },
+          "error": {
+            "description": "Why the last measurement failed",
+            "type": "string"
+          },
+          "files": {
+            "description": "Finished prepared files",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fs_total_bytes": {
+            "description": "Capacity of that filesystem available to Silo; 0 when unknown",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fs_type": {
+            "description": "ext4, xfs, tmpfs, overlay, nfs and so on; empty when unknown",
+            "type": "string"
+          },
+          "fs_used_bytes": {
+            "description": "Bytes used on the filesystem the directory is on, as df counts them",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "measured_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "other_bytes": {
+            "description": "Receipts and other small files",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partial_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partial_files": {
+            "description": "Files an encode is writing, or left behind",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shares_scratch": {
+            "description": "The directory is on the same filesystem as the transcode scratch directory",
+            "type": "boolean"
+          },
+          "stale": {
+            "description": "The last measurement did not finish or failed; the numbers are older",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "measured_at",
+          "files",
+          "bytes",
+          "partial_files",
+          "partial_bytes",
+          "other_bytes",
+          "fs_used_bytes",
+          "fs_total_bytes",
+          "shares_scratch",
+          "ephemeral",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadStorageUser": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadWaitingDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "device_name": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "username"
         ],
         "type": "object"
       },
@@ -8040,6 +9303,15 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "audit_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "audit_change_details": {
+            "type": "boolean"
+          },
           "available": {
             "type": "boolean"
           },
@@ -8068,6 +9340,8 @@
           }
         },
         "required": [
+          "audit_change_details",
+          "audit_actions",
           "available",
           "protocol",
           "streams",
@@ -8824,6 +10098,15 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "download_artifact_dir_override": {
+            "description": "This node's own prepared-download directory; absent when inherited.",
+            "type": "string"
+          },
+          "download_artifact_max_bytes_override": {
+            "description": "This node's own prepared-download budget in bytes (0 for none); absent when inherited.",
+            "format": "int64",
+            "type": "integer"
+          },
           "egress_kbps": {
             "format": "int64",
             "type": "integer"
@@ -9255,6 +10538,23 @@
       "AdminNodeUpdateBody": {
         "additionalProperties": false,
         "properties": {
+          "download_artifact_dir_override": {
+            "description": "Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts.",
+            "maxLength": 4096,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "download_artifact_max_bytes_override": {
+            "description": "Storage budget in bytes for this node's prepared download files; 0 means no budget. Null or -1 restores download.artifact_max_bytes.",
+            "format": "int64",
+            "minimum": -1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -20259,20 +21559,57 @@
         "additionalProperties": false,
         "properties": {
           "has_more": {
-            "description": "Whether more values matched than limit",
+            "description": "Whether more values than limit start with q",
             "type": "boolean"
           },
           "matches": {
-            "description": "Empty, never null",
+            "description": "Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "values": {
+            "description": "The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogFacetValue"
+            },
+            "type": "array"
+          },
+          "values_has_more": {
+            "description": "Whether more values matched than limit for values",
+            "type": "boolean"
           }
         },
         "required": [
           "matches",
-          "has_more"
+          "has_more",
+          "values",
+          "values_has_more"
+        ],
+        "type": "object"
+      },
+      "CatalogFacetValue": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Titles in the scope with this value; values can lag catalog changes by up to two minutes",
+            "examples": [
+              42
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "value": {
+            "examples": [
+              "Warner Bros. Pictures"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
         ],
         "type": "object"
       },
@@ -21528,6 +22865,14 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "extended_query_rules": {
+            "description": "Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields",
+            "type": "boolean"
+          },
+          "facet_value_search": {
+            "description": "searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q",
+            "type": "boolean"
+          },
           "max_sessions_per_account": {
             "description": "Oldest ranking sessions expire when this retention bound is exceeded",
             "format": "int64",
@@ -22087,6 +23432,26 @@
         ],
         "type": "object"
       },
+      "CollectionAdminCollectionSection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminCollectionSection"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CollectionAdminDeviceMetadata": {
         "additionalProperties": false,
         "properties": {
@@ -22114,6 +23479,86 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminDiagnosticSummary"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminDownloadDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadDevice"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminDownloadEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadEntry"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminDownloadStorageEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadStorageEvent"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminDownloadStorageFile": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadStorageFile"
             },
             "type": "array"
           },
@@ -22750,6 +24195,20 @@
             ],
             "type": "boolean"
           },
+          "contains_item": {
+            "description": "listCollections accepts contains_item and marks the acting profile's own manual collections with contains",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "create_description": {
+            "description": "createCollection stores a description for the acting account",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "display_filter_fields": {
             "description": "Catalog query fields a display filter may use",
             "examples": [
@@ -22773,7 +24232,7 @@
             "type": "boolean"
           },
           "groups": {
-            "description": "The acting account supports collection groups",
+            "description": "Always false: personal collection groups are no longer supported",
             "type": "boolean"
           },
           "import_sources": {
@@ -22803,9 +24262,37 @@
             "description": "The acting account supports reordering collection items",
             "type": "boolean"
           },
+          "login_sharing": {
+            "description": "is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it",
+            "type": "boolean"
+          },
+          "mdblist_search": {
+            "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "poster_collages": {
+            "description": "A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "preview_posters": {
+            "description": "previewCollection items carry poster_url when the title has a poster",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "schedule_time_zone": {
+            "$ref": "#/components/schemas/CollectionScheduleTimeZone"
           },
           "sort_preference_kinds": {
             "description": "collection_kind values the sort-preference operations accept",
@@ -22831,10 +24318,18 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "sync_schedule_editable": {
+            "description": "updateCollection accepts sync_schedule on a synced list; false when imports is false",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "groups",
+          "login_sharing",
           "imports",
           "import_sources",
           "artwork",
@@ -22845,6 +24340,13 @@
           "collection_sort_preferences",
           "effective_collection_sort",
           "sort_preference_kinds",
+          "create_description",
+          "mdblist_search",
+          "schedule_time_zone",
+          "sync_schedule_editable",
+          "contains_item",
+          "preview_posters",
+          "poster_collages",
           "revision",
           "state",
           "allowed"
@@ -23217,7 +24719,7 @@
         "additionalProperties": false,
         "properties": {
           "group_id": {
-            "description": "The group whose collections are ordered; omitted or null orders the ungrouped section",
+            "description": "Omit or send null: personal collection groups are no longer supported, and any other value is a validation failure",
             "examples": [
               "g1"
             ],
@@ -23228,7 +24730,7 @@
             ]
           },
           "ordered_ids": {
-            "description": "Every visible collection in the scope, exactly once, in the new order",
+            "description": "Each of the acting profile's own collections, exactly once, in the new order; another profile's collection is a validation failure",
             "examples": [
               [
                 "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
@@ -23307,6 +24809,38 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "CollectionScheduleTimeZone": {
+        "additionalProperties": false,
+        "properties": {
+          "abbreviation": {
+            "description": "Current zone abbreviation as the node's time zone database reports it; some zones report a numeric form such as -03",
+            "examples": [
+              "CDT"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "IANA zone name, from the node's TZ environment variable or UTC when TZ is empty or names no known zone; omitted when the node uses its system default zone or a TZ file path",
+            "examples": [
+              "America/Chicago"
+            ],
+            "type": "string"
+          },
+          "utc_offset": {
+            "description": "Current offset from UTC, daylight saving time included",
+            "examples": [
+              "-05:00"
+            ],
+            "pattern": "^[+-][0-9]{2}:[0-9]{2}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "utc_offset",
+          "abbreviation"
         ],
         "type": "object"
       },
@@ -23505,11 +25039,19 @@
             },
             "type": "array"
           },
+          "templates": {
+            "description": "The bundle's templates, in template_ids order.",
+            "items": {
+              "$ref": "#/components/schemas/CollectionTemplateSummary"
+            },
+            "type": "array"
+          },
           "title": {
             "type": "string"
           }
         },
         "required": [
+          "templates",
           "id",
           "title",
           "description",
@@ -23529,6 +25071,44 @@
         },
         "required": [
           "categories"
+        ],
+        "type": "object"
+      },
+      "CollectionTemplateSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "featured": {
+            "description": "Collections created from this template are pinned first on their shelf.",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "media_kind": {
+            "type": "string"
+          },
+          "needs_setup": {
+            "description": "Applying the template creates an empty collection that cannot sync until an administrator sets its source.",
+            "type": "boolean"
+          },
+          "poster_path": {
+            "description": "Server-relative path of the template's poster image.",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source",
+          "media_kind",
+          "featured",
+          "needs_setup"
         ],
         "type": "object"
       },
@@ -23920,6 +25500,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -24004,7 +25591,8 @@
           "last_sync_message",
           "item_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "poster_is_collage"
         ],
         "type": "object"
       },
@@ -25256,6 +26844,9 @@
           "preparation_progress": {
             "type": "boolean"
           },
+          "prepare_again": {
+            "type": "boolean"
+          },
           "proxy_delivery": {
             "type": "boolean"
           },
@@ -25274,6 +26865,9 @@
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "revoked_removes_local": {
+            "type": "boolean"
           },
           "season_download": {
             "type": "boolean"
@@ -25326,6 +26920,8 @@
           "monitor_quality",
           "preparation_progress",
           "direct_download_links",
+          "prepare_again",
+          "revoked_removes_local",
           "revision",
           "state",
           "allowed"
@@ -29708,6 +31304,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -29726,7 +31329,8 @@
           "id",
           "title",
           "poster_url",
-          "item_count"
+          "item_count",
+          "poster_is_collage"
         ],
         "type": "object"
       },
@@ -31219,13 +32823,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -35069,27 +36674,19 @@
       "PersonalCollection": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "description": "Profiles a shared collection is limited to; empty means every profile on the account",
-            "examples": [
-              []
-            ],
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "collection_type": {
             "description": "manual, smart, or an import source (mdblist, tmdb, trakt)",
             "examples": [
               "manual"
             ],
             "type": "string"
+          },
+          "contains": {
+            "description": "Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
@@ -35119,7 +36716,7 @@
             "description": "Display filter fragment; absent when none"
           },
           "group_id": {
-            "description": "null when ungrouped",
+            "description": "Always null: personal collection groups are no longer supported",
             "examples": [
               "g1"
             ],
@@ -35144,6 +36741,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does",
             "examples": [
               false
             ],
@@ -35201,6 +36799,13 @@
               "null"
             ]
           },
+          "poster_is_collage": {
+            "description": "poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "examples": [
               ""
@@ -35229,6 +36834,7 @@
             "description": "Default sort document; {} when unset"
           },
           "sort_order": {
+            "description": "Position in its creator's own order of collections",
             "examples": [
               0
             ],
@@ -35240,6 +36846,20 @@
           },
           "source_url": {
             "description": "Where an imported collection is synced from; empty otherwise",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "sync_cadence": {
+            "description": "The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces",
+            "enum": [
+              "",
+              "daily",
+              "weekly",
+              "monthly",
+              "custom"
+            ],
             "examples": [
               ""
             ],
@@ -35271,13 +36891,13 @@
           "description",
           "collection_type",
           "is_shared",
-          "allowed_profile_ids",
           "query_definition",
           "sort_config",
           "sort_order",
           "group_id",
           "source_url",
           "sync_schedule",
+          "sync_cadence",
           "next_sync_at",
           "last_sync_at",
           "last_sync_status",
@@ -35286,6 +36906,7 @@
           "include_in_server_collections",
           "poster_url",
           "poster_thumbhash",
+          "poster_is_collage",
           "created_at",
           "updated_at"
         ],
@@ -35309,7 +36930,7 @@
         "additionalProperties": false,
         "properties": {
           "groups": {
-            "description": "The account's collection groups in sort order; empty, never null",
+            "description": "Always empty: personal collection groups are no longer supported",
             "items": {
               "$ref": "#/components/schemas/CollectionGroup"
             },
@@ -35336,21 +36957,6 @@
       "PersonalCollectionCreate": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "description": "Profiles a shared collection is limited to",
-            "examples": [
-              []
-            ],
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "collection_type": {
             "description": "Defaults to manual",
             "enum": [
@@ -35359,6 +36965,13 @@
             ],
             "examples": [
               "manual"
+            ],
+            "type": "string"
+          },
+          "description": {
+            "description": "Empty when omitted. Send only when getCollectionCapabilities reports create_description; otherwise the request fails",
+            "examples": [
+              "For wet afternoons"
             ],
             "type": "string"
           },
@@ -35372,6 +36985,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
@@ -35511,6 +37125,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "poster_url": {
+            "description": "Card-size poster URL; omitted when the item has none",
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
@@ -35553,23 +37171,12 @@
       "PersonalCollectionUpdate": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "description": {
             "type": "string"
           },
           "display_query_definition": {},
           "group_id": {
-            "description": "Null removes the group; omitted leaves it unchanged",
+            "description": "Omit: personal collection groups are no longer supported, and setting it answers capability_unsupported",
             "examples": [
               "1"
             ],
@@ -35583,6 +37190,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login",
             "type": "boolean"
           },
           "library_ids": {
@@ -35611,6 +37219,19 @@
           "query_definition": {},
           "sort_config": {},
           "source_url": {
+            "type": "string"
+          },
+          "sync_schedule": {
+            "description": "A synced list's cadence; empty stops scheduled syncs. Cron expressions are refused. Accepted when getCollectionCapabilities reports sync_schedule_editable",
+            "enum": [
+              "",
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "examples": [
+              "weekly"
+            ],
             "type": "string"
           }
         },
@@ -38371,9 +39992,10 @@
         "additionalProperties": false,
         "properties": {
           "allow_profile_custom_sections": {
-            "description": "Whether non-admin profiles may build sections from admin-only recipes",
+            "deprecated": true,
+            "description": "Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it.",
             "examples": [
-              false
+              true
             ],
             "type": "boolean"
           }
@@ -38398,6 +40020,13 @@
               true
             ],
             "type": "boolean"
+          },
+          "default_title": {
+            "description": "The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
           },
           "featured": {
             "examples": [
@@ -38447,6 +40076,7 @@
             "type": "string"
           },
           "title": {
+            "description": "The title this profile sees: its own title override, or the administrator's title",
             "examples": [
               "Continue Watching"
             ],
@@ -38457,6 +40087,7 @@
           "id",
           "section_type",
           "title",
+          "default_title",
           "featured",
           "item_limit",
           "hidden",
@@ -39619,6 +41250,7 @@
         "additionalProperties": false,
         "properties": {
           "admin_only": {
+            "description": "Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has",
             "examples": [
               false
             ],
@@ -44236,13 +45868,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -44411,13 +46044,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -45012,13 +46646,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -45300,6 +46935,13 @@
             ],
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -45324,6 +46966,7 @@
           "name",
           "collection_type",
           "item_count",
+          "poster_is_collage",
           "created_at",
           "updated_at"
         ],
@@ -61740,7 +63383,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List collection template bundles.",
+        "summary": "List collection template bundles, each with a summary of its templates.",
         "tags": [
           "admin-collections"
         ],
@@ -62279,7 +63922,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List supported collection templates.",
+        "summary": "List the collection templates with an mdblist, tmdb or tmdb_list source.",
         "tags": [
           "admin-collections"
         ],
@@ -64475,6 +66118,176 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/collections/{id}/sections": {
+      "get": {
+        "operationId": "listAdminCollectionSections",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminCollectionSection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the administrator Home and library page rows that show a collection. Rows profiles added themselves are not listed.",
+        "tags": [
+          "admin-collections"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/collections/{id}/sync": {
       "post": {
         "operationId": "syncAdminCollection",
@@ -66631,6 +68444,424 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/downloads/devices": {
+      "get": {
+        "operationId": "listAdminDownloadDevices",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Account, profile or device name",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Account, profile or device name",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only devices not seen within stale_device_days",
+            "explode": false,
+            "in": "query",
+            "name": "stale",
+            "schema": {
+              "description": "Only devices not seen within stale_device_days",
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "platform",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "last_seen: longest unseen first. size: most bytes on the device first.",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "last_seen",
+              "description": "last_seen: longest unseen first. size: most bytes on the device first.",
+              "enum": [
+                "last_seen",
+                "size"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminDownloadDevice"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List every device that holds managed downloads, across accounts.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/entries": {
+      "get": {
+        "operationId": "listAdminDownloadEntries",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "maxLength": 10,
+              "pattern": "^([1-9][0-9]*)?$",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminDownloadEntry"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List managed device downloads across accounts, newest first, optionally for one account, profile, device or status.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/downloads/preparations": {
       "get": {
         "operationId": "listAdminDownloadPreparations",
@@ -67530,6 +69761,1482 @@
           }
         ],
         "summary": "Resume paused offline-download preparation jobs. Each job returns to the queue at its original position, or waits out a pending retry backoff.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/revoke": {
+      "post": {
+        "operationId": "revokeAdminDownloads",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminDownloadRevokeInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadRevokeOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke device downloads. The Silo app deletes each copy the next time the device syncs and confirms by deleting the download. The server stops serving the file at once. A revoked episode is excluded from its series monitor; a preparation only revoked downloads waited on is canceled.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage": {
+      "get": {
+        "operationId": "getAdminDownloadStorage",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadStorage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read prepared-download storage at the server and every transcode node: what is on disk, what Silo's records say, budgets, and files nothing accounts for.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/capabilities": {
+      "get": {
+        "operationId": "getAdminDownloadStorageCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadStorageCapabilitiesOutputBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover the admin view of prepared-download storage.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/events": {
+      "get": {
+        "operationId": "listAdminDownloadStorageEvents",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this reason",
+            "explode": false,
+            "in": "query",
+            "name": "reason",
+            "schema": {
+              "description": "Only this reason",
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "location",
+            "schema": {
+              "maxLength": 32,
+              "pattern": "^(server|device|node:[1-9][0-9]*)?$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only the last N days; 0 for all kept history (90 days)",
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "description": "Only the last N days; 0 for all kept history (90 days)",
+              "format": "int64",
+              "maximum": 90,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminDownloadStorageEvent"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the prepared-file clean-up and device revocation history, newest first. A row is one batch (a maintenance pass or an administrator action) at one location for one reason and account.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/files": {
+      "get": {
+        "operationId": "listAdminDownloadStorageFiles",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "maxLength": 8192,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only files at this location",
+            "explode": false,
+            "in": "query",
+            "name": "location",
+            "schema": {
+              "description": "Only files at this location",
+              "maxLength": 32,
+              "pattern": "^(server|node:[1-9][0-9]*)?$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only files in this state; ready files by default",
+            "explode": false,
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "description": "Only files in this state; ready files by default",
+              "enum": [
+                "in_use",
+                "cached",
+                "expired",
+                ""
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only files of this format",
+            "explode": false,
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "description": "Only files of this format",
+              "enum": [
+                "remux",
+                "transcode",
+                ""
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only files from this library",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Only files from this library",
+              "maxLength": 10,
+              "pattern": "^([1-9][0-9]*)?$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Title search",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Title search",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "size: largest first. last_used: least recently used first. created: newest first.",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "size",
+              "description": "size: largest first. last_used: least recently used first. created: newest first.",
+              "enum": [
+                "size",
+                "last_used",
+                "created"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminDownloadStorageFile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List prepared download files with what they are, where they are, and who they serve.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/files/delete": {
+      "post": {
+        "operationId": "deleteAdminDownloadStorageFiles",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminDownloadStorageDeleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadStorageDeleteOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete prepared download files. Devices that finished keep their copies. A file a download is waiting on or fetching is refused unless include_in_use is set; then it is deleted and prepared again.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/locations/{location}/cleanup": {
+      "post": {
+        "operationId": "cleanUpAdminDownloadStorageLocation",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "server, or node:\u003cid\u003e",
+            "in": "path",
+            "name": "location",
+            "required": true,
+            "schema": {
+              "description": "server, or node:\u003cid\u003e",
+              "maxLength": 32,
+              "pattern": "^(server|node:[1-9][0-9]*)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadStorageCleanupOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run prepared-file clean-up at one location now: expire files past their cache period and enforce the budget and disk ceiling.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/storage/locations/{location}/untracked/delete": {
+      "post": {
+        "operationId": "deleteAdminDownloadStorageUntrackedFiles",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "server, or node:\u003cid\u003e",
+            "in": "path",
+            "name": "location",
+            "required": true,
+            "schema": {
+              "description": "server, or node:\u003cid\u003e",
+              "maxLength": 32,
+              "pattern": "^(server|node:[1-9][0-9]*)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadStorageUntrackedOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List one location's prepared-file directory now and delete the files no prepared-file record accounts for and that nothing has written to for an hour. Only files named like Silo's prepared files are considered.",
         "tags": [
           "admin"
         ],
@@ -81146,6 +84853,43 @@
             }
           },
           {
+            "explode": false,
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "actor_user_id",
+            "schema": {
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          {
             "description": "Page size; default 50, maximum 200",
             "explode": false,
             "in": "query",
@@ -81383,6 +85127,43 @@
       "get": {
         "operationId": "connectAdminLogsSocket",
         "parameters": [
+          {
+            "description": "audit: domain action filter.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "audit: acting account, including an impersonator.",
+            "in": "query",
+            "name": "actor_user_id",
+            "schema": {
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "audit: affected entity type.",
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "audit: affected entity identifier.",
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
           {
             "description": "Offer silo.admin-logs.v2 followed by silo.ticket.\u003csingle-use-ticket\u003e.",
             "in": "header",
@@ -108035,437 +111816,6 @@
         "x-silo-class": "acting_admin"
       }
     },
-    "/api/v2/admin/settings/sections": {
-      "get": {
-        "operationId": "getAdminSectionSettings",
-        "parameters": [
-          {
-            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileSectionFlags"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "304": {
-            "description": "The representation named by If-None-Match is current; no body.",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "412": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Failed",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read section permission configuration; read failures retain the disabled default.",
-        "tags": [
-          "admin-settings"
-        ],
-        "x-silo-class": "acting_admin",
-        "x-silo-conditional": true,
-        "x-silo-service-backed": true
-      },
-      "put": {
-        "operationId": "updateAdminSectionSettings",
-        "parameters": [
-          {
-            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProfileSectionFlags"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileSectionFlags"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "408": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Timeout"
-          },
-          "412": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Failed",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "428": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Required"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Replace section permission configuration under the existing settings transaction guard.",
-        "tags": [
-          "admin-settings"
-        ],
-        "x-silo-class": "acting_admin",
-        "x-silo-demo-restricted": true,
-        "x-silo-guarded": true,
-        "x-silo-retry-safety": "natural_idempotent",
-        "x-silo-service-backed": true
-      }
-    },
     "/api/v2/admin/settings/sensitive-status": {
       "get": {
         "operationId": "getAdminSensitiveSettingsStatus",
@@ -128264,6 +131614,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -128506,6 +131881,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -128576,12 +131976,12 @@
             }
           },
           {
-            "description": "Case-insensitive prefix",
+            "description": "Case-insensitive search text; see matches and values for how each answers it",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Case-insensitive prefix",
+              "description": "Case-insensitive search text; see matches and values for how each answers it",
               "examples": [
                 "ste"
               ],
@@ -128589,13 +131989,13 @@
             }
           },
           {
-            "description": "Most matches to return; default 20, maximum 100",
+            "description": "Most values to return in matches and in values; default 20, maximum 100",
             "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
               "default": 20,
-              "description": "Most matches to return; default 20, maximum 100",
+              "description": "Most values to return in matches and in values; default 20, maximum 100",
               "format": "int64",
               "maximum": 100,
               "minimum": 1,
@@ -128710,7 +132110,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Prefix typeahead over one facet of a scope.",
+        "summary": "Typeahead over one facet of a scope, with title counts.",
         "tags": [
           "catalog"
         ],
@@ -130728,12 +134128,12 @@
             }
           },
           {
-            "description": "Name prefix or fragment; empty lists the first people",
+            "description": "Name to match: each word must start a word of the name, case-insensitively, and only the first eight distinct words count; empty lists the first people",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Name prefix or fragment; empty lists the first people",
+              "description": "Name to match: each word must start a word of the name, case-insensitively, and only the first eight distinct words count; empty lists the first people",
               "maxLength": 200,
               "type": "string"
             }
@@ -132588,6 +135988,19 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item",
+            "explode": false,
+            "in": "query",
+            "name": "contains_item",
+            "schema": {
+              "description": "A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item",
+              "examples": [
+                "01J9Z8C3W4R5T6Y7U8I9O0P1Q5"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -132697,7 +136110,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the collections the acting profile owns or may see, with the account's collection groups.",
+        "summary": "List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order.",
         "tags": [
           "collections"
         ],
@@ -132869,6 +136282,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {
@@ -133264,6 +136687,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133280,7 +136713,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create an account-wide collection group. Not idempotent: a retry after a lost response creates a second group.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133416,6 +136849,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133432,7 +136875,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the canonical collection editor state and its strong validator.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133650,6 +137093,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133666,7 +137119,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the order of the account's collection groups. Retries are not safe after an intervening mutation.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133848,6 +137301,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133864,7 +137327,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete a collection group; its collections become ungrouped.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -134027,6 +137490,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -134043,7 +137516,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the canonical collection editor state and its strong validator.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -134275,6 +137748,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -134291,7 +137774,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update a collection group; omitted members are unchanged. Retries are not safe after an intervening mutation.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -135403,10 +138886,12 @@
             }
           },
           {
+            "description": "Omit: personal collection groups are no longer supported, and any value is a validation failure",
             "explode": false,
             "in": "query",
             "name": "group_id",
             "schema": {
+              "description": "Omit: personal collection groups are no longer supported, and any value is a validation failure",
               "type": "string"
             }
           }
@@ -135759,7 +139244,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.",
+        "summary": "Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation.",
         "tags": [
           "collections"
         ],
@@ -137189,6 +140674,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -137205,7 +140700,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update the creator's collection; omitted fields are unchanged.",
+        "summary": "Update the creator's collection; omitted fields are unchanged. Another profile's shared collection answers permission_denied.",
         "tags": [
           "collections"
         ],
@@ -147588,6 +151083,191 @@
           "downloads"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/downloads/{id}/prepare": {
+      "post": {
+        "description": "Use after the file route answers 409 prepared_file_expired. The revision does not change: the recipe is the same. An entry whose file is still on the server, an original-quality entry, or one already preparing returns unchanged.",
+        "operationId": "prepareDownloadAgain",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadEntry"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Prepare a finished download's file again after the server cleaned up its copy; the entry returns to preparing and becomes ready like a new download.",
+        "tags": [
+          "downloads"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -170739,6 +174419,42 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional display name recorded on the device registry (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional display name recorded on the device registry (first 120 characters)",
+              "examples": [
+                "Living room"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the device registry (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the device registry (first 40 characters)",
+              "examples": [
+                "iOS"
+              ],
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -173436,8 +177152,7 @@
         "tags": [
           "profile_sections"
         ],
-        "x-silo-class": "profile_scoped",
-        "x-silo-service-backed": true
+        "x-silo-class": "profile_scoped"
       }
     },
     "/api/v2/profile/sections/settings": {
@@ -204598,6 +208313,46 @@
         }
       },
       {
+        "description": "List the prepared-download directory with its measurement, including the directory path. One listing runs at a time; a second, or one the volume does not answer within 15 seconds, gets 503.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/downloads/artifacts",
+        "handler": "(*internal/transcodenode.Server).handleListDownloadArtifacts",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/downloadstorage_Listing"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
         "description": "Reload configuration; active remux work is not torn down.",
         "retry_safety": "non_retryable",
         "listener": "proxy",
@@ -210758,6 +214513,119 @@
         ],
         "type": "object"
       },
+      "downloadstorage_File": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mod_time": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "bytes",
+          "mod_time"
+        ],
+        "type": "object"
+      },
+      "downloadstorage_Listing": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/downloadstorage_File"
+            },
+            "type": "array"
+          },
+          "usage": {
+            "$ref": "#/x-silo-worker-protocols/schemas/downloadstorage_Usage"
+          }
+        },
+        "required": [
+          "usage",
+          "files"
+        ],
+        "type": "object"
+      },
+      "downloadstorage_Usage": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "files": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fs_total_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fs_type": {
+            "type": "string"
+          },
+          "fs_used_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "other_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "partial_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "partial_files": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "shares_scratch": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "measured_at",
+          "files",
+          "bytes",
+          "partial_files",
+          "partial_bytes",
+          "other_bytes",
+          "fs_used_bytes",
+          "fs_total_bytes",
+          "shares_scratch",
+          "ephemeral"
+        ],
+        "type": "object"
+      },
       "mediasample_At": {
         "additionalProperties": false,
         "properties": {
@@ -212148,6 +216016,9 @@
           "active_jobs": {
             "format": "int32",
             "type": "integer"
+          },
+          "artifacts": {
+            "$ref": "#/x-silo-worker-protocols/schemas/downloadstorage_Usage"
           },
           "attribution": {
             "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceAttribution"

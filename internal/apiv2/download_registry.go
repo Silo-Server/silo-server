@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 )
@@ -98,6 +99,14 @@ type DownloadCapability struct {
 	// DirectDownloadLinks: POST /direct-download/links mints the
 	// profile-bound links the direct-download routes accept as `dl`.
 	DirectDownloadLinks bool `json:"direct_download_links"`
+	// PrepareAgain: a finished entry whose server file was cleaned up answers
+	// the file route with 409 prepared_file_expired, and POST
+	// /downloads/{id}/prepare prepares it again.
+	PrepareAgain bool `json:"prepare_again"`
+	// RevokedRemovesLocal: an administrator can revoke entries. A revoked
+	// entry means the app deletes its local copy at its next sync and then
+	// deletes the entry; see docs/downloads-api.md.
+	RevokedRemovesLocal bool `json:"revoked_removes_local"`
 }
 
 // DownloadQualityOption describes one quality preset. bitrate_kbps and
@@ -128,6 +137,37 @@ func registerDownloadRegistry(reg *Registry) {
 	remove.DefaultStatus = 204
 	Register(reg, remove, reg.deleteDownload)
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/capabilities/downloads", "getDownloadCapability", "downloads", "Discover download policy and ordered registry status support."), Class: ClassProfileScoped, ServiceBacked: true}, reg.getDownloadCapability)
+	prepare := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/{id}/prepare", "prepareDownloadAgain", "downloads", "Prepare a finished download's file again after the server cleaned up its copy; the entry returns to preparing and becomes ready like a new download."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	prepare.Description = "Use after the file route answers 409 prepared_file_expired. The revision does not change: the recipe is the same. An entry whose file is still on the server, an original-quality entry, or one already preparing returns unchanged."
+	prepare.Errors = []int{409, 429, 501}
+	Register(reg, prepare, reg.prepareDownloadAgain)
+}
+
+// DownloadPrepareAgainService prepares a finished managed download's expired
+// file again (*downloads.Service).
+type DownloadPrepareAgainService interface {
+	PrepareAgain(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalogpkg.AccessFilter) (*downloads.Download, error)
+}
+
+type DownloadPrepareAgainInput struct {
+	ID       string `path:"id" minLength:"1"`
+	DeviceID string `header:"X-Silo-Device-Id" required:"true" minLength:"1" maxLength:"128"`
+}
+
+func (reg *Registry) prepareDownloadAgain(ctx context.Context, in *DownloadPrepareAgainInput) (*DownloadEntryOutput, error) {
+	if reg.deps.DownloadPrepareAgain == nil {
+		return nil, unavailable("downloads")
+	}
+	user, profile, p := viewerIdentity(ctx)
+	if p != nil {
+		return nil, p
+	}
+	row, err := reg.deps.DownloadPrepareAgain.PrepareAgain(ctx, user, profile, in.DeviceID, in.ID, handlers.AccessFilterFromContext(ctx, ""))
+	if err != nil {
+		// The caps and delivery checks a new download meets answer the same way here.
+		return nil, downloadCreationProblem(err)
+	}
+	return &DownloadEntryOutput{Body: downloadEntryOf(row)}, nil
 }
 func downloadEntryOf(row *downloads.Download) DownloadEntry {
 	out := DownloadEntry{ID: ID(row.ID), ContentID: row.ContentID, EpisodeID: row.EpisodeID, BatchID: ID(row.BatchID), DeviceID: ID(row.DeviceID), MediaFileID: ID(strconv.Itoa(row.MediaFileID)), FileSize: row.FileSize, BytesSent: row.BytesSent, Kind: row.Kind, Status: row.Status, Quality: row.Quality, EffectiveQuality: row.EffectiveQuality, DeliveryFormat: row.Format, TargetBitrateKbps: row.TargetBitrateKbps, Revision: row.Revision, CreatedAt: NewInstant(row.CreatedAt)}
@@ -149,6 +189,9 @@ func downloadProblem(err error) *Problem {
 		return NewProblem(TypeDependencyUnavailable, "The asset is temporarily unavailable.").WithRetryAfter(5)
 	case errors.Is(err, downloads.ErrNotFound), errors.Is(err, downloads.ErrSubscriptionNotFound), errors.Is(err, downloads.ErrAssetNotFound), errors.Is(err, catalogpkg.ErrItemNotFound):
 		return NewProblem(TypeNotFound, "Download not found.")
+	// Before not-active: an expired file is both, and the client acts on it.
+	case errors.Is(err, downloads.ErrPreparedFileExpired):
+		return NewProblem(TypePreparedFileExpired, "The server's prepared file was cleaned up; prepare the download again before fetching it.")
 	case errors.Is(err, downloads.ErrDownloadNotActive):
 		return NewProblem(TypeConflict, "The download is no longer active.")
 	case errors.Is(err, downloads.ErrFeatureDisabled), errors.Is(err, downloads.ErrDownloadNotAllowed):
@@ -243,6 +286,8 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.OrderedStatus = true
 		out.FileDelivery = reg.deps.DownloadDelivery != nil
 		out.DirectDownloadLinks = reg.deps.DirectDownloadLinks != nil
+		out.PrepareAgain = reg.deps.DownloadPrepareAgain != nil
+		out.RevokedRemovesLocal = true
 		out.BoundedManifests = reg.deps.DownloadManifests != nil
 		out.SubscriptionReads = reg.deps.DownloadSubscriptions != nil
 		out.SubscriptionMutations = reg.deps.DownloadSubscriptionMutations != nil

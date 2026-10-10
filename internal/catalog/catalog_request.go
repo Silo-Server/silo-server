@@ -51,4 +51,8 @@ type CatalogRequest struct {
 	// episode catalog; Query.MediaScope then holds the scope every other read
 	// of the request uses.
 	SearchMediaScope string
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: an overlay rule on a
+	// field or with not_in_last that /api/v2 added is refused. ParseCatalogRequest
+	// sets it unless the caller opts in to ExtendedRules.
+	V1Rules bool
 }

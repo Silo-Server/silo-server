@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -70,6 +71,14 @@ type Node struct {
 	// what the node itself resolves against once it has reloaded its config.
 	HWAccelOverride  *string `json:"hw_accel_override,omitempty"`
 	HWDeviceOverride *string `json:"hw_device_override,omitempty"`
+	// DownloadArtifactDirOverride is where this node keeps prepared download
+	// files. nil means the cluster download.artifact_dir, or when that is
+	// blank, download-artifacts inside the node's transcode directory. A node
+	// fixes its artifact directory at startup, so a change applies on restart.
+	DownloadArtifactDirOverride *string `json:"download_artifact_dir_override,omitempty"`
+	// DownloadArtifactMaxBytesOverride is this node's prepared-download storage
+	// budget in bytes; 0 means no budget. nil inherits download.artifact_max_bytes.
+	DownloadArtifactMaxBytesOverride *int64 `json:"download_artifact_max_bytes_override,omitempty"`
 	// CapabilityDrift is an operator-facing note describing how this node's
 	// hardware got worse at the last capability refetch: a backend that used to
 	// pass its probe and now fails, or a render device that is gone. nil means
@@ -267,6 +276,12 @@ type UpdateNodeInput struct {
 	MaxBandwidthKbps *int    `json:"max_bandwidth_kbps,omitempty"`
 	HWAccelOverride  *string `json:"hw_accel_override,omitempty"`
 	HWDeviceOverride *string `json:"hw_device_override,omitempty"`
+	// DownloadArtifactDirOverride follows the override convention: empty
+	// string (or JSON null) restores the inherited directory.
+	DownloadArtifactDirOverride *string `json:"download_artifact_dir_override,omitempty"`
+	// DownloadArtifactMaxBytesOverride is a byte budget, 0 for none; a
+	// negative value (or JSON null) restores the inherited budget.
+	DownloadArtifactMaxBytesOverride *int64 `json:"download_artifact_max_bytes_override,omitempty"`
 }
 
 // UnmarshalJSON decodes an update body, mapping an explicit JSON null on the
@@ -294,6 +309,12 @@ func (i *UpdateNodeInput) UnmarshalJSON(data []byte) error {
 	if isJSONNull(raw["public_url"]) {
 		i.PublicURL = new(string)
 	}
+	if isJSONNull(raw["download_artifact_dir_override"]) {
+		i.DownloadArtifactDirOverride = new(string)
+	}
+	if isJSONNull(raw["download_artifact_max_bytes_override"]) {
+		i.DownloadArtifactMaxBytesOverride = new(int64(-1))
+	}
 	return nil
 }
 
@@ -307,6 +328,11 @@ func isJSONNull(raw json.RawMessage) bool {
 // has a closed set of values; the database CHECK enforces the same list, and
 // rejecting here turns a constraint violation into an operator-readable error.
 func (i UpdateNodeInput) Validate() error {
+	if i.DownloadArtifactDirOverride != nil {
+		if dir := strings.TrimSpace(*i.DownloadArtifactDirOverride); dir != "" && !filepath.IsAbs(dir) {
+			return fmt.Errorf("%w: download_artifact_dir_override must be an absolute path", ErrInvalidNodeInput)
+		}
+	}
 	if i.HWAccelOverride == nil {
 		return nil
 	}
@@ -403,7 +429,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -421,6 +447,7 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&n.HWAccelOverride, &n.HWDeviceOverride,
 		&n.CapabilityDrift, &driftBaselineBytes,
 		&networkAccessBytes,
+		&n.DownloadArtifactDirOverride, &n.DownloadArtifactMaxBytesOverride,
 	)
 	if err != nil {
 		return nil, err
@@ -541,6 +568,14 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 	if input.PublicURL != nil {
 		publicURL = normalizeOverride(*input.PublicURL)
 	}
+	var artifactDir *string
+	if input.DownloadArtifactDirOverride != nil {
+		artifactDir = normalizeOverride(*input.DownloadArtifactDirOverride)
+	}
+	var artifactMaxBytes *int64
+	if input.DownloadArtifactMaxBytesOverride != nil && *input.DownloadArtifactMaxBytesOverride >= 0 {
+		artifactMaxBytes = input.DownloadArtifactMaxBytesOverride
+	}
 	row := r.pool.QueryRow(ctx,
 		`UPDATE stream_nodes SET
 			name = COALESCE($2, name),
@@ -552,6 +587,8 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 			hw_accel_override = CASE WHEN $11::boolean THEN $12::text ELSE hw_accel_override END,
 			hw_device_override = CASE WHEN $13::boolean THEN $14::text ELSE hw_device_override END,
 			public_url = CASE WHEN $15::boolean THEN $16::text ELSE public_url END,
+			download_artifact_dir_override = CASE WHEN $17::boolean THEN $18::text ELSE download_artifact_dir_override END,
+			download_artifact_max_bytes_override = CASE WHEN $19::boolean THEN $20::bigint ELSE download_artifact_max_bytes_override END,
 			-- Everything below describes the worker the old URL addressed, so
 			-- repointing the row at a different machine has to drop it. The
 			-- caller publishes the returned row to the pools immediately, and
@@ -576,7 +613,9 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 		input.MaxBandwidthKbps != nil, maxBandwidth,
 		input.HWAccelOverride != nil, hwAccelOverride,
 		input.HWDeviceOverride != nil, hwDeviceOverride,
-		input.PublicURL != nil, publicURL)
+		input.PublicURL != nil, publicURL,
+		input.DownloadArtifactDirOverride != nil, artifactDir,
+		input.DownloadArtifactMaxBytesOverride != nil, artifactMaxBytes)
 	n, err := scanNode(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNodeNotFound

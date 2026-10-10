@@ -12,15 +12,36 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
+./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
+./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
+./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
+./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestScanStateCarriesProbeRejectionDB
+./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# Series air-date sort keys advance when a known episode airs.
+./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
+
+# Section and Smart collection rule fields and operators compile to working SQL.
+./internal/catalog TestRuleFieldsFilterCatalogDB
+./internal/api/handlers TestCatalogProfileSectionsDB
+
+# Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
+./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
+./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
+./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
+./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
+./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -47,9 +68,15 @@
 ./internal/catalog TestTryClaimTrailersRefresh
 ./internal/catalog TestReleaseTrailersRefreshClaim
 
+# The person name fallback never merges namesakes with different provider IDs.
+./internal/catalog TestPersonNameFallbackKeepsNamesakesApartPostgres
+
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
+./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
 # Image cache jobs run again for artwork the target no longer holds.
 ./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
@@ -67,6 +94,9 @@
 ./internal/metadata TestArtworkRevisionGCBatchHealRechecksRetrackBetweenSurfaces
 ./internal/metadata TestArtworkRevisionGCRunRetainsPartialDeletionForHealing
 ./internal/metadata TestArtworkRevisionGCBatchRechecksOwnershipAndReferences
+./internal/metadata TestArtworkRevisionGCDormantSweep
+./internal/metadata TestArtworkRevisionGCDormantSweepCycles
+./internal/metadata TestArtworkRevisionGCDormantCycleEndsWhileRowsArrive
 
 # Persisted notification, request, marker and preview contracts.
 ./internal/markers TestPopulationSyncResumesAfterQuotaAcrossRuns
@@ -81,6 +111,13 @@
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
+./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
+./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
+./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
+./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
+./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 
@@ -117,3 +154,19 @@
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
+
+# Transactional administrator audit details and rollback isolation.
+./internal/activitylog TestMutationCommitRollbackAndHistoryDB
+
+# Online partitioned audit indexes preserve writers and resume canceled builds.
+./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
+
+./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+
+# Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair
+# discovery rows rank by in step with the 'tmdb' source.
+./internal/catalog TestRatingSourceRepositoryUpsertPostgres
+./internal/catalog TestRatingSourceRepositorySyncsTMDBVotesPostgres
+
+# Watch-provider events carry catalog titles to plugins.
+./internal/watchsync TestGetMediaTitlesDB

@@ -358,40 +358,6 @@ func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) 
 	return def, true
 }
 
-// registerWritingDevice refreshes the device registry from the request's
-// declared device after a canonical device-scope write.
-func (h *SettingValuesHandler) registerWritingDevice(
-	ctx context.Context, store userstore.UserStore, profileID string, device DeviceMetadata,
-) {
-	if profileID == "" || device.DeviceID == "" {
-		return
-	}
-	if h.deviceSeen != nil {
-		key := profileID + "\x00" + device.DeviceID
-		if _, seen := h.deviceSeen.Get(key); seen {
-			return
-		}
-		h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		return
-	}
-	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-	}); err != nil {
-		slog.WarnContext(ctx, "failed to register device after canonical write",
-			"component", "api",
-			"profile_id", profileID,
-			"device_id", device.DeviceID,
-			"error", err,
-		)
-	}
-}
-
 func (h *SettingValuesHandler) effectiveResponses(
 	ctx context.Context,
 	resolved []settingsresolve.Effective,

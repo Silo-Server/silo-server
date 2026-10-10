@@ -33,7 +33,7 @@ func TestApplyGenreCapCountsAllGenres(t *testing.T) {
 	}
 }
 
-func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
+func TestHNSWEfSearchStaysWithinPgvectorRange(t *testing.T) {
 	tests := []struct {
 		name           string
 		candidateLimit int
@@ -42,6 +42,10 @@ func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
 		{name: "raises small scans", candidateLimit: 40, want: minHNSWEfSearch},
 		{name: "keeps exact floor", candidateLimit: minHNSWEfSearch, want: minHNSWEfSearch},
 		{name: "keeps larger scans", candidateLimit: 900, want: 900},
+		{name: "keeps pgvector maximum", candidateLimit: maxHNSWEfSearch, want: maxHNSWEfSearch},
+		{name: "caps just above maximum", candidateLimit: maxHNSWEfSearch + 1, want: maxHNSWEfSearch},
+		{name: "caps genre discover pool", candidateLimit: 1200, want: maxHNSWEfSearch},
+		{name: "caps largest ANN limit", candidateLimit: 2000, want: maxHNSWEfSearch},
 	}
 
 	for _, tt := range tests {
