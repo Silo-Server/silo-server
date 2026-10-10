@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListVideo } from "lucide-react";
 import type { PlayerChapter } from "../types";
-import { formatTime } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface ChaptersMenuProps {

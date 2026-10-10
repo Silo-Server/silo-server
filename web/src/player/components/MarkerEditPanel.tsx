@@ -3,7 +3,7 @@ import { Check, GripHorizontal, RotateCcw, Trash2, X } from "lucide-react";
 import type { MarkerEditor } from "../hooks/useMarkerEditor";
 import { MARKER_KINDS, MARKER_LABELS } from "../hooks/useMarkerEditor";
 import type { MarkerKind } from "../types";
-import { formatTime } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 
 interface MarkerEditPanelProps {
   editor: MarkerEditor;
