@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils";
 /**
  * One card in a radio group of mutually exclusive choices, each with a title
  * and an explanation. Render several inside a `role="radiogroup"` container
- * sharing one `name`.
+ * sharing one `name`. The whole card selects its option; the radio stays the
+ * keyboard and screen-reader control.
  */
 export function ChoiceOption<T extends string>({
   name,
@@ -26,10 +27,13 @@ export function ChoiceOption<T extends string>({
   const id = useId();
   return (
     <div
+      onClick={() => {
+        if (!disabled) onSelect(value);
+      }}
       className={cn(
-        "border-border/70 flex items-start gap-3 rounded-xl border px-3.5 py-3",
+        "border-border/70 flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3",
         selected && "border-amber-500/40 bg-amber-500/5",
-        disabled && "opacity-60",
+        disabled && "cursor-not-allowed opacity-60",
       )}
     >
       <input
