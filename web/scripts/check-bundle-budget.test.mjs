@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BYTE_TOLERANCE,
-  budgetFailures,
   crossOriginRenderBlocking,
   eagerFiles,
+  renderBlockingFailures,
   vendorChunkFailures,
 } from "./check-bundle-budget.mjs";
 
@@ -99,41 +98,18 @@ describe("crossOriginRenderBlocking", () => {
   });
 });
 
-describe("budgetFailures", () => {
-  const budget = { eagerBrotliBytes: 300_000, crossOriginRenderBlocking: 1 };
-
-  it("passes within the byte tolerance", () => {
-    expect(
-      budgetFailures(
-        { eagerBrotliBytes: 300_000 + BYTE_TOLERANCE, crossOriginRenderBlocking: 1 },
-        budget,
-      ),
-    ).toEqual([]);
-    expect(
-      budgetFailures(
-        { eagerBrotliBytes: 300_000 - BYTE_TOLERANCE, crossOriginRenderBlocking: 1 },
-        budget,
-      ),
-    ).toEqual([]);
+describe("renderBlockingFailures", () => {
+  it("passes when nothing blocks first paint", () => {
+    expect(renderBlockingFailures([])).toEqual([]);
   });
 
-  it("fails growth past the budget", () => {
-    const failures = budgetFailures(
-      { eagerBrotliBytes: 300_000 + BYTE_TOLERANCE + 1, crossOriginRenderBlocking: 2 },
-      budget,
-    );
+  it("fails once per render-blocking resource", () => {
+    const failures = renderBlockingFailures([
+      "https://fonts.googleapis.com/css2?family=Outfit",
+      "//cdn.example.com/blocking.js",
+    ]);
     expect(failures).toHaveLength(2);
-    expect(failures[0]).toContain("over the 300000 B budget");
-    expect(failures[1]).toContain("2 cross-origin render-blocking resources, budget 1");
-  });
-
-  it("asks for a lower budget once the bundle shrinks", () => {
-    const failures = budgetFailures(
-      { eagerBrotliBytes: 300_000 - BYTE_TOLERANCE - 1, crossOriginRenderBlocking: 0 },
-      budget,
-    );
-    expect(failures).toHaveLength(2);
-    expect(failures[0]).toContain("under the 300000 B budget");
-    expect(failures[1]).toContain("Lower the budget");
+    expect(failures[0]).toContain("blocks first paint on https://fonts.googleapis.com/css2");
+    expect(failures[1]).toContain("blocks first paint on //cdn.example.com/blocking.js");
   });
 });
