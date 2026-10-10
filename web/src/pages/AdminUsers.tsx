@@ -790,7 +790,9 @@ function UserForm({
   );
   // Policy fields inherit from the access group unless explicitly overridden.
   const [policy, setPolicy] = useState(() => policyStateFromUser(user ?? null));
-  const [invalidLimits, setInvalidLimits] = useState<ReadonlySet<LimitPolicyKey>>(new Set());
+  const [invalidLimitDrafts, setInvalidLimitDrafts] = useState<ReadonlyMap<LimitPolicyKey, string>>(
+    new Map(),
+  );
   const [dialogTab, setDialogTab] = useState("account");
   // Set when Save is refused for an invalid limit, so the browser reports the
   // field once the Limits tab has rendered it.
@@ -801,12 +803,12 @@ function UserForm({
     setReportLimits(false);
     formRef.current?.reportValidity();
   }, [reportLimits, dialogTab]);
-  function handleLimitValidityChange(key: LimitPolicyKey, invalid: boolean) {
-    setInvalidLimits((current) => {
-      if (current.has(key) === invalid) return current;
-      const next = new Set(current);
-      if (invalid) next.add(key);
-      else next.delete(key);
+  function handleInvalidLimitDraftChange(key: LimitPolicyKey, draft: string | undefined) {
+    setInvalidLimitDrafts((current) => {
+      if (current.get(key) === draft) return current;
+      const next = new Map(current);
+      if (draft === undefined) next.delete(key);
+      else next.set(key, draft);
       return next;
     });
   }
@@ -882,7 +884,7 @@ function UserForm({
     }
     // A cleared or half-typed limit is not in the policy state, which still
     // holds the last valid value; saving now would send that instead.
-    if (!policyLocked && invalidLimits.size > 0) {
+    if (!policyLocked && invalidLimitDrafts.size > 0) {
       setDialogTab("limits");
       setReportLimits(true);
       return;
@@ -1179,8 +1181,8 @@ function UserForm({
                 onChange={setPolicy}
                 source={hintSource}
                 effective={inheritHints}
-                invalidLimits={invalidLimits}
-                onLimitValidityChange={handleLimitValidityChange}
+                invalidLimitDrafts={invalidLimitDrafts}
+                onInvalidLimitDraftChange={handleInvalidLimitDraftChange}
               />
             </fieldset>
             <div className="space-y-1">

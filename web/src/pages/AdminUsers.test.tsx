@@ -606,6 +606,26 @@ describe("AdminUsers user dialog policy hints", () => {
     expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(null);
   });
 
+  it("keeps a non-whole limit across a tab switch and still refuses to save it", async () => {
+    mocks.users = [{ ...adminUser, max_streams: 3 }, ownerViewer];
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit taylor");
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+    await user.type(within(dialog).getByLabelText("Max Streams"), "1.5");
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    expect(within(dialog).queryByLabelText("Max Streams")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+  });
+
   it("saves the retyped value after a cleared limit", async () => {
     mocks.users = [{ ...adminUser, max_streams: 3 }, ownerViewer];
     mocks.update.mockReset().mockResolvedValue(undefined);
