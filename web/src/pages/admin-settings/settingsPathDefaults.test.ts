@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_TRANSCODE_DIR, effectiveDownloadArtifactDir } from "./settingsPathDefaults";

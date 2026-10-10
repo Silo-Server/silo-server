@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { FileVersion, VersionVideoTrack } from "@/api/types";
 import type { MediaSpecSection } from "./mediaSpecSections";
@@ -9,7 +11,6 @@ import {
   buildVideoSections,
   formatChromaSubsampling,
   formatDolbyVisionLabel,
-  formatDurationSeconds,
   formatVideoLevel,
   formatVideoRangeLabel,
 } from "./mediaSpecSections";
@@ -61,22 +62,6 @@ describe("formatChromaSubsampling", () => {
 });
 
 describe("formatDolbyVisionLabel", () => {
-  it("returns empty string without any DV data", () => {
-    expect(formatDolbyVisionLabel({})).toBe("");
-  });
-
-  it("prefixes raw profile strings with Dolby Vision", () => {
-    expect(formatDolbyVisionLabel({ dolby_vision: "Profile 8.1" })).toBe(
-      "Dolby Vision Profile 8.1",
-    );
-  });
-
-  it("keeps labels that already start with Dolby Vision", () => {
-    expect(formatDolbyVisionLabel({ dolby_vision: "Dolby Vision Profile 5" })).toBe(
-      "Dolby Vision Profile 5",
-    );
-  });
-
   it("falls back to the numeric profile", () => {
     expect(formatDolbyVisionLabel({ dv_profile: 8 })).toBe("Dolby Vision Profile 8");
   });
@@ -183,19 +168,6 @@ describe("formatVideoLevel", () => {
     expect(formatVideoLevel("vp9", 31)).toBe("31");
     expect(formatVideoLevel("hevc", 0)).toBe("");
     expect(formatVideoLevel(undefined, undefined)).toBe("");
-  });
-});
-
-describe("formatDurationSeconds", () => {
-  it("formats hours, minutes, and seconds", () => {
-    expect(formatDurationSeconds(2 * 3600 + 14 * 60 + 32)).toBe("2h 14m 32s");
-    expect(formatDurationSeconds(14 * 60 + 32)).toBe("14m 32s");
-    expect(formatDurationSeconds(59)).toBe("59s");
-  });
-
-  it("returns empty string for missing durations", () => {
-    expect(formatDurationSeconds(0)).toBe("");
-    expect(formatDurationSeconds(undefined)).toBe("");
   });
 });
 

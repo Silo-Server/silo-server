@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import ConnectionsPanel from "./ConnectionsPanel";
 
-vi.mock("@/hooks/queries/useRequests", () => ({ useRequestIntegrations: () => ({ data: [] }) }));
+vi.mock("@/hooks/queries/admin/requests", () => ({ useRequestIntegrations: () => ({ data: [] }) }));
 vi.mock("@/hooks/queries/useAutoscan", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/useAutoscan")>();
   return {

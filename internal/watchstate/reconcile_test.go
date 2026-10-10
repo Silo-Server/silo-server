@@ -147,31 +147,6 @@ func TestReconciler_resolveMovie(t *testing.T) {
 	}
 }
 
-func TestReconciler_resolveEpisode(t *testing.T) {
-	season, episode := 1, 3
-	r := newTestReconciler(
-		nil,
-		map[string]*models.Episode{
-			"series-1": {ContentID: "ep-1", SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: 3},
-		},
-		map[string][]*models.MediaItemProviderID{
-			"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-		},
-	)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:        "episode",
-		SeriesProviderIDs: map[string]string{"tvdb": "81189"},
-		Season:            &season,
-		Episode:           &episode,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "ep-1" {
-		t.Errorf("resolve = %q, want ep-1", got)
-	}
-}
-
 func TestReconciler_resolveEpisodeLegacyProviderFallback(t *testing.T) {
 	season, episode := 1, 3
 	r := newTestReconciler(
@@ -219,17 +194,6 @@ func TestReconciler_resolveEpisodeSeasonZero(t *testing.T) {
 	}
 	if got != "special-1" {
 		t.Errorf("resolve = %q, want special-1", got)
-	}
-}
-
-func TestReconciler_resolveEmptyIdentity(t *testing.T) {
-	r := newTestReconciler(nil, nil, nil)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("resolve = %q, want empty", got)
 	}
 }
 

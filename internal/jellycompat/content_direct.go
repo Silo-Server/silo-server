@@ -347,11 +347,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 // AllowedLibraryIDs means unrestricted (all enabled libraries); a non-nil but
 // empty allowlist grants access to no libraries at all.
 func (s *directContentService) accessibleFolders(ctx context.Context, filter catalog.AccessFilter) ([]*models.MediaFolder, error) {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return nil, nil
-		}
-		return s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
+	libraryIDs, none := filter.LibraryScope(nil)
+	if none {
+		return nil, nil
+	}
+	if libraryIDs != nil {
+		return s.folderRepo.ListByIDs(ctx, libraryIDs)
 	}
 	return s.folderRepo.GetEnabled(ctx)
 }
@@ -1429,6 +1430,8 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 
 func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	versions := append([]catalog.FileVersion(nil), d.Versions...)
+	// applyListFileFields picks the same first version in SQL; keep the two
+	// orders in step.
 	sort.SliceStable(versions, func(i, j int) bool {
 		return compatPrimaryVideoTrack(versions[i]).Width > compatPrimaryVideoTrack(versions[j]).Width
 	})

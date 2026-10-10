@@ -2,18 +2,23 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/go-chi/chi/v5"
 )
 
 type sessionContextKey string
@@ -27,16 +32,28 @@ const (
 	tokenRefreshTimeout = 30 * time.Second
 )
 
+// tokenRefresher exchanges a session's Silo refresh token for a new pair;
+// *auth.Service implements it.
+type tokenRefresher interface {
+	Refresh(ctx context.Context, refreshToken string) (*auth.TokenPair, error)
+}
+
 // Authenticator extracts Jellyfin-style auth tokens and resolves compat sessions.
 type Authenticator struct {
-	sessions    *SessionStore
-	authService *auth.Service
-	now         func() time.Time
+	sessions *SessionStore
+	// refresher is nil when no auth service is configured; sessions then
+	// keep their Silo tokens unrefreshed.
+	refresher tokenRefresher
+	now       func() time.Time
 }
 
 // NewAuthenticator creates a new compat authenticator.
 func NewAuthenticator(sessions *SessionStore, authService *auth.Service) *Authenticator {
-	return &Authenticator{sessions: sessions, authService: authService, now: time.Now}
+	a := &Authenticator{sessions: sessions, now: time.Now}
+	if authService != nil {
+		a.refresher = authService
+	}
+	return a
 }
 
 // ExtractToken extracts a compat token from Jellyfin-style request auth.
@@ -96,8 +113,12 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 			return
 		}
 
-		session, ok := a.sessions.Get(token)
-		if !ok {
+		session, err := a.sessions.Lookup(r.Context(), token)
+		if err != nil && !errors.Is(err, ErrSessionNotFound) {
+			writeSessionLookupFailed(w, r, token, err)
+			return
+		}
+		if err != nil {
 			slog.WarnContext(r.Context(), "jellycompat auth: session not found", "component", "jellycompat",
 				"path", r.URL.Path,
 				"token_prefix", safeTokenPrefix(token),
@@ -109,40 +130,83 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 		// Refresh underlying Silo tokens if they're about to expire.
 		// Use a detached context so a client aborting the request mid-refresh
 		// (common on flaky mobile networks) doesn't revoke the compat session.
-		if a.authService != nil && !session.StreamAppTokenExpiry.IsZero() &&
+		if a.refresher != nil && !session.StreamAppTokenExpiry.IsZero() &&
 			session.StreamAppTokenExpiry.Before(a.now().Add(tokenRefreshBuffer)) {
 			refreshCtx, cancel := context.WithTimeout(context.Background(), tokenRefreshTimeout)
-			newPair, err := a.authService.Refresh(refreshCtx, session.StreamAppRefreshToken)
+			newPair, err := a.refresher.Refresh(refreshCtx, session.StreamAppRefreshToken)
 			cancel()
+			if errors.Is(err, auth.ErrSessionCheckUnavailable) || errors.Is(err, auth.ErrProviderUnavailable) {
+				// The store could not be read, or the sign-in provider could
+				// not answer under the fail_closed outage policy: the refresh
+				// token was not refused. Keep the compat session; the client
+				// retries.
+				slog.WarnContext(r.Context(), "jellycompat auth: token refresh could not check the session; keeping it", "component", "jellycompat",
+					"path", r.URL.Path,
+					"token_prefix", safeTokenPrefix(token),
+					"error", logredact.SanitizeText(err.Error()),
+				)
+				writeSessionCheckUnavailable(w)
+				return
+			}
 			if err != nil {
 				slog.WarnContext(r.Context(), "jellycompat auth: token refresh failed, revoking session", "component", "jellycompat",
 					"path", r.URL.Path,
 					"token_prefix", safeTokenPrefix(token),
-					"error", err,
+					"error", logredact.SanitizeText(err.Error()),
 				)
 				a.sessions.Delete(token)
 				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 				return
 			}
+			// The request uses the session exactly as Update stores it, so
+			// it never reads the session back after the write.
+			var refreshed Session
 			updateErr := a.sessions.Update(token, func(s *Session) error {
 				s.StreamAppAccessToken = newPair.AccessToken
 				s.StreamAppRefreshToken = newPair.RefreshToken
 				s.StreamAppTokenExpiry = a.now().Add(time.Duration(newPair.ExpiresIn) * time.Second)
+				refreshed = *s
 				return nil
 			})
-			if updateErr != nil {
+			switch {
+			case errors.Is(updateErr, ErrSessionNotFound):
+				// Signed out while the tokens refreshed, such as by an
+				// account-wide revocation.
+				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
+				return
+			case updateErr != nil:
 				slog.WarnContext(r.Context(), "jellycompat auth: session update after refresh failed", "component", "jellycompat",
 					"token_prefix", safeTokenPrefix(token),
 					"error", updateErr,
 				)
-			} else {
-				// Re-read the session to get the updated tokens.
-				session, _ = a.sessions.Get(token)
+			default:
+				session = &refreshed
 			}
 		}
 
 		serveWithSession(next, w, r, session)
 	})
+}
+
+// writeSessionCheckUnavailable answers a request whose session could not be
+// checked with a retryable 503.
+func writeSessionCheckUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(auth.SessionCheckRetryAfterSeconds))
+	writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Server is temporarily unavailable")
+}
+
+// writeSessionLookupFailed answers a request whose compat session could not
+// be read from the session store. The token was not judged: a retryable
+// 503, never a 401 that signs the client out.
+func writeSessionLookupFailed(w http.ResponseWriter, r *http.Request, token string, err error) {
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat auth: session lookup failed; answering 503", "component", "jellycompat",
+			"path", r.URL.Path,
+			"token_prefix", safeTokenPrefix(token),
+			"error", logredact.SanitizeText(err.Error()),
+		)
+	}
+	writeSessionCheckUnavailable(w)
 }
 
 // attributeActivity records the session's account on the activity log entry
@@ -217,22 +281,28 @@ func mediaBrowserAuthorizationValue(header, key string) string {
 // resolveCompatToken resolves a token to a compat session: a session-store token
 // (normal login) or, matching Jellyfin, an sa_ admin API key (synthesized
 // session bound to the key user's primary profile). Returns false when the token
-// matches neither. keyAuth may be nil (resolveSession handles a nil receiver).
-func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *AdminAPIKeyAuthenticator, token string) (*Session, bool) {
+// matches neither, and an error when the session store could not be read, which
+// judges nothing about the token. keyAuth may be nil (resolveSession handles a
+// nil receiver).
+func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *AdminAPIKeyAuthenticator, token string) (*Session, bool, error) {
 	if token == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	if sessions != nil {
-		if session, ok := sessions.Get(token); ok {
-			return session, true
+		session, err := sessions.Lookup(ctx, token)
+		if err == nil {
+			return session, true, nil
+		}
+		if !errors.Is(err, ErrSessionNotFound) {
+			return nil, false, err
 		}
 	}
 	if strings.HasPrefix(token, "sa_") {
 		if session, _, _ := keyAuth.resolveSession(ctx, token); session != nil {
-			return session, true
+			return session, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 // PlaybackSessionAuth accepts a login/API token or an unexpired PlaySessionId
@@ -248,7 +318,12 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			// Try standard token auth first — a compat session token or an sa_
 			// admin key (synthesized session).
 			if token, ok := ExtractToken(r); ok {
-				if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, token); ok {
+				session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, token)
+				if err != nil {
+					writeSessionLookupFailed(w, r, token, err)
+					return
+				}
+				if ok {
 					serveWithSession(next, w, r, session)
 					return
 				}
@@ -267,7 +342,12 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			// miss it and 401 the stream — forcing a needless transcode fallback.
 			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" && playbackStore != nil {
 				if playSession, found := playbackStore.Get(playSessionID); found && playbackGrantMatchesRequest(r, playSession) {
-					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
+					session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken)
+					if err != nil {
+						writeSessionLookupFailed(w, r, playSession.CompatToken, err)
+						return
+					}
+					if ok {
 						serveWithSession(next, w, r, session)
 						return
 					}
@@ -287,7 +367,12 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 				sourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId")
 				clientIP := clientip.FromContext(r.Context())
 				if grant, found := playbackStore.FindStreamGrant(itemID, sourceID, clientIP, requestPeerHost(r), staticStreamGrantIdle); found {
-					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, grant.CompatToken); ok {
+					session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, grant.CompatToken)
+					if err != nil {
+						writeSessionLookupFailed(w, r, grant.CompatToken, err)
+						return
+					}
+					if ok {
 						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
 							"play_session", grant.ID, "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
 						serveWithSession(next, w, r, session)

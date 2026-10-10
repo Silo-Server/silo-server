@@ -434,17 +434,21 @@ type ApplyMatchItem = Pick<ItemDetail, "content_id" | "series_id" | "season_numb
   library_id?: number;
 };
 
+interface ApplyItemMatchVariables {
+  item: ApplyMatchItem;
+  providerIds: Record<string, string>;
+  /**
+   * Called with the item's new content ID when applying the match moved it,
+   * so a page showing the old ID can follow it.
+   */
+  onReplaced?: (contentID: string) => void | Promise<void>;
+}
+
 export function useApplyItemMatch() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      item,
-      providerIds,
-    }: {
-      item: ApplyMatchItem;
-      providerIds: Record<string, string>;
-    }) => {
+    mutationFn: async ({ item, providerIds }: ApplyItemMatchVariables) => {
       return v2("POST /api/v2/admin/items/{id}/match/apply", {
         path: { id: item.content_id },
         body: {
@@ -455,8 +459,39 @@ export function useApplyItemMatch() {
       });
     },
     retry: false,
-    onSuccess: async (_, { item }) => {
+    onSuccess: async (result, { item, onReplaced }) => {
       toast.success("Match applied successfully");
+      const adminLists = Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
+      ]);
+
+      if (result.content_id && result.content_id !== item.content_id) {
+        // The match moved the item to a new content ID, so the old one no
+        // longer resolves. Mark its queries stale without refetching them,
+        // move a page showing it to the new ID before anything else can
+        // refetch it, then refresh the lists and rows that still link to it.
+        await queryClient.invalidateQueries({
+          predicate: (query) => query.queryKey.includes(item.content_id),
+          refetchType: "none",
+        });
+        try {
+          await onReplaced?.(result.content_id);
+        } finally {
+          // The lists still link to the old ID even if following it failed.
+          // Home reads its rows through one-shot fetches, so it re-reads them
+          // only when the refresh signal changes.
+          void invalidateMediaSurfaceQueries(queryClient, {
+            itemId: item.content_id,
+            skipItemQueries: true,
+          }).then(
+            () => bumpHomeRefreshSignal(queryClient),
+            () => bumpHomeRefreshSignal(queryClient),
+          );
+        }
+        await adminLists;
+        return;
+      }
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
@@ -464,8 +499,7 @@ export function useApplyItemMatch() {
           queryKey: ["catalog", "items", item.content_id, "detail"],
         }),
         queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
+        adminLists,
       ]);
 
       if (item.type === "series") {

@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   PROFILE_ID: "profile_id",
   PROFILE_TOKEN: "profile_token",
   CURRENT_PROFILE: "current_profile",
+  PROFILE_LAUNCH: "silo-profile-launch",
   DEVICE_ID: "silo-device-id",
   VOLUME: "player-volume",
   MUTED: "player-muted",
@@ -46,23 +47,150 @@ function removeRaw(key: string): void {
   }
 }
 
-function get(key: StorageKey): string | null {
-  return getRaw(key);
-}
-
-function set(key: StorageKey, value: string): void {
-  setRaw(key, value);
-}
-
-function remove(key: StorageKey): void {
+function getSession(key: string): string | null {
   try {
-    localStorage.removeItem(key);
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setSession(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Storage full or unavailable
+  }
+}
+
+function removeSession(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
   } catch {
     // Storage unavailable
   }
 }
 
+/**
+ * The active profile choice: which profile, its PIN proof, and the profile
+ * itself. Where it lives depends on the tab's profile scope below.
+ */
+const PROFILE_SELECTION_KEYS: ReadonlySet<string> = new Set([
+  STORAGE_KEYS.PROFILE_ID,
+  STORAGE_KEYS.PROFILE_TOKEN,
+  STORAGE_KEYS.CURRENT_PROFILE,
+]);
+
+/**
+ * Whether this tab shares the browser's remembered profile ("shared", in
+ * localStorage) or keeps its own ("tab", in sessionStorage). A browser set to
+ * ask who is watching gives every new tab its own choice, so opening a tab
+ * never takes the profile away from another one mid-playback.
+ *
+ * Fixed for the life of the tab on first use, from the launch setting at that
+ * moment: changing the setting to "ask" takes effect in new tabs, and
+ * {@link adoptTabProfileSelection} moves a tab back to the shared choice.
+ */
+const PROFILE_SCOPE_KEY = "silo-profile-scope";
+/** Prefix for a tab's own profile choice, distinct from the legacy sessionStorage proof key. */
+const TAB_PROFILE_PREFIX = "silo-tab-profile:";
+/**
+ * Changes whenever the signed-in account changes (sign-in, sign-out, a refused
+ * session). A tab's own choice records the epoch it was made in and is void
+ * once that changes, so signing out in one tab clears the choice in all of them.
+ */
+const PROFILE_EPOCH_KEY = "silo-profile-epoch";
+const TAB_PROFILE_EPOCH_KEY = `${TAB_PROFILE_PREFIX}epoch`;
+
+type ProfileScope = "shared" | "tab";
+
+function profileScope(): ProfileScope {
+  const stored = getSession(PROFILE_SCOPE_KEY);
+  if (stored === "shared" || stored === "tab") return stored;
+  const scope: ProfileScope = getRaw(STORAGE_KEYS.PROFILE_LAUNCH) === "ask" ? "tab" : "shared";
+  setSession(PROFILE_SCOPE_KEY, scope);
+  return scope;
+}
+
+function currentProfileEpoch(): string {
+  return getRaw(PROFILE_EPOCH_KEY) ?? "";
+}
+
+function clearTabProfileSelection(): void {
+  for (const key of PROFILE_SELECTION_KEYS) removeSession(`${TAB_PROFILE_PREFIX}${key}`);
+  removeSession(TAB_PROFILE_EPOCH_KEY);
+}
+
+function getTabProfileValue(key: string): string | null {
+  if (getSession(TAB_PROFILE_EPOCH_KEY) !== currentProfileEpoch()) {
+    clearTabProfileSelection();
+    return null;
+  }
+  return getSession(`${TAB_PROFILE_PREFIX}${key}`);
+}
+
+function setTabProfileValue(key: string, value: string): void {
+  if (getSession(TAB_PROFILE_EPOCH_KEY) !== currentProfileEpoch()) {
+    clearTabProfileSelection();
+    setSession(TAB_PROFILE_EPOCH_KEY, currentProfileEpoch());
+  }
+  setSession(`${TAB_PROFILE_PREFIX}${key}`, value);
+}
+
+function get(key: StorageKey): string | null {
+  if (PROFILE_SELECTION_KEYS.has(key) && profileScope() === "tab") return getTabProfileValue(key);
+  return getRaw(key);
+}
+
+function set(key: StorageKey, value: string): void {
+  if (PROFILE_SELECTION_KEYS.has(key) && profileScope() === "tab") {
+    setTabProfileValue(key, value);
+    return;
+  }
+  setRaw(key, value);
+}
+
+function remove(key: StorageKey): void {
+  if (PROFILE_SELECTION_KEYS.has(key) && profileScope() === "tab") {
+    removeSession(`${TAB_PROFILE_PREFIX}${key}`);
+    return;
+  }
+  removeRaw(key);
+}
+
 export const storage = { KEYS: STORAGE_KEYS, get, set, remove };
+
+/** True when this tab keeps its own profile choice rather than the browser's. */
+export function hasTabProfileScope(): boolean {
+  return profileScope() === "tab";
+}
+
+/**
+ * Moves this tab to the browser's shared profile choice, carrying its own
+ * choice over when it has one, for a switch back to remembering the profile.
+ */
+export function adoptTabProfileSelection(): void {
+  if (profileScope() !== "tab") return;
+  const values = [...PROFILE_SELECTION_KEYS].map((key) => [key, getTabProfileValue(key)] as const);
+  if (values.some(([key, value]) => key === STORAGE_KEYS.PROFILE_ID && value !== null)) {
+    for (const [key, value] of values) {
+      if (value === null) removeRaw(key);
+      else setRaw(key, value);
+    }
+  }
+  clearTabProfileSelection();
+  setSession(PROFILE_SCOPE_KEY, "shared");
+}
+
+/**
+ * The signed-in account changed: drop the shared profile choice and void every
+ * tab's own one, so no tab carries a profile across a sign-out or sign-in.
+ */
+export function endProfileEpoch(): void {
+  setRaw(PROFILE_EPOCH_KEY, `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+  for (const key of PROFILE_SELECTION_KEYS) removeRaw(key);
+  clearTabProfileSelection();
+}
 
 /**
  * Namespace used before anyone has ever signed in on this browser. Values

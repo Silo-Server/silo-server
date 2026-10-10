@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
+import type { components } from "@/api/v2/schema";
 import type {
   ImportMDBListCollectionRequest,
   ImportTMDBCollectionRequest,
@@ -45,15 +46,14 @@ export type CollectionTemplateTMDBList = Pick<ImportMDBListCollectionRequest, "u
 
 // Discover and collection templates ship as backend-driven blueprints that
 // the admin cannot tweak inline; the form surfaces a read-only summary and
-// directs the admin to apply via Template Bundles.
+// directs the admin to Starter packs.
 export interface CollectionTemplateTMDBCollection {
   collection_id: number;
 }
 
 // CollectionTemplateTMDBDiscover mirrors templates.TMDBDiscoverSpec field by
 // field. Discover templates are not editable via the admin import form — the
-// gallery renders a read-only summary and routes apply through Template
-// Bundles.
+// gallery renders a read-only summary and points to Starter packs.
 export interface CollectionTemplateTMDBDiscover {
   media_type: "movie" | "tv";
   with_genres?: number[];
@@ -103,16 +103,7 @@ export interface CollectionTemplateCatalog {
   categories: CollectionTemplateGroup[];
 }
 
-export interface CollectionTemplateBundle {
-  id: string;
-  title: string;
-  description: string;
-  template_ids: string[];
-}
-
-export interface CollectionTemplateBundleCatalog {
-  bundles: CollectionTemplateBundle[];
-}
+export type CollectionTemplateBundleCatalog = components["schemas"]["BundleCatalog"];
 
 export interface ApplyCollectionTemplateBundleRequest {
   library_ids: number[];
@@ -222,27 +213,4 @@ export function mediaKindLabel(kind: CollectionTemplateMediaKind): string {
     case "mixed":
       return "Movies + TV";
   }
-}
-
-export interface LibraryEligibility {
-  kinds?: string[];
-  hint?: string;
-}
-
-export function libraryEligibilityForMediaKind(
-  kind: "movie" | "tv" | "all" | "mixed",
-): LibraryEligibility {
-  if (kind === "movie") {
-    return {
-      kinds: ["movies"],
-      hint: "Movie-only source — TV-only libraries are disabled. Mixed libraries always work.",
-    };
-  }
-  if (kind === "tv") {
-    return {
-      kinds: ["series"],
-      hint: "TV-only source — movie-only libraries are disabled. Mixed libraries always work.",
-    };
-  }
-  return {};
 }

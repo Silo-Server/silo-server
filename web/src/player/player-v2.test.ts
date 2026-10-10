@@ -182,3 +182,36 @@ it("sends subtitle multipart bytes once without a JSON content type", async () =
   expect(form.get("language_override")).toBe("true");
   expect(form.get("media_file_id")).toBe("42");
 });
+
+it("sends an operation's own headers and exposes the response metadata", async () => {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ subtitle: { id: "7" } }), {
+        status: 200,
+        headers: { ETag: '"rev-4"' },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  let etag: string | null = null;
+
+  await playerV2(config, "PUT /api/v2/subtitles/stored/{id}/timing", {
+    path: { id: "7" },
+    headers: { "If-Match": '"rev-3"' },
+    body: { offset_ms: 0, scale: 1 },
+    onResponse: (response) => {
+      etag = response.headers.get("ETag");
+    },
+  });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/v2/subtitles/stored/7/timing",
+    expect.objectContaining({
+      method: "PUT",
+      headers: expect.objectContaining({
+        "If-Match": '"rev-3"',
+        Authorization: "Bearer token-1",
+      }),
+    }),
+  );
+  expect(etag).toBe('"rev-4"');
+});

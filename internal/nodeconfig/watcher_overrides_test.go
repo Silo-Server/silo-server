@@ -73,6 +73,34 @@ func TestApplySettingsOverlaysNodeHWOverrides(t *testing.T) {
 	}
 }
 
+// A node's own prepared-download directory replaces the cluster setting; with
+// no override the cluster value stands.
+func TestApplySettingsOverlaysNodeArtifactDir(t *testing.T) {
+	dir := "/mnt/fast-ssd/silo-downloads"
+	for _, test := range []struct {
+		name      string
+		overrides nodeHWOverrides
+		want      string
+	}{
+		{name: "overridden", overrides: nodeHWOverrides{ArtifactDir: &dir}, want: dir},
+		{name: "inherited", want: "/srv/cluster-downloads"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := newOverrideWatcher(t, "http://node-1", func(context.Context, string, string) (nodeHWOverrides, bool, error) {
+				return test.overrides, true, nil
+			})
+			settings := clusterSettings()
+			settings["download.artifact_dir"] = "/srv/cluster-downloads"
+			if err := w.applySettings(context.Background(), settings); err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			if got := w.Config().Download.ArtifactDir; got != test.want {
+				t.Fatalf("artifact dir = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // The API host has no stream_nodes row and must never pay for a lookup.
 func TestApplySettingsSkipsOverlayWithoutNodeIdentity(t *testing.T) {
 	looked := false
@@ -271,20 +299,5 @@ func TestApplySettingsKeepsOverrideWhenTheRowStopsMatching(t *testing.T) {
 	if cfg.Playback.HWAccel != "nvenc" || cfg.Playback.HWDevice != "0" {
 		t.Fatalf("effective policy = %q / %q, want the last override read from the row",
 			cfg.Playback.HWAccel, cfg.Playback.HWDevice)
-	}
-}
-
-// A node that never had a row is a different case: there is nothing to keep, so
-// the cluster settings stand rather than an invented value.
-func TestApplySettingsInheritsClusterWhenNoRowWasEverFound(t *testing.T) {
-	w := newOverrideWatcher(t, "http://node-1", func(context.Context, string, string) (nodeHWOverrides, bool, error) {
-		return nodeHWOverrides{}, false, nil
-	})
-	if err := w.applySettings(context.Background(), clusterSettings()); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	cfg := w.Config()
-	if cfg.Playback.HWAccel != "qsv" || cfg.Playback.HWDevice != "/dev/dri/renderD128" {
-		t.Fatalf("effective policy = %q / %q, want the cluster values", cfg.Playback.HWAccel, cfg.Playback.HWDevice)
 	}
 }

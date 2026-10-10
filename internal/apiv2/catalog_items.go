@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // Section catalog-items: the profile-scoped catalog browse, facet documents,
@@ -36,7 +38,7 @@ type CatalogBrowseInput struct {
 	Q             string   `query:"q" doc:"Search text" example:"heat"`
 	NamePrefix    string   `query:"name_prefix" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
 	Match         string   `query:"match" enum:"all,any" doc:"How the filters combine; default all"`
-	Type          string   `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, podcast, video, …" example:"movie"`
+	Type          string   `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, manga, or video (movies and series). video_with_episodes, for source=query only, searches movies, series, and episodes when q is set and lists movies and series without q; check getCatalogSearchCapabilities.video_with_episodes_scope first" example:"movie"`
 	Genre         string   `query:"genre" example:"Crime"`
 	Status        string   `query:"status" doc:"Metadata match state" example:"matched"`
 	YearMin       int      `query:"year_min" minimum:"0" example:"1990"`
@@ -61,9 +63,10 @@ type CatalogFiltersInput struct {
 	Scope         string `query:"scope" enum:"home,library"`
 	SectionID     string `query:"section_id"`
 	LibraryID     ID     `query:"library_id" example:"1"`
+	LibraryIDs    []ID   `query:"library_ids,explode" maxItems:"200" doc:"Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section" example:"[\"1\",\"2\"]"`
 	CollectionID  string `query:"collection_id"`
 	PersonID      ID     `query:"person_id"`
-	Type          string `query:"type" example:"movie"`
+	Type          string `query:"type" doc:"Media scope, as on listCatalogItems; video_with_episodes lists the facets of video" example:"movie"`
 	SkipTechnical bool   `query:"skip_technical" doc:"true omits the file-derived facets (resolutions, audio and subtitle languages)"`
 }
 
@@ -71,8 +74,8 @@ type CatalogFiltersInput struct {
 type CatalogFacetSearchInput struct {
 	CatalogFiltersInput
 	Facet string `query:"facet" required:"true" enum:"genre,studio,network,country,original_language,content_rating,author,narrator,series" doc:"The facet to search" example:"author"`
-	Q     string `query:"q" doc:"Case-insensitive prefix" example:"ste"`
-	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most matches to return; default 20, maximum 100"`
+	Q     string `query:"q" doc:"Case-insensitive search text; see matches and values for how each answers it" example:"ste"`
+	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most values to return in matches and in values; default 20, maximum 100"`
 }
 
 // AudiobookGroupsInput is the listAudiobookGroups query.
@@ -109,7 +112,7 @@ type CatalogQuery struct {
 	PersonID     ID                  `json:"person_id,omitempty"`
 	Q            string              `json:"q,omitempty"`
 	NamePrefix   string              `json:"name_prefix,omitempty" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
-	Type         string              `json:"type,omitempty"`
+	Type         string              `json:"type,omitempty" doc:"Media scope, as the listCatalogItems type parameter"`
 	Group        string              `json:"group,omitempty" enum:"work"`
 	SkipTotal    bool                `json:"skip_total,omitzero"`
 	QueryLimit   int                 `json:"query_limit,omitzero" minimum:"0"`
@@ -136,6 +139,14 @@ type CatalogItemInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
 	LibraryID ID     `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
 	FileID    ID     `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
+}
+
+// CatalogItemDeviceInput names one item whose answer carries the effective
+// playback choice (effective_audio_*, effective_subtitle_*), which the
+// caller's device-scoped preferences decide.
+type CatalogItemDeviceInput struct {
+	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The stable device identifier used to resolve device-scoped playback preferences; absent resolves the profile's preferences" example:"tv-1"`
+	CatalogItemInput
 }
 
 // CatalogSeriesInput names one series.
@@ -226,10 +237,20 @@ type CatalogFiltersOutput struct {
 	Body CatalogFilters
 }
 
-// CatalogFacetMatches is a facet typeahead answer.
+// CatalogFacetMatches is a facet typeahead answer. matches is the prefix
+// answer every client has read; values is the ranked answer with counts.
 type CatalogFacetMatches struct {
-	Matches []string `json:"matches" doc:"Empty, never null"`
-	HasMore bool     `json:"has_more" doc:"Whether more values matched than limit"`
+	Matches       []string            `json:"matches" doc:"Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null"`
+	HasMore       bool                `json:"has_more" doc:"Whether more values than limit start with q"`
+	Values        []CatalogFacetValue `json:"values" doc:"The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null"`
+	ValuesHasMore bool                `json:"values_has_more" doc:"Whether more values matched than limit for values"`
+}
+
+// CatalogFacetValue is one facet value with the number of titles in the
+// scope that carry it.
+type CatalogFacetValue struct {
+	Value string `json:"value" example:"Warner Bros. Pictures"`
+	Count int    `json:"count" doc:"Titles in the scope with this value; values can lag catalog changes by up to two minutes" example:"42"`
 }
 
 // CatalogFacetMatchesOutput is the searchCatalogFacet response.
@@ -345,6 +366,7 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
+	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise"`
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
@@ -368,7 +390,8 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any"`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
+	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
@@ -391,9 +414,52 @@ type CatalogItemDetail struct {
 
 // CatalogRatingSource is one source's rating of an item.
 type CatalogRatingSource struct {
-	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
+	Source string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize."`
 	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
+}
+
+// CatalogRating is one external rating as a title page shows it.
+type CatalogRating struct {
+	Source  string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
+	Name    string  `json:"name" doc:"The source's name as a plain-text mark, shown next to the score" example:"IMDb"`
+	Score   float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
+	Display string  `json:"display" doc:"The score on the source's own scale, formatted for display" example:"8.5"`
+}
+
+// catalogRatingsOf builds the title page's ratings from the stored columns
+// and per-source rows, keeping only the sources sel shows.
+func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []CatalogRating {
+	item := ratingsources.Item{IMDB: d.RatingIMDB, TMDB: d.RatingTMDB, RTCritic: d.RatingRTCritic, RTAudience: d.RatingRTAudience}
+	if len(d.RatingSources) > 0 {
+		item.Sources = make(map[string]float64, len(d.RatingSources))
+		for _, source := range d.RatingSources {
+			item.Sources[source.Source] = source.Score
+		}
+	}
+	built := ratingsources.Build(item, sel)
+	out := make([]CatalogRating, 0, len(built))
+	for _, r := range built {
+		out = append(out, CatalogRating{Source: r.Source, Name: r.Name, Score: r.Score, Display: r.Display})
+	}
+	return out
+}
+
+// shownRatingSources keeps the per-source rows of the sources sel shows, in
+// the order of ratings. A stored row of any other source, such as one a plugin
+// reported before it stopped declaring the source, is left out.
+func shownRatingSources(sources []catalogpkg.ItemRatingSourceInfo, sel ratingsources.Selection) []catalogpkg.ItemRatingSourceInfo {
+	byName := make(map[string]catalogpkg.ItemRatingSourceInfo, len(sources))
+	names := make([]string, 0, len(sources))
+	for _, source := range sources {
+		byName[source.Source] = source
+		names = append(names, source.Source)
+	}
+	var out []catalogpkg.ItemRatingSourceInfo
+	for _, name := range sel.Sources(names) {
+		out = append(out, byName[name])
+	}
+	return out
 }
 
 func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo) []CatalogRatingSource {
@@ -444,6 +510,7 @@ type EpisodeFile struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully."`
 }
 
 // Episode is one episode row of a season listing.
@@ -531,7 +598,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
 		"The facet values available in a scope, for filter menus.")), reg.getCatalogFilters)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
-		"Prefix typeahead over one facet of a scope.")), reg.searchCatalogFacet)
+		"Typeahead over one facet of a scope, with title counts.")), reg.searchCatalogFacet)
 	query := humaOp(http.MethodPost, Prefix+"/catalog/query", opQueryCatalogItems, "catalog",
 		"Page the catalog by a JSON rule-group query; the body form of the browse.")
 	query.DefaultStatus = http.StatusOK
@@ -555,6 +622,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}/episodes", "listSeasonEpisodes", "catalog",
 		"The episodes of one season of a series by number.")), reg.listSeasonEpisodes)
 	registerCatalogActions(reg)
+	registerRatingsCapability(reg)
 }
 
 // --- helpers ---
@@ -575,14 +643,21 @@ func (reg *Registry) catalogItems() (CatalogItemService, *Problem) {
 
 // itemViewer resolves the caller into the seams' viewer: identity from the
 // context, access policy from the access seam, artwork size and
-// presentation hints from the query. The v2 listener reads no device
-// header, so the filter carries no device id.
+// presentation hints from the query. The filter carries no device id; reads
+// that resolve device-scoped preferences use itemViewerOnDevice.
 func (reg *Registry) itemViewer(ctx context.Context, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+	return reg.itemViewerOnDevice(ctx, "", imageSize, libraryID, fileID)
+}
+
+// itemViewerOnDevice is itemViewer for the caller's declared
+// X-Silo-Device-Id, so device-scoped playback preferences resolve as they
+// do on v1 and in getWatchState. The id is clamped like v1's header read.
+func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
 	_, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.ItemViewer{}, p
 	}
-	opts := handlers.AccessFilterOptions{}
+	opts := handlers.AccessFilterOptions{DeviceID: handlers.NewDeviceMetadata(deviceID, "", "").DeviceID}
 	if libraryID != "" {
 		n, p := libraryID.positive("query.library_id")
 		if p != nil {
@@ -622,6 +697,12 @@ func (reg *Registry) versionsScopedToLibrary(ctx context.Context) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
+// ratingSelection is the set of external rating sources the administrator
+// shows (IMDb and TMDB always).
+func (reg *Registry) ratingSelection(ctx context.Context) ratingsources.Selection {
+	return reg.deps.RatingSources.Selection(ctx)
 }
 
 // positive parses a canonical decimal ID that must name a positive integer.
@@ -733,6 +814,24 @@ func (in *CatalogBrowseInput) catalogValues() (url.Values, *Problem) {
 	return v, nil
 }
 
+// ratingSortSources maps each sort field that orders by a rating an
+// administrator can hide to that rating's source.
+var ratingSortSources = map[string]string{
+	"rating_rt_critic":   models.RatingSourceRTCritic,
+	"rating_rt_audience": models.RatingSourceRTAudience,
+}
+
+// dropHiddenRatingSort removes an explicit sort by a rating clients are not
+// shown, so the browse orders as if no sort was asked for (the saved or
+// default order, reported as effective_sort) instead of ranking titles by a
+// score their cards leave out.
+func dropHiddenRatingSort(values url.Values, sel ratingsources.Selection) {
+	if source, ok := ratingSortSources[values.Get("sort")]; ok && !sel.Shows(source) {
+		values.Del("sort")
+		values.Del("order")
+	}
+}
+
 // catalogSortFields is the sort allowlist: every field the query executor
 // sorts by, personalized ones included, since the browse always has a
 // profile.
@@ -762,11 +861,40 @@ func (in *CatalogFiltersInput) catalogValues() url.Values {
 	return v
 }
 
+// catalogRequest parses the scope and adds library_ids to the libraries it
+// names, sorted and without repeats, so one set of libraries shares one
+// cached facet value list in whatever order a client sends it. The resolver
+// intersects them with the viewer's libraries, so they can narrow a scope
+// but never widen it.
+func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Problem) {
+	req, p := parseCatalogRequest(in.catalogValues())
+	if p != nil || len(in.LibraryIDs) == 0 {
+		return req, p
+	}
+	if req.Source == catalogpkg.CatalogSourceSection {
+		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids does not apply to source=section"})
+	}
+	for _, id := range in.LibraryIDs {
+		n, p := id.positive("query.library_ids")
+		if p != nil {
+			return catalogpkg.CatalogRequest{}, p
+		}
+		req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
+	}
+	slices.Sort(req.Query.LibraryIDs)
+	req.Query.LibraryIDs = slices.Compact(req.Query.LibraryIDs)
+	return req, nil
+}
+
 // parseCatalogRequest runs the shared parser and reports its refusal as a
 // 422 on the query parameter the message names; the source when it names
 // none, since the source decides what the rest must carry.
 func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem) {
-	req, err := catalogpkg.ParseCatalogRequest(values)
+	req, err := catalogpkg.ParseCatalogRequestWithOptions(values, catalogpkg.CatalogRequestOptions{
+		SearchMediaScopes: true,
+		ExtendedRules:     true,
+	})
 	if err != nil {
 		location := "query.source"
 		for _, name := range []string{"section_id", "collection_id", "person_id", "library_id", "scope", "groups"} {
@@ -774,6 +902,9 @@ func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem
 				location = "query." + name
 				break
 			}
+		}
+		if errors.Is(err, catalogpkg.ErrSearchMediaScopeSource) {
+			location = "query.type"
 		}
 		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: err.Error()})
@@ -796,6 +927,8 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
+	sel := reg.ratingSelection(ctx)
+	dropHiddenRatingSort(values, sel)
 	req, p := parseCatalogRequest(values)
 	if p != nil {
 		return nil, p
@@ -872,7 +1005,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	}
 	items := make([]CatalogItem, 0, len(view.Items))
 	for _, item := range view.Items {
-		items = append(items, catalogItemOfListing(item))
+		items = append(items, catalogItemOfListing(item, sel))
 	}
 	window, err := cursors.Encode(scope, catalogBrowsePosition{Snapshot: view.Snapshot, Sort: req.ResolvedSort, After: view.CursorScope})
 	if err != nil {
@@ -957,7 +1090,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -985,7 +1118,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -993,7 +1126,14 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if err != nil {
 		return nil, catalogProblem(err, "query.facet")
 	}
-	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: NonNil(view.Matches), HasMore: view.HasMore}}, nil
+	values := make([]CatalogFacetValue, len(view.Values))
+	for i, v := range view.Values {
+		values[i] = CatalogFacetValue{Value: v.Value, Count: v.Count}
+	}
+	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{
+		Matches: NonNil(view.Matches), HasMore: view.HasMore,
+		Values: values, ValuesHasMore: view.ValuesHasMore,
+	}}, nil
 }
 
 func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
@@ -1028,12 +1168,12 @@ func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in
 	return output, err
 }
 
-func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (*CatalogItemDetailOutput, error) {
+func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceInput) (*CatalogItemDetailOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1041,7 +1181,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	out := catalogItemDetailOf(detail)
+	out := catalogItemDetailOf(detail, reg.ratingSelection(ctx))
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
 		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
 		if err != nil {
@@ -1056,12 +1196,12 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	return &CatalogItemDetailOutput{Body: out}, nil
 }
 
-func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemInput) (*FileVersionCollectionOutput, error) {
+func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemDeviceInput) (*FileVersionCollectionOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1219,11 +1359,11 @@ func playbackVariantsOf(vs []catalogpkg.PlaybackVariant) []PlaybackVariant {
 	return out
 }
 
-// catalogItemDetailOf renders the detail document; the card members come
-// from the same detail, so a detail never disagrees with its own card. The
-// detail service does not load keywords, the original language, or the
-// match status, so those card members are empty here as they are in v1.
-func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
+// catalogItemCardOf renders the card members of a detail, with every stored
+// rating. The detail service does not load keywords, the original language,
+// or the match status, so those card members are empty here as they are in
+// v1.
+func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 	card := CatalogItem{
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
@@ -1241,13 +1381,28 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 	for _, f := range d.WorkFormats {
 		card.WorkFormats = append(card.WorkFormats, CatalogWorkFormat{Type: f.Type, ContentID: f.ContentID, LibraryID: idOfPositive(f.LibraryID)})
 	}
+	return card
+}
+
+// catalogItemDetailOf renders the detail document; the card members come
+// from the same detail, so a detail never disagrees with its own card. A
+// viewer who curates the item's metadata gets every stored rating, for the
+// metadata editor; everyone else gets only the ratings sel shows, as on
+// cards.
+func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) CatalogItemDetail {
+	card := catalogItemCardOf(d)
+	ratingSources := d.RatingSources
+	if !d.ViewerCurates {
+		card = withShownRatings(card, sel)
+		ratingSources = shownRatingSources(ratingSources, sel)
+	}
 	out := CatalogItemDetail{
-		CatalogItem: card,
-		SortTitle:   d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
+		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
+		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,
@@ -1284,7 +1439,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
-				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize})
+				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
 		}
 		out = append(out, ep)
 	}

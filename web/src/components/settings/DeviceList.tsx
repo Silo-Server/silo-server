@@ -39,9 +39,18 @@ export function isDormantDevice(device: UserDevice, now: number): boolean {
   return now - seen > DORMANT_AFTER_MS;
 }
 
+/**
+ * Identifies one row. A device ID alone is not enough: in the household view
+ * the same browser or TV appears once per profile that used it.
+ */
+export function deviceSelectionKey(device: Pick<UserDevice, "profile_id" | "device_id">): string {
+  return `${device.profile_id}:${device.device_id}`;
+}
+
 export interface DeviceListProps {
   devices: UserDevice[];
-  selectedDeviceId: string | null;
+  /** The selected row's {@link deviceSelectionKey}. */
+  selectedKey: string | null;
   onSelect: (device: UserDevice) => void;
   search: string;
   onSearchChange: (value: string) => void;
@@ -73,7 +82,7 @@ export interface DeviceListProps {
  */
 export function DeviceList({
   devices,
-  selectedDeviceId,
+  selectedKey,
   onSelect,
   search,
   onSearchChange,
@@ -209,10 +218,10 @@ export function DeviceList({
             </h3>
             <ul>
               {section.devices.map((device) => (
-                <li key={`${device.profile_id}:${device.device_id}`}>
+                <li key={deviceSelectionKey(device)}>
                   <DeviceRow
                     device={device}
-                    selected={device.device_id === selectedDeviceId}
+                    selected={deviceSelectionKey(device) === selectedKey}
                     onSelect={onSelect}
                     now={now}
                   />

@@ -134,6 +134,8 @@ func assertInvitationLifecycleEffects(t *testing.T, e *Env, id string, resp resp
 	// Expiry is computed by the service clock; database-written times use database bounds.
 	bounded(got["expires_at"], applicationStarted.Add(invitations.DefaultTTL).Truncate(time.Microsecond), applicationFinished.Add(invitations.DefaultTTL))
 	want["expires_at"] = got["expires_at"]
+	// Synthetic SMTP is not configured, so the link is delivered manually.
+	want["delivery"] = json.RawMessage(`"link"`)
 	email, note := "fixture-guest@silo.example.test", "welcome"
 	if supersedes {
 		email = "fixture-invitee@silo.example.test"

@@ -63,6 +63,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   return (
     <ActionBar
       {...props}
+      itemTitle={item.title}
       watchedLabel={getWatchedActionLabel(item)}
       isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}

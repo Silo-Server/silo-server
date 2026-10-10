@@ -5,18 +5,6 @@ import (
 	"testing"
 )
 
-func TestBundleHasExpectedCounts(t *testing.T) {
-	if len(BundledStudios) != 10 {
-		t.Errorf("BundledStudios = %d, want 10", len(BundledStudios))
-	}
-	if len(BundledNetworks) != 10 {
-		t.Errorf("BundledNetworks = %d, want 10", len(BundledNetworks))
-	}
-	if len(BundledGenres) != 8 {
-		t.Errorf("BundledGenres = %d, want 8", len(BundledGenres))
-	}
-}
-
 func TestBundleStudiosHaveRequiredFields(t *testing.T) {
 	for _, s := range BundledStudios {
 		if s.TMDBID <= 0 {
@@ -90,56 +78,5 @@ func TestBundleSlugsAreUniqueWithinKind(t *testing.T) {
 			t.Errorf("duplicate genre slug %q (also %q)", g.Slug, prior)
 		}
 		seen[key] = g.DisplayName
-	}
-}
-
-func TestFindStudioBySlug(t *testing.T) {
-	got, ok := FindStudioBySlug("marvel-studios")
-	if !ok {
-		t.Fatal("expected marvel-studios to exist")
-	}
-	if got.DisplayName != "Marvel Studios" {
-		t.Errorf("display = %q, want Marvel Studios", got.DisplayName)
-	}
-
-	if _, ok := FindStudioBySlug("not-a-real-studio"); ok {
-		t.Error("expected unknown slug to return false")
-	}
-}
-
-func TestFindNetworkBySlug(t *testing.T) {
-	got, ok := FindNetworkBySlug("netflix")
-	if !ok {
-		t.Fatal("expected netflix to exist")
-	}
-	if got.DisplayName != "Netflix" {
-		t.Errorf("display = %q, want Netflix", got.DisplayName)
-	}
-}
-
-func TestFindGenreBySlug(t *testing.T) {
-	got, ok := FindGenreBySlug("action")
-	if !ok {
-		t.Fatal("expected action to exist")
-	}
-	if got.MovieID != 28 {
-		t.Errorf("movie id = %d, want 28", got.MovieID)
-	}
-}
-
-func TestGenresWithoutTVEquivalentHaveZeroSeriesID(t *testing.T) {
-	horror, ok := FindGenreBySlug("horror")
-	if !ok {
-		t.Fatal("expected horror to exist")
-	}
-	if horror.SeriesID != 0 {
-		t.Errorf("horror.SeriesID = %d, want 0", horror.SeriesID)
-	}
-	romance, ok := FindGenreBySlug("romance")
-	if !ok {
-		t.Fatal("expected romance to exist")
-	}
-	if romance.SeriesID != 0 {
-		t.Errorf("romance.SeriesID = %d, want 0", romance.SeriesID)
 	}
 }

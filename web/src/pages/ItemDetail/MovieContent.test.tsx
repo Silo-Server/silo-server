@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     useRefreshItemMetadata: vi.fn(),
     useRedetectItemMarkers: vi.fn(),
     useAdminMarkerCapabilities: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
     useSetRating: vi.fn(),
@@ -73,6 +74,10 @@ vi.mock("@/hooks/queries/watchlist", () => ({
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -220,6 +225,7 @@ function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}):
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -262,6 +268,7 @@ describe("MovieContent", () => {
     mocks.useRefreshItemMetadata.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useRedetectItemMarkers.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useAdminMarkerCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
     mocks.useSetRating.mockReturnValue({ mutate: vi.fn() });
@@ -408,6 +415,26 @@ describe("MovieContent", () => {
     });
   });
 
+  it.each([
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: true } }, true],
+    [{ role: "admin" }, { data: { trickplay: true, trickplay_supported: false } }, false],
+    [{ role: "admin" }, { data: { trickplay: true } }, false],
+    [{ role: "admin" }, { data: { trickplay: false } }, false],
+    [{ role: "admin" }, { data: undefined }, false],
+  ])("offers seek-preview status to %o with capability %o: %s", (user, capability, offered) => {
+    mocks.useAuth.mockReturnValue({ user });
+    mocks.useLibraryCapabilities.mockReturnValue(capability);
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(true);
+  });
+
   it("passes credits re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
@@ -439,6 +466,7 @@ describe("MovieContent", () => {
       </MemoryRouter>,
     );
     expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(false);
   });
 
   it.each([

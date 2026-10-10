@@ -63,7 +63,7 @@ type TrendingRefresher struct {
 	TMDBTrending  catalog.TMDBCollectionFetcher
 	TraktTrending catalog.TraktCollectionFetcher
 
-	// Clock defaults to recipes.RealClock{}. Tests inject recipes.FixedClock.
+	// Clock defaults to recipes.RealClock{}.
 	Clock  recipes.Clock
 	logger *slog.Logger
 }

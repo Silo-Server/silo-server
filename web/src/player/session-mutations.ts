@@ -14,7 +14,11 @@
  */
 
 import type { PlayerConfig } from "./context/PlayerConfigContext";
-import { playerFetchResponse, PlayerFetchError } from "./player-fetch";
+import {
+  isTransientPlayerRequestError,
+  playerFetchResponse,
+  PlayerFetchError,
+} from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
 import { randomUUID } from "@/lib/uuid";
 
@@ -114,11 +118,6 @@ async function mutationFetch(
   return response;
 }
 
-function isTransient(error: unknown) {
-  if (error instanceof PlayerFetchError) return error.status >= 500;
-  return error instanceof TypeError || error instanceof DOMException;
-}
-
 /**
  * Sends one progress sample. Sequenced sessions serialize samples and retry
  * a transient failure with the same body.
@@ -155,7 +154,7 @@ export function sendSessionProgress(
           );
           return;
         } catch (error) {
-          if (attempt >= 2 || !isTransient(error)) throw error;
+          if (attempt >= 2 || !isTransientPlayerRequestError(error)) throw error;
           await pause(250);
         }
       }
@@ -222,7 +221,7 @@ export function stopSequencedSession(
           state.stopped = true;
           return;
         }
-        if (!isTransient(error) || Date.now() >= deadline) throw error;
+        if (!isTransientPlayerRequestError(error) || Date.now() >= deadline) throw error;
         await pause(Math.min(500, deadline - Date.now()));
         if (Date.now() >= deadline) throw error;
       }

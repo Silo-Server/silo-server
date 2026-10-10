@@ -893,23 +893,6 @@ func (r *Repository) ListActiveRunsForUser(ctx context.Context, userID int) ([]R
 	return scanRunsWithMappingID(rows)
 }
 
-func (r *Repository) GetProgress(ctx context.Context, userID int, profileID, mediaItemID string) (*localProgressRow, error) {
-	var row localProgressRow
-	err := r.pool.QueryRow(ctx, `
-		SELECT updated_at
-		FROM user_watch_progress
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		userID, profileID, mediaItemID,
-	).Scan(&row.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting watch progress: %w", err)
-	}
-	return &row, nil
-}
-
 func (r *Repository) UpsertImportedProgress(
 	ctx context.Context,
 	userID int,

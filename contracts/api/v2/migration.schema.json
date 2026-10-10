@@ -44,8 +44,8 @@
     "authTrait": {
       "enum": [
         "acting_admin", "authenticated", "cors", "delegated", "demo_guarded", "egress_metered",
-        "marker_edit", "metadata_curation", "node_bearer", "optional_viewer_access",
-        "profile_required", "rate_limited", "viewer_access"
+        "household_profile_gate", "marker_edit", "metadata_curation", "node_bearer",
+        "optional_viewer_access", "profile_required", "rate_limited", "viewer_access"
       ]
     },
     "requestKind": { "enum": ["none", "json", "multipart", "binary", "range", "dynamic_proxy", "unknown"] },

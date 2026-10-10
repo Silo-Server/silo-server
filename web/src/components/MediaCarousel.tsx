@@ -15,6 +15,8 @@ interface MediaCarouselProps {
   skeletonCount?: number;
   skeletonAspect?: string;
   onViewAll?: () => void;
+  /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
+  viewAllHref?: string;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -40,10 +42,13 @@ export default function MediaCarousel({
   skeletonCount = 7,
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
+  viewAllHref,
   headerActions,
   edgePadding = true,
   compact = false,
 }: MediaCarouselProps) {
+  const viewAllClass =
+    "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
@@ -52,7 +57,7 @@ export default function MediaCarousel({
   const viewportPadX = edgePadding ? " pr-4 sm:pr-6 lg:pr-10 xl:pr-12" : "";
   const containerPadX = edgePadding ? " pl-4 sm:pl-6 lg:pl-10 xl:pl-12" : "";
   const titleClass = compact
-    ? "text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase"
+    ? "text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase"
     : "text-foreground text-xl font-semibold tracking-tight";
   const headerGap = compact ? "mb-2" : "mb-5";
   const slideGap = compact ? "gap-3" : "gap-4 lg:gap-5";
@@ -91,14 +96,19 @@ export default function MediaCarousel({
           )}
           {headerActions}
         </div>
-        {onViewAll && (
-          <button
-            onClick={onViewAll}
-            className="text-muted-foreground hover:text-primary text-[12px] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]"
+        {viewAllHref ? (
+          <Link
+            to={viewAllHref}
+            aria-label={`Explore all ${title}`}
+            className={`${viewAllClass} shrink-0`}
           >
             Explore all
+          </Link>
+        ) : onViewAll ? (
+          <button onClick={onViewAll} className={viewAllClass}>
+            Explore all
           </button>
-        )}
+        ) : null}
       </div>
 
       <div className="relative">

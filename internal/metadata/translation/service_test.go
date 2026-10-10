@@ -400,7 +400,14 @@ func TestForceRetranslatesProviderAndAIButNeverManual(t *testing.T) {
 	if final.FieldsTotal != 3 {
 		t.Fatalf("fields_total = %d, want 3", final.FieldsTotal)
 	}
-	for _, w := range locs.allWrites() {
+	if final.Status != jobrunner.StatusCompleted || final.FieldsDone != 3 {
+		t.Fatalf("completed job = %+v, want 3 fields done", final)
+	}
+	writes := locs.allWrites()
+	if len(writes) != 3 {
+		t.Fatalf("writes = %+v, want 3", writes)
+	}
+	for _, w := range writes {
 		if !w.force {
 			t.Errorf("write without force flag: %+v", w)
 		}

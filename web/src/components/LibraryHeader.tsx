@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
+import { Shuffle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
 
@@ -15,6 +16,9 @@ interface LibraryHeaderProps {
    */
   overlay?: boolean;
   availableTabs?: readonly LibraryTab[];
+  /** Starts a shuffle of the whole library; omitted where nothing can shuffle. */
+  onShuffle?: () => void;
+  shuffleDisabled?: boolean;
 }
 
 const DEFAULT_TABS: readonly LibraryTab[] = ["recommended", "library", "collections"];
@@ -40,6 +44,8 @@ export default function LibraryHeader({
   libraryType = "",
   overlay = false,
   availableTabs = DEFAULT_TABS,
+  onShuffle,
+  shuffleDisabled = false,
 }: LibraryHeaderProps) {
   const tabLabels = isAudiobookLibraryType(libraryType) ? AUDIOBOOK_TAB_LABELS : TAB_LABELS;
   const [pastThreshold, setPastThreshold] = useState(false);
@@ -71,13 +77,31 @@ export default function LibraryHeader({
           <span className="hero-eyebrow-strong">{libraryName}</span>
         </p>
       </div>
-      <TabsPrimitive.List className="marquee-tab-bar" aria-label="Library view">
-        {availableTabs.map((tab) => (
-          <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
-            {tabLabels[tab]}
-          </TabsPrimitive.Trigger>
-        ))}
-      </TabsPrimitive.List>
+      <div className="flex min-w-0 items-center gap-2">
+        {onShuffle && (
+          // Drawn as a one-button tab bar so it matches the tabs beside it.
+          <div className="marquee-tab-bar shrink-0">
+            <button
+              type="button"
+              className="marquee-tab-trigger gap-1.5 disabled:cursor-default disabled:opacity-60"
+              onClick={onShuffle}
+              disabled={shuffleDisabled}
+              title="Shuffle"
+              aria-label="Shuffle"
+            >
+              <Shuffle className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Shuffle</span>
+            </button>
+          </div>
+        )}
+        <TabsPrimitive.List className="marquee-tab-bar" aria-label="Library view">
+          {availableTabs.map((tab) => (
+            <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
+              {tabLabels[tab]}
+            </TabsPrimitive.Trigger>
+          ))}
+        </TabsPrimitive.List>
+      </div>
     </header>
   );
 }

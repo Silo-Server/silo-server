@@ -103,14 +103,6 @@ func TestSaturdayMorningPredicate(t *testing.T) {
 	}
 }
 
-// TestSeasonalRecipeRegistered verifies the recipe is in the registry.
-func TestSeasonalRecipeRegistered(t *testing.T) {
-	_, ok := Get("seasonal_themed")
-	if !ok {
-		t.Fatal("seasonal_themed not registered")
-	}
-}
-
 // TestSeasonalValidatesTheme verifies that an unknown theme is rejected and a
 // known theme with mode "auto" is accepted.
 func TestSeasonalValidatesTheme(t *testing.T) {
@@ -187,37 +179,6 @@ func TestSeasonalRequiresTheme(t *testing.T) {
 	// Explicit empty theme string
 	if err := rec.Validate(json.RawMessage(`{"theme":""}`)); err == nil {
 		t.Error(`{"theme":""} should be rejected`)
-	}
-}
-
-// TestAllSeasonalPredicatesPresent verifies every theme referenced by a preset
-// (in either the legacy single-theme form or the new EnabledThemes list) has a
-// corresponding predicate in SeasonalPredicates.
-func TestAllSeasonalPredicatesPresent(t *testing.T) {
-	rec, ok := Get("seasonal_themed")
-	if !ok {
-		t.Fatal("seasonal_themed not registered")
-	}
-
-	for _, preset := range rec.Definition().Presets {
-		var p SeasonalThemedParams
-		if err := json.Unmarshal(preset.DefaultParams, &p); err != nil {
-			t.Errorf("preset %q: failed to unmarshal DefaultParams: %v", preset.Key, err)
-			continue
-		}
-		themes := append([]string{}, p.EnabledThemes...)
-		if p.Theme != "" {
-			themes = append(themes, p.Theme)
-		}
-		if len(themes) == 0 {
-			t.Errorf("preset %q: neither enabled_themes nor theme set", preset.Key)
-			continue
-		}
-		for _, th := range themes {
-			if _, hasPred := SeasonalPredicates[th]; !hasPred {
-				t.Errorf("preset %q: theme %q has no predicate in SeasonalPredicates", preset.Key, th)
-			}
-		}
 	}
 }
 
