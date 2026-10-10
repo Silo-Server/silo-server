@@ -54,7 +54,7 @@ import type {
   PlayerPictureInPictureChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
-import { formatTime } from "@/player/components/SeekBar";
+import { formatTime } from "@/player/utils/formatTime";
 import { storage } from "@/utils/storage";
 import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";

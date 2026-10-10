@@ -36,6 +36,14 @@ const (
 	markerMemoryTTL         = 15 * time.Minute
 	markerFetchTimeout      = 45 * time.Second
 	markerMemoryLimit       = 512
+	// markerSaveGrace is how long a pass whose caller has gone, or whose own
+	// deadline has passed, still has to save answers it already fetched.
+	markerSaveGrace = 5 * time.Second
+	// markerReadHold is how long short reads leave a provider alone after
+	// one of them ran out of time waiting for it. A provider slower than a
+	// read's budget would otherwise be asked and cut off on every read.
+	// Lookups that can wait for a provider, such as playback, still ask it.
+	markerReadHold = time.Minute
 
 	// Files can arrive a few days before their listed date, through time
 	// zones or early releases; titles dated further ahead are not recent.
@@ -81,13 +89,16 @@ type PopulationService struct {
 	slots  chan struct{}
 	mu     sync.Mutex
 	memory map[string]cachedMarkerResult
+	// holds maps an identity and provider to the end of its short-read hold.
+	// It is kept per replica, like memory.
+	holds map[string]time.Time
 	// setupWaitLogged keeps the "waiting for setup" notice to one line per
 	// process instead of one per playback, read, or sync.
 	setupWaitLogged atomic.Bool
 }
 
 func NewPopulationService(opts PopulationOptions) *PopulationService {
-	return &PopulationService{opts: opts, slots: make(chan struct{}, 4), memory: make(map[string]cachedMarkerResult)}
+	return &PopulationService{opts: opts, slots: make(chan struct{}, 4), memory: make(map[string]cachedMarkerResult), holds: make(map[string]time.Time)}
 }
 
 func (s *PopulationService) OnlineStorage(ctx context.Context) (OnlineStorage, error) {
@@ -190,9 +201,11 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	if len(entries) == 0 {
 		return file, false, nil
 	}
-	// A pass must finish writing before its two-minute leases expire. The file
-	// lease also prevents different replicas from projecting competing provider
-	// results onto the same file from independently read cache snapshots.
+	short := shortRead(ctx)
+	// A pass must finish writing before its two-minute leases expire, which
+	// leaves room for markerSaveGrace after this deadline. The file lease also
+	// prevents different replicas from projecting competing provider results
+	// onto the same file from independently read cache snapshots.
 	ctx, cancelPass := context.WithTimeout(ctx, 90*time.Second)
 	defer cancelPass()
 	fileClaim, claimed, err := s.claimFile(ctx, file, waitForLease)
@@ -252,11 +265,8 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	}
 	var pending []completedFetch
 	var failures []error
+	fetched := false
 	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			failures = append(failures, err)
-			break
-		}
 		providerID := entry.provider.ID()
 		key := identity + ":" + providerID
 		if storage == OnlineStorageOnDemand && !refresh {
@@ -267,10 +277,22 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		}
 		// Reserve network capacity before taking a database lease, so requests
 		// waiting behind other viewers cannot outlive their leases in the queue.
-		select {
-		case s.slots <- struct{}{}:
-		case <-ctx.Done():
-			failures = append(failures, ctx.Err())
+		reserved := false
+		if ctx.Err() == nil && (!short || !s.held(key)) {
+			select {
+			case s.slots <- struct{}{}:
+				reserved = true
+			case <-ctx.Done():
+			}
+		}
+		if !reserved {
+			// Once the caller has gone or the pass is out of time, ask no more
+			// providers, and a short read skips a held provider. Keep their
+			// cached answers, so saving what was already fetched does not
+			// drop them.
+			if result, ok := cached[providerID]; ok {
+				results = append(results, providerResult{entry: entry, result: result})
+			}
 			continue
 		}
 		claim, claimed, claimErr := s.opts.Store.Claim(ctx, file.ID, providerID, identity, providerRevision(entry.provider), storage == OnlineStorageOnDemand || refresh)
@@ -289,12 +311,28 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		cancel()
 		<-s.slots
 		if fetchErr != nil {
-			failures = append(failures, s.recordFetchFailure(ctx, entry.provider, request, claim, fetchErr)...)
+			if _, limited := RetryAfter(fetchErr); !limited && ctx.Err() != nil {
+				// The caller left or the pass ran out of time, which says
+				// nothing about the provider. Plugin providers report that as
+				// a gRPC status, so check the pass context, not the error.
+				if err := s.release(ctx, claim); err != nil {
+					failures = append(failures, err)
+				}
+				// A short read that ran out of time waiting for this provider
+				// holds it off from other short reads, without counting a
+				// failure. A viewer who left says nothing about its speed.
+				if short && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					s.hold(key)
+				}
+			} else {
+				failures = append(failures, s.recordFetchFailure(ctx, entry.provider, request, claim, fetchErr)...)
+			}
 			if result, ok := cached[providerID]; ok {
 				results = append(results, providerResult{entry: entry, result: result})
 			}
 			continue
 		}
+		fetched = true
 		result.ProviderID = providerID
 		results = append(results, providerResult{entry: entry, result: result, refreshed: true})
 		found := len(result.Markers) > 0
@@ -313,28 +351,42 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 			pending = append(pending, completedFetch{claim: claim, completion: completion})
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		failures = append(failures, err)
+		if !fetched {
+			// Nothing new to save for a caller that has gone.
+			return file, false, errors.Join(failures...)
+		}
+	}
 	if len(results) == 0 {
 		return file, false, errors.Join(failures...)
 	}
-	stillEnabled, settingsErr := s.enabled(ctx)
-	currentStorage, storageErr := s.OnlineStorage(ctx)
+	// Save answers already fetched even when the caller has gone: each one
+	// cost provider quota, and dropping it would leave the file looking
+	// failed. The save keeps the pass deadline, or gets markerSaveGrace once
+	// the caller has gone.
+	saveCtx, cancelSave := context.WithDeadline(context.WithoutCancel(ctx), saveDeadline(ctx))
+	defer cancelSave()
+	stillEnabled, settingsErr := s.enabled(saveCtx)
+	currentStorage, storageErr := s.OnlineStorage(saveCtx)
 	if settingsErr != nil || storageErr != nil || !stillEnabled || currentStorage != storage {
 		for _, fetch := range pending {
-			if err := s.complete(ctx, fetch.claim, FetchCompletion{Outcome: markerFetchError, RetryAt: time.Now().Add(time.Minute), Error: "marker settings changed"}); err != nil {
+			if err := s.complete(saveCtx, fetch.claim, FetchCompletion{Outcome: markerFetchError, RetryAt: time.Now().Add(time.Minute), Error: "marker settings changed"}); err != nil {
 				failures = append(failures, err)
 			}
 		}
 		return file, false, errors.Join(append(failures, settingsErr, storageErr)...)
 	}
-	current, checkErr := s.checkIdentity(ctx, file, identity)
+	current, checkErr := s.checkIdentity(saveCtx, file, identity)
 	file = current
 	if storage == OnlineStorageOnDemand {
 		if checkErr != nil {
 			return file, false, errors.Join(append(failures, checkErr)...)
 		}
 		effective := ApplyResult(file, s.selectResults(results))
+		effective.MarkerThumbnailBaseSegments = models.EffectiveMarkerSegments(file)
 		if s.opts.Notify != nil {
-			s.opts.Notify(ctx, effective)
+			s.opts.Notify(saveCtx, effective)
 		}
 		return effective, true, errors.Join(failures...)
 	}
@@ -345,7 +397,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	} else if s.opts.Write == nil {
 		err = errors.New("marker writer unavailable")
 	} else {
-		wrote, err = s.opts.Write(ctx, file, merged)
+		wrote, err = s.opts.Write(saveCtx, file, merged)
 	}
 	if err != nil {
 		failures = append(failures, err)
@@ -358,21 +410,21 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		if err != nil {
 			completion = FetchCompletion{Outcome: markerFetchError, RetryAt: time.Now().Add(time.Minute), Error: "marker storage failed"}
 		}
-		if completeErr := s.complete(ctx, fetch.claim, completion); completeErr != nil {
+		if completeErr := s.complete(saveCtx, fetch.claim, completion); completeErr != nil {
 			failures = append(failures, completeErr)
 		}
 	}
 	if wrote {
 		file = ApplyResult(file, merged)
 		if s.opts.LoadFile != nil {
-			if refreshed, loadErr := s.opts.LoadFile(ctx, file.ID); loadErr == nil && refreshed != nil {
+			if refreshed, loadErr := s.opts.LoadFile(saveCtx, file.ID); loadErr == nil && refreshed != nil {
 				file = refreshed
 			} else if loadErr != nil {
 				failures = append(failures, loadErr)
 			}
 		}
 		if s.opts.Notify != nil {
-			s.opts.Notify(ctx, file)
+			s.opts.Notify(saveCtx, file)
 		}
 	}
 	return file, wrote, errors.Join(failures...)
@@ -478,6 +530,29 @@ func (s *PopulationService) complete(ctx context.Context, claim FetchClaim, resu
 	return s.opts.Store.Complete(cleanup, claim, result)
 }
 
+func (s *PopulationService) release(ctx context.Context, claim FetchClaim) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return s.opts.Store.Release(cleanup, claim)
+}
+
+// shortRead reports whether the caller cannot wait as long as a provider may
+// take, as with catalog reads that give the lookup a few seconds.
+func shortRead(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && time.Until(deadline) < markerFetchTimeout
+}
+
+// saveDeadline is the pass deadline while the caller is still there, and
+// markerSaveGrace from now once it has gone or less than that remains.
+func saveDeadline(ctx context.Context) time.Time {
+	grace := time.Now().Add(markerSaveGrace)
+	if deadline, ok := ctx.Deadline(); ok && ctx.Err() == nil && deadline.After(grace) {
+		return deadline
+	}
+	return grace
+}
+
 func populationIdentity(file *models.MediaFile, ids ExternalIDs, entries []fetchEntry) string {
 	revisions := make([][2]string, 0, len(entries))
 	for _, entry := range entries {
@@ -548,17 +623,43 @@ func (s *PopulationService) remember(key string, result Result) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.memory) >= markerMemoryLimit {
-		var oldest string
-		var expires time.Time
-		for k, v := range s.memory {
-			if oldest == "" || v.expires.Before(expires) {
-				oldest = k
-				expires = v.expires
-			}
-		}
-		delete(s.memory, oldest)
+		delete(s.memory, firstToExpire(s.memory, func(entry cachedMarkerResult) time.Time { return entry.expires }))
 	}
 	s.memory[key] = cachedMarkerResult{result: result, expires: time.Now().Add(markerMemoryTTL)}
+}
+
+// held reports whether short reads are holding off a provider for key.
+func (s *PopulationService) held(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.holds[key]
+	if ok && !time.Now().Before(until) {
+		delete(s.holds, key)
+		return false
+	}
+	return ok
+}
+
+// hold keeps short reads off a provider for key for markerReadHold.
+func (s *PopulationService) hold(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.holds[key]; !ok && len(s.holds) >= markerMemoryLimit {
+		delete(s.holds, firstToExpire(s.holds, func(until time.Time) time.Time { return until }))
+	}
+	s.holds[key] = time.Now().Add(markerReadHold)
+}
+
+// firstToExpire returns the key of the entry that expires first.
+func firstToExpire[V any](entries map[string]V, expires func(V) time.Time) string {
+	var first string
+	var at time.Time
+	for key, entry := range entries {
+		if t := expires(entry); first == "" || t.Before(at) {
+			first, at = key, t
+		}
+	}
+	return first
 }
 
 type SyncSummary struct {

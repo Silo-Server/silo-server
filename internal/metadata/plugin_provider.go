@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -344,6 +345,11 @@ func titleAliasesFromPlugin(aliases []*pluginv1.TitleAlias, provider string) []T
 	return out
 }
 
+// ErrPersonDetailUnsupported reports a metadata plugin that does not implement
+// person lookup. It says nothing about the person, unlike a plugin that looked
+// them up and found nothing.
+var ErrPersonDetailUnsupported = errors.New("provider does not support person lookup")
+
 func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRequest) (*PersonDetailResult, error) {
 	client, err := p.clientFactory(ctx, p.installationID, p.capabilityID)
 	if err != nil {
@@ -361,7 +367,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 	})
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
-			return nil, nil
+			return nil, ErrPersonDetailUnsupported
 		}
 		return nil, err
 	}

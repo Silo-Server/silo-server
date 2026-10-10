@@ -39,15 +39,29 @@ type FileMarkers struct {
 
 // MarkerOccurrence is one continuous range. A kind can occur more than once.
 type MarkerOccurrence struct {
-	Kind         string  `json:"kind" enum:"intro,credits,recap,preview"`
-	StartSeconds float64 `json:"start_seconds" minimum:"0"`
-	EndSeconds   float64 `json:"end_seconds" minimum:"0"`
+	Kind                    string   `json:"kind" enum:"intro,credits,recap,preview"`
+	StartSeconds            float64  `json:"start_seconds" minimum:"0"`
+	EndSeconds              float64  `json:"end_seconds" minimum:"0"`
+	ThumbnailURL            string   `json:"thumbnail_url,omitempty"`
+	ThumbnailThumbhash      string   `json:"thumbnail_thumbhash,omitempty"`
+	ThumbnailCaptureSeconds *float64 `json:"thumbnail_capture_seconds,omitempty" minimum:"0" doc:"Captured source timestamp; marker previews sample the marker start"`
 }
 
-func markerOccurrences(segments []models.MarkerSegment) []MarkerOccurrence {
+func markerOccurrences(segments []models.MarkerSegment, previews ...[]catalogpkg.VersionMarkerPreview) []MarkerOccurrence {
 	out := make([]MarkerOccurrence, 0, len(segments))
 	for _, segment := range segments {
-		out = append(out, MarkerOccurrence{Kind: segment.Kind, StartSeconds: segment.StartSeconds, EndSeconds: segment.EndSeconds})
+		occurrence := MarkerOccurrence{Kind: segment.Kind, StartSeconds: segment.StartSeconds, EndSeconds: segment.EndSeconds}
+		if len(previews) > 0 {
+			for _, image := range previews[0] {
+				if image.MarkerSegment == segment && image.ThumbnailURL != "" {
+					occurrence.ThumbnailURL = image.ThumbnailURL
+					occurrence.ThumbnailThumbhash = image.ThumbnailThumbhash
+					occurrence.ThumbnailCaptureSeconds = new(image.ThumbnailCaptureSeconds)
+					break
+				}
+			}
+		}
+		out = append(out, occurrence)
 	}
 	return out
 }
@@ -184,7 +198,7 @@ func markerOutput(view handlers.FileMarkersView, err error) (*FileMarkersOutput,
 	if err != nil {
 		return nil, catalogProblem(err, "body")
 	}
-	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview), MarkerSegments: markerOccurrences(view.MarkerSegments)}}, nil
+	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview), MarkerSegments: markerOccurrences(view.MarkerSegments, view.MarkerPreviews)}}, nil
 }
 func markerSegment(view handlers.MarkerSegmentView) MarkerSegment {
 	result := MarkerSegment{StartSeconds: view.Start, EndSeconds: view.End, Source: view.Source, Provider: view.Provider, Confidence: view.Confidence, Algorithm: view.Algorithm}

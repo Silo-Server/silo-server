@@ -2495,15 +2495,19 @@ submission. No automatic retry, authentication replay or provider update occurs.
 The web edit submission captures identity and input before queueing and refuses
 late completion from another authority or a newer dialog draft.
 
-An update that changes the upstream the plugin is handed clears the poll marker of
-every source bound to it, in the same transaction, so those sources restart from
-now against the new upstream. That upstream is the linked Requests integration
-when there is one, otherwise the connection's base URL: linking, unlinking or
-switching the integration, or changing an unlinked connection's base URL, resets
-markers. Changing the name, kind or API key, or the stored base URL of a linked
-connection, keeps them. The frozen v1 connection update shares this repository
-path. Editing the linked Requests integration itself does not reset markers. A poll that was already running does not restore the old marker; see the
-source update below.
+An update that changes the upstream the plugin is handed clears the poll marker and
+`last_run_at` of every source bound to it, in the same transaction, so those
+sources restart from now against the new upstream and are polled at the next
+cycle instead of after their interval. That upstream is the linked Requests
+integration when there is one, otherwise the connection's base URL: linking,
+unlinking or switching the integration, or changing an unlinked connection's base
+URL, resets markers. Base URLs that differ only in the case of the scheme or host,
+surrounding whitespace, or trailing slashes name the same server and keep them; a
+different port, scheme or path (an escaped slash, `%2F`, included) does not.
+Changing the name, kind or API key, or the stored base URL of a linked connection,
+keeps them. The frozen v1 connection update shares this repository path. Editing
+the linked Requests integration itself does not reset markers. A poll that was
+already running does not restore the old marker; see the source update below.
 
 ### Delete an autoscan connection (v2)
 
@@ -2723,9 +2727,12 @@ delivery mode preserves the stored mode. Rewrites need nonblank from/to values.
 
 An update that changes the bound connection (including unbinding it) or the stored
 source configuration clears the source's poll marker, so the next poll starts from
-now. A marker is the plugin's continuation token for one upstream; replaying it
-against another server can repeat or skip that server's history. Changing only the
-label, enabled state, delivery mode, poll interval or path rewrites keeps the marker.
+now. It clears `last_run_at` too, so the next cycle polls the source instead of
+waiting out its interval, and the source reads as not run until then. A marker is
+the plugin's continuation token for one upstream; replaying it against another
+server can repeat or skip that server's history. Changing only the label, enabled
+state, delivery mode, poll interval or path rewrites keeps the marker and
+`last_run_at`.
 The rule lives in the repository update, so the frozen v1 source update applies it too.
 A poll cycle re-reads each source just before polling it, so an edit made earlier in
 the cycle is honored; a source whose row cannot be read is skipped until the next cycle. A poll already running during the reset cannot write the old

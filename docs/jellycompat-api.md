@@ -250,6 +250,29 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+`GET` and `HEAD /Items/{id}/Download` serve the original file through the
+native direct download, the same service as `/api/v2/direct-download`, so they
+follow its rules. Both answer `403` when **Allow downloads** is off, the
+account's download permission is off, or the policy engine refuses the
+download, and `404` for a file outside the viewer's library or quality scope.
+The server and per-user download bandwidth limits pace the transfer. Like
+native downloads, each API server process applies them on its own, to its
+native and Jellyfin downloads together. As with the native
+direct download, these requests create no download record and do not count
+toward the concurrent or per-period download limits: a Jellyfin client
+registers nothing with the server, so there is no download to list, count, or
+revoke. Stream bitrate limits apply to playback, not downloads, as on the
+native API. The response carries the same `ETag` as a `Static=true` stream of
+the file, for clients that resume with `If-Range`.
+
+Every playable item reports `CanDownload: true`, and every account's policy
+reports `EnableContentDownloading: true`, whatever the account may download.
+Infuse refuses Direct Play of an item it believes it cannot download, so the
+download rules act on the `Download` route alone, and a client may offer a
+download that the route then refuses. A client that saves a file
+from a `Static=true` stream URL looks the same as playback and follows the
+playback rules.
+
 Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
 member on single-item reads and on list reads that request the field and
 already take the detail path (`Chapters` or `MediaSources` among the

@@ -116,6 +116,9 @@ type ItemsHandler struct {
 	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	MarkerPopulation         MarkerPopulationService
 	MarkerFileResolver       FilePathResolver
+	MarkerImageURLs          interface {
+		ResolveURLs(context.Context, []string) map[string]catalog.ResolvedImageURL
+	}
 }
 
 // NewItemsHandler creates a new ItemsHandler.

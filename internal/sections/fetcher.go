@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
@@ -204,12 +206,30 @@ func (f *Fetcher) cachedEditorialCandidates(ctx context.Context, subjectType str
 		return candidates, nil
 	}
 
-	value, err, _ := f.candidateGroup.Do(key, func() (any, error) {
+	// A caller whose context is already done starts no detached load.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Every request for this scope shares the load, so it runs detached from
+	// the one that started it, as blockingResolvedListRebuild does. Each
+	// caller still stops waiting when its own context ends.
+	flight := f.candidateGroup.DoChan(key, func() (value any, err error) {
+		defer func() {
+			// The load runs on its own goroutine, out of reach of the
+			// request's panic recovery.
+			if rec := recover(); rec != nil {
+				slog.ErrorContext(ctx, "editorial candidate load panicked", "component", "sections", "subject_type", subjectType,
+					"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+				err = errors.New("editorial candidate load panicked")
+			}
+		}()
 		now := f.now()
 		if candidates, ok := cache.get(key, now); ok {
 			return candidates, nil
 		}
-		candidates, err := loader(ctx, subjectType, libraryID, libraryIDs, filter)
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolvedListBuildTimeout)
+		defer cancel()
+		candidates, err := loader(loadCtx, subjectType, libraryID, libraryIDs, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -221,10 +241,16 @@ func (f *Fetcher) cachedEditorialCandidates(ctx context.Context, subjectType str
 		}
 		return append([]string(nil), candidates...), nil
 	})
-	if err != nil {
-		return nil, err
+	var outcome singleflight.Result
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case outcome = <-flight:
 	}
-	candidates, _ := value.([]string)
+	if outcome.Err != nil {
+		return nil, outcome.Err
+	}
+	candidates, _ := outcome.Val.([]string)
 	return append([]string(nil), candidates...), nil
 }
 

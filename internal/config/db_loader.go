@@ -335,6 +335,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.ImageWorkers = imageWorkers
+	personRefreshPerMinute, err := intOr(m, MetadataPersonRefreshPerMinuteSettingKey, 120)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Metadata.PersonRefreshPerMinute = personRefreshPerMinute
 	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
 	if err != nil {
 		return nil, err

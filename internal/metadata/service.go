@@ -2096,7 +2096,15 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		upsertStaleProviderIDValues(ctx, s.staleIDRepo, followUpContentID, staleValues)
 	}
 	if result != nil && strings.TrimSpace(result.ContentID) != "" {
-		if syncErr := s.syncRefreshDebtForItem(ctx, result.ContentID); syncErr != nil {
+		syncCtx := ctx
+		// A claimed item merged into another one hands its counted attempt to
+		// the item it became. The merge keeps the higher attempt count of the
+		// two rows, so a merge into a row already at or past the terminal count
+		// can repeat the notice or miss it; it changes no scheduling.
+		if result.ContentID != req.ContentID && refreshAttemptCounted(ctx, RefreshTargetItem, req.ContentID) {
+			syncCtx = withCountedRefreshAttempt(ctx, RefreshTargetItem, result.ContentID)
+		}
+		if syncErr := s.syncRefreshDebtForItem(syncCtx, result.ContentID); syncErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to sync refresh debt after successful metadata refresh", "component", "metadata",
 				"content_id", result.ContentID,
 				"error", syncErr)
@@ -2935,7 +2943,9 @@ func (s *MetadataService) RefreshScheduledItem(ctx context.Context, contentID st
 }
 
 // RefreshScheduledTarget re-fetches metadata for a queued item, season, or
-// episode target using the background refresh merge policy.
+// episode target using the background refresh merge policy. The caller must
+// have claimed the target's debt row: the claim counted this attempt, so a
+// target that reaches its terminal attempts here reports it.
 //
 // A queued item may be the durable recovery for a viewer's trailer request
 // whose process died mid-refresh (see RequestTrailersRefresh). That request
@@ -2944,6 +2954,7 @@ func (s *MetadataService) RefreshScheduledItem(ctx context.Context, contentID st
 // a recovery that fails hands the slot back instead of leaving the viewer
 // blocked for a week over trailers nobody ever stored.
 func (s *MetadataService) RefreshScheduledTarget(ctx context.Context, targetType, contentID string) error {
+	ctx = withCountedRefreshAttempt(ctx, targetType, contentID)
 	if NormalizeRefreshTargetType(targetType) == RefreshTargetItem {
 		if claim := s.adoptTrailersRefreshClaim(ctx, contentID); claim != nil {
 			return claim.run(ctx)
@@ -3062,7 +3073,35 @@ func (s *MetadataService) refreshTarget(ctx context.Context, targetType, content
 // RequestStaleMetadataRefresh nudges a stale target into the durable refresh
 // queue and starts a detached refresh when the target is due. Provider work is
 // never done inline on the caller's request path.
+//
+// Detail views call this for incomplete items. A target whose only debt is
+// episode-incomplete debt parked after its terminal attempts stays parked: a
+// view adds no evidence that another provider fetch would help. A view no
+// longer lifts it to the top priority band or refreshes it; its terminal
+// re-check, an operator refresh, a rescan, or a trailer request still does.
 func (s *MetadataService) RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error {
+	if s == nil || s.refreshDebtRepo == nil {
+		return nil
+	}
+	targetType = NormalizeRefreshTargetType(targetType)
+	contentID = strings.TrimSpace(contentID)
+	if targetType == "" || contentID == "" {
+		return nil
+	}
+	debt, err := s.refreshDebtRepo.GetTarget(ctx, targetType, contentID)
+	if err != nil && !errors.Is(err, ErrRefreshDebtNotFound) {
+		return err
+	}
+	if debt != nil && isParkedEpisodeDebt(debt.ReasonMask, debt.AttemptCount) {
+		return nil
+	}
+	return s.queueStaleMetadataRefresh(ctx, targetType, contentID)
+}
+
+// queueStaleMetadataRefresh is RequestStaleMetadataRefresh without the terminal
+// check, for callers whose own work needs the next refresh whatever the
+// target's episode debt is.
+func (s *MetadataService) queueStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error {
 	if s == nil || s.refreshDebtRepo == nil {
 		return nil
 	}
@@ -3659,7 +3698,8 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		return err
 	}
 	now := time.Now().UTC()
-	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount)
+	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount,
+		refreshAttemptCounted(ctx, RefreshTargetItem, contentID))
 	return s.refreshDebtRepo.MarkSuccess(
 		ctx,
 		contentID,
@@ -3711,7 +3751,8 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	if err != nil {
 		return err
 	}
-	logRefreshDebtTerminal(RefreshTargetSeason, seasonID, reasonMask, attemptCount)
+	logRefreshDebtTerminal(RefreshTargetSeason, seasonID, reasonMask, attemptCount,
+		refreshAttemptCounted(ctx, RefreshTargetSeason, seasonID))
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetSeason,
@@ -3745,7 +3786,8 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 	if err != nil {
 		return err
 	}
-	logRefreshDebtTerminal(RefreshTargetEpisode, episodeID, reasonMask, attemptCount)
+	logRefreshDebtTerminal(RefreshTargetEpisode, episodeID, reasonMask, attemptCount,
+		refreshAttemptCounted(ctx, RefreshTargetEpisode, episodeID))
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetEpisode,
@@ -3804,7 +3846,8 @@ func (s *MetadataService) syncRefreshDebtFailure(ctx context.Context, contentID 
 		attemptCount++
 	}
 	now := time.Now().UTC()
-	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount)
+	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount,
+		incrementAttempt || refreshAttemptCounted(ctx, RefreshTargetItem, contentID))
 	return s.refreshDebtRepo.MarkFailure(
 		ctx,
 		contentID,
@@ -3834,7 +3877,8 @@ func (s *MetadataService) syncRefreshDebtTargetFailure(ctx context.Context, targ
 		attemptCount++
 	}
 	now := time.Now().UTC()
-	logRefreshDebtTerminal(targetType, contentID, reasonMask, attemptCount)
+	logRefreshDebtTerminal(targetType, contentID, reasonMask, attemptCount,
+		incrementAttempt || refreshAttemptCounted(ctx, targetType, contentID))
 	return s.refreshDebtRepo.MarkTargetFailure(
 		ctx,
 		targetType,
@@ -5929,6 +5973,12 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		}
 	}
 
+	// Ambiguous dates are reported once per series on each pass: the same
+	// unlinked files come back every pass until their metadata or names change.
+	ambiguousFiles := 0
+	ambiguousAirDates := make(map[string]struct{})
+	var exampleAmbiguous *models.MediaFile
+	exampleAmbiguousAirDate := ""
 	for _, file := range files {
 		hint, ok := hints[file.ID]
 		if !ok {
@@ -5940,10 +5990,15 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		episodeNum := hint.episodeNum
 		if hint.airDate != "" {
 			candidates := episodesByAirDate[hint.airDate]
-			selected, ok := selectAirDateEpisodeCandidate(candidates, seriesItem)
+			selected, ok := selectAirDateEpisodeCandidate(candidates, seriesItem, hint)
 			if !ok {
 				if len(candidates) > 1 {
-					slog.WarnContext(ctx, "metadata: skipped ambiguous air-date episode link", "component", "metadata",
+					ambiguousFiles++
+					ambiguousAirDates[hint.airDate] = struct{}{}
+					if exampleAmbiguous == nil {
+						exampleAmbiguous, exampleAmbiguousAirDate = file, hint.airDate
+					}
+					slog.DebugContext(ctx, "metadata: skipped ambiguous air-date episode link", "component", "metadata",
 						"series_id", seriesID,
 						"file_id", file.ID,
 						"file_path", file.FilePath,
@@ -5990,26 +6045,88 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 				"error", err)
 		}
 	}
+	if ambiguousFiles > 0 {
+		slog.WarnContext(ctx, "metadata: skipped ambiguous air-date episode links", "component", "metadata",
+			"series_id", seriesID,
+			"files", ambiguousFiles,
+			"air_dates", len(ambiguousAirDates),
+			"example_file_id", exampleAmbiguous.ID,
+			"example_air_date", exampleAmbiguousAirDate)
+	}
 	return nil
 }
 
-func selectAirDateEpisodeCandidate(candidates []*models.Episode, seriesItem *models.MediaItem) (*models.Episode, bool) {
-	if len(candidates) == 0 {
+// selectAirDateEpisodeCandidate picks the episode a by-date file belongs to
+// among the series' episodes that aired that day. Each rule narrows the
+// candidates only when it keeps at least one, so a rule that matches none of
+// them never rules out the rest: the series' own provider numbering, the
+// episode title in the filename, the file's season folder, and finally
+// regular episodes over same-day specials.
+func selectAirDateEpisodeCandidate(candidates []*models.Episode, seriesItem *models.MediaItem, hint episodeLinkHint) (*models.Episode, bool) {
+	remaining := make([]*models.Episode, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate != nil {
+			remaining = append(remaining, candidate)
+		}
+	}
+	// narrow reports false when the rule matched none of several candidates.
+	narrow := func(keep func(*models.Episode) bool) bool {
+		if len(remaining) < 2 {
+			return true
+		}
+		kept := make([]*models.Episode, 0, len(remaining))
+		for _, candidate := range remaining {
+			if keep(candidate) {
+				kept = append(kept, candidate)
+			}
+		}
+		if len(kept) == 0 {
+			return false
+		}
+		remaining = kept
+		return true
+	}
+
+	for _, provider := range preferredEpisodeProviders(seriesItem) {
+		if len(remaining) < 2 {
+			break
+		}
+		if filtered := filterEpisodesByProviderID(remaining, provider); len(filtered) > 0 {
+			remaining = filtered
+			break
+		}
+	}
+	titleMatched := true
+	if airDateTitleIsEvidence(hint.title) {
+		title := normalizeTitleForScoring(hint.title)
+		titleMatched = narrow(func(candidate *models.Episode) bool { return normalizeTitleForScoring(candidate.Title) == title })
+	}
+	if hint.seasonKnown {
+		narrow(func(candidate *models.Episode) bool { return candidate.SeasonNumber == hint.seasonNum })
+	}
+	// A titled file that matches no candidate may be a special its provider
+	// titles differently, so only then is a regular episode not the default.
+	if titleMatched {
+		narrow(func(candidate *models.Episode) bool { return candidate.SeasonNumber > 0 })
+	}
+
+	if len(remaining) != 1 {
 		return nil, false
 	}
-	if len(candidates) == 1 {
-		return candidates[0], true
-	}
-	for _, provider := range preferredEpisodeProviders(seriesItem) {
-		filtered := filterEpisodesByProviderID(candidates, provider)
-		if len(filtered) == 1 {
-			return filtered[0], true
-		}
-		if len(filtered) > 1 {
-			return nil, false
-		}
-	}
-	return nil, false
+	return remaining[0], true
+}
+
+// unknownEpisodeTitle is the normalized placeholder renamers write for an
+// episode without a title.
+const unknownEpisodeTitle = "unknown"
+
+// airDateTitleIsEvidence reports whether a by-date filename's title can pick
+// between same-day episodes. Generic titles and the Unknown placeholder cannot.
+func airDateTitleIsEvidence(title string) bool {
+	// Check the normalized form, which is what the title match compares, so
+	// spellings such as "Episode-83" or "(TBA)" count as generic too.
+	normalized := normalizeTitleForScoring(title)
+	return !isGenericEpisodeMatchTitle(normalized) && normalized != unknownEpisodeTitle
 }
 
 func preferredEpisodeProviders(seriesItem *models.MediaItem) []string {
@@ -6058,7 +6175,9 @@ type episodeLinkHint struct {
 	seasonKnown bool
 	episodeNum  int
 	airDate     string
-	ok          bool
+	// title is the episode title a by-date filename carries after its date.
+	title string
+	ok    bool
 }
 
 func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, seriesID string, incomplete bool, lastCheckedAt *time.Time) {
@@ -6200,7 +6319,15 @@ func parseEpisodeLinkHint(file *models.MediaFile, libraryRoots ...string) episod
 		return episodeLinkHint{seasonNum: fnh.SeasonNum, seasonKnown: fnh.SeasonKnown, episodeNum: fnh.EpisodeNum, ok: true}
 	}
 	if fnh.AirDate != "" {
-		return episodeLinkHint{airDate: fnh.AirDate, ok: true}
+		// A by-date name has no episode number, but its season folder and
+		// title still tell same-day episodes apart.
+		return episodeLinkHint{
+			seasonNum:   fnh.SeasonNum,
+			seasonKnown: fnh.SeasonKnown,
+			airDate:     fnh.AirDate,
+			title:       extractAirDateMatchTitle(file.FilePath),
+			ok:          true,
+		}
 	}
 	return episodeLinkHint{}
 }

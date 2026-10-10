@@ -142,13 +142,18 @@ func TestUpdateSourceMarkerReset(t *testing.T) {
 			}
 
 			if tc.wantReset {
-				if updated.Marker != nil {
-					t.Fatalf("marker = %q, want cleared", *updated.Marker)
+				// The source polls at the next cycle instead of waiting out
+				// its interval from a run that read the old upstream.
+				if updated.Marker != nil || updated.LastRunAt != nil {
+					t.Fatalf("marker = %v, last run = %v, want both cleared", updated.Marker, updated.LastRunAt)
 				}
 				return
 			}
 			if updated.Marker == nil || *updated.Marker != before {
 				t.Fatalf("marker = %v, want %q kept", updated.Marker, before)
+			}
+			if updated.LastRunAt == nil || !updated.LastRunAt.Equal(*src.LastRunAt) {
+				t.Fatalf("last run = %v, want %v kept", updated.LastRunAt, src.LastRunAt)
 			}
 		})
 	}
@@ -415,11 +420,29 @@ func TestUpdateConnectionMarkerReset(t *testing.T) {
 		"rename keeps bound markers": {
 			edit: func(c *Connection) { c.Name = "marker-test-sonarr-renamed" },
 		},
+		"trailing slash keeps bound markers": {
+			edit: func(c *Connection) { c.BaseURL = "http://sonarr.invalid/" },
+		},
+		"host case keeps bound markers": {
+			edit: func(c *Connection) { c.BaseURL = "http://SONARR.invalid" },
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, repo, bound, other := newSourceMarkerDBTest(t)
 			alsoBound := createMarkedSource(ctx, t, repo, *bound.ConnectionID, "2026-10-04T17:00:00Z|7")
 			unrelated := createMarkedSource(ctx, t, repo, other.ID, "2026-10-04T18:00:00Z|9")
+			// A source whose first poll failed has a run time but no marker.
+			failedFirst, err := repo.CreateSource(ctx, Source{
+				PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: bound.ConnectionID,
+				Enabled: true, DeliveryMode: DeliveryModePoll,
+			})
+			if err != nil {
+				t.Fatalf("create source: %v", err)
+			}
+			t.Cleanup(func() { _ = repo.DeleteSource(ctx, failedFirst.ID) })
+			if err := repo.RecordError(ctx, failedFirst.ID, "connection refused"); err != nil {
+				t.Fatalf("record error: %v", err)
+			}
 
 			conn, err := repo.GetConnection(ctx, *bound.ConnectionID)
 			if err != nil {
@@ -435,12 +458,19 @@ func TestUpdateConnectionMarkerReset(t *testing.T) {
 				if err != nil {
 					t.Fatalf("get source: %v", err)
 				}
-				if tc.wantReset && got.Marker != nil {
-					t.Fatalf("bound source %s marker = %q, want cleared", id, *got.Marker)
+				if tc.wantReset && (got.Marker != nil || got.LastRunAt != nil) {
+					t.Fatalf("bound source %s marker = %v, last run = %v, want both cleared", id, got.Marker, got.LastRunAt)
 				}
-				if !tc.wantReset && got.Marker == nil {
-					t.Fatalf("bound source %s marker cleared, want kept", id)
+				if !tc.wantReset && (got.Marker == nil || got.LastRunAt == nil) {
+					t.Fatalf("bound source %s marker = %v, last run = %v, want both kept", id, got.Marker, got.LastRunAt)
 				}
+			}
+			retry, err := repo.GetSource(ctx, failedFirst.ID)
+			if err != nil {
+				t.Fatalf("get source: %v", err)
+			}
+			if (retry.LastRunAt == nil) != tc.wantReset {
+				t.Fatalf("source with a failed first poll: last run = %v, want cleared %v", retry.LastRunAt, tc.wantReset)
 			}
 			got, err := repo.GetSource(ctx, unrelated.ID)
 			if err != nil {

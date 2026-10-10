@@ -362,7 +362,8 @@ func TestSeriesDebtSweepDoesNotRepeatTerminalWarnings(t *testing.T) {
 
 	// The refreshed target itself still reports the claim that took it to the
 	// terminal count, once.
-	if err := h.service.syncRefreshDebtForEpisode(ctx, "episode-s05e03"); err != nil {
+	claimedCtx := withCountedRefreshAttempt(ctx, RefreshTargetEpisode, "episode-s05e03")
+	if err := h.service.syncRefreshDebtForEpisode(claimedCtx, "episode-s05e03"); err != nil {
 		t.Fatalf("syncRefreshDebtForEpisode: %v", err)
 	}
 	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
@@ -370,6 +371,56 @@ func TestSeriesDebtSweepDoesNotRepeatTerminalWarnings(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "content_id=episode-s05e03") {
 		t.Fatalf("terminal warning does not name the refreshed target\n%s", logs.String())
+	}
+}
+
+// TestTerminalDebtWarningFollowsOnlyACountedAttempt covers the two ways a
+// terminal episode target gets refreshed. The scheduled refresh whose claim
+// took it to the terminal count reports that once, after the batch flush has
+// already settled the row in its series sweep. An on-demand refresh of the
+// same target counts no attempt, so it reports nothing.
+func TestTerminalDebtWarningFollowsOnlyACountedAttempt(t *testing.T) {
+	h, _, _, _, _ := seedSeriesSyncCounters(t)
+	debts := newFakeRefreshDebtRepo()
+	h.service.refreshDebtRepo = debts
+	ctx := context.Background()
+	claimedAt := time.Now()
+	leaseExpiresAt := claimedAt.Add(RefreshDebtLeaseDuration)
+	debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, "episode-s05e03")] = &models.MetadataRefreshDebt{
+		TargetType:     RefreshTargetEpisode,
+		ContentID:      "episode-s05e03",
+		Priority:       refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		ReasonMask:     RefreshDebtReasonEpisodeIncomplete,
+		NextRefreshAt:  claimedAt,
+		ClaimedAt:      &claimedAt,
+		LeaseExpiresAt: &leaseExpiresAt,
+		LastAttemptAt:  &claimedAt,
+		AttemptCount:   refreshDebtEpisodeTerminalAttempts,
+	}
+	logs := captureDefaultLogs(t)
+
+	batchCtx, flush := h.service.BeginScheduledRefreshBatch(ctx)
+	if err := h.service.RefreshScheduledTarget(batchCtx, RefreshTargetEpisode, "episode-s05e03"); err != nil {
+		t.Fatalf("RefreshScheduledTarget: %v", err)
+	}
+	flush(ctx)
+	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
+		t.Fatalf("terminal warnings after the claimed refresh = %d, want 1\n%s", got, logs.String())
+	}
+
+	// runOnDemandMetadataRefresh refreshes the target this way, with no claim.
+	if err := h.service.refreshTarget(ctx, RefreshTargetEpisode, "episode-s05e03", 0, ModeScheduledRefresh, false); err != nil {
+		t.Fatalf("on-demand refreshTarget: %v", err)
+	}
+	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
+		t.Fatalf("terminal warnings after an on-demand refresh = %d, want still 1\n%s", got, logs.String())
+	}
+	debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-s05e03")
+	if err != nil {
+		t.Fatalf("GetTarget: %v", err)
+	}
+	if debt.Priority != refreshDebtTerminalPriority {
+		t.Fatalf("priority = %d, want terminal priority %d", debt.Priority, refreshDebtTerminalPriority)
 	}
 }
 

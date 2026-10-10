@@ -24485,6 +24485,13 @@ export interface components {
       kind: "intro" | "credits" | "recap" | "preview";
       /** Format: double */
       start_seconds: number;
+      /**
+       * Format: double
+       * @description Captured source timestamp; marker previews sample the marker start
+       */
+      thumbnail_capture_seconds?: number;
+      thumbnail_thumbhash?: string;
+      thumbnail_url?: string;
     };
     MarkerSegment: {
       algorithm?: string;

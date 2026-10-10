@@ -520,6 +520,7 @@ type FileVersion struct {
 	Recap                    *Marker                `json:"recap,omitempty"`
 	Preview                  *Marker                `json:"preview,omitempty"`
 	MarkerSegments           []models.MarkerSegment `json:"-"`
+	MarkerPreviews           []VersionMarkerPreview `json:"-"`
 	// Trickplay is the layout of the file's servable seek-bar previews, nil
 	// when it has none. The v2 watch and Jellyfin views carry it; the frozen
 	// v1 view does not.
@@ -538,6 +539,16 @@ func (v *FileVersion) SetMarkers(file *models.MediaFile) {
 	v.Recap = markerFromRange(file.RecapStart, file.RecapEnd)
 	v.Preview = markerFromRange(file.PreviewStart, file.PreviewEnd)
 	v.MarkerSegments = models.EffectiveMarkerSegments(file)
+	previews := make([]VersionMarkerPreview, 0, len(v.MarkerPreviews))
+	for _, image := range v.MarkerPreviews {
+		for _, segment := range v.MarkerSegments {
+			if image.MarkerSegment == segment {
+				previews = append(previews, image)
+				break
+			}
+		}
+	}
+	v.MarkerPreviews = previews
 }
 
 func (v FileVersion) EffectiveMarkerSegments() []models.MarkerSegment {
@@ -3903,7 +3914,10 @@ func (s *DetailService) buildPlaybackInfoWith(
 			Recap:                    versionRecap,
 			Preview:                  versionPreview,
 			MarkerSegments:           models.EffectiveMarkerSegments(f),
-			Unreadable:               f.ProbeRejected(),
+			MarkerPreviews: BuildMarkerPreviews(ctx, f, func(ctx context.Context, paths []string) map[string]ResolvedImageURL {
+				return s.PresignURLsWithExpiry(ctx, paths, "card")
+			}),
+			Unreadable: f.ProbeRejected(),
 		})
 
 		for _, sub := range f.SubtitleTracks {

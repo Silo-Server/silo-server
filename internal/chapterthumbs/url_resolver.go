@@ -88,7 +88,7 @@ func (r chapterURLResolver) protectImages(ctx context.Context, keys []string, id
 		SELECT mf.id, ARRAY(
 			SELECT chapter->>'thumbnail_path'
 			FROM jsonb_array_elements(
-				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+				(CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END) || mf.marker_thumbnails
 			) AS chapter
 			WHERE chapter->>'thumbnail_path' = ANY($2::text[])
 		)

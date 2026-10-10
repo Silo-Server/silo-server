@@ -1036,6 +1036,9 @@ export interface TimeRange {
 export type MarkerKind = "intro" | "credits" | "recap" | "preview";
 
 export interface MarkerOccurrence {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;

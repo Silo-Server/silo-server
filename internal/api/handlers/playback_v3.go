@@ -1608,6 +1608,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// subrip_sidecar_v1 is attempt-sticky, so dropping it here keeps it out
 		// of every later replan of this attempt too.
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureSubripSidecarV3)
+		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
 	}
 	timings.mark("decode_validate")
 	profileID := apimw.GetProfileID(r.Context())

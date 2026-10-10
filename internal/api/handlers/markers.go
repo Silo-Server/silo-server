@@ -17,6 +17,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -67,6 +68,8 @@ type MarkersHandler struct {
 	AuditHistory     MarkerAuditLister
 	Notifier         PlaybackMarkerUpdateNotifier
 	MarkerPopulation MarkerPopulationService
+	MarkerImageURLs  artworkurl.Resolver
+	ThumbnailQueuer  catalog.ChapterThumbnailQueuer
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -111,12 +114,13 @@ type segmentMarker struct {
 }
 
 type fileMarkersResponse struct {
-	FileID         int                    `json:"file_id"`
-	Intro          segmentMarker          `json:"intro"`
-	Credits        segmentMarker          `json:"credits"`
-	Recap          segmentMarker          `json:"recap"`
-	Preview        segmentMarker          `json:"preview"`
-	MarkerSegments []models.MarkerSegment `json:"-"`
+	FileID         int                            `json:"file_id"`
+	Intro          segmentMarker                  `json:"intro"`
+	Credits        segmentMarker                  `json:"credits"`
+	Recap          segmentMarker                  `json:"recap"`
+	Preview        segmentMarker                  `json:"preview"`
+	MarkerSegments []models.MarkerSegment         `json:"-"`
+	MarkerPreviews []catalog.VersionMarkerPreview `json:"-"`
 }
 
 type contributionOutcomeResponse struct {

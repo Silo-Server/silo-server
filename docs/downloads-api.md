@@ -691,6 +691,8 @@ Browser/web convenience path. It is synchronous and original-only. Mobile client
 should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
+The Jellyfin-compatible `/Items/{id}/Download` route serves through the same
+path and rules; see [jellycompat-api.md](jellycompat-api.md).
 
 A browser navigation cannot send headers, so it opens a short-lived link
 instead. Mint one with an ordinary profile-scoped request:
@@ -713,9 +715,11 @@ X-Profile-Token: {pin proof, for a locked profile}
 
 `createDirectDownloadLink` requires `X-Profile-Id`, and the PIN proof for a
 locked profile. It authorizes the file the way the download itself does: the
-download policy, then catalog and file access under the profile's limits. A
+download policy, then catalog and file access under the profile's limits, then
+the download policy's quality ceiling against the original's resolution. A
 file the profile cannot see, or that does not exist, is `404`; a refused
-download policy is `403 permission_denied`. API keys get `403`, since a link is
+download policy, including an original above the download quality ceiling, is
+`403 permission_denied`. API keys get `403`, since a link is
 bound to a login session; they call direct download with their key instead.
 Nothing is served or recorded. The URLs are server-relative; use `proxy_url`
 only when `proxy_delivery` is true.
@@ -1980,7 +1984,7 @@ prevents duplicate ephemeral transfers. The download capability exposes
 
 GET and HEAD `/api/v2/direct-download?file_id={id}` preserve synchronous original-file delivery. GET and HEAD `/api/v2/direct-download-proxy?file_id={id}` preserve the proxy-aware variant. `file_id` is a canonical positive decimal string; `format` may be absent, empty or `original`. Duplicate and unknown query parameters return 422. These routes use the existing download capability/policy service; they do not create a managed download, artifact or playback session.
 
-Every request applies authentication, viewer/demo gates, the household profile rule, account download policy and catalog/file access. Header callers may supply the existing profile and PIN headers. Browser navigation uses a link from `POST /api/v2/direct-download/links` (section 4.10): its `dl` token carries the profile that minted it, so the request runs under that profile's limits. The account `token` query fallback remains, but carries no profile, so the household rule refuses it on accounts with a locked or restricted profile. URLs remain secrets with the limitations described in section 4.10.
+Every request applies authentication, viewer/demo gates, the household profile rule, account download policy, catalog/file access and the download quality ceiling for the original's resolution (403 when the original is above it). Header callers may supply the existing profile and PIN headers. Browser navigation uses a link from `POST /api/v2/direct-download/links` (section 4.10): its `dl` token carries the profile that minted it, so the request runs under that profile's limits. The account `token` query fallback remains, but carries no profile, so the household rule refuses it on accounts with a locked or restricted profile. URLs remain secrets with the limitations described in section 4.10.
 
 The service opens the authorized source file and closes it after streaming. Success preserves Content-Disposition, original MIME type, Content-Length, Last-Modified, HEAD, ranges/206 and conditional/304 semantics. Missing files return 404. Malformed input returns 422; invalid range 416 retains Content-Range. Failures before output become redacted v2 problems. A failure after output has begun aborts the stream instead of appending JSON; neither partial bytes nor a lost response prove completion. No replay or durable local-file receipt is provided.
 

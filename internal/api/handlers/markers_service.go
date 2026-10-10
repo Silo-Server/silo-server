@@ -30,7 +30,7 @@ func (h *MarkersHandler) GetMarkers(ctx context.Context, access catalog.AccessFi
 	if err != nil {
 		return FileMarkersView{}, err
 	}
-	return fileMarkers(populateFileMarkers(ctx, h.MarkerPopulation, file)), nil
+	return h.fileMarkersView(ctx, populateFileMarkers(ctx, h.MarkerPopulation, file)), nil
 }
 
 func (h *MarkersHandler) SetMarkers(ctx context.Context, access catalog.AccessFilter, target MarkerTarget, changes MarkerChanges) (FileMarkersView, error) {
@@ -140,7 +140,19 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
 	h.maybeContribute(refreshed, sets)
-	return fileMarkers(refreshed), nil
+	return h.fileMarkersView(ctx, refreshed), nil
+}
+
+// v2-only projection; the legacy writer retains its frozen response shape.
+func (h *MarkersHandler) fileMarkersView(ctx context.Context, file *models.MediaFile) FileMarkersView {
+	view := fileMarkers(file)
+	if h.ThumbnailQueuer != nil {
+		h.ThumbnailQueuer.QueueFileIDs(ctx, []int{file.ID})
+	}
+	if h.MarkerImageURLs != nil {
+		view.MarkerPreviews = catalog.BuildMarkerPreviews(ctx, file, h.MarkerImageURLs.ResolveURLs)
+	}
+	return view
 }
 
 func (h *MarkersHandler) ensureMarkerEditable(ctx context.Context, file *models.MediaFile) error {

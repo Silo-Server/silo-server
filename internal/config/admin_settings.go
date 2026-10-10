@@ -137,6 +137,13 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
 
+// MetadataPersonRefreshPerMinuteSettingKey caps how many background person
+// metadata lookups each API node makes per minute. Every lookup asks each
+// person-capable provider once, so it bounds each provider, and it leaves room
+// on provider limits a scan shares. On-demand lookups (a person page) aren't
+// counted.
+const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
+
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
 // sheets. Changing it makes both again.
@@ -301,6 +308,9 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
+
+	// Background person metadata lookups per API node per minute.
+	MetadataPersonRefreshPerMinuteSettingKey: "120",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
@@ -628,6 +638,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100000)
 	case MetadataImageWorkersSettingKey:
 		return normalizeAdminInt(key, value, 0, 256)
+	case MetadataPersonRefreshPerMinuteSettingKey:
+		return normalizeAdminInt(key, value, 1, 6000)
 	case MarkersDetectionWorkersSettingKey:
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":

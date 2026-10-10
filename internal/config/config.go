@@ -387,6 +387,9 @@ type MetadataConfig struct {
 	// ImageWorkers is how many artwork encodes run at once. Zero means one
 	// per CPU core.
 	ImageWorkers int `yaml:"-"`
+	// PersonRefreshPerMinute caps background person metadata lookups per API
+	// node (metadata.person_refresh_per_minute).
+	PersonRefreshPerMinute int `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.

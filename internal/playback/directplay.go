@@ -113,7 +113,7 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	}
 
 	w.Header().Del("ETag")
-	etag := directPlayEntityTag(f, stat)
+	etag := DirectPlayEntityTag(f, stat)
 	if etag != "" {
 		w.Header().Set("ETag", etag)
 	}

@@ -51,6 +51,7 @@ const SCANNER_KEYS = [
   "matcher.workers",
   "matcher.batch_size",
   "metadata.image_workers",
+  "metadata.person_refresh_per_minute",
 ];
 
 const SCANNING_GROUP_KEYS = [REALTIME_MONITORING_KEY, ...SCANNER_KEYS];
@@ -334,6 +335,14 @@ export default function LibraryMetadataSettings() {
               value={form.getValue("metadata.image_workers")}
               onChange={(value) => form.setValue("metadata.image_workers", value)}
               restartRequired={restartKeys.has("metadata.image_workers")}
+            />
+            <SettingField
+              label="Person lookups per minute"
+              type="number"
+              description="How many cast and crew members each server looks up per minute in the background. Opening a person's page isn't limited."
+              value={form.getValue("metadata.person_refresh_per_minute")}
+              onChange={(value) => form.setValue("metadata.person_refresh_per_minute", value)}
+              restartRequired={restartKeys.has("metadata.person_refresh_per_minute")}
             />
             <SettingField
               label="Matcher workers"

@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -21,11 +23,46 @@ var (
 	ErrPersonMetadataNotFound = errors.New("no person metadata found from any provider")
 )
 
+// PersonLookupRateLimitedError reports a lookup that no provider answered
+// because at least one was rate limiting. RetryAfter is the longest wait a
+// provider asked for, or zero. It unwraps to ErrPersonMetadataNotFound.
+type PersonLookupRateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *PersonLookupRateLimitedError) Error() string {
+	return "person lookup rate limited by a provider"
+}
+
+func (e *PersonLookupRateLimitedError) Unwrap() error { return ErrPersonMetadataNotFound }
+
+// RateLimitRetryAfter lets callers outside this package back off without
+// importing it.
+func (e *PersonLookupRateLimitedError) RateLimitRetryAfter() time.Duration { return e.RetryAfter }
+
+// PersonAnsweredRateLimitedError comes back with a person whose lookup was
+// answered and stored while another provider rate limited it. The sweep
+// pauses on it, as it would ask that provider again for every person in its
+// backlog; RefreshPerson's callers, which only want the person, never see it.
+type PersonAnsweredRateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *PersonAnsweredRateLimitedError) Error() string {
+	return "person lookup answered while a provider rate limited it"
+}
+
+// RateLimitRetryAfter lets callers outside this package back off without
+// importing it.
+func (e *PersonAnsweredRateLimitedError) RateLimitRetryAfter() time.Duration { return e.RetryAfter }
+
 type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
-	Update(ctx context.Context, person models.Person) error
+	UpdateRefreshed(ctx context.Context, person models.Person, lookedUp catalog.PersonIdentity) (catalog.PersonIdentity, error)
 	MarkRefreshAttempt(ctx context.Context, id int64) error
-	FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
+	StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error)
+	RecordRefreshOutcome(ctx context.Context, id int64, identity catalog.PersonIdentity, outcome catalog.PersonRefreshOutcome) error
+	ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
 type PersonRefreshService struct {
@@ -72,28 +109,83 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 	if s.pluginResolver == nil || s.pool == nil {
 		return nil, fmt.Errorf("person refresh providers are not configured")
 	}
+	return withoutAnsweredRateLimit(s.refreshPerson(ctx, id, s.resolveProviders, time.Time{}))
+}
 
-	// Person refresh is a background path; the nil checker falls back to a
-	// direct pool query rather than the hot-path installation cache.
+// withoutAnsweredRateLimit drops the rate-limit signal from an answered
+// lookup, for callers that only want the person.
+func withoutAnsweredRateLimit(person *models.Person, err error) (*models.Person, error) {
+	var answered *PersonAnsweredRateLimitedError
+	if errors.As(err, &answered) {
+		return person, nil
+	}
+	return person, err
+}
+
+// resolveProviders returns the enabled providers. Person refresh is a
+// background path; the nil checker falls back to a direct pool query rather
+// than the hot-path installation cache.
+func (s *PersonRefreshService) resolveProviders(ctx context.Context) ([]Provider, error) {
 	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
 	if err != nil {
 		return nil, fmt.Errorf("resolve person providers: %w", err)
 	}
-
-	return s.refreshPersonWithProviders(ctx, id, providers)
+	return providers, nil
 }
 
-func (s *PersonRefreshService) FindCandidates(ctx context.Context, limit int) ([]int64, error) {
+// RefreshPersonUnlessStartedSince refreshes a person unless a lookup for them
+// started after since: the sweep's claim, or a person page's request. Another
+// API node may have looked them up meanwhile, and asking the providers twice
+// would also count the outcome twice. Starting the lookup is atomic (see
+// catalog.PersonRepository.StartRefreshAttemptUnlessStartedSince), so only
+// one node proceeds; a skipped call returns the stored person. since comes
+// from the API node's clock; a small skew against the database only risks the
+// duplicate lookup this avoids.
+func (s *PersonRefreshService) RefreshPersonUnlessStartedSince(ctx context.Context, id int64, since time.Time) (*models.Person, error) {
 	if s.repo == nil {
 		return nil, fmt.Errorf("person refresh repository is not configured")
 	}
-	return s.repo.FindRefreshCandidates(ctx, limit)
+	if s.pluginResolver == nil || s.pool == nil {
+		return nil, fmt.Errorf("person refresh providers are not configured")
+	}
+	return s.refreshPerson(ctx, id, s.resolveProviders, since)
+}
+
+// ClaimCandidates claims people due for a background lookup; see
+// catalog.PersonRepository.ClaimRefreshCandidates.
+func (s *PersonRefreshService) ClaimCandidates(ctx context.Context, limit int) ([]int64, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("person refresh repository is not configured")
+	}
+	return s.repo.ClaimRefreshCandidates(ctx, limit)
 }
 
 func (s *PersonRefreshService) refreshPersonWithProviders(
 	ctx context.Context,
 	id int64,
 	providers []Provider,
+) (*models.Person, error) {
+	return s.refreshPersonSince(ctx, id, providers, time.Time{})
+}
+
+func (s *PersonRefreshService) refreshPersonSince(
+	ctx context.Context,
+	id int64,
+	providers []Provider,
+	since time.Time,
+) (*models.Person, error) {
+	return s.refreshPerson(ctx, id, func(context.Context) ([]Provider, error) { return providers, nil }, since)
+}
+
+// refreshPerson looks the person up, unless since is set and another lookup
+// started after it. resolve supplies the providers once the attempt is
+// recorded, so a failure to resolve them is a failed lookup that backs off
+// like any other.
+func (s *PersonRefreshService) refreshPerson(
+	ctx context.Context,
+	id int64,
+	resolve func(context.Context) ([]Provider, error),
+	since time.Time,
 ) (*models.Person, error) {
 	person, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -106,13 +198,29 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 		return nil, ErrPersonNotFound
 	}
 	// Record the attempt before any provider I/O so the backoff survives a
-	// crash mid-refresh. The write is bookkeeping, not a precondition: if it
-	// fails, the refresh still runs and only the backoff is lost.
-	if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
+	// crash mid-refresh. Unconditionally, the write is bookkeeping, not a
+	// precondition: if it fails, the refresh still runs and only the backoff
+	// is lost. With since set it decides which node looks the person up, so a
+	// failure skips the lookup; a claim comes back when its lease runs out.
+	if !since.IsZero() {
+		started, err := s.repo.StartRefreshAttemptUnlessStartedSince(ctx, id, since)
+		if err != nil {
+			return nil, err
+		}
+		if !started {
+			// Another lookup started after since and records its own outcome.
+			return person, nil
+		}
+	} else if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
 		slog.WarnContext(ctx, "person refresh: failed to record refresh attempt", "component", "metadata",
 			"person_id", id,
 			"error", err,
 		)
+	}
+	providers, err := resolve(ctx)
+	if err != nil {
+		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
+		return nil, err
 	}
 
 	accumulator := PersonDetailResult{
@@ -120,6 +228,12 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 	photoProviderID := ""
 	hasMetadata := false
+	// consulted and failed decide the outcome of a lookup that found nothing:
+	// a 404 or an empty answer is the provider not knowing the person, while an
+	// error, a timeout, or no provider that supports person lookup says nothing
+	// about them.
+	consulted, failed := 0, false
+	rateLimited, retryAfter := false, time.Duration(0)
 
 	for _, provider := range providers {
 		personProvider, ok := provider.(PersonProvider)
@@ -131,7 +245,18 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			ProviderIDs: accumulator.ProviderIDs,
 			Language:    "en",
 		})
+		if errors.Is(err, ErrPersonDetailUnsupported) {
+			continue
+		}
+		consulted++
 		if err != nil {
+			if !providerDoesNotKnow(err) {
+				failed = true
+			}
+			if class, wait := ClassifyProviderError(err); class == ProviderErrorRateLimited {
+				rateLimited = true
+				retryAfter = max(retryAfter, wait)
+			}
 			slog.WarnContext(ctx, "person refresh: provider detail lookup failed", "component", "metadata",
 				"provider", provider.Slug(),
 				"person_id", id,
@@ -151,6 +276,14 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 
 	if !hasMetadata {
+		outcome := catalog.PersonRefreshNotFound
+		if failed || consulted == 0 {
+			outcome = catalog.PersonRefreshFailed
+		}
+		s.recordRefreshOutcome(ctx, *person, outcome)
+		if rateLimited {
+			return nil, &PersonLookupRateLimitedError{RetryAfter: retryAfter}
+		}
 		return nil, ErrPersonMetadataNotFound
 	}
 
@@ -169,22 +302,82 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	MergePersonDetail(&accumulator, &existingDetail, MergeReplaceUnlocked)
 	accumulator = existingDetail
 
+	// A provider answer that can't be stored records a failure, so a
+	// deterministic error (an unparseable date) backs off like any other
+	// failure instead of coming back every time the attempt's lease runs out.
 	refreshed, err := mergePersonIntoRecord(*person, accumulator)
 	if err != nil {
+		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
 		return nil, err
 	}
 
-	if err := s.repo.Update(ctx, refreshed); err != nil {
+	stored, err := s.repo.UpdateRefreshed(ctx, refreshed, catalog.PersonIdentityOf(*person))
+	if errors.Is(err, catalog.ErrPersonIdentityChanged) {
+		// An admin corrected the person's ids during the lookup. The answer is
+		// about the old ones, so neither it nor an outcome is stored; the
+		// correction already made the person due under the new ids.
+		slog.InfoContext(ctx, "person refresh: person's ids changed during the lookup; answer not stored", "component", "metadata",
+			"person_id", id,
+		)
+		current, getErr := s.repo.Get(ctx, id)
+		if errors.Is(getErr, pgx.ErrNoRows) || (getErr == nil && current == nil) {
+			return nil, ErrPersonNotFound
+		}
+		if getErr != nil {
+			return nil, fmt.Errorf("load person %d: %w", id, getErr)
+		}
+		if rateLimited {
+			// The sweep still needs to hear about the limit.
+			return current, &PersonAnsweredRateLimitedError{RetryAfter: retryAfter}
+		}
+		return current, nil
+	}
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The row was merged into another person concurrently; there is no
 			// longer anything to refresh under this id.
 			return nil, ErrPersonNotFound
 		}
+		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
+	// The answer is about the ids just stored: a provider can extend them,
+	// and resolving an id conflict can restore one or fold in a merged
+	// person's.
+	refreshed.TmdbID, refreshed.ImdbID, refreshed.TvdbID = stored.TmdbID, stored.ImdbID, stored.TvdbID
+	s.recordRefreshOutcome(ctx, refreshed, catalog.PersonRefreshAnswered)
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)
 
+	if rateLimited {
+		return &refreshed, &PersonAnsweredRateLimitedError{RetryAfter: retryAfter}
+	}
 	return &refreshed, nil
+}
+
+// recordRefreshOutcome stores a finished lookup's outcome, which decides when
+// the sweep looks the person up again. Like the attempt mark it is
+// bookkeeping: a failed write is logged, and the attempt's short lease then
+// brings the person back. It runs even when the refresh ran out of time.
+func (s *PersonRefreshService) recordRefreshOutcome(ctx context.Context, person models.Person, outcome catalog.PersonRefreshOutcome) {
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	err := s.repo.RecordRefreshOutcome(recordCtx, person.ID, catalog.PersonIdentityOf(person), outcome)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The person's ids changed during the lookup, or the person is gone;
+		// the outcome is about an identity they no longer have.
+		slog.InfoContext(ctx, "person refresh: person changed during the lookup; outcome not recorded", "component", "metadata",
+			"person_id", person.ID,
+			"outcome", outcome,
+		)
+		return
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "person refresh: failed to record refresh outcome", "component", "metadata",
+			"person_id", person.ID,
+			"outcome", outcome,
+			"error", err,
+		)
+	}
 }
 
 func (s *PersonRefreshService) enqueuePersonPhoto(ctx context.Context, person models.Person, providerIDs map[string]string, photoProviderID string) {
@@ -375,4 +568,11 @@ func personCacheContentID(
 		}
 	}
 	return strconv.FormatInt(person.ID, 10)
+}
+
+// providerDoesNotKnow reports a lookup error that says the provider doesn't
+// know the person: a built-in provider's HTTP 404, or a plugin's NotFound
+// status, which PluginProvider passes through as is.
+func providerDoesNotKnow(err error) bool {
+	return isProvider404(err) || status.Code(err) == codes.NotFound
 }
