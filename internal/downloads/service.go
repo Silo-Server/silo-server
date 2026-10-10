@@ -1177,7 +1177,7 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 // ResolveDirectFile authorizes a browser-style original download without
 // writing response bytes. It is used by the API before minting a proxy token.
 func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, format string, filter catalog.AccessFilter) (*FileTarget, error) {
-	cfg, _, err := s.downloadConfigForUser(ctx, userID, "")
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1196,6 +1196,16 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 	}
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
+	}
+	// The original goes out unchanged, so the policy's download quality
+	// ceiling, which a custom override can narrow, must admit its resolution,
+	// as for a managed original. This route offers no other quality, so an
+	// over-ceiling original is a policy refusal.
+	if err := s.policy.ensureServedQualityAllowed(ctx, user, cfg, s.artifacts != nil, file, ""); err != nil {
+		if errors.Is(err, ErrQualityUnavailable) {
+			return nil, fmt.Errorf("original is above the download quality ceiling: %w", ErrDownloadNotAllowed)
+		}
+		return nil, err
 	}
 	return &FileTarget{Path: file.FilePath, MediaFileID: file.ID, ProxyEligible: proxyDeliveryAllowed(cfg)}, nil
 }
