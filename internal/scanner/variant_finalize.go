@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -10,6 +11,12 @@ import (
 
 // FinalizeVariantsByPathPrefix recomputes edition/presentation metadata after
 // canonical root ownership and item linkage are stable for the scanned scope.
+//
+// Every present file in the scope is re-parsed, so parser and folder changes
+// reach the whole scope. A file's part total is the only value that depends on
+// other files of the same owner, so files outside the scope are loaded only as
+// variantSiblingOwners chooses. Other out-of-scope files are finalized when
+// their own scope runs.
 func (s *Scanner) FinalizeVariantsByPathPrefix(
 	ctx context.Context,
 	folder *models.MediaFolder,
@@ -19,7 +26,7 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		return nil
 	}
 
-	scopedFiles, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, pathPrefix)
+	scopedFiles, err := s.fileRepo.ListVariantFilesByPathPrefix(ctx, folder.ID, pathPrefix)
 	if err != nil {
 		return fmt.Errorf("loading files for variant finalization: %w", err)
 	}
@@ -27,38 +34,138 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		return nil
 	}
 
-	files, err := s.variantFinalizationFilesForScope(ctx, folder.ID, scopedFiles)
+	candidates, err := s.variantFinalizationCandidates(ctx, folder, scopedFiles)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+	updates := variantMetadataUpdates(candidates)
+	if len(updates) == 0 {
 		return nil
 	}
+	if _, err := s.fileRepo.UpdateVariantMetadata(ctx, folder.ID, updates); err != nil {
+		return fmt.Errorf("finalizing variant metadata for %d files under %s: %w", len(updates), pathPrefix, err)
+	}
+	return nil
+}
 
-	partTotals := variantPartTotals(files, folder)
-	for _, file := range files {
-		if file == nil || file.MissingSince != nil {
-			continue
-		}
-		ownerKey := stableOwnerKey(file)
-		if ownerKey == "" {
-			continue
-		}
+// variantCandidate is one file variant finalization considers, with its owner
+// and the hints parsed from its path once.
+type variantCandidate struct {
+	file     VariantFile
+	ownerKey string
+	hints    *naming.VariantHints
+}
 
-		hints := variantHintsForFile(file, folder)
+func newVariantCandidates(files []VariantFile, folder *models.MediaFolder) []variantCandidate {
+	candidates := make([]variantCandidate, 0, len(files))
+	for i := range files {
+		hints := variantHintsForFile(&files[i], folder)
 		if hints == nil {
 			hints = &naming.VariantHints{}
 		}
+		candidates = append(candidates, variantCandidate{
+			file:     files[i],
+			ownerKey: stableOwnerKey(files[i].EpisodeID, files[i].ContentID),
+			hints:    hints,
+		})
+	}
+	return candidates
+}
+
+func (s *Scanner) variantFinalizationCandidates(
+	ctx context.Context,
+	folder *models.MediaFolder,
+	scopedFiles []VariantFile,
+) ([]variantCandidate, error) {
+	candidates := newVariantCandidates(scopedFiles, folder)
+	episodes, contents := variantSiblingOwners(candidates)
+	if len(episodes.IDs) == 0 && len(contents.IDs) == 0 {
+		return candidates, nil
+	}
+
+	related, err := s.fileRepo.ListVariantFilesByOwners(ctx, folder.ID, episodes, contents)
+	if err != nil {
+		return nil, fmt.Errorf("loading related files for variant finalization: %w", err)
+	}
+	loaded := make(map[int]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		loaded[candidate.file.ID] = struct{}{}
+	}
+	var outside []VariantFile
+	for _, file := range related {
+		if _, ok := loaded[file.ID]; !ok {
+			outside = append(outside, file)
+		}
+	}
+	return append(candidates, newVariantCandidates(outside, folder)...), nil
+}
+
+// variantSiblingOwners returns the owners of the in-scope files, episode
+// owners apart from content owners without an episode link. Every file of an
+// owner is read when one of its in-scope files is in a multipart group, under
+// its new hints, its stored values or a stored part total. For the other owners
+// only their files stored as parts are read: when a part leaves its group, for
+// example by a rename, the parts left behind need a new total even though
+// nothing in the scope is a part any more.
+func variantSiblingOwners(candidates []variantCandidate) (episodes, contents VariantOwners) {
+	episodeIDs := make(map[string]struct{})
+	contentIDs := make(map[string]struct{})
+	episodes.Whole = make(map[string]struct{})
+	contents.Whole = make(map[string]struct{})
+	for _, candidate := range candidates {
+		if candidate.ownerKey == "" {
+			continue
+		}
+		ids, whole, id := episodeIDs, episodes.Whole, candidate.file.EpisodeID
+		if id == "" {
+			ids, whole, id = contentIDs, contents.Whole, candidate.file.ContentID
+		}
+		ids[id] = struct{}{}
+		if variantCandidateInPartGroup(candidate) {
+			whole[id] = struct{}{}
+		}
+	}
+	episodes.IDs = sortedVariantOwnerIDs(episodeIDs)
+	contents.IDs = sortedVariantOwnerIDs(contentIDs)
+	return episodes, contents
+}
+
+func variantCandidateInPartGroup(candidate variantCandidate) bool {
+	if _, ok := variantPartGroupKey(candidate.ownerKey, candidate.hints); ok {
+		return true
+	}
+	stored := &naming.VariantHints{
+		EditionKey:            candidate.file.EditionKey,
+		PresentationKind:      candidate.file.PresentationKind,
+		PresentationGroupKey:  candidate.file.PresentationGroupKey,
+		PresentationPartIndex: candidate.file.PresentationPartIndex,
+	}
+	if _, ok := variantPartGroupKey(candidate.ownerKey, stored); ok {
+		return true
+	}
+	return candidate.file.PresentationPartTotal > 0
+}
+
+// variantMetadataUpdates returns, in id order, the files whose stored variant
+// metadata differs from their parsed hints and part totals, carrying the new
+// values. Files without an owner are left as they are.
+func variantMetadataUpdates(candidates []variantCandidate) []VariantFile {
+	partTotals := variantPartTotals(candidates)
+	var updates []VariantFile
+	for _, candidate := range candidates {
+		if candidate.ownerKey == "" {
+			continue
+		}
+		hints := candidate.hints
 		partTotal := 0
-		if groupKey, ok := variantPartGroupKey(ownerKey, hints); ok {
+		if groupKey, ok := variantPartGroupKey(candidate.ownerKey, hints); ok {
 			partTotal = partTotals[groupKey]
 		}
-
-		if !variantMetadataChanged(file, hints, partTotal) {
+		if !variantMetadataChanged(&candidate.file, hints, partTotal) {
 			continue
 		}
 
-		updated := *file
+		updated := candidate.file
 		updated.EditionRaw = hints.EditionRaw
 		updated.EditionKey = hints.EditionKey
 		updated.EditionConfidence = hints.EditionConfidence
@@ -69,40 +176,27 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		updated.PresentationPartTotal = partTotal
 		updated.MultiEpisodeStart = hints.MultiEpisodeStart
 		updated.MultiEpisodeEnd = hints.MultiEpisodeEnd
-		if _, err := s.fileRepo.Upsert(ctx, updated); err != nil {
-			return fmt.Errorf("finalizing variant metadata for %s: %w", file.FilePath, err)
-		}
+		updates = append(updates, updated)
 	}
-
-	return nil
+	sort.Slice(updates, func(i, j int) bool { return updates[i].ID < updates[j].ID })
+	return updates
 }
 
 // variantPartTotals returns the part count for each group of files that are
 // parts of one split movie or episode. A group needs at least two distinct part
 // numbers: a lone "Part 2" file is a whole episode or movie with the part in
 // its title, such as "Resurrection Ship, Part 2" or "Mockingjay - Part 2".
-func variantPartTotals(files []*models.MediaFile, folder *models.MediaFolder) map[string]int {
+func variantPartTotals(candidates []variantCandidate) map[string]int {
 	partsByGroup := make(map[string]map[int]struct{})
-	for _, file := range files {
-		if file == nil || file.MissingSince != nil {
-			continue
-		}
-		ownerKey := stableOwnerKey(file)
-		if ownerKey == "" {
-			continue
-		}
-		hints := variantHintsForFile(file, folder)
-		if hints == nil {
-			continue
-		}
-		groupKey, ok := variantPartGroupKey(ownerKey, hints)
+	for _, candidate := range candidates {
+		groupKey, ok := variantPartGroupKey(candidate.ownerKey, candidate.hints)
 		if !ok {
 			continue
 		}
 		if partsByGroup[groupKey] == nil {
 			partsByGroup[groupKey] = make(map[int]struct{})
 		}
-		partsByGroup[groupKey][hints.PresentationPartIndex] = struct{}{}
+		partsByGroup[groupKey][candidate.hints.PresentationPartIndex] = struct{}{}
 	}
 
 	totals := make(map[string]int, len(partsByGroup))
@@ -129,7 +223,7 @@ func variantPartGroupKey(ownerKey string, hints *naming.VariantHints) (string, b
 // rather than parsed from the filename; scans keep them as they are.
 const editionSourceImport = "import"
 
-func variantHintsForFile(file *models.MediaFile, folder *models.MediaFolder) *naming.VariantHints {
+func variantHintsForFile(file *VariantFile, folder *models.MediaFolder) *naming.VariantHints {
 	if file.EditionSource == editionSourceImport && file.EditionKey != "" {
 		return &naming.VariantHints{
 			EditionRaw:            file.EditionRaw,
@@ -146,67 +240,27 @@ func variantHintsForFile(file *models.MediaFile, folder *models.MediaFolder) *na
 	return naming.ParseVariantHints(file.FilePath, folder.Type, folder.Paths...)
 }
 
-func (s *Scanner) variantFinalizationFilesForScope(
-	ctx context.Context,
-	folderID int,
-	scopedFiles []*models.MediaFile,
-) ([]*models.MediaFile, error) {
-	if len(scopedFiles) == 0 {
-		return nil, nil
+func sortedVariantOwnerIDs(ids map[string]struct{}) []string {
+	result := make([]string, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
 	}
-
-	filesByID := make(map[int]*models.MediaFile, len(scopedFiles))
-	for _, file := range scopedFiles {
-		if file == nil || file.MissingSince != nil {
-			continue
-		}
-		if file.EpisodeID == "" && file.ContentID == "" {
-			if file.MediaFolderID == folderID {
-				filesByID[file.ID] = file
-			}
-			continue
-		}
-
-		var related []*models.MediaFile
-		var err error
-		switch {
-		case file.EpisodeID != "":
-			related, err = s.fileRepo.GetByEpisodeID(ctx, file.EpisodeID)
-		case file.ContentID != "":
-			related, err = s.fileRepo.GetByContentID(ctx, file.ContentID)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("loading related files for variant finalization: %w", err)
-		}
-		for _, relatedFile := range related {
-			if relatedFile == nil || relatedFile.MissingSince != nil || relatedFile.MediaFolderID != folderID {
-				continue
-			}
-			filesByID[relatedFile.ID] = relatedFile
-		}
-	}
-
-	files := make([]*models.MediaFile, 0, len(filesByID))
-	for _, file := range filesByID {
-		files = append(files, file)
-	}
-	return files, nil
+	sort.Strings(result)
+	return result
 }
 
-func stableOwnerKey(file *models.MediaFile) string {
+func stableOwnerKey(episodeID, contentID string) string {
 	switch {
-	case file == nil:
-		return ""
-	case file.EpisodeID != "":
-		return "episode:" + file.EpisodeID
-	case file.ContentID != "":
-		return "content:" + file.ContentID
+	case episodeID != "":
+		return "episode:" + episodeID
+	case contentID != "":
+		return "content:" + contentID
 	default:
 		return ""
 	}
 }
 
-func variantMetadataChanged(file *models.MediaFile, hints *naming.VariantHints, partTotal int) bool {
+func variantMetadataChanged(file *VariantFile, hints *naming.VariantHints, partTotal int) bool {
 	if file == nil {
 		return false
 	}
