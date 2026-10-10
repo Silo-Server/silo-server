@@ -242,7 +242,7 @@ function BooleanPolicyRow({
       >
         <SelectTrigger
           id={id}
-          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9"
+          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
         >
           <SelectValue />
         </SelectTrigger>
