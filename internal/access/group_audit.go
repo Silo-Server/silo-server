@@ -20,8 +20,9 @@ func groupAuditValues(group *Group) map[string]any {
 		"download_transcode_allowed": group.DownloadTranscodeAllowed, "transcode_allowed": group.TranscodeAllowed,
 		"audio_transcode_allowed": group.AudioTranscodeAllowed, "max_streams": group.MaxStreams,
 		"max_transcodes": group.MaxTranscodes, "max_remote_stream_bitrate_kbps": group.MaxRemoteStreamBitrateKbps,
-		"max_local_stream_bitrate_kbps": group.MaxLocalStreamBitrateKbps, "allowed_permissions": group.AllowedPermissions,
-		"requests_allowed": group.RequestsAllowed, auditFieldDefault: group.IsDefault,
+		"max_local_stream_bitrate_kbps": group.MaxLocalStreamBitrateKbps, "max_profiles": group.MaxProfiles,
+		"allowed_permissions": group.AllowedPermissions, "requests_allowed": group.RequestsAllowed,
+		auditFieldDefault: group.IsDefault,
 	}
 }
 func recordGroupMutation(ctx context.Context, tx pgx.Tx, before, after *Group) (*auditmutation.Entry, error) {

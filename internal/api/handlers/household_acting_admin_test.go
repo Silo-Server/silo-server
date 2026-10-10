@@ -49,7 +49,7 @@ func actingAdminHousehold(t *testing.T, primaryPIN string) userstore.UserStore {
 
 func actingAdminProfileHandler(store userstore.UserStore) *ProfileHandler {
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleAdmin, MaxProfiles: 10}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleAdmin, MaxProfiles: new(10)}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
 	return handler
 }
