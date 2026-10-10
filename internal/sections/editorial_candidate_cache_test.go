@@ -2,20 +2,21 @@ package sections
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 func TestCachedEditorialCandidatesReusesCandidateListForSameScope(t *testing.T) {
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -51,7 +52,7 @@ func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 
 	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
 	f := &Fetcher{
-		Clock: recipes.FixedClock(now),
+		Clock: fixedClock(now),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -69,7 +70,7 @@ func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 		t.Fatalf("different filter cachedEditorialCandidates: %v", err)
 	}
 
-	f.Clock = recipes.FixedClock(now.Add(2 * time.Hour))
+	f.Clock = fixedClock(now.Add(2 * time.Hour))
 	if _, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, nil, filter, time.Hour, loader); err != nil {
 		t.Fatalf("expired cachedEditorialCandidates: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestCachedEditorialCandidatesSeparatesNilAndEmptyLibraryScope(t *testing.T)
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -107,7 +108,7 @@ func TestCachedEditorialCandidatesCoalescesConcurrentMisses(t *testing.T) {
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	var (
 		mu    sync.Mutex
@@ -150,5 +151,115 @@ func TestCachedEditorialCandidatesCoalescesConcurrentMisses(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("loader calls = %d, want 1", calls)
+	}
+}
+
+// Requests for the same scope share one load. The request that started it
+// leaving must not fail the load for the others.
+func TestCachedEditorialCandidatesFollowerSurvivesLeaderCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &Fetcher{}
+		release := make(chan struct{})
+		var calls int
+		loader := func(ctx context.Context, _ string, _ *int, _ []int, _ catalog.AccessFilter) ([]string, error) {
+			calls++
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-release:
+				return []string{"first"}, nil
+			}
+		}
+
+		leaderCtx, cancelLeader := context.WithCancel(t.Context())
+		leaderDone := make(chan struct{})
+		go func() {
+			defer close(leaderDone)
+			_, _ = f.cachedEditorialCandidates(leaderCtx, "actor", nil, nil, catalog.AccessFilter{}, time.Hour, loader)
+		}()
+		synctest.Wait() // the leader's load is running
+		var (
+			followed []string
+			err      error
+		)
+		followerDone := make(chan struct{})
+		go func() {
+			defer close(followerDone)
+			followed, err = f.cachedEditorialCandidates(t.Context(), "actor", nil, nil, catalog.AccessFilter{}, time.Hour, loader)
+		}()
+		synctest.Wait() // the follower is waiting on the same load
+		cancelLeader()
+		<-leaderDone // the leader stops waiting without ending the load
+		close(release)
+		<-followerDone
+
+		if err != nil || len(followed) != 1 || followed[0] != "first" {
+			t.Fatalf("follower candidates = %v, err = %v after the leader left", followed, err)
+		}
+		if calls != 1 {
+			t.Fatalf("loader calls = %d, want 1 shared load", calls)
+		}
+	})
+}
+
+// The shared load runs on its own goroutine, where a panic would end the
+// process instead of reaching the request's recovery.
+func TestCachedEditorialCandidatesSurvivesLoaderPanic(t *testing.T) {
+	f := &Fetcher{}
+	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
+		panic("loader bug")
+	}
+	if candidates, err := f.cachedEditorialCandidates(t.Context(), "actor", nil, nil, catalog.AccessFilter{}, time.Hour, loader); err == nil || len(candidates) != 0 {
+		t.Fatalf("panicking loader returned %v, %v", candidates, err)
+	}
+}
+
+// A request that has already ended must not start a load nobody waits on.
+func TestCachedEditorialCandidatesCanceledCallerStartsNoLoad(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &Fetcher{}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		var calls int
+		loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
+			calls++
+			return []string{"first"}, nil
+		}
+		if _, err := f.cachedEditorialCandidates(ctx, "actor", nil, nil, catalog.AccessFilter{}, time.Hour, loader); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+		synctest.Wait() // any load the call started has finished
+		if calls != 0 {
+			t.Fatalf("loader calls = %d for a canceled caller, want 0", calls)
+		}
+	})
+}
+
+func TestCachedEditorialCandidatesDoesNotCacheAnEmptySet(t *testing.T) {
+	t.Parallel()
+
+	f := &Fetcher{
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+	}
+	calls := 0
+	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil
+		}
+		return []string{"Drama"}, nil
+	}
+
+	for range 2 {
+		if _, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader); err != nil {
+			t.Fatalf("cachedEditorialCandidates: %v", err)
+		}
+	}
+	got, err := f.cachedEditorialCandidates(context.Background(), "genre_roulette", nil, nil, catalog.AccessFilter{}, time.Hour, loader)
+	if err != nil {
+		t.Fatalf("cachedEditorialCandidates: %v", err)
+	}
+	if calls != 2 || len(got) != 1 || got[0] != "Drama" {
+		t.Fatalf("calls = %d, candidates = %v; want the empty set reloaded once, then the cached genre", calls, got)
 	}
 }

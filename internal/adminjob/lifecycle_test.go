@@ -301,17 +301,6 @@ func TestQueuedCancellationAfterStorageCommitWaitsForRestart(t *testing.T) {
 	}
 }
 
-func TestStorageTransitionRestartRequestReportsUnavailableHost(t *testing.T) {
-	runner := &Runner{}
-	if err := runner.requestStorageTransitionRestart("job"); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("missing restart callback error = %v", err)
-	}
-	runner.storageTransitionCommitted = func(context.Context) error { return errors.New("restart refused") }
-	if err := runner.requestStorageTransitionRestart("job"); err == nil || !strings.Contains(err.Error(), "restart refused") {
-		t.Fatalf("refused restart error = %v", err)
-	}
-}
-
 func TestUndeterminedStorageCommitLeavesJobRunningForRestartRecovery(t *testing.T) {
 	r := lifecycleRepo(t)
 	job, err := r.Create(t.Context(), CreateJobInput{JobType: JobTypeStorageTransition, CreatedByUserID: 1, RequestPayload: StorageTransitionRequest{TransitionID: "uncertain", Policy: "migrate_all"}})

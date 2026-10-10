@@ -45,8 +45,10 @@ func TestPersonalPreparationExchangesPasswordForToken(t *testing.T) {
 	}
 }
 func TestPersonalPreparationPlexTokensStayDistinct(t *testing.T) {
+	// Preparation checks and stores this address without sending a request.
+	// A numeric public address keeps the test independent of DNS.
 	svc := &Service{}
-	prepared, err := svc.preparePersonalRun(t.Context(), 7, CreateRunInput{Source: SourceTypePlex, ProfileID: "target", PlexBaseURL: "https://plex.example.test", PlexToken: "server-token", PlexAccountToken: "account-token"})
+	prepared, err := svc.preparePersonalRun(t.Context(), 7, CreateRunInput{Source: SourceTypePlex, ProfileID: "target", PlexBaseURL: "https://8.8.8.8", PlexToken: "server-token", PlexAccountToken: "account-token"})
 	if err != nil {
 		t.Fatal(err)
 	}

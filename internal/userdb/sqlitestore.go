@@ -112,6 +112,10 @@ func (s *SQLiteUserStore) ListProgress(_ context.Context, profileID, status stri
 	return ListProgress(s.db, profileID, status, limit, offset)
 }
 
+func (s *SQLiteUserStore) ListCompletedProgressSince(_ context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
+	return ListCompletedProgressSince(s.db, profileID, since, until, limit)
+}
+
 func (s *SQLiteUserStore) ListProgressPage(_ context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
 	return ListProgressPage(s.db, profileID, status, after, limit)
 }
@@ -309,7 +313,7 @@ func (s *SQLiteUserStore) ReorderCollectionItems(_ context.Context, _ string, _ 
 	return fmt.Errorf("collection reordering is not supported on the SQLite user store")
 }
 
-func (s *SQLiteUserStore) ReorderCollections(_ context.Context, _ string, _ *string, _ []string) error {
+func (s *SQLiteUserStore) ReorderCollections(_ context.Context, _ string, _ []string) error {
 	return fmt.Errorf("collection reordering is not supported on the SQLite user store")
 }
 

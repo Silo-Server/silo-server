@@ -20,6 +20,8 @@ export interface WatchRouteRequest {
   libraryId?: number;
   roomId?: string;
   roomToken?: string;
+  /** The shuffle this playback belongs to; the post-roll plays its next pick. */
+  shuffleId?: string;
   restart: boolean;
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
@@ -34,6 +36,7 @@ export interface WatchPlaybackStartInput {
   libraryId?: number;
   roomId?: string;
   roomToken?: string;
+  shuffleId?: string;
   restart?: boolean;
   audioTrackIndex?: number;
   prePlaySubtitleMode?: "auto" | "off" | "explicit";
@@ -54,6 +57,7 @@ function buildWatchRouteRequestKey(
   libraryId: number | undefined,
   roomId: string | undefined,
   roomToken: string | undefined,
+  shuffleId: string | undefined,
   restart: boolean,
   audioTrackIndex: number | undefined,
   prePlaySubtitleMode: "auto" | "off" | "explicit" | undefined,
@@ -65,6 +69,7 @@ function buildWatchRouteRequestKey(
     libraryId ?? null,
     roomId ?? null,
     roomToken ?? null,
+    shuffleId ?? null,
     restart,
     audioTrackIndex ?? null,
     prePlaySubtitleMode ?? null,
@@ -78,6 +83,7 @@ export function createWatchRouteRequest({
   libraryId,
   roomId,
   roomToken,
+  shuffleId,
   restart = false,
   audioTrackIndex,
   prePlaySubtitleMode,
@@ -90,6 +96,7 @@ export function createWatchRouteRequest({
     libraryId,
     roomId,
     roomToken,
+    shuffleId,
     restart,
     audioTrackIndex,
     prePlaySubtitleMode,
@@ -101,6 +108,7 @@ export function createWatchRouteRequest({
       libraryId,
       roomId,
       roomToken,
+      shuffleId,
       restart,
       audioTrackIndex,
       prePlaySubtitleMode,
@@ -119,6 +127,7 @@ export function buildWatchRouteRequest(
     libraryId: parseOptionalInt(searchParams.get("libraryId")),
     roomId: searchParams.get("room_id") ?? undefined,
     roomToken: searchParams.get("room_token") ?? undefined,
+    shuffleId: searchParams.get("shuffle") ?? undefined,
     restart: searchParams.get("restart") === "1",
   });
 }
@@ -133,6 +142,7 @@ export function buildWatchHref(request: WatchRouteRequest): string {
   if (request.libraryId != null) searchParams.set("libraryId", String(request.libraryId));
   if (request.roomId) searchParams.set("room_id", request.roomId);
   if (request.roomToken) searchParams.set("room_token", request.roomToken);
+  if (request.shuffleId) searchParams.set("shuffle", request.shuffleId);
   if (request.restart) searchParams.set("restart", "1");
   const query = searchParams.toString();
 

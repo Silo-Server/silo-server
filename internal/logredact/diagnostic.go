@@ -175,3 +175,18 @@ func assignmentValue(text string, i int) (start, end int) {
 	}
 	return i, end
 }
+
+// secretAssignmentPattern matches a key=value or key: value pair whose key
+// names a credential, anywhere in free text. Matching on the key alone means a
+// non-secret outer assignment (desc = api_key=SECRET) cannot hide a nested one.
+var secretAssignmentPattern = regexp.MustCompile(`(?i)([\w.-]*(?:password|passwd|secret|token|api[_-]?key|authorization|cookie)[\w.-]*"?\s*[:=]\s*)(?:(?:bearer|basic)\s+)?(?:"[^"]*"|[^\s"&,;]+)`)
+
+// urlUserinfoPattern matches the userinfo of a URL embedded in free text.
+var urlUserinfoPattern = regexp.MustCompile(`://[^/\s@]+@`)
+
+// SanitizeText masks credential assignments and URL userinfo in free-form
+// diagnostic text, such as a stored error message, and keeps everything else.
+func SanitizeText(text string) string {
+	text = secretAssignmentPattern.ReplaceAllString(text, "${1}"+Placeholder)
+	return urlUserinfoPattern.ReplaceAllString(text, "://"+Placeholder+"@")
+}

@@ -10,8 +10,9 @@ import {
   PlatformIcon,
   platformKindLabel,
 } from "@/components/admin/deviceOverrides";
-import { DeviceList, lastSeenLabel } from "@/components/settings/DeviceList";
+import { DeviceList, deviceSelectionKey, lastSeenLabel } from "@/components/settings/DeviceList";
 import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
+import { ProfileLaunchSettingsGroup } from "@/components/settings/ProfileLaunchSettingsGroup";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
 import { useClearDeviceSettings, useForgetDevice, useMyDevices } from "@/hooks/queries/devices";
 import {
@@ -20,11 +21,12 @@ import {
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
+  useStoredSettingValues,
 } from "@/hooks/queries/settingValues";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
 
@@ -45,7 +47,7 @@ export default function DeviceSettings() {
   const [household, setHousehold] = useState(false);
   const [search, setSearch] = useState("");
   const [profileFilter, setProfileFilter] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   /**
    * On a phone the list and the settings are two screens, not two panes.
    *
@@ -75,17 +77,24 @@ export default function DeviceSettings() {
   );
 
   // Default to the device you are on: it is the one you can check the effect of
-  // immediately, and the one most people came here for.
+  // immediately, and the one most people came here for. The list is ordered by
+  // last use, so its first entry is often another browser on the same account.
+  // In the household view this device can appear once per profile that used
+  // it, so prefer your own row. Fall back to the first device only when the
+  // one you are on is not listed (never registered, or filtered out).
   const selected = useMemo(() => {
     if (selectable.length === 0) return null;
-    return selectable.find((device) => device.device_id === selectedId) ?? selectable[0];
-  }, [selectable, selectedId]);
+    return (
+      selectable.find((device) => deviceSelectionKey(device) === selectedKey) ??
+      defaultDevice(selectable, profile?.id)
+    );
+  }, [selectable, selectedKey, profile?.id]);
 
   useEffect(() => {
-    if (selected && selected.device_id !== selectedId) {
-      setSelectedId(selected.device_id);
+    if (selected && deviceSelectionKey(selected) !== selectedKey) {
+      setSelectedKey(deviceSelectionKey(selected));
     }
-  }, [selected, selectedId]);
+  }, [selected, selectedKey]);
 
   return (
     <div className="space-y-5">
@@ -98,6 +107,12 @@ export default function DeviceSettings() {
           differently there and change it — from here, whichever device you&apos;re holding.
         </p>
       </header>
+
+      {/* Kept by this browser itself, not the server, so it sits apart from
+          the device list, which edits server-held settings for any device. */}
+      <div className={cn(showDetailOnMobile && "hidden xl:block")}>
+        <ProfileLaunchSettingsGroup />
+      </div>
 
       {canSeeHousehold ? (
         <div className={cn(showDetailOnMobile && "hidden xl:block")}>
@@ -121,9 +136,9 @@ export default function DeviceSettings() {
           <div className={cn(showDetailOnMobile && "hidden xl:block")}>
             <DeviceList
               devices={devices}
-              selectedDeviceId={selected?.device_id ?? null}
+              selectedKey={selected ? deviceSelectionKey(selected) : null}
               onSelect={(device) => {
-                setSelectedId(device.device_id);
+                setSelectedKey(deviceSelectionKey(device));
                 setShowDetailOnMobile(true);
                 // Swapping the panes leaves the scroll position where the list
                 // was, which on a phone lands mid-settings with no context.
@@ -166,6 +181,13 @@ export default function DeviceSettings() {
         )}
       </div>
     </div>
+  );
+}
+
+function defaultDevice(devices: UserDevice[], ownProfileId: string | undefined): UserDevice | null {
+  const current = devices.filter((device) => device.is_current_device);
+  return (
+    current.find((device) => device.profile_id === ownProfileId) ?? current[0] ?? devices[0] ?? null
   );
 }
 
@@ -271,6 +293,20 @@ function DeviceDetail({
     profileId: targetProfileId,
   };
 
+  // While a profile value outranks the device's own (ui.title_art's "apply to
+  // all devices"), the effective read answers with the profile row only. The
+  // device row it passes over is read here so it stays visible and resettable.
+  const profileWideKeys = supportedKeys.filter(
+    (key) =>
+      SETTING_DEFINITIONS[key].resolutionOrder[0] === "profile" &&
+      settings[key]?.source === "profile",
+  );
+  const { data: storedOnDevice } = useStoredSettingValues({
+    keys: profileWideKeys,
+    identity,
+    enabled: canUseDeviceSettings,
+  });
+
   // The subtitle appearance panel edits its object locally so dragging a
   // colour or opacity feels instant, persisting each patch as it lands. The
   // server value reasserts itself whenever the panel is (re)opened.
@@ -324,7 +360,7 @@ function DeviceDetail({
               onClick={() => {
                 if (
                   !window.confirm(
-                    `Clear all ${changedCount} ${changedCount === 1 ? "change" : "changes"} on ${device.device_name}?`,
+                    `Use ${ownerLabel} profile settings on ${device.device_name}? This removes the ${changedCount} ${changedCount === 1 ? "setting" : "settings"} changed on this device. Settings that only apply to devices go back to the app default.`,
                   )
                 ) {
                   return;
@@ -332,14 +368,14 @@ function DeviceDetail({
                 clearDevice.mutate(
                   { deviceId: device.device_id, profileId: targetProfileId },
                   {
-                    onSuccess: () => toast.success("Settings cleared on this device"),
+                    onSuccess: () => toast.success("Removed the changes on this device"),
                     onError: (error) =>
                       toast.error(error instanceof Error ? error.message : "Couldn't clear"),
                   },
                 );
               }}
             >
-              Clear all changes
+              Use profile settings
             </Button>
           ) : null}
           {!device.is_current_device ? (
@@ -430,6 +466,7 @@ function DeviceDetail({
           keys={supportedKeys}
           ownerLabel={ownerLabel}
           devicePlatform={device.device_platform}
+          storedOnDevice={storedOnDevice}
           disabled={setValue.isPending || clearValue.isPending}
           onChange={(key: SettingKey, value: unknown) =>
             setValue.mutate(

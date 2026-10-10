@@ -260,8 +260,12 @@ func TestCanWriteMarkerUpdateLetsReplacementVersionsOverwrite(t *testing.T) {
 		existing, incoming SegmentPayload
 		want               bool
 	}{
-		{"chromaprint v2 over dialogue v1", payload("chromaprint:dialogue:v1", 0.9, 10, 70), payload("chromaprint:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
-		{"dialogue v2 over chromaprint v2", payload("chromaprint:v2", 0.9, 10, 70), payload("chromaprint:dialogue:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"silence v2 corrects an equal-confidence range", payload("chapter:silence:v2", 0.98, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
+		{"chapter replaces chromaprint v4 at lower confidence", payload("chromaprint:v4", 0.98, 60, 120), payload("chapter:v1", 0.95, 60, 120), true},                           //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 cannot replace chapter", payload("chapter:v1", 0.95, 60, 120), payload("chromaprint:v4", 0.85, 60, 120), false},                                        //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 cannot replace episode copy at higher confidence", payload("episode-version-copy:v1", 0.85, 60, 120), payload("chromaprint:v4", 0.98, 60, 120), false}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v2 over dialogue v1", payload("chromaprint:dialogue:v1", 0.9, 10, 70), payload("chromaprint:v2", 0.75, 12, 70), true},                                     //nolint:misspell // Persisted algorithm identifier.
+		{"dialogue v2 over chromaprint v2", payload("chromaprint:v2", 0.9, 10, 70), payload("chromaprint:dialogue:v2", 0.75, 12, 70), true},                                     //nolint:misspell // Persisted algorithm identifier.
 		{"chapter over over-extended legacy silence", payload("chapter:silence:v1", 0.98, 60, 140), payload("chapter:v1", 0.95, 60, 120), true},
 		{"silence v2 over chapter", payload("chapter:v1", 0.95, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
 		{"chromaprint v3 over dialogue v2", payload("chromaprint:dialogue:v2", 0.9, 10, 70), payload("chromaprint:v3", 0.3, 12, 70), true},            //nolint:misspell // Persisted algorithm identifier.
@@ -351,5 +355,25 @@ func TestSameSeasonScoredVersion(t *testing.T) {
 		if got := sameSeasonScoredVersion(tc.a, tc.b); got != tc.want {
 			t.Errorf("sameSeasonScoredVersion(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+func TestManualDeletionRejectsAutomaticProjection(t *testing.T) {
+	file := &models.MediaFile{Duration: 1000, IntroMarkersSource: new(models.MarkerSourceManual)}
+	for _, source := range []string{models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceScanner, models.MarkerSourceS3} {
+		result := Result{ProviderID: "provider", SourceClass: source, Markers: []Marker{
+			{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 30 * time.Second},
+			{Kind: MarkerKindRecap, Start: 40 * time.Second, End: 60 * time.Second},
+		}}
+		next := ApplyResult(file, result)
+		if next.IntroStart != nil || next.IntroEnd != nil || next.RecapStart == nil || *next.RecapStart != 40 {
+			t.Fatalf("%s restored deleted intro or suppressed unrelated recap: %+v", source, next.MarkerSegments)
+		}
+		if file.RecapStart != nil {
+			t.Fatal("projection mutated stored snapshot")
+		}
+	}
+	if !CanWriteMarkerUpdate(SegmentPayload{Source: models.MarkerSourceManual}, SegmentPayload{Source: models.MarkerSourceManual, Start: new(12.0), End: new(34.0)}) {
+		t.Fatal("explicit manual replacement must be allowed")
 	}
 }

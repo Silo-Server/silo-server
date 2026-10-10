@@ -75,6 +75,8 @@ type EventConsumerClient struct {
 
 type AuthProviderClient struct {
 	client  pluginv1.AuthProviderClient
+	checks  pluginv1.AuthProviderChecksClient
+	network pluginv1.NetworkIdentityAuthClient
 	timeout time.Duration
 }
 
@@ -215,6 +217,8 @@ func (c *Client) AuthProvider(capabilityID string) (*AuthProviderClient, error) 
 	}
 	return &AuthProviderClient{
 		client:  c.rpc.AuthProvider(),
+		checks:  c.rpc.AuthProviderChecks(),
+		network: c.rpc.NetworkIdentityAuth(),
 		timeout: DefaultAuthTimeout,
 	}, nil
 }
@@ -364,10 +368,20 @@ func (c *ScheduledTaskClient) Run(ctx context.Context, req *pluginv1.RunSchedule
 	return c.client.Run(callCtx, req)
 }
 
+// PollChanges calls the plugin with the host's per-call deadline. When the
+// call fails because that deadline passed or the caller canceled, the returned
+// error also wraps the context error, so callers can tell a host-side timeout
+// or cancellation (errors.Is) from a status code the plugin chose itself.
 func (c *ScanSourceClient) PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error) {
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
-	return c.client.PollChanges(callCtx, req)
+	resp, err := c.client.PollChanges(callCtx, req)
+	if err != nil {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("%w: %w", ctxErr, err)
+		}
+	}
+	return resp, err
 }
 
 func (c *RequestRouterClient) Fulfill(ctx context.Context, req *pluginv1.FulfillRequest) (*pluginv1.FulfillResponse, error) {
@@ -422,6 +436,39 @@ func (c *AuthProviderClient) ExchangeCode(ctx context.Context, req *pluginv1.Exc
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.ExchangeCode(callCtx, req)
+}
+
+// TestConnection asks the plugin to test staged settings. Plugins built
+// before SDK v0.22.0 answer codes.Unimplemented.
+func (c *AuthProviderClient) TestConnection(ctx context.Context, req *pluginv1.AuthTestConnectionRequest) (*pluginv1.AuthTestConnectionResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.checks.TestConnection(callCtx, req)
+}
+
+// CheckAccount re-checks one account with the provider. Plugins built
+// before SDK v0.22.0 answer codes.Unimplemented.
+func (c *AuthProviderClient) CheckAccount(ctx context.Context, req *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.checks.CheckAccount(callCtx, req)
+}
+
+// AuthenticatePeer asks a network provider who the overlay peer of a request
+// it proxied is. Plugins without the "network" auth mode answer
+// codes.Unimplemented.
+func (c *AuthProviderClient) AuthenticatePeer(ctx context.Context, req *pluginv1.AuthenticatePeerRequest) (*pluginv1.AuthenticateResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.network.AuthenticatePeer(callCtx, req)
+}
+
+// EndSessionUrl asks the plugin for the provider logout URL. Plugins built
+// before SDK v0.22.0 answer codes.Unimplemented.
+func (c *AuthProviderClient) EndSessionUrl(ctx context.Context, req *pluginv1.AuthEndSessionUrlRequest) (*pluginv1.AuthEndSessionUrlResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.checks.EndSessionUrl(callCtx, req)
 }
 
 func (c *HTTPRoutesClient) Handle(ctx context.Context, req *pluginv1.HandleHTTPRequest) (*pluginv1.HandleHTTPResponse, error) {

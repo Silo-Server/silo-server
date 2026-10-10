@@ -1,0 +1,9 @@
+{
+  "revision": "165ec9e877759eb1312ddf0e64d5fb05f3183e04d967deb116de5a532355d9fa",
+  "state": "available",
+  "allowed": true,
+  "available": true,
+  "realtime_channel": "download_preparations",
+  "devices": true,
+  "revocation": true
+}

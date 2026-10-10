@@ -1,9 +1,12 @@
 import { useRef } from "react";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import MediaCardArtwork, {
+  MEDIA_CARD_CAPTION_CLASS,
+  MEDIA_CARD_META_CLASS,
+  MEDIA_CARD_TITLE_CLASS,
+} from "@/components/MediaCardArtwork";
 import type { BrowseItem } from "@/api/types";
-import { decodeThumbhash } from "@/lib/thumbhash";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
@@ -11,6 +14,7 @@ import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
+import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -38,12 +42,22 @@ function formatRuntime(minutes?: number | null) {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-function formatRating(value?: number | null, max = 10) {
-  return value != null ? `${value.toFixed(1)} / ${max}` : null;
+// A rating reads the same as on the title page: its source's mark, then the
+// score on the source's own scale ("IMDb 8.1", "RT 93%").
+function ratingLabel(mark: string, score: string | null) {
+  return score != null ? (
+    <>
+      <span className="not-uppercase">{mark}</span> {score}
+    </>
+  ) : null;
 }
 
-function formatPercent(value?: number | null) {
-  return value != null ? `${value}%` : null;
+function outOfTen(value?: number | null) {
+  return value != null ? formatOutOfTen(value) : null;
+}
+
+function percent(value?: number | null) {
+  return value != null ? formatPercent(value) : null;
 }
 
 function formatProgress(ratio?: number | null) {
@@ -124,19 +138,13 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
         <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
       );
     case "rating_imdb":
-      return item.rating_imdb != null ? (
-        <>
-          <span className="not-uppercase">★</span> {item.rating_imdb.toFixed(1)} / 10
-        </>
-      ) : (
-        <>{defaultLabel}</>
-      );
+      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
     case "rating_tmdb":
-      return <>{formatRating(item.rating_tmdb) ?? defaultLabel}</>;
+      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{defaultLabel}</>;
     case "rating_rt_critic":
-      return <>{formatPercent(item.rating_rt_critic) ?? defaultLabel}</>;
+      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
     case "rating_rt_audience":
-      return <>{formatPercent(item.rating_rt_audience) ?? defaultLabel}</>;
+      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
     case "release_date":
       return (
         <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
@@ -190,8 +198,6 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
-  const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
-  const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
@@ -214,46 +220,26 @@ export default function ItemCard({
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
-          <div
-            className={`media-card-image relative ${
-              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
-            }`}
-            style={
-              thumbhashUrl
-                ? {
-                    backgroundImage: `url(${thumbhashUrl})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
-            }
+          <MediaCardArtwork
+            src={item.poster_url}
+            alt={displayTitle}
+            mediaType={item.type}
+            thumbhash={item.poster_thumbhash}
+            square={item.type === "audiobook"}
+            scrim="background"
           >
-            {item.poster_url ? (
-              <img
-                src={item.poster_url}
-                alt={displayTitle}
-                className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-                onLoad={onLoad}
-                onError={onError}
-              />
-            ) : (
-              <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">
-                <span className="line-clamp-3 font-medium">{displayTitle || "No Poster"}</span>
-              </div>
-            )}
-            <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
             {item.status === "pending" && (
-              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                 Scanning
               </span>
             )}
             {item.status === "unmatched" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-red-300 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
                 Unmatched
               </span>
             )}
             {item.status === "ambiguous" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-amber-200 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
                 Ambiguous
               </span>
             )}
@@ -268,7 +254,7 @@ export default function ItemCard({
               <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
                 {mangaStatus ? (
                   <span
-                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
+                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
                   >
                     {mangaStatus.label}
                   </span>
@@ -276,14 +262,14 @@ export default function ItemCard({
                   <span />
                 )}
                 {mangaCountLabel && (
-                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                     <Layers className="size-3 shrink-0" />
                     <span className="truncate">{mangaCountLabel}</span>
                   </span>
                 )}
               </div>
             )}
-          </div>
+          </MediaCardArtwork>
         </ViewTransitionLink>
         {!selectionMode && item.play_content_id ? (
           <CardPlayOverlay
@@ -331,26 +317,20 @@ export default function ItemCard({
         />
       </div>
       {showCaption ? (
-        <div className="px-1 pt-3">
-          <ViewTransitionLink
-            to={headingHref}
-            className="block truncate text-[14px] font-semibold tracking-tight hover:underline"
-          >
+        <div className={MEDIA_CARD_CAPTION_CLASS}>
+          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
             {displayTitle}
           </ViewTransitionLink>
           {showMetadata && episodeLabels?.episodeTitle ? (
             <ViewTransitionLink
               to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[12px] font-medium hover:underline"
+              className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
             >
               {episodeLabels.episodeTitle}
             </ViewTransitionLink>
           ) : null}
           {showMetadata ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
-            >
+            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
               <SortMeta item={item} sortField={sortField} />
             </ViewTransitionLink>
           ) : null}

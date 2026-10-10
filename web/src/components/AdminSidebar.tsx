@@ -15,6 +15,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
+import { useAdminRequestCounts } from "@/hooks/queries/admin/requests";
 import { cn } from "@/lib/utils";
 
 interface SidebarItem extends AdminNavItem {
@@ -57,12 +58,24 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
 
   const activityBadge =
     sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined;
+  const pendingRequests = useAdminRequestCounts().data?.needs_approval ?? 0;
+  const requestsBadge =
+    pendingRequests > 0 ? (
+      <span className="bg-primary text-primary-foreground rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums">
+        <span aria-hidden="true">{pendingRequests}</span>
+        <span className="sr-only">, {pendingRequests} need approval</span>
+      </span>
+    ) : undefined;
+  const badges: Record<string, ReactNode> = {
+    "/admin/activity": activityBadge,
+    "/admin/requests": requestsBadge,
+  };
   const sections: SidebarSection[] = buildAdminNavSections({
     policyEditorAvailable: policyCapability.data?.editor_available === true,
   }).map((section) => ({
     ...section,
     items: section.items.map((item) =>
-      item.href === "/admin/activity" ? { ...item, badge: activityBadge } : item,
+      badges[item.href] ? { ...item, badge: badges[item.href] } : item,
     ),
   }));
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,8 +22,7 @@ func TestCollectionMixedWriterLockOrderPostgres(t *testing.T) {
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	for _, operation := range []string{"collection-update", "collection-wildcard", "group-update", "group-delete"} {
-		group := strings.HasPrefix(operation, "group-")
+	for _, operation := range []string{"collection-update", "collection-wildcard"} {
 		t.Run(operation, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -51,21 +49,6 @@ func TestCollectionMixedWriterLockOrderPostgres(t *testing.T) {
 			revision, err := store.CollectionRevision(ctx, id)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if group {
-				g, err := store.CreateCollectionGroup(ctx, "group", "group", "manual")
-				if err != nil {
-					t.Fatal(err)
-				}
-				id = g.ID
-				if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{ID: c.ID, RequestProfileID: "owner", GroupID: new(new(g.ID))}); err != nil {
-					t.Fatal(err)
-				}
-				table = "user_collection_groups"
-				revision, err = store.CollectionOrderRevision(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
 			}
 			gate, err := pool.Begin(ctx)
 			if err != nil {
@@ -103,17 +86,6 @@ func TestCollectionMixedWriterLockOrderPostgres(t *testing.T) {
 			defer legacyPool.Close()
 			defer guardPool.Close()
 			run := func(s *PostgresUserStore, expected *int64) error {
-				if group {
-					if expected != nil && operation == "group-delete" {
-						return s.DeleteCollectionGroupIfRevision(ctx, id, *expected)
-					}
-					if expected == nil {
-						_, e := s.UpdateCollectionGroup(ctx, id, new("legacy"), nil, nil)
-						return e
-					}
-					_, e := s.UpdateCollectionGroupIfRevision(ctx, id, new("guarded"), nil, nil, *expected)
-					return e
-				}
 				return s.UpdateCollection(ctx, userstore.UpdateCollectionInput{ID: id, RequestProfileID: "owner", Name: new("changed"), ExpectedRevision: expected})
 			}
 			legacyDone := make(chan error, 1)

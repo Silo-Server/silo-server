@@ -2,9 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fixturePlanV3 } from "../protocol-v3.fixtures";
-import { derivePersistedSubtitleMode } from "../utils/subtitleMode";
 import type { UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
+import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { PlayerFileVersion, WatchPageProps } from "../types";
 import { WatchPage } from "./WatchPage";
 
@@ -14,6 +13,7 @@ const toastErrorMock = vi.hoisted(() => vi.fn());
 const roomConnectionMock = vi.hoisted(() => vi.fn());
 const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
+const trickplayRefetchMock = vi.hoisted(() => vi.fn());
 vi.mock("../start-v2", () => ({ playbackCapabilitiesV2: playbackCapabilitiesMock }));
 
 vi.mock("../hooks/usePlaybackSession", () => ({
@@ -36,6 +36,7 @@ vi.mock("../context/PlayerConfigContext", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ fetchQuery: vi.fn() }),
+  useQuery: () => ({ data: undefined, refetch: trickplayRefetchMock }),
 }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: startPlaybackMock }),
@@ -94,11 +95,16 @@ function playbackSession(
     error: null,
     initialSubtitleErrorTitle: null,
     initialSubtitleError: null,
+    connectionStatus: "connected",
+    connectionErrorTitle: null,
+    connectionError: null,
     switchVersion: vi.fn(),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
     recoverFromFailure: vi.fn(),
+    recoverConnection: vi.fn(),
+    retryConnection: vi.fn(),
     invalidatePlan: vi.fn().mockResolvedValue(true),
     reanchorSeek: vi.fn().mockResolvedValue(true),
     refreshSubtitles: vi.fn(),
@@ -122,17 +128,8 @@ beforeEach(() => {
   startPlaybackMock.mockReset();
   playbackSessionMock.mockReset();
   videoPlayerMock.mockReset();
+  trickplayRefetchMock.mockReset();
   toastErrorMock.mockReset();
-});
-
-describe("derivePersistedSubtitleMode", () => {
-  it("persists an enabled mode when a subtitle track is selected", () => {
-    expect(derivePersistedSubtitleMode(3)).toBe("always");
-  });
-
-  it("persists off when subtitles are disabled", () => {
-    expect(derivePersistedSubtitleMode(null)).toBe("off");
-  });
 });
 
 describe("WatchPage playback errors", () => {
@@ -520,4 +517,21 @@ describe("Watch Party source fallback", () => {
     view.rerender(createElement(WatchPage, props));
     expect(fallbackSource).toHaveBeenCalledTimes(1);
   });
+});
+
+it("bounds sheet error refreshes and lets a changed file refresh independently", () => {
+  playbackSessionMock.mockReturnValue(playbackSession());
+  const view = render(createElement(WatchPage, watchPageProps));
+  const refresh = () => videoPlayerMock.mock.calls.at(-1)?.[0].onTrickplayError();
+  refresh();
+  for (let attempt = 0; attempt < 20; attempt++) refresh();
+  expect(trickplayRefetchMock).toHaveBeenCalledTimes(1);
+  playbackSessionMock.mockReturnValue(playbackSession({ mediaFileId: 8 }));
+  view.rerender(createElement(WatchPage, watchPageProps));
+  refresh();
+  expect(trickplayRefetchMock).toHaveBeenCalledTimes(2);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_001);
+  refresh();
+  expect(trickplayRefetchMock).toHaveBeenCalledTimes(3);
+  clock.mockRestore();
 });

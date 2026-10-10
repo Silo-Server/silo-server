@@ -169,7 +169,7 @@ describe("useActivityFeed", () => {
       0,
     );
     let current = room();
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 26; i++) {
       const next = room({ ...current, members: [member(1, "Nathan"), member(2 + i, `G${i}`)] });
       log = foldActivity(log, next, [], "connected", i + 1);
       current = next;

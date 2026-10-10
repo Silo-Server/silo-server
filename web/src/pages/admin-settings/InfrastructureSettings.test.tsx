@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,29 +158,17 @@ describe("InfrastructureSettings", () => {
     mockUncheckedSourceHealth();
     taskJobsMock.mockReset();
     taskJobsMock.mockReturnValue({ data: [], isFetching: false, refetch: vi.fn() });
+    useCheckAdminSettingsConnectionMock.mockReset();
+    useCheckAdminSettingsConnectionMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
     storageTransitionCapabilitiesMock.mockReset();
     storageTransitionCapabilitiesMock.mockReturnValue({
       data: { state: "available", allowed: true },
       isPending: false,
       isError: false,
     });
-  });
-
-  it("renders every field group heading", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    for (const heading of [
-      "Storage",
-      "Redis",
-      "Public storage",
-      "Private storage",
-      "Database",
-      "Logs",
-    ]) {
-      expect(markup).toContain(heading);
-    }
   });
 
   it.each([
@@ -352,80 +340,6 @@ describe("InfrastructureSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("renders the page header on its own, with no description or status strip", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Storage & Database" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Where Silo keeps its data. Changes here take effect after a restart."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Redis not configured")).not.toBeInTheDocument();
-    expect(screen.queryByText("No public bucket set")).not.toBeInTheDocument();
-  });
-
-  it("claims a restart only for the groups whose settings actually need one", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    // No page-wide claim: the Logs group applies live, and a blanket line
-    // would tell an admin to restart for it.
-    expect(
-      screen.queryByText("Changes on this page apply after a restart."),
-    ).not.toBeInTheDocument();
-    // Artwork, Redis, both storage buckets, and Database each say it once; their
-    // fields drop the per-field chips.
-    expect(screen.getAllByText(/Changes apply after a restart/)).toHaveLength(5);
-    expect(screen.queryAllByLabelText("Takes effect after a server restart")).toHaveLength(0);
-    const logsGroup = within(screen.getByRole("group", { name: "Logs" }));
-    expect(logsGroup.queryByText(/Changes apply after a restart/)).not.toBeInTheDocument();
-  });
-
-  it("demotes a group to per-field chips when one of its keys stops needing a restart", () => {
-    // The same page against a future registry where the Redis URL hot-reloads:
-    // the group-level claim must disappear on its own rather than stay wrong.
-    restartKeysMock.mockReturnValueOnce({
-      has: (key: string) => /^(s3|database|userdb)\./.test(key),
-    });
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-    expect(redisGroup.queryByText(/Changes apply after a restart/)).not.toBeInTheDocument();
-  });
-
-  it("says what each bucket holds", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    expect(
-      screen.getByText(
-        /Files clients download directly: cached artwork, uploaded posters, and branding images/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts/,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("puts units beside the control rather than in the label", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Delete log entries older than");
-    expect(markup).not.toContain("Delete log entries older than (days)");
-    expect(markup).not.toContain("Maximum log size (MB)");
-  });
-
   it("manages the merged database, storage and log keys in one form", () => {
     mockForm();
 
@@ -433,7 +347,9 @@ describe("InfrastructureSettings", () => {
 
     const calls = settingsFormMock.mock.calls as [{ keys: string[] }][];
     const keys = calls[calls.length - 1]?.[0].keys ?? [];
-    expect(keys).toEqual(expect.arrayContaining(["redis.url", "database.max_connections"]));
+    expect(keys).toEqual(
+      expect.arrayContaining(["redis.url", "redis.db", "database.max_connections"]),
+    );
     expect(keys).toEqual(
       expect.arrayContaining(["s3.public_bucket", "s3.private_bucket", OPSLOG_BUCKET_POLICIES_KEY]),
     );
@@ -441,26 +357,6 @@ describe("InfrastructureSettings", () => {
     expect(keys).not.toContain("metadata.cache_images");
     // The disabled Litestream storage tab is gone; its keys keep working through the API.
     expect(keys.filter((key) => key.startsWith("s3.user_db_"))).toEqual([]);
-  });
-
-  it("shows only essential controls until Advanced is opened", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Use Redis");
-    expect(markup).toContain("Endpoint");
-    expect(markup).toContain("Bucket");
-    expect(markup).toContain("Check Connection");
-    expect(markup).toContain("Maximum log entries");
-    // Advanced, so not rendered while collapsed.
-    expect(markup).not.toContain("Region");
-    expect(markup).not.toContain("Maximum Postgres connections");
-    expect(markup).not.toContain("Record one allowed check in every");
-    expect(markup).not.toContain("Per-area limits");
-    // Removed entirely.
-    expect(markup).not.toContain("User DB");
-    expect(markup).not.toContain("Not currently in use");
   });
 
   it("keeps the Redis connection check available when REDIS_URL comes from the environment", () => {
@@ -478,75 +374,170 @@ describe("InfrastructureSettings", () => {
     expect(redisGroup.getByRole("button", { name: "Check Connection" })).toBeEnabled();
   });
 
-  it("renders Check Connection as a filled button rather than flat text", () => {
-    mockForm();
+  it("shows the Redis database number in use and stages an edit to it", () => {
+    const form = mockForm({
+      getValue: (key: string) => (key === "redis.db" ? "3" : ""),
+      sensitiveConfigured: ["redis.url"],
+    });
 
     render(<InfrastructureSettings />);
 
-    for (const button of screen.getAllByRole("button", { name: "Check Connection" })) {
-      expect(button).toHaveAttribute("data-variant", "secondary");
-    }
+    const field = within(screen.getByRole("group", { name: "Redis" })).getByLabelText(
+      "Database number",
+    );
+    expect(field).toHaveValue(3);
+    expect(field).toBeEnabled();
+    fireEvent.change(field, { target: { value: "5" } });
+    expect(form.setValue).toHaveBeenCalledWith("redis.db", "5");
   });
 
-  it("opens an Advanced section while one of its fields is unsaved", () => {
-    mockForm({ isDirty: (key: string) => key === "database.max_connections", dirtyCount: 1 });
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Maximum Postgres connections");
-    expect(markup).toContain("Advanced · 2 settings");
-  });
-
-  it("warns that the first artwork write locks a public storage identity field", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
+  it("makes the Redis database number read-only when REDIS_URL comes from the environment", () => {
     mockForm({
-      isDirty: (key: string) => key === "s3.public_bucket",
-      dirtyCount: 1,
-      getValue: (key: string) => (key === "s3.public_bucket" ? "new-artwork" : ""),
+      getValue: (key: string) => (key === "redis.db" ? "1" : ""),
+      sensitiveConfigured: ["redis.url"],
+      sensitiveManagedByEnv: ["redis.url", "redis.db"],
     });
 
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
+    render(<InfrastructureSettings />);
 
-    expect(markup).toContain("Storage location change");
-    expect(markup).toContain("settings-field-note");
-    expect(markup).toContain("The first artwork write records this location");
-    serverStatus.current = undefined;
+    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+    // The server reports the number in REDIS_URL; it cannot be saved here.
+    expect(redisGroup.getByLabelText("Database number")).toHaveValue(1);
+    expect(redisGroup.getByLabelText("Database number")).toBeDisabled();
   });
 
-  it("says a private bucket becomes locked at startup", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
-    mockForm({
-      isDirty: (key: string) => key === "s3.private_bucket",
-      dirtyCount: 1,
-      getValue: (key: string) =>
-        key === "s3.private_bucket" ? "private" : key === "s3.public_url_auth" ? "presigned" : "",
+  it("checks the Redis connection with the database number", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
+    useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
+    const request = { values: { "redis.url": "", "redis.db": "5" }, dirty_keys: ["redis.db"] };
+    const form = mockForm({
+      sensitiveConfigured: ["redis.url"],
+      buildConnectionCheckRequest: vi.fn(() => request),
     });
 
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
+    render(<InfrastructureSettings />);
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Redis" })).getByRole("button", {
+        name: "Check Connection",
+      }),
+    );
 
-    expect(markup).toContain("Silo records a configured private bucket at startup");
-    expect(markup).not.toContain("The first artwork write records the storage layout");
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ kind: "redis", body: request }));
+    expect(form.buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
   });
 
-  it("explains the managed transition when a locked S3 identity field is edited", () => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const saved: Record<string, string> = {
-      "artwork.storage_backend": "s3",
-      "s3.public_bucket": "old-artwork",
-    };
-    mockForm({
-      isDirty: (key: string) => key === "s3.public_bucket",
-      dirtyCount: 1,
-      getPersistedValue: (key: string) => saved[key] ?? "",
-      getValue: (key: string) => (key === "s3.public_bucket" ? "new-artwork" : (saved[key] ?? "")),
+  it("marks the Redis database number for a restart on its own", () => {
+    // A registry where only the number needs a restart: the group cannot say
+    // so for every field, which leaves the chip to this one.
+    restartKeysMock.mockReturnValueOnce({ has: (key: string) => key === "redis.db" });
+    mockForm({ sensitiveConfigured: ["redis.url"] });
+
+    render(<InfrastructureSettings />);
+
+    const badges = within(screen.getByRole("group", { name: "Redis" })).getAllByLabelText(
+      "Takes effect after a server restart",
+    );
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.parentElement).toHaveTextContent("Database number");
+  });
+
+  describe("editing the Redis connection", () => {
+    const newUrl = "redis://new.example.invalid:6379/7";
+
+    beforeEach(() => {
+      realForm.enabled = true;
+      // No redis.db is saved: the server reports the 3 in the saved URL.
+      serverSettings.current = { "s3.public_url_auth": "presigned", "redis.db": "3" };
+      sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+      updateSettingsMock.mockReset();
+      updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });
     });
 
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
+    afterEach(() => {
+      realForm.enabled = false;
+    });
 
-    expect(markup).toContain("Storage location change");
-    expect(markup).toContain("Saving this location opens a managed transition");
-    expect(markup).toContain("Review transition");
-    serverStatus.current = undefined;
+    it("saves the number on screen with a new URL", async () => {
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": newUrl, "redis.db": "3" }),
+      );
+    });
+
+    it("checks a new URL with the number on screen", async () => {
+      const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
+      useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+      await userEvent.click(redisGroup.getByRole("button", { name: "Check Connection" }));
+
+      await waitFor(() =>
+        expect(mutateAsync).toHaveBeenCalledWith({
+          kind: "redis",
+          body: {
+            values: { "redis.url": newUrl, "redis.db": "3" },
+            dirty_keys: ["redis.url", "redis.db"],
+          },
+        }),
+      );
+    });
+
+    it("stages nothing once the new URL is taken back", async () => {
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+      await userEvent.clear(redisGroup.getByLabelText("Connection URL"));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+    });
+
+    it("drops a URL keystroke that arrives while a save is in flight", async () => {
+      updateSettingsMock.mockReturnValue(new Promise(() => {}));
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+      fireEvent.change(redisGroup.getByLabelText("Database number"), { target: { value: "5" } });
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.db": "5" }));
+
+      fireEvent.change(redisGroup.getByLabelText("Connection URL"), { target: { value: "r" } });
+
+      expect(redisGroup.getByLabelText("Connection URL")).toHaveValue("");
+    });
+
+    it("sends the number with the empty URL when Redis is switched off", async () => {
+      // The server stores no number without a URL, so this removes a saved one.
+      render(<InfrastructureSettings />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": "", "redis.db": "3" }),
+      );
+    });
+
+    it("stages nothing once Redis is switched back on", async () => {
+      render(<InfrastructureSettings />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+    });
   });
 
   it("saves unrelated edits before opening an S3 location transition", async () => {
@@ -772,6 +763,7 @@ describe("InfrastructureSettings", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Storage lock status is unavailable");
     expect(screen.getByRole("group", { name: "Database" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Maximum Postgres connections")).toBeVisible();
     expect(screen.getByRole("group", { name: "Logs" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();

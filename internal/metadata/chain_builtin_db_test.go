@@ -165,7 +165,8 @@ func TestResolveChainWithChecker_BuiltinEntryResolvesInProcessProvider(t *testin
 
 // The chain-less fallback must skip default_enabled=false capabilities: a
 // chain-less library, and a library whose only chain row is the disabled
-// seeded NFO entry, must not activate the provider.
+// seeded NFO entry, must not activate the provider. Default-enabled providers
+// must also declare support for the requested content level.
 func TestChainlessFallback_SkipsDefaultDisabledCapability(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
@@ -176,6 +177,10 @@ func TestChainlessFallback_SkipsDefaultDisabledCapability(t *testing.T) {
 	installationID := insertTestInstallation(t, pool, "builtin", true)
 	insertTestCapability(t, pool, installationID, capID,
 		`{"display_name":"Test Fallback","default_priority":{"movie":1},"default_enabled":false}`)
+	seriesCapID := capID + "-series"
+	RegisterBuiltinProvider(seriesCapID, func() Provider { return &builtinStubProvider{slug: seriesCapID} })
+	insertTestCapability(t, pool, installationID, seriesCapID,
+		`{"display_name":"Test Series","default_priority":{"series":1},"default_enabled":true}`)
 	chainRepo := NewChainRepository(pool)
 
 	assertNotResolved := func(folderID int, scenario string) {
@@ -187,6 +192,9 @@ func TestChainlessFallback_SkipsDefaultDisabledCapability(t *testing.T) {
 		for _, p := range providers {
 			if p.Slug() == capID {
 				t.Errorf("%s: default_enabled=false capability leaked into the fallback", scenario)
+			}
+			if p.Slug() == seriesCapID {
+				t.Errorf("%s: series-only capability leaked into the movie fallback", scenario)
 			}
 		}
 	}

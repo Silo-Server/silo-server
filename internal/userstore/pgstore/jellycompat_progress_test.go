@@ -75,6 +75,11 @@ func TestJellycompatProgressExplicitHistoricalEdit(t *testing.T) {
 
 }
 
+func TestHistoryEntryOnce(t *testing.T) {
+	pool, userID := newConstraintTestUser(t)
+	storetest.RunHistoryEntryOnce(t, newStore(pool, userID))
+}
+
 func TestDatedMarkWatchedBatchAtomic(t *testing.T) {
 	pool, userID := newConstraintTestUser(t)
 	storetest.RunDatedMarkWatchedBatch(t, newStore(pool, userID))

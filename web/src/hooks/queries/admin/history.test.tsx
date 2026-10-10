@@ -197,15 +197,18 @@ describe("useAdminPlaybackHistory", () => {
       wrapper: wrapper(),
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const firstSignal = fetchMock.mock.calls[0]![1]?.signal;
     act(() => setProfileId("p-other"));
     rerender();
     // The hook re-keys under the new authority and starts its own request; the
     // first page is released afterwards and must be refused, not cached.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(requestOf(fetchMock, 1).headers.get("X-Profile-Id")).toBe("p-other");
-    releases[0]!(jsonResponse(page([entry])));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(firstSignal?.aborted).toBe(true);
+    await act(async () => releases[0]!(jsonResponse(page([entry]))));
     expect(result.current.data).toBeUndefined();
     expect(result.current.isPending).toBe(true);
+    await act(async () => releases[1]!(jsonResponse(page([{ ...entry, session_id: "current" }]))));
+    await waitFor(() => expect(result.current.data?.[0]?.session_id).toBe("current"));
   });
 });

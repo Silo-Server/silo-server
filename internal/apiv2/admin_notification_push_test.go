@@ -29,12 +29,13 @@ func (f *fakeAdminNotificationPush) SendAndroidPushTest(_ context.Context, profi
 }
 
 func TestAdminNotificationPushDispatch(t *testing.T) {
+	fake := new(fakeAdminNotificationPush)
+	deps := pilotDeps(nil, nil)
+	deps.AdminNotificationPush = fake
+	h := NewHandler(deps)
 	for _, platform := range []string{"apple", "fcm"} {
 		t.Run(platform, func(t *testing.T) {
-			fake := new(fakeAdminNotificationPush)
-			deps := pilotDeps(nil, nil)
-			deps.AdminNotificationPush = fake
-			h := NewHandler(deps)
+			*fake = fakeAdminNotificationPush{}
 			path := Prefix + "/admin/notifications/push/" + platform + "/test"
 			body := `{"profile_id":"target-profile","server_device_id":"target-device"}`
 			for _, headers := range []map[string]string{nil, profileOwner(), with(bearer(adminToken), "X-Profile-Id", "p-owner")} {

@@ -48,8 +48,12 @@ type PlannerInputV3 struct {
 	ServerBitrateCapKbps int
 	RequestedFile        *models.MediaFile
 	EffectiveFile        *models.MediaFile
-	AudioTrackIndex      int
-	Settings             PlannerSettingsV3
+	// LowerVersion names the version that serves lower qualities when the
+	// requested version is 4K and 4K transcoding is disabled. Nil when the
+	// item has no such version or the caller did not look for one.
+	LowerVersion    *LowerVersionV3
+	AudioTrackIndex int
+	Settings        PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
 	Registry *TransformationRegistryV3
 	// ProgressiveRemuxRegistry, HLSRemuxRegistry, and HLSVideoRegistry report
@@ -144,12 +148,17 @@ func (input PlannerInputV3) hlsVideoRegistry() *TransformationRegistryV3 {
 }
 
 type PlannerResultV3 struct {
-	Plan             *PlanV3
-	Terminal         *TerminalV3
-	PlayMethod       PlayMethod
-	TranscodeAudio   bool
-	TargetVideoCodec string
-	TargetAudioCodec string
+	Plan           *PlanV3
+	Terminal       *TerminalV3
+	PlayMethod     PlayMethod
+	TranscodeAudio bool
+	// RemuxResumeLeadingPictureDrop asks a progressive remux that starts past
+	// zero to drop the open-GOP leading pictures macOS Firefox rejects. It is
+	// best effort: an executor whose FFmpeg lacks the filter serves the plain
+	// copy, so it never narrows where the route may run.
+	RemuxResumeLeadingPictureDrop bool
+	TargetVideoCodec              string
+	TargetAudioCodec              string
 	// SourceAudioChannels freezes the selected input track's channel count for
 	// source-sensitive encode recipes such as multichannel-to-stereo downmixing.
 	SourceAudioChannels int
@@ -198,6 +207,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	file := input.EffectiveFile
 	if file == nil {
 		file = input.RequestedFile
+	}
+	// A file ffprobe already rejected has nothing for any route to validate.
+	// Answer before the bitrate-cap wrapper below, which would otherwise
+	// rename the refusal after a policy that has nothing to do with it.
+	if file.ProbeRejected() {
+		return terminalPlannerResultV3(TerminalSourceUnreadableV3, TerminalSourceUnreadableMessageV3, false)
 	}
 	if input.Now.IsZero() {
 		input.Now = time.Now()
@@ -367,6 +382,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	base.AvailableQualities = availableQualitiesV3(input, source)
 	base.Subtitle.Inventory = BuildSubtitleInventoryV3(file, input.AdditionalSubtitles)
 	base.Claims.Audio.Passthrough = passthrough
+	if subtitle.Degraded {
+		base.DegradationWarnings = append(base.DegradationWarnings, SubtitleTrackUnavailableWarningV3())
+	}
 	if source.DynamicRange == DynamicRangeHDRUnknownV3 && (rangeOK || clientManagedRange) {
 		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
 			Code:    "hdr_range_assumed_hdr10",
@@ -548,8 +566,13 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// video stream-copy route: the avc1/fMP4 segment would desync strict
 	// decoders. Skipping the remux branch drops through to the HLS transcode.
 	if videoOK && !source.VideoCopyUnsafe && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
-		progressiveAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
-		hlsAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
+		// A source with more channels than the delivery's ceiling cannot be
+		// copied there even when the codec is supported. Adapt only the audio
+		// so the video stays a copy instead of falling through to a transcode.
+		progressiveChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels)
+		hlsChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels)
+		progressiveCodecAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
+		hlsCodecAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 			deliverySupportsAudioClaimV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, audioClaims, audioOK)
 		// AAC frames in Matroska use a millisecond packet clock while each frame
 		// contains 1024 samples. Copying those rounded timestamps into MP4/fMP4
@@ -558,17 +581,37 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// through the versioned timestamp-normalization recipe. Native original
 		// playback above remains byte-for-byte direct play.
 		firefoxAACTimingQuirk, normalizeMatroskaAAC := firefoxMatroskaAACTimingQuirkV3(source, input.Request)
-		progressiveTranscodeAudio := !progressiveAudioOK || normalizeMatroskaAAC
-		hlsTranscodeAudio := !hlsAudioOK || normalizeMatroskaAAC
+		progressiveCodecTranscodeAudio := !progressiveCodecAudioOK || normalizeMatroskaAAC
+		progressiveTranscodeAudio := progressiveCodecTranscodeAudio || progressiveChannelLimited
+		hlsCodecTranscodeAudio := !hlsCodecAudioOK || normalizeMatroskaAAC
+		hlsTranscodeAudio := hlsCodecTranscodeAudio || hlsChannelLimited
 		hlsAudioQuirk, hlsAudioQuirkOK := hlsEAC3AudioCorrectionV3(source, input.Request)
+		// The device quirk owns the conversion of a codec HLS could otherwise
+		// copy, including one that only exceeds the channel ceiling, so its
+		// validated stereo recipe and applied-quirk record are kept.
+		hlsQuirkConvertsAudio := hlsAudioQuirkOK && !hlsCodecTranscodeAudio
+		hlsAACChannels := 0
+		switch {
+		case hlsQuirkConvertsAudio:
+			hlsAACChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
+		case hlsTranscodeAudio:
+			// HLS packaging cannot safely copy non-native codecs such as DTS,
+			// TrueHD, or Opus. Preserve surround when adapting those codecs,
+			// and keep as many channels as a channel ceiling allows; a native
+			// codec rejected by the scoped client claim keeps the normal
+			// compatibility downmix policy.
+			hlsAACChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, hlsChannelLimited || !hlsNativeAudioCodecV3(source.AudioCodec))
+		}
 		progressiveAudioConvertOK := false
 		if progressiveTranscodeAudio && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
 			progressiveAudioConvertOK = input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
 		}
-		if progressiveTranscodeAudio && hlsTranscodeAudio {
+		if progressiveCodecTranscodeAudio && hlsCodecTranscodeAudio {
 			// Each delivery consults only its own eligible executor pool. A
 			// progressive proxy may run the conversion without implying that an
-			// HLS transcode node can, and vice versa.
+			// HLS transcode node can, and vice versa. A conversion forced only by
+			// a channel ceiling is not terminal: the video transcode below can
+			// still downmix through its own executor pool.
 			audioConvertOK := progressiveAudioConvertOK ||
 				hlsDeliveryOK && input.hlsRemuxRegistry().Available(TransformationAudioToAACV3)
 			if !audioConvertOK {
@@ -590,7 +633,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			hlsTranscodeAudio := hlsTranscodeAudio
 			remuxBase := cloneRemuxPlanCandidateV3(base)
 			if dvStrip {
-				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: DV7ToHDR10ClaimsV3()})
+				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: DV7ToHDR10ClaimsV3()})
 				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
 				remuxBase.Claims.Video = VideoClaimsV3{HDR10: true}
 				remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})
@@ -602,7 +645,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			progressivePlan.DecisionReason = decisionReasonContainerNormalizationV3
 			progressiveAudioChannels := 0
 			if progressiveTranscodeAudio && progressiveAudioConvertOK {
-				progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, false)
+				progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, progressiveChannelLimited)
 				progressivePlan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 				progressivePlan.EffectiveRecipe.AudioChannels = intPointerV3(progressiveAudioChannels)
 				progressivePlan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(progressiveAudioChannels)
@@ -619,7 +662,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			}
 			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
 			tryProgressive := func() (PlannerResultV3, bool) {
-				if !remuxSubtitleOK || !progressiveExecutable || input.ServerBitrateCapKbps > 0 && progressiveTranscodeAudio {
+				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, file, progressiveAudioChannels) {
 					return PlannerResultV3{}, false
 				}
 				candidate := cloneRemuxPlanCandidateV3(progressivePlan)
@@ -627,7 +670,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				candidate.Claims.Subtitles = remuxSubtitle.Claims
 				finalizePlanIdentityV3(&candidate, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 				if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, candidate) && !planAttemptedV3(candidate, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-					return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
+					return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, RemuxResumeLeadingPictureDrop: firefoxMacOSHEVCResumeLeadingPictureDropV3(source, input.Request), TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
 				}
 				return PlannerResultV3{}, false
 			}
@@ -637,16 +680,18 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					return result
 				}
 			}
-			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK))
+			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (!hlsTranscodeAudio && !hlsAudioQuirkOK || audioRemuxFitsServerCapV3(input, file, hlsAACChannels))
 			if hlsRouteOK && (hlsTranscodeAudio || hlsAudioQuirkOK) && !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
 				// HLS needs an AAC conversion that no HLS executor offers. Skip
 				// only this route: a later recipe (the Dolby Vision HDR10 strip)
 				// may still play over progressive. The terminal is reported once
 				// every remux recipe is exhausted.
 				hlsRouteOK = false
-				hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
-				if !hlsTranscodeAudio {
+				switch {
+				case hlsQuirkConvertsAudio:
 					hlsAudioConversionUnavailable = "The device-specific HLS route requires the validated AAC conversion toolchain."
+				case hlsCodecTranscodeAudio:
+					hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
 				}
 			}
 			if hlsRouteOK {
@@ -655,25 +700,25 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
 				hlsAudioChannels := 0
-				if hlsTranscodeAudio {
-					// HLS packaging cannot safely copy non-native codecs such as
-					// DTS, TrueHD, or Opus. Preserve surround when adapting those
-					// codecs; a native codec rejected by the scoped client claim
-					// keeps the normal compatibility downmix policy.
-					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, !hlsNativeAudioCodecV3(source.AudioCodec))
+				if hlsTranscodeAudio && !hlsQuirkConvertsAudio {
+					hlsAudioChannels = hlsAACChannels
 					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
 					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
 					plan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: hlsAudioAdaptationReasonV3}
 					plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
-					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: "The selected audio track is converted to AAC for HLS delivery."})
+					message := "The selected audio track is converted to AAC for HLS delivery."
+					if !hlsCodecTranscodeAudio {
+						message = fmt.Sprintf("The selected audio track is converted to AAC %s to fit this output's channel limit.", audioLayoutForChannelsV3(hlsAudioChannels))
+					}
+					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: message})
 				}
 				if normalizeMatroskaAAC {
 					appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
 				}
-				if hlsAudioQuirkOK && !hlsTranscodeAudio {
+				if hlsQuirkConvertsAudio {
 					hlsTranscodeAudio = true
-					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
+					hlsAudioChannels = hlsAACChannels
 					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
 					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
@@ -711,8 +756,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, hlsAudioConversionUnavailable, true)
 		}
 		if input.ServerBitrateCapKbps > 0 && (progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK) {
-			// Audio re-encoding can raise a copy remux above a source that only
-			// just fits the cap. Encode both tracks with an explicit budget.
+			// The audio-converting remux could not prove it stays inside the cap
+			// (or was already attempted). Encode both tracks with an explicit
+			// budget.
 			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "", false)
 		}
 	}
@@ -747,37 +793,102 @@ func hlsVideoSampleEntryV3(source SourceDescriptorV3, request StartRequestV3, dv
 // gates pass. Registry availability is deliberately not consulted: it can
 // trigger lazy node-capability fetches, which source-preserving starts must
 // never pay for, and a rung whose toolchain is missing degrades to a retryable
-// terminal at replan time.
+// terminal at replan time. A 4K version that may not be transcoded publishes
+// the qualities its lower-resolution version serves instead.
 func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
-	return availableQualitiesForRouteV3(input, source)
+	if lowerVersionServesQualitiesV3(input) {
+		return lowerVersionQualitiesV3(input)
+	}
+	return append([]AvailableQualityV3{originalQualityEntryV3(source)}, transcodeRungsV3(input, input.EffectiveFile, source)...)
 }
 
-// availableQualitiesForRouteV3 keeps source-preserving HDR planning lazy while
-// still advertising the choices the configured policy allows. Selecting a
-// lower HDR rung performs the executor capability lookup during the replan;
-// building the menu itself never probes local or pooled executors.
-func availableQualitiesForRouteV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
-	qualities := []AvailableQualityV3{{
+// originalQualityEntryV3 is the menu entry that plays source unchanged.
+func originalQualityEntryV3(source SourceDescriptorV3) AvailableQualityV3 {
+	return AvailableQualityV3{
 		Label:           QualityOriginalV3,
 		Height:          source.Height,
 		BitrateKbps:     source.BitrateKbps,
 		PreservesSource: true,
-	}}
+	}
+}
+
+// LowerVersionV3 describes the version of an item that serves lower
+// qualities when the requested version is 4K and 4K transcoding is disabled.
+type LowerVersionV3 struct {
+	// Requested is the version the viewer asked for. The menu's original
+	// entry stays this version even while the lower version plays.
+	Requested SourceDescriptorV3
+	// Lower is the first non-4K version in the handler's fallback order, the
+	// one a lower quality moves playback to.
+	Lower SourceDescriptorV3
+}
+
+// lowerVersionServesQualitiesV3 reports whether lower qualities come from
+// another version. A lower quality on the 4K source is then refused with
+// no_alternate_version, and the handler's alternate-version fallback plays
+// the lower version: unchanged when the quality fits it, transcoded when the
+// quality is lower still. Without HLS or transcoding the 4K source is refused
+// for a reason the fallback does not act on, so the menu stays as it was.
+func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
+	return input.LowerVersion != nil && !input.Settings.Allow4KTranscode && input.Settings.TranscodeEnabled &&
+		deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+}
+
+// lowerVersionQualitiesV3 is the menu of a 4K version whose lower qualities
+// come from its lower-resolution version: original, the lower version at its
+// resolution class (for example "1080p"), which plays it unchanged, and the
+// transcode rungs below that version.
+func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
+	lower := input.LowerVersion.Lower
+	qualities := []AvailableQualityV3{originalQualityEntryV3(input.LowerVersion.Requested)}
+	if label, ok := lowerVersionLabelV3(input.LowerVersion.Requested, lower); ok {
+		qualities = append(qualities, AvailableQualityV3{
+			Label:       label,
+			DisplayName: label,
+			Height:      lower.Height,
+			BitrateKbps: lower.BitrateKbps,
+		})
+	}
+	return append(qualities, transcodeRungsV3(input, nil, lower)...)
+}
+
+// lowerVersionLabelV3 names the plain resolution preference that plays the
+// lower version unchanged: the planner preserves a source no taller than the
+// preference's height. Only the 1080p and 720p classes qualify. "480p" is also
+// a fixed transcode rung, and a source taller than its class, such as
+// 2560x1440 in the 1080p class, would be scaled down. The requested version
+// must be taller than the class, or the preference would preserve it (a
+// 3840x1080 source) instead of moving playback to the lower version.
+func lowerVersionLabelV3(requested, lower SourceDescriptorV3) (string, bool) {
+	class := sourceLadderHeightV3(lower)
+	if (class != 1080 && class != 720) || lower.Height <= 0 || lower.Height > class || requested.Height <= class {
+		return "", false
+	}
+	return strconv.Itoa(class) + "p", true
+}
+
+// transcodeRungsV3 lists the fixed rungs a transcode of source can serve:
+// none when the policy forbids transcoding it. HDR rungs are advertised from
+// the configured policy alone, keeping source-preserving HDR planning lazy:
+// selecting one performs the executor capability lookup during the replan;
+// building the menu never probes local or pooled executors.
+func transcodeRungsV3(input PlannerInputV3, file *models.MediaFile, source SourceDescriptorV3) []AvailableQualityV3 {
 	if source.Height <= 0 {
 		// Fixed rungs must sit strictly below a known source height; unknown
 		// probe metadata cannot prove that any advertised rung avoids upscaling.
-		return qualities
+		return nil
 	}
 	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled || input.Settings.ViewerTranscodeDisabled {
-		return qualities
+		return nil
 	}
-	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
-		return qualities
+	if is4KSourceV3(file, source) && !input.Settings.Allow4KTranscode {
+		return nil
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 &&
 		tonemap.NewPolicy(input.Settings.HardwareToneMapEnabled, input.Settings.SoftwareToneMapEnabled) == tonemap.PolicyNone {
-		return qualities
+		return nil
 	}
+	var qualities []AvailableQualityV3
 	for _, rung := range ladderRungsV3 {
 		if !ladderRungPublishableV3(rung, source) {
 			continue
@@ -1035,23 +1146,8 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
-	targetVideoCodec := transcodeCodecH264
-	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) && hlsHEVCOutputSupportedV3(input.Request, quality, source) {
-		targetVideoCodec = transcodeCodecHEVC
-	}
-	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
-		base.AvailableQualities = availableQualitiesForRouteV3(input, source)
-	}
-	plan := base
-	plan.Delivery = DeliveryTranscodeHLSV3
-	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-	plan.EffectiveRecipe.VideoCodec = targetVideoCodec
-	if targetVideoCodec == transcodeCodecHEVC {
-		plan.EffectiveRecipe.VideoSampleEntry = VideoSampleEntryHVC1
-	}
-	plan.EffectiveRecipe.AudioCodec = "aac"
-	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
-	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
+	// A server bitrate cap reserves the AAC and mux share before either video
+	// codec is sized, so the HEVC decoder check below sees the real target.
 	targetAudioBitrateKbps := 0
 	if input.ServerBitrateCapKbps > 0 {
 		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
@@ -1063,6 +1159,48 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
 	}
+	// Encodes stop at the ladder's top class. A taller source (8K, a square
+	// VR frame) that keeps its own frame on the original route is fitted into
+	// the 2160p box, as the resolution buckets did, instead of asking an
+	// encoder for more lines than hardware H.264 takes.
+	if top := bitrateLadder[0]; quality.Height > top.Height {
+		width, height := FitLadderBox(source.Width, source.Height, top.Height)
+		width, height = encodedFrame(source.Width, source.Height, width, height)
+		quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+		quality.PreservesSource = false
+	}
+	targetVideoCodec := transcodeCodecH264
+	// H.264 is always an allowed output, but it stays within an attested
+	// H.264 decoder: a scaled encode steps down to the tallest class one
+	// takes, and the bitrate stays within that decoder's limit. h264Quality
+	// is also kept for the H.264 fallback after a failed HEVC attempt.
+	h264Quality := h264BoundedQualityV3(input.Request, quality, source)
+	hevcQuality := quality
+	quality = h264Quality
+	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
+		// HEVC output needs no more than the source's bits counted as HEVC,
+		// whether it scales the source or only converts it at its own size,
+		// and the decoder is checked against that HEVC target.
+		if sourceKbps := sourceEquivalentKbps(source, transcodeCodecHEVC); sourceKbps > 0 && hevcQuality.BitrateKbps > 0 {
+			hevcQuality.BitrateKbps = min(hevcQuality.BitrateKbps, sourceKbps)
+		}
+		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {
+			targetVideoCodec, quality = transcodeCodecHEVC, hevcQuality
+		}
+	}
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
+		base.AvailableQualities = availableQualitiesV3(input, source)
+	}
+	plan := base
+	plan.Delivery = DeliveryTranscodeHLSV3
+	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+	plan.EffectiveRecipe.VideoCodec = targetVideoCodec
+	if targetVideoCodec == transcodeCodecHEVC {
+		plan.EffectiveRecipe.VideoSampleEntry = VideoSampleEntryHVC1
+	}
+	plan.EffectiveRecipe.AudioCodec = "aac"
+	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
+	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
 	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
@@ -1120,6 +1258,10 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// the same HLS delivery without changing source/remux behavior.
 	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		targetVideoCodec = transcodeCodecH264
+		quality = h264Quality
+		plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
+		plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
+		plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 		plan.EffectiveRecipe.VideoCodec = targetVideoCodec
 		plan.EffectiveRecipe.VideoSampleEntry = ""
 		if !replaceVideoTransformationV3(&plan, targetVideoCodec) || !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) {
@@ -1131,6 +1273,126 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+}
+
+// h264BoundedQualityV3 fits a transcode target to the client's attested
+// H.264 decoders. An encode that no decoder takes, scaled or a same-size
+// codec conversion, steps down the ladder until its fitted size does,
+// stopping at the smallest class since H.264 is the universal HLS output. A
+// decoder takes a class only when its bitrate limit earns that class on the
+// ladder, so a 1080p decoder limited to 3 Mbps gets 720p, as downloads do.
+// The bitrate then stays within the limit of a decoder that takes the output.
+func h264BoundedQualityV3(request StartRequestV3, quality QualityResultV3, source SourceDescriptorV3) QualityResultV3 {
+	decoders := attestedH264DecodersV3(request, source.FrameRate)
+	if len(decoders) == 0 {
+		return quality
+	}
+	// The encode keeps the source's frame rate, so a decoder must take it too.
+	takes := func(decoder VideoDecodeCapabilityV3, width, height int) bool {
+		return h264DecoderTakesFrameV3(decoder, width, height, source.FrameRate)
+	}
+	anyTakes := func(width, height, class int) bool {
+		for _, decoder := range decoders {
+			if takes(decoder, width, height) &&
+				(decoder.MaxBitrateKbps <= 0 || LadderClassForBitrate(decoder.MaxBitrateKbps, source.FrameRate, transcodeCodecH264) >= class) {
+				return true
+			}
+		}
+		return false
+	}
+	outputClass := ladderClassForSize(quality.Width, quality.Height)
+	if quality.PreservesSource {
+		// A source-size conversion keeps the class its height earned on the
+		// preserving route: a 2560x1080 film is 1080p here, not 2160p.
+		outputClass = ladderClassForSize(0, quality.Height)
+	}
+	if quality.Height > 0 && !anyTakes(quality.Width, quality.Height, outputClass) {
+		classes := ladderClassesFrom(ladderClassForSize(quality.Width, quality.Height))
+		for i, class := range classes {
+			width, height := FitLadderBox(source.Width, source.Height, class.Height)
+			width, height = encodedFrame(source.Width, source.Height, width, height)
+			if height == 0 {
+				height = class.Height
+			}
+			if width == 0 {
+				width = class.Width
+			}
+			if anyTakes(width, height, class.Height) || i == len(classes)-1 {
+				quality.Label, quality.Width, quality.Height = heightLabel(height), width, height
+				quality.BitrateKbps = minPositiveV3(quality.BitrateKbps, ladderClassBitrateKbpsV3(class.Height))
+				quality.PreservesSource = false
+				break
+			}
+		}
+	}
+	limit := 0
+	for _, decoder := range decoders {
+		if !takes(decoder, quality.Width, quality.Height) {
+			continue
+		}
+		if decoder.MaxBitrateKbps <= 0 {
+			return quality
+		}
+		limit = max(limit, decoder.MaxBitrateKbps)
+	}
+	if limit > 0 && (quality.BitrateKbps <= 0 || quality.BitrateKbps > limit) {
+		quality.BitrateKbps = limit
+	}
+	return quality
+}
+
+// attestedH264DecodersV3 lists the 8-bit H.264 decoders strict caps attest:
+// the hardware ones when any takes the source's frame rate, else the opted-in
+// software ones that do, else every attested one, hardware first. It is
+// empty without detailed evidence, when H.264 stays unbounded.
+func attestedH264DecodersV3(request StartRequestV3, frameRate float64) []VideoDecodeCapabilityV3 {
+	caps := request.Capabilities
+	if caps.VideoEvidence != EvidenceExactV3 && caps.VideoEvidence != EvidencePlatformAttestedV3 {
+		return nil
+	}
+	softwareOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
+	var fallback []VideoDecodeCapabilityV3
+	for _, hardware := range []bool{true, false} {
+		var decoders []VideoDecodeCapabilityV3
+		usable := false
+		for _, decoder := range caps.VideoDecode {
+			if decoder.Hardware != hardware || (!hardware && !softwareOptIn) || !strings.EqualFold(decoder.Codec, transcodeCodecH264) ||
+				(len(decoder.BitDepths) > 0 && !containsIntV3(decoder.BitDepths, 8)) {
+				continue
+			}
+			decoders = append(decoders, decoder)
+			usable = usable || h264DecoderTakesFrameRateV3(decoder, frameRate)
+		}
+		if usable {
+			return decoders
+		}
+		if fallback == nil {
+			fallback = decoders
+		}
+	}
+	return fallback
+}
+
+// h264DecoderTakesFrameRateV3 reports whether a decoder takes an encode at
+// the source's frame rate; an unknown rate or limit always passes.
+func h264DecoderTakesFrameRateV3(decoder VideoDecodeCapabilityV3, frameRate float64) bool {
+	return decoder.MaxFrameRate <= 0 || frameRate <= decoder.MaxFrameRate+0.01
+}
+
+// h264DecoderTakesFrameV3 reports whether a decoder takes a width x height
+// encode at the source's frame rate. A reported rate holds at the decoder's
+// largest size (Android derives it there), so a smaller frame may run faster
+// within the same pixel rate: a 4K30 decoder takes 1080p60, while a 1080p30
+// one takes 720p60 but not 1080p60.
+func h264DecoderTakesFrameV3(decoder VideoDecodeCapabilityV3, width, height int, frameRate float64) bool {
+	if (decoder.MaxWidth > 0 && width > decoder.MaxWidth) || (decoder.MaxHeight > 0 && height > decoder.MaxHeight) {
+		return false
+	}
+	if h264DecoderTakesFrameRateV3(decoder, frameRate) {
+		return true
+	}
+	return decoder.MaxWidth > 0 && decoder.MaxHeight > 0 && width > 0 && height > 0 &&
+		float64(width)*float64(height)*frameRate <= float64(decoder.MaxWidth)*float64(decoder.MaxHeight)*(decoder.MaxFrameRate+0.01)
 }
 
 func videoTransformationForTargetV3(codec string) TransformationV3 {
@@ -1295,7 +1557,9 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		warnings = append(warnings, DegradationWarningV3{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."})
 	}
 	capKbps := optionalValueV3(request.BandwidthCapKbps)
-	capExceededBySource := capKbps > 0 && source.BitrateKbps > capKbps
+	// The cap is a hard ceiling, so a video source whose bitrate is unknown
+	// cannot be shown to fit it, as with the server cap.
+	capExceededBySource := capKbps > 0 && (source.BitrateKbps > capKbps || source.BitrateKbps <= 0 && source.VideoCodec != "")
 	if quality == QualityOriginalV3 && !capExceededBySource {
 		result := originalQualityResultV3(source)
 		result.Warnings = warnings
@@ -1308,14 +1572,26 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	reason := "quality_auto_source"
 	explicitRung := false
 	capApplied := false
+	// budgetKbps is the share of a bandwidth estimate or cap that automatic
+	// quality plans for; the encode never targets more than it. A source over
+	// the estimate's budget is re-encoded at its own size rather than sent
+	// as-is; a cap keeps its own source rule below.
+	budgetKbps := 0
+	overEstimate := false
+	// classLimit is the tallest class the preference, device, bandwidth or
+	// cap allows, before the source's own height bounds targetHeight; 0 is
+	// no limit. It keeps a cropped source in the class it earned.
+	var classLimit int
 	switch {
 	case quality == QualityOriginalV3:
 		// Only reached when the source bitrate exceeds the cap: the cap is a
 		// hard ceiling and outranks the original preference.
-		targetHeight = ladderHeightForBandwidthV3(int(float64(capKbps) * 0.8))
+		targetHeight = streamLadderClassV3(capKbps, source)
+		classLimit = targetHeight
 		capApplied = true
 	case quality != "auto":
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
+		classLimit = targetHeight
 		reason = "quality_fixed_rung"
 		explicitRung = true
 	default:
@@ -1324,14 +1600,29 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 			targetHeight = maxHeight
 			reason = "quality_device_limit"
 		}
+		classLimit = maxHeight
 		bandwidth := optionalValueV3(request.BandwidthEstimateKbps)
+		fromEstimate := bandwidth > 0
 		if capKbps > 0 && (bandwidth == 0 || capKbps < bandwidth) {
 			bandwidth = capKbps
+			fromEstimate = false
 		}
 		if bandwidth > 0 {
-			targetHeight = minPositiveV3(targetHeight, ladderHeightForBandwidthV3(int(float64(bandwidth)*0.8)))
+			earned := streamLadderClassV3(bandwidth, source)
+			targetHeight = minPositiveV3(targetHeight, earned)
+			classLimit = minPositiveV3(classLimit, earned)
+			budgetKbps = streamBudgetKbpsV3(bandwidth)
+			// A source of unknown bitrate counts as needing the full bitrate
+			// of the class it would be sent at, so it goes as-is only when the
+			// budget covers that.
+			sourceKbps := source.BitrateKbps
+			if sourceKbps <= 0 {
+				sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
+			}
+			overEstimate = fromEstimate && sourceKbps > budgetKbps
 			reason = "quality_bandwidth_limit"
 		} else if request.Metered {
+			classLimit = minPositiveV3(classLimit, 720)
 			if capped := minPositiveV3(targetHeight, 720); capped != targetHeight {
 				targetHeight = capped
 				reason = "quality_metered_limit"
@@ -1350,10 +1641,11 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// the cap's rung.
 	if capKbps > 0 && !capApplied {
 		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
-		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderBitrateKbpsV3(targetHeight) > capKbps) {
+		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderClassBitrateKbpsV3(targetHeight) > capKbps) {
 			capApplied = true
-			if capHeight := ladderHeightForBandwidthV3(int(float64(capKbps) * 0.8)); capHeight < targetHeight {
+			if capHeight := streamLadderClassV3(capKbps, source); capHeight < targetHeight {
 				targetHeight = capHeight
+				classLimit = minPositiveV3(classLimit, capHeight)
 			}
 		}
 	}
@@ -1361,11 +1653,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		reason = decisionReasonBandwidthCapV3
 		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
 	}
-	if source.Height > 0 && targetHeight >= source.Height && !capApplied {
+	if source.Height > 0 && targetHeight >= source.Height && !capApplied && !overEstimate {
+		label, width, height := sourceFrameV3(source)
 		return QualityResultV3{
-			Label:           strconv.Itoa(source.Height) + "p",
-			Width:           source.Width,
-			Height:          source.Height,
+			Label:           label,
+			Width:           width,
+			Height:          height,
 			BitrateKbps:     source.BitrateKbps,
 			PreservesSource: true,
 			ExplicitRung:    explicitRung,
@@ -1373,20 +1666,39 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 			Warnings:        warnings,
 		}
 	}
-	label := resolutionLabelV3(targetHeight)
-	effectiveHeight := resolutionHeightV3(label)
-	if source.Height > 0 && effectiveHeight > source.Height {
-		effectiveHeight = source.Height
-		label = resolutionLabelV3(effectiveHeight)
+	// Snap to a ladder class and fit the source into that class's box, so a
+	// scope film at the 1080p class is 1920x800. The label is the exact height
+	// the encoder scales to.
+	class := ladderClassesFrom(streamClassV3(targetHeight, classLimit, source))[0]
+	width, effectiveHeight := FitLadderBox(source.Width, source.Height, class.Height)
+	if effectiveHeight == 0 {
+		effectiveHeight = class.Height
 	}
-	width, bitrate := qualityDimensionsV3(effectiveHeight, source.Width, source.Height)
+	if width == 0 {
+		width = class.Width
+	}
+	// A fit that keeps an odd source frame still encodes an even one.
+	width, effectiveHeight = encodedFrame(source.Width, source.Height, width, effectiveHeight)
+	label := heightLabel(effectiveHeight)
+	bitrate := ladderClassBitrateKbpsV3(class.Height)
+	if budgetKbps > 0 && bitrate > budgetKbps {
+		// A class is earned at its floor, which can sit below the class
+		// bitrate; keep the headroom the class choice assumed.
+		bitrate = budgetKbps
+	}
+	if source.BitrateKbps > 0 {
+		// A smaller frame never needs more bits than the whole source used,
+		// counted as H.264, the output the planner starts from.
+		sourceEquivalent := int(float64(source.BitrateKbps) / codecEfficiency(source.VideoCodec))
+		bitrate = min(bitrate, max(sourceEquivalent, 1))
+	}
 	if capKbps > 0 && bitrate > capKbps {
 		// The ladder has no rung below 480p, so a cap under the lowest rung's
 		// bitrate is honored by lowering the encode target directly: the cap
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }
@@ -1417,10 +1729,11 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	}
 	fitsRung := sourceClassHeight > 0 && sourceClassHeight <= rung.Height && source.BitrateKbps > 0 && source.BitrateKbps <= rung.BitrateKbps
 	if fitsRung && !capApplied {
+		label, width, height := sourceFrameV3(source)
 		return QualityResultV3{
-			Label:           strconv.Itoa(source.Height) + "p",
-			Width:           source.Width,
-			Height:          source.Height,
+			Label:           label,
+			Width:           width,
+			Height:          height,
 			BitrateKbps:     source.BitrateKbps,
 			PreservesSource: true,
 			ExplicitRung:    true,
@@ -1436,8 +1749,8 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	if width == 0 {
 		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(height))
 	}
-	// Keep the clamped height exact. The transcoder leaves non-ladder heights
-	// unscaled, preserving the source crop even on a lower-class rung.
+	// Keep the clamped height exact. The transcoder scales to exactly this
+	// height, so a source crop is preserved even on a lower-class rung.
 	targetLabel := strconv.Itoa(height) + "p"
 	return QualityResultV3{
 		Label:             targetLabel,
@@ -1451,8 +1764,43 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	}
 }
 
+// originalQualityResultV3 keeps the source's frame. Its label is the exact
+// source height: a class label would scale a 3840x1600 source to 1080 lines
+// whenever the original route still needs a video transcode.
 func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
-	return QualityResultV3{Label: resolutionLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+	label, width, height := sourceFrameV3(source)
+	return QualityResultV3{Label: label, Width: width, Height: height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+}
+
+// streamClassV3 is the ladder class an automatic encode snaps into for a
+// target height already bounded by the source. A target below the source is
+// a downscale into the class at or below it. A target that keeps the source
+// height uses the class the source's frame belongs to by both dimensions,
+// within limit (0 for none), so a cropped 1920x800 film under a 1080p limit
+// re-encodes at its own size in the 1080p class rather than dropping to 720p.
+func streamClassV3(targetHeight, limit int, source SourceDescriptorV3) int {
+	class := ladderClassesFrom(targetHeight)[0].Height
+	if source.Height > 0 && targetHeight >= source.Height {
+		if own := ladderClassForSize(source.Width, source.Height); own > 0 {
+			class = own
+			if limit > 0 {
+				class = min(class, ladderClassesFrom(limit)[0].Height)
+			}
+		}
+	}
+	return class
+}
+
+// sourceFrameV3 is the frame a route that keeps the source size encodes when
+// it still converts (a codec change): the source frame with an odd height
+// rounded down to the even one 4:2:0 output needs, the width scale=-2 then
+// gives, and that height as the label. An unknown height has no label.
+func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) {
+	if source.Height <= 0 {
+		return "", source.Width, source.Height
+	}
+	width, height = encodedFrame(source.Width, source.Height, source.Width, source.Height)
+	return heightLabel(height), width, height
 }
 
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied
@@ -1673,17 +2021,18 @@ func resolutionLabelV3(h int) string {
 		return "480p"
 	}
 }
-func ladderHeightForBandwidthV3(kbps int) int {
-	switch {
-	case kbps >= 20_000:
-		return 2160
-	case kbps >= 8_000:
-		return 1080
-	case kbps >= 4_000:
-		return 720
-	default:
-		return 480
-	}
+
+// streamLadderClassV3 is the ladder class a streaming bandwidth budget
+// earns for this source. Automatic quality keeps a fifth of the measured
+// bandwidth as headroom and plans H.264, the output every route can decode.
+func streamLadderClassV3(kbps int, source SourceDescriptorV3) int {
+	return LadderClassForBitrate(streamBudgetKbpsV3(kbps), source.FrameRate, transcodeCodecH264)
+}
+
+// streamBudgetKbpsV3 is the part of a bandwidth figure automatic quality
+// plans to use.
+func streamBudgetKbpsV3(kbps int) int {
+	return int(float64(kbps) * 0.8)
 }
 func minPositiveV3(a, b int) int {
 	if a <= 0 {
@@ -1695,11 +2044,22 @@ func minPositiveV3(a, b int) int {
 	return b
 }
 
-// ladderBitrateKbpsV3 retains the established bitrate for each plain
-// resolution preference. Explicit menu steps use ladderRungsV3 below.
-func ladderBitrateKbpsV3(height int) int {
-	bitrates := map[int]int{480: 1_500, 720: 2_000, 1080: 6_000, 2160: 20_000}
-	return bitrates[resolutionHeightV3(resolutionLabelV3(height))]
+// ladderClassBitrateKbpsV3 is the encode bitrate automatic quality and the
+// plain resolution preferences use for a ladder class; a target between
+// classes takes the class below it. Explicit menu steps use ladderRungsV3.
+func ladderClassBitrateKbpsV3(height int) int {
+	switch ladderClassesFrom(height)[0].Height {
+	case 2160:
+		return 20_000
+	case 1080:
+		return 6_000
+	case 720:
+		return 2_000
+	case 540:
+		return 1_800
+	default:
+		return 1_500
+	}
 }
 
 type ladderRungV3 struct {
@@ -1776,19 +2136,6 @@ func ladderRungPublishableV3(rung ladderRungV3, source SourceDescriptorV3) bool 
 	return source.BitrateKbps > 0 && rung.BitrateKbps < source.BitrateKbps
 }
 
-func qualityDimensionsV3(height, sourceWidth, sourceHeight int) (int, int) {
-	rung := resolutionHeightV3(resolutionLabelV3(height))
-	width := 0
-	if sourceWidth > 0 && sourceHeight > 0 {
-		width = sourceWidth * rung / sourceHeight
-		width -= width % 2
-	}
-	if width == 0 {
-		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(rung))
-	}
-	return width, ladderBitrateKbpsV3(rung)
-}
-
 func SortedTransformationNamesV3(values []TransformationV3) []string {
 	result := make([]string, 0, len(values))
 	for _, v := range values {
@@ -1836,6 +2183,38 @@ func deliverySupportsAudioClaimV3(request StartRequestV3, deliveryClass, codec s
 	return containsFoldV3(supportedCodecs, codec)
 }
 
+// deliveryExceedsMaxChannelsV3 reports whether an audio stream with the given
+// channel count exceeds the delivery's max_channels ceiling. Planning and the
+// finished-plan check in deliverySupportsPlanV3 share it; a ceiling of zero or
+// less means unset, matching aacOutputChannelsV3.
+func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass string, channels int) bool {
+	capability, ok := request.ClientPlaybackContext.Deliveries[deliveryClass]
+	return ok && capability.MaxChannels != nil && *capability.MaxChannels > 0 && channels > *capability.MaxChannels
+}
+
+// audioRemuxFitsServerCapV3 reports whether a video-copy remux that converts
+// the selected audio to AAC stays inside the administrator's bitrate cap, or
+// the client's bandwidth cap when that is lower: the planner has already folded
+// the two into Request.BandwidthCapKbps. The file's total bitrate already
+// counts the audio track the AAC output replaces, so adding the full AAC rate
+// is an upper bound. The source descriptor's rate
+// can be the video track's alone and would undercount. An unknown total cannot
+// be bounded and needs the budgeted transcode.
+func audioRemuxFitsServerCapV3(input PlannerInputV3, file *models.MediaFile, aacChannels int) bool {
+	if input.ServerBitrateCapKbps <= 0 {
+		return true
+	}
+	totalBitrateKbps := 0
+	if file != nil {
+		totalBitrateKbps = normalizeBitrateKbpsV3(file.Bitrate)
+	}
+	if totalBitrateKbps <= 0 {
+		return false
+	}
+	_, aacKbps := ResolveAACOutputV3(aacChannels, 0)
+	return totalBitrateKbps+aacKbps <= optionalValueV3(input.Request.BandwidthCapKbps)
+}
+
 // deliverySupportsPlanV3 applies the capability limits scoped to the delivery
 // class after a concrete recipe has been built. Empty lists preserve clients
 // that only advertise class availability; non-empty lists are authoritative
@@ -1863,7 +2242,7 @@ func deliverySupportsPlanV3(request StartRequestV3, deliveryClass string, plan P
 			}
 		}
 	}
-	if capability.MaxChannels != nil && plan.EffectiveRecipe.AudioChannels != nil && *plan.EffectiveRecipe.AudioChannels > *capability.MaxChannels {
+	if plan.EffectiveRecipe.AudioChannels != nil && deliveryExceedsMaxChannelsV3(request, deliveryClass, *plan.EffectiveRecipe.AudioChannels) {
 		return false
 	}
 	clientManagedOriginalRange := deliveryClass == DeliveryClassOriginalHTTPV3 &&

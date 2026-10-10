@@ -16,24 +16,38 @@ type AdminAuditLogsService interface {
 	List(context.Context, activitylog.ListOptions) (activitylog.ListResult, error)
 }
 
+type AdminAuditChange struct {
+	Field  string  `json:"field"`
+	Before *string `json:"before,omitempty"`
+	After  *string `json:"after,omitempty"`
+}
+
 type AdminAuditLog struct {
-	ID                 string  `json:"id"`
-	Timestamp          Instant `json:"timestamp"`
-	ClientIP           string  `json:"client_ip"`
-	UserID             *string `json:"user_id,omitempty"`
-	ImpersonatorUserID *string `json:"impersonator_user_id,omitempty"`
-	SessionID          string  `json:"session_id,omitempty"`
-	PlaybackSessionID  string  `json:"playback_session_id,omitempty"`
-	RequestID          string  `json:"request_id,omitempty"`
-	NodeID             string  `json:"node_id,omitempty"`
-	Method             string  `json:"method"`
-	Path               string  `json:"path"`
-	PathPattern        string  `json:"path_pattern,omitempty"`
-	StatusCode         int     `json:"status_code"`
-	UserAgent          string  `json:"user_agent,omitempty"`
-	DurationMs         int     `json:"duration_ms"`
+	Action             string             `json:"action,omitempty"`
+	TargetType         string             `json:"target_type,omitempty"`
+	TargetID           string             `json:"target_id,omitempty"`
+	Changes            []AdminAuditChange `json:"changes,omitempty"`
+	ID                 string             `json:"id"`
+	Timestamp          Instant            `json:"timestamp"`
+	ClientIP           string             `json:"client_ip"`
+	UserID             *string            `json:"user_id,omitempty"`
+	ImpersonatorUserID *string            `json:"impersonator_user_id,omitempty"`
+	SessionID          string             `json:"session_id,omitempty"`
+	PlaybackSessionID  string             `json:"playback_session_id,omitempty"`
+	RequestID          string             `json:"request_id,omitempty"`
+	NodeID             string             `json:"node_id,omitempty"`
+	Method             string             `json:"method"`
+	Path               string             `json:"path"`
+	PathPattern        string             `json:"path_pattern,omitempty"`
+	StatusCode         int                `json:"status_code"`
+	UserAgent          string             `json:"user_agent,omitempty"`
+	DurationMs         int                `json:"duration_ms"`
 }
 type AdminAuditLogsInput struct {
+	Action      string `query:"action" maxLength:"64"`
+	TargetType  string `query:"target_type" maxLength:"64"`
+	TargetID    string `query:"target_id" maxLength:"64"`
+	ActorUserID string `query:"actor_user_id" pattern:"^[1-9][0-9]*$" maxLength:"20"`
 	LimitParam
 	Cursor            string `query:"cursor" maxLength:"8192"`
 	From              string `query:"from" format:"date-time"`
@@ -58,7 +72,7 @@ func registerAdminAuditLogs(reg *Registry) {
 		if reg.deps.AdminAuditLogs == nil {
 			return nil, unavailable("audit logs")
 		}
-		opts := activitylog.ListOptions{Method: strings.ToUpper(strings.TrimSpace(in.Method)), PathPrefix: strings.TrimSpace(in.PathPrefix), ClientIP: strings.TrimSpace(in.ClientIP), RequestID: strings.TrimSpace(in.RequestID), SessionID: strings.TrimSpace(in.SessionID), PlaybackSessionID: strings.TrimSpace(in.PlaybackSessionID), Limit: in.Limit}
+		opts := activitylog.ListOptions{Action: strings.TrimSpace(in.Action), TargetType: strings.TrimSpace(in.TargetType), TargetID: strings.TrimSpace(in.TargetID), Method: strings.ToUpper(strings.TrimSpace(in.Method)), PathPrefix: strings.TrimSpace(in.PathPrefix), ClientIP: strings.TrimSpace(in.ClientIP), RequestID: strings.TrimSpace(in.RequestID), SessionID: strings.TrimSpace(in.SessionID), PlaybackSessionID: strings.TrimSpace(in.PlaybackSessionID), Limit: in.Limit}
 		if in.StatusCode != "" {
 			code, err := strconv.Atoi(in.StatusCode)
 			if err != nil {
@@ -75,6 +89,13 @@ func registerAdminAuditLogs(reg *Registry) {
 			} else {
 				return nil, NewProblem(TypeValidationFailed, "Invalid client_ip.")
 			}
+		}
+		if in.ActorUserID != "" {
+			id, err := intOfID(ID(in.ActorUserID))
+			if err != nil || id <= 0 {
+				return nil, NewProblem(TypeValidationFailed, "Invalid actor_user_id.")
+			}
+			opts.ActorUserID = &id
 		}
 		if in.UserID != "" {
 			id, err := intOfID(ID(in.UserID))
@@ -116,7 +137,10 @@ func registerAdminAuditLogs(reg *Registry) {
 			if entry.ID <= 0 || entry.Timestamp.IsZero() {
 				return nil, serviceProblem(errors.New("invalid audit log identity or time"))
 			}
-			row := AdminAuditLog{ID: strconv.FormatInt(entry.ID, 10), Timestamp: NewInstant(entry.Timestamp), ClientIP: entry.ClientIP, SessionID: entry.SessionID, PlaybackSessionID: entry.PlaybackSessionID, RequestID: entry.RequestID, NodeID: entry.NodeID, Method: entry.Method, Path: entry.Path, PathPattern: entry.PathPattern, StatusCode: entry.StatusCode, UserAgent: entry.UserAgent, DurationMs: entry.DurationMs}
+			row := AdminAuditLog{Action: entry.Action, TargetType: entry.TargetType, TargetID: entry.TargetID, ID: strconv.FormatInt(entry.ID, 10), Timestamp: NewInstant(entry.Timestamp), ClientIP: entry.ClientIP, SessionID: entry.SessionID, PlaybackSessionID: entry.PlaybackSessionID, RequestID: entry.RequestID, NodeID: entry.NodeID, Method: entry.Method, Path: entry.Path, PathPattern: entry.PathPattern, StatusCode: entry.StatusCode, UserAgent: entry.UserAgent, DurationMs: entry.DurationMs}
+			for _, change := range entry.Changes {
+				row.Changes = append(row.Changes, AdminAuditChange{Field: change.Field, Before: change.Before, After: change.After})
+			}
 			if entry.ImpersonatorUserID != nil {
 				row.ImpersonatorUserID = new(strconv.Itoa(*entry.ImpersonatorUserID))
 			}

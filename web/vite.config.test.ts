@@ -1,5 +1,10 @@
 // @vitest-environment node
 
+// TODO: this file loads vite.config.ts, whose @tailwindcss/vite import calls
+// node:module register at load time, which Vitest does not allow in VM
+// contexts, so it runs on the threads pool (THREADS_TESTS in vite.config.ts).
+// Make it VM-safe and drop it from that list.
+
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";

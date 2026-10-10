@@ -70,7 +70,7 @@ func seededBreaking(t *testing.T) []byte {
 // TestSeededBreakingChangeIsDetected proves the pinned tool detects the
 // seeded fixture; a tool upgrade that stops detecting it fails here.
 func TestSeededBreakingChangeIsDetected(t *testing.T) {
-	changes, err := Diff(contracts.OpenAPI, seededBreaking(t))
+	changes, err := Diff(seedDocument(t), seededBreaking(t))
 	if err != nil {
 		t.Fatal(err)
 	}

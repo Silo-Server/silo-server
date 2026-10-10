@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,8 @@ export interface SecretFieldProps {
    */
   cleared?: boolean;
   hint?: string;
+  /** Extra line under the description, e.g. a save error for this field. */
+  status?: ReactNode;
   disabled?: boolean;
   restartRequired?: boolean;
 }
@@ -61,6 +63,7 @@ export function SecretField({
   onClear,
   cleared = false,
   hint,
+  status,
   disabled = false,
   restartRequired = false,
 }: SecretFieldProps) {
@@ -97,6 +100,7 @@ export function SecretField({
       htmlFor={controlId}
       description={description}
       descriptionId={hintId}
+      status={status}
       restartRequired={restartRequired}
     >
       {/* The action sits ahead of the input, as in LimitField: the row's unit

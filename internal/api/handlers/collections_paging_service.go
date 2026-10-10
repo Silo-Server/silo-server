@@ -54,6 +54,11 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 	if err != nil {
 		return out, err
 	}
+	// Another profile's collection shows only what its owner can access too.
+	access, err = catalog.PersonalCollectionFilter(ctx, h.CollectionOwners, access, userID, profileID, c.CreatorProfileID)
+	if err != nil {
+		return out, collectionPageError(err)
+	}
 	if catalog.IsLiveQueryType(c.CollectionType) {
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
@@ -183,6 +188,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		for _, item := range page.Items {
 			out.Items = append(out.Items, h.itemListResponseOf(ctx, item))
 		}
+		h.setListingLogos(ctx, out.Items, page.Items, access)
 		out.Revision = witness
 		out.HasMore = page.HasMore
 		out.Query = page.Next
@@ -213,6 +219,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 			out.Items = append(out.Items, v)
 		}
 	}
+	h.setListingLogos(ctx, out.Items, items, access)
 	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: page.Revision}); err != nil {
 		return out, collectionPageError(err)
 	}

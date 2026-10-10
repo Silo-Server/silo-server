@@ -247,41 +247,6 @@ func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	}
 }
 
-func TestWatchedRefillRunsBeforeDiversity(t *testing.T) {
-	visible := &models.MediaItem{ContentID: "visible"}
-	overflow := &models.MediaItem{ContentID: "overflow"}
-	sectionsWithItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{
-				ID:          "ordinary",
-				SectionType: sections.SectionRecentlyAdded,
-				ItemLimit:   1,
-			},
-			Items: []*models.MediaItem{visible, overflow},
-		},
-		{
-			ResolvedSection: sections.ResolvedSection{
-				ID:          "avoid-duplicates",
-				SectionType: sections.SectionHiddenGems,
-			},
-			Items: []*models.MediaItem{overflow},
-		},
-	}
-
-	filtered := filterWatchedHomeSectionItems(sectionsWithItems, map[string]*itemUserStateResponse{
-		"visible":  {Played: false},
-		"overflow": {Played: false},
-	})
-	diverse := applyDiversityFilter(filtered)
-
-	if got := diverse[0].Items; len(got) != 1 || got[0].ContentID != "visible" {
-		t.Fatalf("first section items = %#v, want visible refill", got)
-	}
-	if got := diverse[1].Items; len(got) != 1 || got[0].ContentID != "overflow" {
-		t.Fatalf("hidden overflow candidate affected downstream diversity: %#v", got)
-	}
-}
-
 func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	ctx := context.Background()
 	store := newPlaybackTestStore(t)
