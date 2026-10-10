@@ -38,6 +38,7 @@ type fakeDownloadService struct {
 	patchErr       error
 	serveErr       error
 	serveBody      string
+	directBody     string
 	directErr      error
 	manifest       *downloads.OfflineManifest
 	batchManifests []*downloads.OfflineManifest
@@ -179,6 +180,9 @@ func (f *fakeDownloadService) SyncSubscriptions(_ context.Context, userID int, p
 func (f *fakeDownloadService) ServeDirect(_ context.Context, w http.ResponseWriter, _ *http.Request, _, fileID int, format string, _ catalog.AccessFilter) error {
 	f.gotDirectFileID = fileID
 	f.gotDirectFormat = format
+	if f.directBody != "" {
+		_, _ = w.Write([]byte(f.directBody))
+	}
 	if f.directErr != nil {
 		return f.directErr
 	}
@@ -914,6 +918,30 @@ func TestHandleDirectDownloadThreadsOriginalFormat(t *testing.T) {
 	}
 	if svc.gotDirectFormat != downloads.FormatOriginal {
 		t.Fatalf("direct format = %q, want original", svc.gotDirectFormat)
+	}
+}
+
+// A transfer that fails after the file's headers and first bytes went out must
+// leave the partial media response alone instead of appending a JSON 500.
+func TestHandleDirectDownloadDoesNotAppendJSONAfterResponseCommitted(t *testing.T) {
+	routes := map[string]func(*DownloadHandler, http.ResponseWriter, *http.Request){
+		"direct": (*DownloadHandler).HandleDirectDownload,
+		"proxy":  (*DownloadHandler).HandleDirectDownloadViaProxy,
+	}
+	for name, handle := range routes {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeDownloadService{
+				directBody: "partial",
+				directErr:  fmt.Errorf("serving download: %w", downloads.ErrResponseCommitted),
+			}
+			h := NewDownloadHandler(svc)
+			rec := httptest.NewRecorder()
+			handle(h, rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42", nil, 7, "", ""))
+
+			if rec.Code != http.StatusOK || rec.Body.String() != "partial" {
+				t.Fatalf("response status=%d body=%q", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

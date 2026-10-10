@@ -558,9 +558,11 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 	// exactly as on /downloads/{id}/file above; roll the deadline with progress
 	// instead of truncating the body at 120 s.
 	sw := httpstream.NewRollingDeadlineWriter(w)
-	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+	err = h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter)
+	// Headers and part of the file already went out, so an error body would
+	// corrupt the media response. Same handling as ServeDownloadFile.
+	if err != nil && !errors.Is(err, downloads.ErrResponseCommitted) {
 		h.writeDownloadError(w, err)
-		return
 	}
 }
 
