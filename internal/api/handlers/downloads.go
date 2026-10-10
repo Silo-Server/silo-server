@@ -558,10 +558,19 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 	// exactly as on /downloads/{id}/file above; roll the deadline with progress
 	// instead of truncating the body at 120 s.
 	sw := httpstream.NewRollingDeadlineWriter(w)
-	err = h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter)
-	// Headers and part of the file already went out, so an error body would
-	// corrupt the media response. Same handling as ServeDownloadFile.
-	if err != nil && !errors.Is(err, downloads.ErrResponseCommitted) {
+	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+		if errors.Is(err, downloads.ErrResponseCommitted) {
+			// Headers and part of the file already went out, so an error body
+			// would corrupt the media response. Abort it instead, as the v2
+			// stream writer requires. A client that left has canceled the
+			// request; any other failure, such as a short read from storage,
+			// is the server's.
+			if r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "direct download failed after the response started",
+					"component", "downloads", "file_id", fileID, "error", err)
+			}
+			panic(http.ErrAbortHandler)
+		}
 		h.writeDownloadError(w, err)
 	}
 }
