@@ -58,9 +58,20 @@ function jobDescription(job: AdminJob) {
   }
 }
 
+function imageCacheCleanupTotals(result: Record<string, unknown>) {
+  const deletedPrefixes = typeof result.deleted_prefixes === "number" ? result.deleted_prefixes : 0;
+  const deletedObjects =
+    typeof result.deleted_s3_objects === "number" ? result.deleted_s3_objects : 0;
+  return `${deletedObjects} cached object${deletedObjects === 1 ? "" : "s"} across ${deletedPrefixes} prefix${deletedPrefixes === 1 ? "" : "es"}`;
+}
+
 function jobResult(job: AdminJob) {
-  if (job.status !== "completed") return null;
   const result = job.result_payload as Record<string, unknown>;
+  // A canceled image cache cleanup keeps what it deleted before the cancel.
+  if (job.status === "cancelled" && job.job_type === "image_cache_cleanup") {
+    return `Canceled after deleting ${imageCacheCleanupTotals(result)}`;
+  }
+  if (job.status !== "completed") return null;
   switch (job.job_type) {
     case "library_refresh": {
       const total = result.total_items ?? 0;
@@ -92,13 +103,8 @@ function jobResult(job: AdminJob) {
       }
       return parts.length > 0 ? `Deleted ${parts.join(", ")}` : "Deleted (empty)";
     }
-    case "image_cache_cleanup": {
-      const deletedPrefixes =
-        typeof result.deleted_prefixes === "number" ? result.deleted_prefixes : 0;
-      const deletedObjects =
-        typeof result.deleted_s3_objects === "number" ? result.deleted_s3_objects : 0;
-      return `Deleted ${deletedObjects} cached object${deletedObjects === 1 ? "" : "s"} across ${deletedPrefixes} prefix${deletedPrefixes === 1 ? "" : "es"}`;
-    }
+    case "image_cache_cleanup":
+      return `Deleted ${imageCacheCleanupTotals(result)}`;
     case "catalog_export":
       return typeof result.items_exported === "number"
         ? `Exported ${result.items_exported} items, ${typeof result.files_exported === "number" ? result.files_exported : 0} files`
