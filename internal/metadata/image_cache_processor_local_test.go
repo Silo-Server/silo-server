@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -318,5 +319,135 @@ func TestProcessLocalImageFailsWithoutRootResolver(t *testing.T) {
 	}
 	if len(cacher.bytesReq) != 0 {
 		t.Fatal("must not cache without confinement roots")
+	}
+}
+
+// A directory swapped for a symlink to outside the library after the path was
+// resolved must not let the read follow it out: the open goes through the
+// root handle taken before resolution.
+func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	showDir := filepath.Join(root, "Show")
+	if err := os.Mkdir(showDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	posterPath := writeLocalPoster(t, showDir)
+	if err := os.WriteFile(filepath.Join(outside, "poster.jpg"), []byte("outside-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pinned, _ := openLibraryRoots([]string{root})
+	defer closeLibraryRoots(pinned)
+	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	handle := pinnedLibraryRoot(pinned, resolvedRoot)
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if handle == nil || err != nil {
+		t.Fatalf("pinned root %v, rel error %v", handle, err)
+	}
+	// Swap the show directory for a link out of the library.
+	if err := os.Rename(showDir, filepath.Join(root, "Show.moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, showDir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	data, err := readLocalImageFile(posterPath, handle, rel)
+	if err == nil || strings.Contains(string(data), "outside") {
+		t.Fatalf("read %q (err %v) through a swapped directory, want an error", data, err)
+	}
+}
+
+// A library root replaced by a link out of the library after Silo opened it
+// cannot redirect the read, whether the swap lands before or after the image
+// path is resolved.
+func TestReadConfinedLocalImageRefusesRootSwappedAfterOpening(t *testing.T) {
+	setup := func(t *testing.T) (root, posterPath, outside string) {
+		t.Helper()
+		base := t.TempDir()
+		root = filepath.Join(base, "library")
+		outside = filepath.Join(base, "outside")
+		for dir, content := range map[string]string{root: "poster-bytes", outside: "outside-bytes"} {
+			if err := os.MkdirAll(filepath.Join(dir, "Show"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "Show", "poster.jpg"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root, filepath.Join(root, "Show", "poster.jpg"), outside
+	}
+	swapRoot := func(t *testing.T, root, outside string) {
+		t.Helper()
+		if err := os.Rename(root, root+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, root); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+
+	t.Run("swapped before resolution", func(t *testing.T) {
+		root, posterPath, outside := setup(t)
+		pinned, _ := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(pinned)
+		swapRoot(t, root, outside)
+
+		_, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if pinnedLibraryRoot(pinned, resolvedRoot) != nil {
+			t.Fatal("the replacement root matched the root opened before the swap")
+		}
+	})
+
+	t.Run("swapped after resolution", func(t *testing.T) {
+		root, posterPath, outside := setup(t)
+		pinned, _ := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(pinned)
+		resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		handle := pinnedLibraryRoot(pinned, resolvedRoot)
+		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+		if handle == nil || err != nil {
+			t.Fatalf("pinned root %v, rel error %v", handle, err)
+		}
+		swapRoot(t, root, outside)
+
+		data, err := readLocalImageFile(posterPath, handle, rel)
+		if err == nil || strings.Contains(string(data), "outside") {
+			t.Fatalf("read %q (err %v) after the root was swapped, want an error", data, err)
+		}
+	})
+}
+
+// A root the process cannot open is a read failure, not a path outside the
+// library, so it never gets the stable out-of-roots classification.
+func TestReadConfinedLocalImageReportsUnopenableRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	root := filepath.Join(t.TempDir(), "library")
+	showDir := filepath.Join(root, "Show")
+	if err := os.MkdirAll(showDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	posterPath := writeLocalPoster(t, showDir)
+	// Traverse-only: the poster is reachable, but the root cannot be opened.
+	if err := os.Chmod(root, 0o111); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	_, err := readConfinedLocalImage(context.Background(), &fakeLibraryRootResolver{roots: []string{root}}, "show", "file://"+posterPath)
+	if err == nil || !strings.Contains(err.Error(), "local image forbidden") {
+		t.Fatalf("err = %v, want the forbidden failure", err)
 	}
 }

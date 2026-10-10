@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netguard"
@@ -24,6 +25,9 @@ type ImageService interface {
 	FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]metadata.RemoteImage, map[string]string, error)
 	FetchSeasonImages(ctx context.Context, providerIDs map[string]string, language string, folderID int, seasonNumber int) ([]metadata.RemoteImage, map[string]string, error)
 	ApplyItemImage(ctx context.Context, req metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error)
+	FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int, contentID string) ([]metadata.RemoteImage, map[string]string, error)
+	LocalImagePreview(ctx context.Context, contentID string, sourceURL string) (string, error)
+	ApplyLocalItemImage(ctx context.Context, req metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error)
 }
 
 // ImageItemLookup loads media items, seasons, and episodes by content ID.
@@ -78,6 +82,18 @@ func NewAdminImageHandler(
 		imageResolver: imageResolver,
 		detailSvc:     detailSvc,
 	}
+}
+
+// localImageProviderID labels local sidecar choices in the image list.
+const localImageProviderID = "local"
+
+// itemTypeSeries is the media item type for a series.
+const itemTypeSeries = "series"
+
+// offersLocalImages reports whether the picker offers local sidecar artwork
+// for an item type: the NFO provider serves movies and series only.
+func offersLocalImages(itemType string) bool {
+	return itemType == itemTypeMovie || itemType == itemTypeSeries
 }
 
 // --- Request/Response types ---
@@ -192,7 +208,8 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	out, err := h.GetAdminItemImages(r.Context(), contentID)
+	// Frozen v1 keeps its provider-only choices.
+	out, err := h.listItemImages(r.Context(), contentID, false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -202,7 +219,13 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 
 type AdminItemImagesView = getItemImagesResponse
 
+// GetAdminItemImages lists provider choices plus, for a movie or series, the
+// local sidecar artwork next to its files.
 func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID string) (AdminItemImagesView, error) {
+	return h.listItemImages(ctx, contentID, true)
+}
+
+func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
@@ -233,9 +256,16 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 
 	var images []metadata.RemoteImage
 	var providerErrors map[string]string
+	// Only the movie and series list runs sidecar discovery. Every other list
+	// treats a file:// URL as an ordinary provider choice, as before.
+	withLocal := includeLocal && resolved.season == nil && resolved.episode == nil && offersLocalImages(resolved.parentItem.Type)
 	if resolved.season != nil {
 		images, providerErrors, err = h.imageSvc.FetchSeasonImages(
 			ctx, providerIDs, language, folderID, resolved.season.SeasonNumber,
+		)
+	} else if withLocal {
+		images, providerErrors, err = h.imageSvc.FetchItemImagesWithLocal(
+			ctx, providerIDs, resolved.parentItem.Type, language, folderID, resolved.parentItem.ContentID,
 		)
 	} else {
 		// Movies, series, and episodes use the parent item's type for the plugin
@@ -250,10 +280,13 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch images")
 	}
 
-	// Batch-resolve plugin-prefixed URLs for display.
-	rawPaths := make([]string, len(images))
-	for i, img := range images {
-		rawPaths[i] = img.URL
+	// Batch-resolve plugin-prefixed URLs for display. Local files get an
+	// inline preview below instead.
+	rawPaths := make([]string, 0, len(images))
+	for _, img := range images {
+		if !withLocal || !metadata.IsLocalImageSource(img.URL) {
+			rawPaths = append(rawPaths, img.URL)
+		}
 	}
 	var resolvedURLs map[string]string
 	if h.imageResolver != nil && len(rawPaths) > 0 {
@@ -264,11 +297,27 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	entries := make([]itemImageEntry, 0, len(images))
 	for _, img := range images {
 		displayURL := img.URL
-		if resolved, ok := resolvedURLs[img.URL]; ok && resolved != "" {
+		providerID := img.ProviderID
+		if withLocal && metadata.IsLocalImageSource(img.URL) {
+			// A file the picker cannot preview could not be applied either:
+			// both read it under the same confinement and size checks. Report
+			// the failure so the admin can tell why the choice is missing.
+			preview, err := h.imageSvc.LocalImagePreview(ctx, resolved.parentItem.ContentID, img.URL)
+			if err != nil {
+				slog.WarnContext(ctx, "admin images: local image preview failed", "component", "api", "content_id", contentID, "error", logredact.SanitizeText(err.Error()))
+				if providerErrors == nil {
+					providerErrors = map[string]string{}
+				}
+				providerErrors[localImageProviderID] = "Local image preview failed"
+				continue
+			}
+			displayURL = preview
+			providerID = localImageProviderID
+		} else if resolved, ok := resolvedURLs[img.URL]; ok && resolved != "" {
 			displayURL = resolved
 		}
 		entries = append(entries, itemImageEntry{
-			ProviderID:  img.ProviderID,
+			ProviderID:  providerID,
 			URL:         displayURL,
 			OriginalURL: img.URL,
 			Type:        metadata.ImageTypeToString(img.Type),
@@ -312,7 +361,8 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	out, err := h.ApplyAdminItemImage(r.Context(), contentID, req)
+	// Frozen v1 keeps applying provider images only.
+	out, err := h.applyItemImage(r.Context(), contentID, req, false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -323,7 +373,13 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 type AdminItemImageResult = applyItemImageResponse
 type AdminItemImageRequest = applyItemImageRequest
 
+// ApplyAdminItemImage applies a provider image, or for a movie or series one
+// of the local sidecar images the list offered.
 func (h *AdminImageHandler) ApplyAdminItemImage(ctx context.Context, contentID string, req AdminItemImageRequest) (AdminItemImageResult, error) {
+	return h.applyItemImage(ctx, contentID, req, true)
+}
+
+func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string, req AdminItemImageRequest, allowLocal bool) (AdminItemImageResult, error) {
 	if req.OriginalURL == "" || req.Type == "" {
 		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "original_url and type are required")
 	}
@@ -349,44 +405,14 @@ func (h *AdminImageHandler) ApplyAdminItemImage(ctx context.Context, contentID s
 		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type",
 			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
 	}
-	providerID := req.ProviderID
-	if providerID == "" {
-		providerID = primaryProvider(resolved.parentItem)
+	var result *metadata.ApplyItemImageResult
+	if allowLocal && metadata.IsLocalImageSource(req.OriginalURL) {
+		result, err = h.cacheLocalItemImage(ctx, contentID, resolved, imageType, req.OriginalURL)
+	} else {
+		result, err = h.cacheProviderItemImage(ctx, contentID, resolved, imageType, req)
 	}
-
-	// Use the parent item's ContentID for S3 key construction. Season /
-	// episode numbers (when present) scope the S3 key beneath the series
-	// prefix so siblings do not collide.
-	cacheContentID := findBestContentID(resolved.parentItem, providerID)
-	var seasonNumber, episodeNumber *int
-	switch resolved.contentType {
-	case "season":
-		if resolved.season != nil {
-			seasonNumber = new(resolved.season.SeasonNumber)
-		}
-	case "episode":
-		if resolved.episode != nil {
-			seasonNumber = new(resolved.episode.SeasonNumber)
-			episodeNumber = new(resolved.episode.EpisodeNumber)
-		}
-	}
-
-	// Only acting admins reach this call. Like the history-import sources an
-	// admin configures, the image an admin applies may be on the server's local
-	// network; netguard still refuses blocked addresses
-	// (docs/architecture/outbound-address-guard.md).
-	result, err := h.imageSvc.ApplyItemImage(netguard.WithPrivateAccess(ctx), metadata.ApplyItemImageRequest{
-		OriginalURL:   req.OriginalURL,
-		ProviderID:    providerID,
-		ContentType:   resolved.parentItem.Type,
-		ContentID:     cacheContentID,
-		ImageType:     imageType,
-		SeasonNumber:  seasonNumber,
-		EpisodeNumber: episodeNumber,
-	})
 	if err != nil {
-		slog.ErrorContext(ctx, "admin images: apply failed", "component", "api", "content_id", contentID, "error", err)
-		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply image")
+		return AdminItemImageResult{}, err
 	}
 
 	err = h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
@@ -434,6 +460,79 @@ func (h *AdminImageHandler) ApplyAdminItemImage(ctx context.Context, contentID s
 		ImageURL:   imageURL,
 		Revision:   result.Revision,
 	}, nil
+}
+
+// cacheProviderItemImage downloads and caches a provider or HTTP(S) image.
+func (h *AdminImageHandler) cacheProviderItemImage(ctx context.Context, contentID string, resolved *resolvedItem, imageType metadata.ImageType, req AdminItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	providerID := req.ProviderID
+	if providerID == "" {
+		providerID = primaryProvider(resolved.parentItem)
+	}
+
+	// Use the parent item's ContentID for S3 key construction. Season /
+	// episode numbers (when present) scope the S3 key beneath the series
+	// prefix so siblings do not collide.
+	cacheContentID := findBestContentID(resolved.parentItem, providerID)
+	var seasonNumber, episodeNumber *int
+	switch resolved.contentType {
+	case "season":
+		if resolved.season != nil {
+			seasonNumber = new(resolved.season.SeasonNumber)
+		}
+	case "episode":
+		if resolved.episode != nil {
+			seasonNumber = new(resolved.episode.SeasonNumber)
+			episodeNumber = new(resolved.episode.EpisodeNumber)
+		}
+	}
+
+	// Only acting admins reach this call. Like the history-import sources an
+	// admin configures, the image an admin applies may be on the server's local
+	// network; netguard still refuses blocked addresses
+	// (docs/architecture/outbound-address-guard.md).
+	result, err := h.imageSvc.ApplyItemImage(netguard.WithPrivateAccess(ctx), metadata.ApplyItemImageRequest{
+		OriginalURL:   req.OriginalURL,
+		ProviderID:    providerID,
+		ContentType:   resolved.parentItem.Type,
+		ContentID:     cacheContentID,
+		ImageType:     imageType,
+		SeasonNumber:  seasonNumber,
+		EpisodeNumber: episodeNumber,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "admin images: apply failed", "component", "api", "content_id", contentID, "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply image")
+	}
+	return result, nil
+}
+
+// cacheLocalItemImage caches one of the local sidecar images the list offered
+// for a movie or series.
+func (h *AdminImageHandler) cacheLocalItemImage(ctx context.Context, contentID string, resolved *resolvedItem, imageType metadata.ImageType, sourceURL string) (*metadata.ApplyItemImageResult, error) {
+	if resolved.season != nil || resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
+		return nil, apiError(http.StatusBadRequest, "bad_request", "Local images can only be applied to movies and series")
+	}
+	item := resolved.parentItem
+	folderID, err := h.resolveImageFolderID(ctx, item.ContentID)
+	if err != nil {
+		slog.ErrorContext(ctx, "admin images: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Could not determine library for item")
+	}
+	result, err := h.imageSvc.ApplyLocalItemImage(ctx, metadata.ApplyLocalItemImageRequest{
+		ContentID:   item.ContentID,
+		ContentType: item.Type,
+		FolderID:    folderID,
+		ImageType:   imageType,
+		SourceURL:   sourceURL,
+	})
+	if errors.Is(err, metadata.ErrLocalImageNotOffered) {
+		return nil, apiError(http.StatusBadRequest, "bad_request", "The image is not one of this item's local images")
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "admin images: local apply failed", "component", "api", "content_id", contentID, "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply image")
+	}
+	return result, nil
 }
 
 // resolveImageFolderID finds the primary library folder for a content ID.

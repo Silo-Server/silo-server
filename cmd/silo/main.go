@@ -2093,6 +2093,9 @@ func main() {
 			// The processor host must mount the libraries, like the metadata worker.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
 			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
+			// The admin image picker previews and applies the same local files,
+			// under the same confinement.
+			metadataService.SetLibraryRootResolver(deps.FolderRepo)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
 			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {

@@ -461,9 +461,12 @@ type MetadataService struct {
 	seriesWork      map[string]*seriesEpisodeWork
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
-	imageCacheJobs  ImageCacheJobEnqueuer
-	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
-	imageResolver   interface {
+	libraryRoots    LibraryRootResolver
+	// localImageProvider overrides the built-in sidecar discovery in tests.
+	localImageProvider ImageProvider
+	imageCacheJobs     ImageCacheJobEnqueuer
+	autoCacheImages    atomic.Bool // hot-reloaded from metadata.cache_images
+	imageResolver      interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
 
@@ -603,6 +606,12 @@ func (s *MetadataService) SetImageCacher(c ImageCacher) {
 
 func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
 	s.imageCacheJobs = enqueuer
+}
+
+// SetLibraryRootResolver sets the resolver that confines local sidecar artwork
+// reads for the admin image picker to the item's library roots.
+func (s *MetadataService) SetLibraryRootResolver(resolver LibraryRootResolver) {
+	s.libraryRoots = resolver
 }
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
@@ -1153,21 +1162,29 @@ func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Contex
 	if len(files) == 0 {
 		return nil
 	}
+	// Every episode of a series usually shares one observed root, so check
+	// each distinct root and group once rather than once per file.
+	type observedRootKey struct {
+		folderID        int
+		root            string
+		groupKeyVersion int
+		contentGroupKey string
+	}
+	usable := make(map[observedRootKey]bool)
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file == nil || file.ObservedRootPath == "" {
 			continue
 		}
-		if !s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			file.MediaFolderID,
-			file.ObservedRootPath,
-			file.GroupKeyVersion,
-			file.ContentGroupKey,
-		) {
-			continue
+		key := observedRootKey{file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey}
+		ok, checked := usable[key]
+		if !checked {
+			ok = s.canUseObservedRootForDirectorySidecars(ctx, key.folderID, key.root, key.groupKeyVersion, key.contentGroupKey)
+			usable[key] = ok
 		}
-		paths = append(paths, file.ObservedRootPath)
+		if ok {
+			paths = append(paths, file.ObservedRootPath)
+		}
 	}
 	return compactUniqueFilePaths(paths)
 }
@@ -8610,8 +8627,7 @@ func primaryProviderID(ids map[string]string) string {
 // providerIDs should come from the parent MediaItem (for seasons/episodes,
 // the caller resolves up to the series item). contentType is "movie" or "series".
 func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]RemoteImage, map[string]string, error) {
-	contentLevel := contentType
-	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
+	chain, err := s.resolveChainCached(ctx, folderID, contentType)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}
