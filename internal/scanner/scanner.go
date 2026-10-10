@@ -371,7 +371,8 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	}
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
-	// a full library scan decides what happens to a skipped root's catalog.
+	// a full library scan decides what happens to a skipped root's catalog,
+	// so the subtree is reported as not verified.
 	// Every root that holds the subtree counts, and a root nested in another
 	// is also skipped when the outer root's rules exclude it.
 	for _, root := range cleanScanRoots(folder.Paths) {
@@ -394,7 +395,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 				"root", root,
 				"scope", cleanSubtree,
 			)
-			return &ScanResult{}, nil
+			return &ScanResult{ProtectedPaths: []string{cleanSubtree}}, nil
 		}
 	}
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
