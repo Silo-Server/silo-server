@@ -52,6 +52,7 @@ const TRANSCODING_ADVANCED_KEYS = [
   "playback.ffmpeg_path",
   "playback.transcode_dir",
   "playback.segment_retention_seconds",
+  "playback.copy_keyframe_playlist",
   "playback.hw_device",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
@@ -529,6 +530,14 @@ export default function PlaybackSettings() {
               value={form.getValue("playback.transcode_software_tone_map_enabled")}
               onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+            />
+            <SettingField
+              label="Complete playlists for copied video"
+              type="toggle"
+              description="Experimental. When Silo copies an MKV's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. Silo checks each file's keyframes in the background the first time it's played, so that first playback still uses the growing playlist."
+              value={form.getValue("playback.copy_keyframe_playlist") || "false"}
+              onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
+              restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
             />
             <SettingField
               label="Throttle transcoding"

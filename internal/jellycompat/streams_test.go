@@ -630,6 +630,55 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 	}
 }
 
+// The keyframe playlist only applies to copy streams; an encoded stream's
+// recipe and live session must match whatever the flag says.
+func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {
+	encoded := testRemoteTranscodeSource()
+	encoded.KeyframePlaylist = true
+	recipe := playback.NewRecipeCard(7, "profile", encoded.FileID, "", playback.TranscodeOpts{
+		TargetCodecVideo: compatTargetVideoCodec,
+		TargetCodecAudio: compatTargetAudioCodec,
+		AudioTrackIndex:  compatAudioTrackIndexOrDefault(encoded),
+	})
+	if !compatRecipeMatchesSource(&recipe, encoded) {
+		t.Fatal("encoded source rejected its recipe over the keyframe playlist flag")
+	}
+
+	copySource := encoded
+	copySource.HLSRemux = true
+	copyRecipe := recipe
+	copyRecipe.TargetCodecVideo = compatCopyCodec
+	if compatRecipeMatchesSource(&copyRecipe, copySource) {
+		t.Fatal("copy source accepted a recipe without its keyframe playlist")
+	}
+	copyRecipe.KeyframePlaylist = true
+	if !compatRecipeMatchesSource(&copyRecipe, copySource) {
+		t.Fatal("copy source rejected its keyframe playlist recipe")
+	}
+}
+
+// A remote copy session rebuilt from the proxy token keeps the keyframe
+// playlist the client already has.
+func TestBuildProxyRedirectURLCarriesKeyframePlaylistForRemoteCopyRecipe(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	source := PlaybackMediaSource{HLSRemux: true, KeyframePlaylist: true}
+	redirectURL, err := h.buildProxyRedirectURL(
+		"play-1", "upstream-1", string(playback.PlayTranscode),
+		&models.MediaFile{FilePath: "/media/movie.mkv"}, source, nil, time.Time{},
+		"http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, redirectURL, string(playback.PlayTranscode)), h.JWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claims.KeyframePlaylist {
+		t.Fatalf("copy proxy token omitted the keyframe playlist: %#v", claims)
+	}
+}
+
 func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
 	h := &PlaybackHandler{JWTSecret: "test-secret"}
 	source := PlaybackMediaSource{Version: catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10", ColorTransfer: "smpte2084"}}}}

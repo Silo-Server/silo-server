@@ -64,6 +64,11 @@ const (
 	AccessUnratedContentAllow = "allow"
 )
 
+// PlaybackKeyframePlaylistSettingKey serves copy-remux HLS as one complete
+// playlist planned from the source's keyframes, instead of FFmpeg's growing
+// one (#1466). It is off by default until it has been tried across players.
+const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
+
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
 // sources metadata plugins declare, such as rt_critic. Empty, the
@@ -456,6 +461,8 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
 	"catalog.search.meilisearch.binary_quantized":         "false",
+
+	PlaybackKeyframePlaylistSettingKey: "false",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -572,6 +579,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
+		PlaybackKeyframePlaylistSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
