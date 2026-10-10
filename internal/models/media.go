@@ -711,9 +711,10 @@ type MediaItem struct {
 	// set by the query that picks an episode card's artwork: true when the
 	// path is the episode's own still, false for season or series artwork, nil
 	// when no such query loaded the item. They travel with the paths so a
-	// cached item never pairs old artwork with newer provenance.
-	PosterIsEpisodeStill   *bool
-	BackdropIsEpisodeStill *bool
+	// cached item never pairs old artwork with newer provenance. json:"-"
+	// because some frozen v1 responses serialize MediaItem directly.
+	PosterIsEpisodeStill   *bool `json:"-"`
+	BackdropIsEpisodeStill *bool `json:"-"`
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.

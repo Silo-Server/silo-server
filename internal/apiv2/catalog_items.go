@@ -1377,7 +1377,9 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 	}
 	if d.Type == themeOwnerEpisode {
-		card.PosterIsEpisodeStill = new(d.PosterURL != "")
+		// An episode detail's poster is its still; the still's ThumbHash is
+		// served even when its URL doesn't resolve.
+		card.PosterIsEpisodeStill = new(d.PosterURL != "" || d.PosterThumbhash != "")
 		card.BackdropIsEpisodeStill = new(false)
 	}
 	if s := d.UserState; s != nil {
