@@ -32,8 +32,11 @@ import type {
   QualityOption,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
+import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -52,6 +55,10 @@ interface PlayerControlsProps {
   // Seek bar markers
   chapters?: PlayerChapter[];
   regions?: MarkerRegionView[];
+  // Seek bar previews
+  trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
+  onTrickplayError?: () => void;
   // Marker editing
   editing?: boolean;
   activeEditKind?: MarkerKind | null;
@@ -77,6 +84,7 @@ interface PlayerControlsProps {
   onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
+  subtitleSync?: SubtitleSync;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -84,6 +92,7 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -124,6 +133,9 @@ export function PlayerControls({
   buffered,
   chapters,
   regions,
+  trickplay,
+  trickplayUpdatedAt,
+  onTrickplayError,
   editing,
   activeEditKind,
   onRegionEdgeChange,
@@ -147,11 +159,13 @@ export function PlayerControls({
   onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
+  subtitleSync,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  deliveredRecipe,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -299,6 +313,9 @@ export function PlayerControls({
           buffered={buffered}
           chapters={chapters}
           regions={regions}
+          trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
+          onTrickplayError={onTrickplayError}
           editing={editing}
           activeEditKind={activeEditKind}
           onRegionEdgeChange={onRegionEdgeChange}
@@ -336,11 +353,13 @@ export function PlayerControls({
               onSubtitleJobAccepted={onSubtitleJobAccepted}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
+              subtitleSync={subtitleSync}
               audioTracks={audioTracks}
             />
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              deliveredRecipe={deliveredRecipe}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -511,12 +530,14 @@ export function PlayerControls({
                 onSubtitleJobAccepted={onSubtitleJobAccepted}
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
+                subtitleSync={subtitleSync}
                 audioTracks={audioTracks}
               />
 
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                deliveredRecipe={deliveredRecipe}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

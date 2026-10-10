@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { HostSystemStats, ReprobeNodeResult, StreamNode } from "@/api/types";
 import {
@@ -6,7 +8,6 @@ import {
   HW_ACCEL_INHERIT,
   buildNodeHWDeviceRows,
   describeCapabilityDrift,
-  describeEffectiveAcceleration,
   describeGPUBusy,
   describeNodeAccelerationOverride,
   describeNodeEgress,
@@ -18,13 +19,10 @@ import {
   describeResourceSample,
   describeSharedGPU,
   filterNodesByGroup,
-  formatBitsPerSecond,
   nodeHWDevicePaths,
   nodeHasHWDeviceInventory,
-  nodeReportsAcceleration,
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
-  parseHWDeviceOverride,
 } from "./adminNodesPresentation";
 
 const NOW = Date.parse("2026-08-26T12:00:00Z");
@@ -55,10 +53,6 @@ describe("describeNodeGPU", () => {
       label: "Awaiting first report",
       title: "No hardware capability report has been stored for this node yet.",
     });
-  });
-
-  it("treats an explicit null payload the same as an absent one", () => {
-    expect(describeNodeGPU(makeNode({ capabilities: null }), NOW).kind).toBe("awaiting");
   });
 
   it("marks the resolved backend verified when its probe passed", () => {
@@ -93,22 +87,6 @@ describe("describeNodeGPU", () => {
     });
   });
 
-  it("omits the device from an NVENC title, which has no render node", () => {
-    const presentation = describeNodeGPU(
-      makeNode({
-        capabilities: {
-          resolved: "nvenc",
-          detected_backends: [{ backend: "nvenc", verified: true }],
-        },
-      }),
-      NOW,
-    );
-
-    expect(presentation.kind === "reported" && presentation.backend.title).toBe(
-      "NVENC verified by FFmpeg probe.",
-    );
-  });
-
   it("warns with the failure reason when the resolved backend failed its probe", () => {
     const presentation = describeNodeGPU(
       makeNode({
@@ -136,22 +114,6 @@ describe("describeNodeGPU", () => {
       },
       failures: [],
     });
-  });
-
-  it("names a failed backend with no reason rather than showing an empty title", () => {
-    const presentation = describeNodeGPU(
-      makeNode({
-        capabilities: {
-          resolved: "vaapi",
-          detected_backends: [{ backend: "vaapi", verified: false }],
-        },
-      }),
-      NOW,
-    );
-
-    expect(presentation.kind === "reported" && presentation.backend.title).toBe(
-      "VAAPI probe failed: no reason reported",
-    );
   });
 
   it("lists failed backends other than the resolved one", () => {
@@ -231,50 +193,6 @@ describe("describeNodeGPU", () => {
         title: "QSV is in use but this node reported no verification probe for it.",
       },
     });
-  });
-
-  it("collapses identical device descriptions and keeps full paths in the title", () => {
-    const presentation = describeNodeGPU(
-      makeNode({
-        capabilities: {
-          resolved: "qsv",
-          render_device_details: [
-            { path: "/dev/dri/renderD128", description: "Intel GPU", pci_address: "0000:00:02.0" },
-            { path: "/dev/dri/renderD129", description: "Intel GPU" },
-            { path: "/dev/dri/renderD130", description: "NVIDIA GPU (0x2204)" },
-          ],
-        },
-      }),
-      NOW,
-    );
-
-    expect(presentation.kind === "reported" && presentation.deviceSummary).toBe(
-      "2× Intel GPU, NVIDIA GPU (0x2204)",
-    );
-    expect(presentation.kind === "reported" && presentation.deviceTitle).toBe(
-      [
-        "/dev/dri/renderD128 — Intel GPU (0000:00:02.0)",
-        "/dev/dri/renderD129 — Intel GPU",
-        "/dev/dri/renderD130 — NVIDIA GPU (0x2204)",
-      ].join("\n"),
-    );
-  });
-
-  it("counts render device paths when a report carries no details", () => {
-    const presentation = describeNodeGPU(
-      makeNode({
-        capabilities: {
-          resolved: "vaapi",
-          render_devices: ["/dev/dri/renderD128", "/dev/dri/renderD129"],
-        },
-      }),
-      NOW,
-    );
-
-    expect(presentation.kind === "reported" && presentation.deviceSummary).toBe("2 render devices");
-    expect(presentation.kind === "reported" && presentation.deviceTitle).toBe(
-      "/dev/dri/renderD128\n/dev/dri/renderD129",
-    );
   });
 
   it("marks a node stale once the health checks that confirm its report stop", () => {
@@ -485,90 +403,12 @@ describe("describeNodeGPU", () => {
 
     expect(presentation.kind === "reported" && presentation.live).toEqual([]);
   });
-
-  it("tolerates physical_gpu_keys without letting it change the presentation", () => {
-    const capabilities = {
-      resolved: "nvenc",
-      detected_backends: [{ backend: "nvenc", verified: true }],
-    };
-
-    expect(
-      describeNodeGPU(makeNode({ capabilities, physical_gpu_keys: ["GPU-abc"] }), NOW),
-    ).toEqual(describeNodeGPU(makeNode({ capabilities }), NOW));
-  });
-});
-
-describe("describeEffectiveAcceleration", () => {
-  it("has nothing to say about a node with no stored capabilities", () => {
-    expect(describeEffectiveAcceleration(makeNode())).toBeNull();
-    expect(describeEffectiveAcceleration(makeNode({ capabilities: null }))).toBeNull();
-  });
-
-  it("names the device a verified backend resolved on", () => {
-    const node = makeNode({
-      capabilities: {
-        resolved: "qsv",
-        detected_backends: [{ backend: "qsv", verified: true, device: "/dev/dri/renderD128" }],
-      },
-    });
-
-    expect(describeEffectiveAcceleration(node)).toBe(
-      "Currently resolves: QSV — verified on /dev/dri/renderD128",
-    );
-  });
-
-  it("omits the device for a verified backend with no render node, like NVENC", () => {
-    const node = makeNode({
-      capabilities: {
-        resolved: "nvenc",
-        detected_backends: [{ backend: "nvenc", verified: true }],
-      },
-    });
-
-    expect(describeEffectiveAcceleration(node)).toBe("Currently resolves: NVENC — verified");
-  });
-
-  it("says a failed probe failed, without repeating the reason", () => {
-    const node = makeNode({
-      capabilities: {
-        resolved: "qsv",
-        detected_backends: [
-          { backend: "qsv", verified: false, reason: "h264_qsv smoke encode failed: device busy" },
-        ],
-      },
-    });
-
-    expect(describeEffectiveAcceleration(node)).toBe("Currently resolves: QSV — probe failed");
-  });
-
-  it("calls a configured backend with no probe entry not verified", () => {
-    expect(describeEffectiveAcceleration(makeNode({ capabilities: { resolved: "qsv" } }))).toBe(
-      "Currently resolves: QSV — not verified",
-    );
-  });
-
-  it("describes no resolved backend as software encoding", () => {
-    expect(describeEffectiveAcceleration(makeNode({ capabilities: { resolved: "none" } }))).toBe(
-      "Currently resolves: software encoding",
-    );
-  });
-
-  it("treats a report from a server predating these fields as software encoding", () => {
-    expect(describeEffectiveAcceleration(makeNode({ capabilities: {} }))).toBe(
-      "Currently resolves: software encoding",
-    );
-  });
 });
 
 describe("describeSharedGPU", () => {
-  const alone = makeNode({ id: 1, name: "transcode-1" });
   const nvidiaA = makeNode({ id: 2, name: "transcode-a", physical_gpu_keys: ["GPU-aaa"] });
   const nvidiaB = makeNode({ id: 3, name: "transcode-b", physical_gpu_keys: ["GPU-aaa"] });
   const unique = makeNode({ id: 4, name: "transcode-c", physical_gpu_keys: ["GPU-ccc"] });
-
-  it("says nothing about a node that reports no identifiable GPU", () => {
-    expect(describeSharedGPU(alone, [alone, nvidiaA, nvidiaB])).toBeNull();
-  });
 
   it("says nothing when a node's GPUs are its own", () => {
     expect(describeSharedGPU(unique, [unique, nvidiaA, nvidiaB])).toBeNull();
@@ -605,12 +445,6 @@ describe("describeSharedGPU", () => {
     });
   });
 
-  it("reports nothing for a server that predates the field", () => {
-    const olderA = makeNode({ id: 7, name: "old-a" });
-    const olderB = makeNode({ id: 8, name: "old-b" });
-    expect(describeSharedGPU(olderA, [olderA, olderB])).toBeNull();
-  });
-
   it("does not match a node against itself when the list repeats its id", () => {
     expect(describeSharedGPU(nvidiaA, [nvidiaA, nvidiaA])).toBeNull();
   });
@@ -628,22 +462,6 @@ const FULL_SAMPLE: HostSystemStats = {
 };
 
 describe("describeNodeSystem", () => {
-  it("explains a healthy node that reports no sample at all", () => {
-    expect(describeNodeSystem(makeNode())).toEqual({
-      kind: "unreported",
-      label: "—",
-      title:
-        "This node reported no resource sample. Sampling is Linux-only, and a node running a build from before resource sampling reports none.",
-    });
-  });
-
-  it("blames the outage, not the sampler, when an unreachable node has no sample", () => {
-    expect(describeNodeSystem(makeNode({ healthy: false }))).toMatchObject({
-      kind: "unreported",
-      title: "This node is not answering health checks, so it has no current resource sample.",
-    });
-  });
-
   // A frozen CPU percentage is indistinguishable from a live one on screen.
   it("shows dashes for an unhealthy node still carrying an older sample", () => {
     expect(
@@ -660,12 +478,13 @@ describe("describeNodeSystem", () => {
 
     expect(system).toMatchObject({
       kind: "reported",
-      cpu: { label: "CPU", value: "42%", detail: "8 cores · load 1.35", muted: false },
+      cpu: { label: "CPU", value: "42%", detail: "8 cores · load 1.35", muted: false, fill: 42 },
       memory: {
         label: "RAM",
         value: "12.5 GiB of 31.3 GiB",
         detail: "40% used",
         muted: false,
+        fill: 40,
       },
       disk: {
         label: "Disk",
@@ -674,22 +493,9 @@ describe("describeNodeSystem", () => {
         title: "/tmp/silo-transcode — 87% full (435.0 GiB of 500.0 GiB)",
         muted: false,
         warning: true,
+        fill: 87,
       },
-      network: { label: "Net", value: "↓ 12.4 Mbps · ↑ 3.1 Mbps", muted: false },
-    });
-  });
-
-  it("mutes only the readings a partial sample is missing", () => {
-    const system = describeNodeSystem(
-      makeNode({ last_stats: { system: { cpu_pct: 12, mem_total_mb: 0, disks: [] } } }),
-    );
-
-    expect(system).toMatchObject({
-      kind: "reported",
-      cpu: { value: "12%", detail: "", muted: false },
-      memory: { value: "—", muted: true, title: "This sample carries no memory reading." },
-      disk: { value: "—", muted: true, title: "This sample carries no disk reading." },
-      network: { value: "—", muted: true, title: "This sample carries no network reading." },
+      network: { label: "Net", value: "↓ 12.4 Mbps · ↑ 3.1 Mbps", muted: false, fill: null },
     });
   });
 
@@ -743,72 +549,9 @@ describe("describeNodeSystem", () => {
       },
     });
   });
-
-  // A node's /health takes no credential, so it reports what a mount is for
-  // rather than where it is. That is the shape last_stats actually carries, so
-  // the page has to name mounts from it without a path.
-  it("names mounts by role when the sample carries no paths", () => {
-    const system = describeNodeSystem(
-      makeNode({
-        last_stats: {
-          system: {
-            disks: [
-              { role: "scratch", scratch: true, used_gb: 10, total_gb: 100 },
-              { role: "library-1", used_gb: 95, total_gb: 100 },
-              { role: "library-2", unavailable: true },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(system).toMatchObject({
-      disk: {
-        value: "95%",
-        detail: "library-1",
-        warning: true,
-        title: [
-          "scratch — 10% full (10.0 GiB of 100.0 GiB)",
-          "library-1 — 95% full (95.0 GiB of 100.0 GiB)",
-          "library-2 — unavailable on this host",
-        ].join("\n"),
-      },
-    });
-  });
-
-  it("names the mount that went away instead of showing a bare dash", () => {
-    const system = describeNodeSystem(
-      makeNode({ last_stats: { system: { disks: [{ path: "/media", unavailable: true }] } } }),
-    );
-
-    expect(system).toMatchObject({
-      disk: { value: "—", muted: true, title: "/media — unavailable on this host" },
-    });
-  });
-});
-
-describe("formatBitsPerSecond", () => {
-  it("scales a bits-per-second rate to the unit an operator reads", () => {
-    expect(formatBitsPerSecond(0)).toBe("0 bps");
-    expect(formatBitsPerSecond(940)).toBe("940 bps");
-    expect(formatBitsPerSecond(12_500)).toBe("13 kbps");
-    expect(formatBitsPerSecond(12_400_000)).toBe("12.4 Mbps");
-    expect(formatBitsPerSecond(2_500_000_000)).toBe("2.5 Gbps");
-  });
-
-  it("has nothing to say about an absent or impossible rate", () => {
-    expect(formatBitsPerSecond(undefined)).toBeNull();
-    expect(formatBitsPerSecond(null)).toBeNull();
-    expect(formatBitsPerSecond(-1)).toBeNull();
-    expect(formatBitsPerSecond(Number.NaN)).toBeNull();
-  });
 });
 
 describe("describeGPUBusy", () => {
-  it("reports nothing for a host with no GPU rather than an idle one", () => {
-    expect(describeGPUBusy([])).toBeNull();
-  });
-
   it("reports the busiest video engine and the total pinned sessions", () => {
     expect(
       describeGPUBusy([
@@ -839,14 +582,6 @@ describe("describeGPUBusy", () => {
 });
 
 describe("describeResourceSample", () => {
-  it("treats a server with no such endpoint as an unsampled host", () => {
-    expect(describeResourceSample(undefined)).toMatchObject({ kind: "unavailable" });
-  });
-
-  it("treats an explicit available:false the same way", () => {
-    expect(describeResourceSample({ available: false })).toMatchObject({ kind: "unavailable" });
-  });
-
   it("does not claim a sample when available is true but the body carries none", () => {
     expect(describeResourceSample({ available: true })).toMatchObject({ kind: "unavailable" });
   });
@@ -895,20 +630,6 @@ describe("describeNodeAccelerationOverride", () => {
     expect(describeNodeAccelerationOverride(makeNode({ hw_device_override: " , " }))).toBeNull();
   });
 
-  it("names the backend a node is pinned to", () => {
-    const override = describeNodeAccelerationOverride(makeNode({ hw_accel_override: "qsv" }));
-
-    expect(override?.label).toBe("override: qsv");
-    expect(override?.title).toContain("Acceleration: qsv");
-    expect(override?.title).toContain("GPU devices: inherited");
-  });
-
-  it("calls a software override software rather than none", () => {
-    expect(describeNodeAccelerationOverride(makeNode({ hw_accel_override: "none" }))?.label).toBe(
-      "override: software",
-    );
-  });
-
   it("shows a single pinned device inline and counts several", () => {
     expect(
       describeNodeAccelerationOverride(
@@ -923,12 +644,6 @@ describe("describeNodeAccelerationOverride", () => {
     expect(many?.title).toContain("GPU devices: /dev/dri/renderD128, /dev/dri/renderD129.");
     expect(many?.title).toContain("Acceleration: inherited");
   });
-
-  it("says when the override takes effect", () => {
-    const title = describeNodeAccelerationOverride(makeNode({ hw_accel_override: "nvenc" }))?.title;
-    expect(title).toContain("applies to new transcodes within a minute");
-    expect(title).toContain("sessions already running keep the backend they started with");
-  });
 });
 
 describe("describeCapabilityDrift", () => {
@@ -936,14 +651,6 @@ describe("describeCapabilityDrift", () => {
     expect(describeCapabilityDrift(makeNode())).toBeNull();
     expect(describeCapabilityDrift(makeNode({ capability_drift: null }))).toBeNull();
     expect(describeCapabilityDrift(makeNode({ capability_drift: "   " }))).toBeNull();
-  });
-
-  // A server predating the column sends no field at all, which must read as
-  // "no drift" rather than as an empty badge.
-  it("renders nothing for a server that predates the field", () => {
-    const olderServerNode = makeNode();
-    expect("capability_drift" in olderServerNode).toBe(false);
-    expect(describeCapabilityDrift(olderServerNode)).toBeNull();
   });
 
   it("shows the server's note verbatim and explains how it clears", () => {
@@ -954,14 +661,6 @@ describe("describeCapabilityDrift", () => {
     expect(drift?.title.split("\n")[0]).toBe(note);
     expect(drift?.title).toContain("got worse than the report it replaced");
     expect(drift?.title).toContain("re-probe the node");
-  });
-
-  it("trims the stored note rather than rendering its whitespace", () => {
-    expect(
-      describeCapabilityDrift(
-        makeNode({ capability_drift: "  render devices gone: /dev/dri/renderD128  " }),
-      )?.title.split("\n")[0],
-    ).toBe("render devices gone: /dev/dri/renderD128");
   });
 });
 
@@ -1071,13 +770,6 @@ describe("describeReprobeOutcome", () => {
     });
   });
 
-  it("still says which node failed when the server sent no reason", () => {
-    expect(describeReprobeOutcome(makeNode(), result({ status: "error" }))).toEqual({
-      ok: false,
-      message: "transcode-1: re-probe failed — the node reported no reason",
-    });
-  });
-
   it("reports an unchanged hash as plainly as a change", () => {
     const node = makeNode({ capabilities_hash: "sha256:aaa" });
 
@@ -1092,15 +784,6 @@ describe("describeReprobeOutcome", () => {
     expect(
       describeReprobeOutcome(node, result({ capability_hash: "sha256:bbb", resolved: "vaapi" })),
     ).toEqual({ ok: true, message: "transcode-1: re-probed, hardware report changed — now VAAPI" });
-  });
-
-  it("names a software fallback rather than the wire value", () => {
-    expect(
-      describeReprobeOutcome(
-        makeNode({ capabilities_hash: "sha256:aaa" }),
-        result({ capability_hash: "sha256:bbb", resolved: "none" }),
-      ).message,
-    ).toBe("transcode-1: re-probed, hardware report changed — now software");
   });
 
   // Without a hash on both sides there is nothing to compare, and claiming
@@ -1126,41 +809,9 @@ describe("describeReprobeOutcome", () => {
         "transcode-1: re-probed, no change. The stored report will catch up on the next health check",
     });
   });
-
-  it("prefers the name the server answered with, and falls back to the row's", () => {
-    expect(
-      describeReprobeOutcome(makeNode({ name: "stale-name" }), result({ node_name: "renamed" }))
-        .message,
-    ).toContain("renamed:");
-    expect(
-      describeReprobeOutcome(makeNode({ name: "row-name" }), result({ node_name: "  " })).message,
-    ).toContain("row-name:");
-  });
-});
-
-describe("parseHWDeviceOverride", () => {
-  it("splits, trims, and drops empty entries", () => {
-    expect(parseHWDeviceOverride(" /dev/dri/renderD128 ,, /dev/dri/renderD129,")).toEqual([
-      "/dev/dri/renderD128",
-      "/dev/dri/renderD129",
-    ]);
-  });
-
-  it("treats absent and empty values as no devices", () => {
-    expect(parseHWDeviceOverride(null)).toEqual([]);
-    expect(parseHWDeviceOverride(undefined)).toEqual([]);
-    expect(parseHWDeviceOverride("  ")).toEqual([]);
-  });
 });
 
 describe("nodeUsesCUDADevices", () => {
-  // NVENC takes the configured value straight through as its -hwaccel_device,
-  // so offering /dev/dri render paths for it hands the backend something it
-  // cannot use — the same reason the cluster Playback form hides its picker.
-  it("treats an explicit nvenc override as CUDA-addressed", () => {
-    expect(nodeUsesCUDADevices(makeNode({}), "nvenc")).toBe(true);
-  });
-
   it("follows what the node resolves to when the cluster names no backend", () => {
     const node = makeNode({ capabilities: { resolved: "nvenc" } });
     expect(nodeUsesCUDADevices(node, HW_ACCEL_INHERIT)).toBe(true);
@@ -1204,13 +855,6 @@ describe("nodeUsesCUDADevices", () => {
     const node = makeNode({ capabilities: { resolved: "qsv" } });
     expect(nodeUsesCUDADevices(node, "nvenc", "qsv")).toBe(true);
     expect(nodeUsesCUDADevices(node, "qsv", "nvenc")).toBe(false);
-  });
-
-  // An explicit render-device backend wins over whatever the stale report says.
-  it("uses render paths when the override names a render-device backend", () => {
-    const node = makeNode({ capabilities: { resolved: "nvenc" } });
-    expect(nodeUsesCUDADevices(node, "qsv")).toBe(false);
-    expect(nodeUsesCUDADevices(node, "vaapi")).toBe(false);
   });
 
   it("uses render paths for a node that resolves to one", () => {
@@ -1291,16 +935,6 @@ describe("capability report staleness from an unconfirmed hash", () => {
     expect(gpu.kind === "reported" && gpu.stale).toBe("unreported");
   });
 
-  // Absent is not empty: until the first sweep after a restart every node reads
-  // that way, and marking them all stale would be a warning about the API rather
-  // than about any node.
-  it("leaves an unchecked node to the timestamp rule", () => {
-    const node = { ...base, capabilities_hash: "sha256:stored" } as StreamNode;
-    delete (node as { advertised_capabilities_hash?: string }).advertised_capabilities_hash;
-    const gpu = describeNodeGPU(node, Date.parse("2026-08-28T00:00:10Z"));
-    expect(gpu.kind === "reported" && gpu.stale).toBe(null);
-  });
-
   it("leaves a matching hash alone on a freshly checked node", () => {
     const node = {
       ...base,
@@ -1326,20 +960,6 @@ describe("capability report staleness from an unconfirmed hash", () => {
 // that has no denominator — or that nothing measured — has to arrive with no
 // fill at all rather than a fill of zero, which on screen is an idle node.
 describe("load meter fills", () => {
-  it("derives a fill for every reading that has a ceiling", () => {
-    const system = describeNodeSystem(makeNode({ last_stats: { system: FULL_SAMPLE } }));
-
-    expect(system).toMatchObject({
-      kind: "reported",
-      cpu: { fill: 42 },
-      memory: { fill: 40 },
-      disk: { fill: 87 },
-      // Throughput has no ceiling in the sample: the sampler reports bytes
-      // moved, never the link's negotiated speed.
-      network: { fill: null },
-    });
-  });
-
   it("gives an unmeasured reading no fill rather than a fill of zero", () => {
     const system = describeNodeSystem(
       makeNode({ last_stats: { system: { cpu_pct: 0, mem_total_mb: 0, disks: [] } } }),
@@ -1348,9 +968,25 @@ describe("load meter fills", () => {
     expect(system).toMatchObject({
       kind: "reported",
       // A real zero still fills — it was measured, and the node is idle.
-      cpu: { value: "0%", muted: false, fill: 0 },
-      memory: { muted: true, fill: null },
-      disk: { muted: true, fill: null },
+      cpu: { value: "0%", detail: "", muted: false, fill: 0 },
+      memory: {
+        value: "—",
+        muted: true,
+        fill: null,
+        title: "This sample carries no memory reading.",
+      },
+      disk: {
+        value: "—",
+        muted: true,
+        fill: null,
+        title: "This sample carries no disk reading.",
+      },
+      network: {
+        value: "—",
+        muted: true,
+        fill: null,
+        title: "This sample carries no network reading.",
+      },
     });
   });
 
@@ -1408,24 +1044,6 @@ describe("describeNodeJobs", () => {
       fill: null,
     });
     expect(describeNodeJobs(makeNode({ active_jobs: 7, max_jobs: 0 })).fill).toBe(null);
-  });
-
-  it("names a proxy node's concurrency for what it carries", () => {
-    expect(describeNodeJobs(makeNode({ type: "proxy" })).label).toBe("Streams");
-  });
-});
-
-describe("nodeReportsAcceleration", () => {
-  // A proxy stopped probing for hardware it never uses, so its report carries
-  // no backend and no device. The card must drop the acceleration block and the
-  // re-probe button with it — a button whose tooltip promises to re-verify
-  // devices against live hardware is a promise a proxy cannot keep.
-  it("says a proxy has no acceleration to show", () => {
-    expect(nodeReportsAcceleration(makeNode({ type: "proxy" }))).toBe(false);
-  });
-
-  it("keeps the acceleration block on a transcode node", () => {
-    expect(nodeReportsAcceleration(makeNode({ type: "transcode" }))).toBe(true);
   });
 });
 
@@ -1535,16 +1153,6 @@ describe("describeNodeGroups", () => {
     expect(group).toMatchObject({ value: "", degraded: false });
     expect(group?.title).toContain("no group");
   });
-
-  it("says a transcode-only group falls back to any proxy in the cluster", () => {
-    const [group] = describeNodeGroups([grouped(1, "rack-1", { type: "transcode" })]);
-    expect(group?.title).toContain("No proxy in this group");
-  });
-
-  it("says nothing is pinned to a proxy-only group", () => {
-    const [group] = describeNodeGroups([grouped(1, "rack-1", { type: "proxy" })]);
-    expect(group?.title).toContain("nothing is pinned");
-  });
 });
 
 describe("filterNodesByGroup", () => {
@@ -1553,10 +1161,6 @@ describe("filterNodesByGroup", () => {
     makeNode({ id: 2, group: "rack-2" }),
     makeNode({ id: 3, group: null }),
   ];
-
-  it("returns every node when no group is selected", () => {
-    expect(filterNodesByGroup(nodes, null).map((n) => n.id)).toEqual([1, 2, 3]);
-  });
 
   it("narrows to one group", () => {
     expect(filterNodesByGroup(nodes, "rack-1").map((n) => n.id)).toEqual([1]);

@@ -437,7 +437,7 @@ func TestDiagnosticsAdminRoutesRejectNonActingAdmin(t *testing.T) {
 	service := newFakeDiagnosticsService()
 	handler := NewDiagnosticsHandler(service)
 	router := chi.NewRouter()
-	router.Use(apimw.RequireActingAdmin(nil))
+	router.Use(apimw.RequireActingAdmin(nil, nil))
 	RegisterAdminDiagnosticsRoutes(router, handler)
 
 	rec := httptest.NewRecorder()

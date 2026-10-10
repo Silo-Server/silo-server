@@ -266,16 +266,6 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	return SourceResolution{Kind: candidate, PreflightRequired: preflight}
 }
 
-// ClassifySource returns only classifications that are safe without executor
-// preflight; ambiguous or unsupported sources return an empty kind.
-func ClassifySource(source SourceMetadata) SourceKind {
-	resolution := ResolveSource(source)
-	if resolution.PreflightRequired {
-		return ""
-	}
-	return resolution.Kind
-}
-
 // sourceKindForCompatibilityID maps standardized Dolby Vision base-layer
 // compatibility identifiers to their underlying transfer and primaries.
 func sourceKindForCompatibilityID(id int) SourceKind {
@@ -439,20 +429,6 @@ func colorIsBT2020(value string) bool {
 // rangeIsLimited recognizes FFmpeg's names for limited-range video levels.
 func rangeIsLimited(value string) bool {
 	return value == "tv" || value == "mpeg" || value == "limited"
-}
-
-// SourceKindFor maps already trusted dynamic-range metadata to a base signal.
-// Call ResolveSource when the completeness of the metadata is not guaranteed.
-func SourceKindFor(dynamicRange string, dvBLCompatID int) SourceKind {
-	switch strings.ToLower(strings.TrimSpace(dynamicRange)) {
-	case DynamicRangeHDR10, DynamicRangeHDR10Plus:
-		return SourcePQ
-	case DynamicRangeHLG:
-		return SourceHLG
-	case DynamicRangeDolbyVision:
-		return sourceKindForCompatibilityID(dvBLCompatID)
-	}
-	return ""
 }
 
 // SourceTransfer returns the FFmpeg transfer characteristic for a source kind.

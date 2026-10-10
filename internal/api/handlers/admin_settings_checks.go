@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -43,11 +42,6 @@ type s3SettingsCheckClient interface {
 	DeleteObject(ctx context.Context, bucket, key string) error
 }
 
-type redisSettingsCheckClient interface {
-	Ping(ctx context.Context) error
-	Close() error
-}
-
 type embeddingsSettingsCheckClient interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
@@ -61,32 +55,9 @@ type aiSettingsCheckClient interface {
 	Transcribe(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error)
 }
 
-type redisSettingsCheckAdapter struct {
-	client *redis.Client
-}
-
-func (a *redisSettingsCheckAdapter) Ping(ctx context.Context) error {
-	return a.client.Ping(ctx).Err()
-}
-
-func (a *redisSettingsCheckAdapter) Close() error {
-	return cache.CloseRedisClient(a.client)
-}
-
 var newAdminS3SettingsCheckClient = func(cfg s3client.BucketConfig) s3SettingsCheckClient {
 	cfg.Role = "checks"
 	return s3client.NewClient(cfg)
-}
-
-var newAdminRedisSettingsCheckClient = func(cfg config.RedisConfig) (redisSettingsCheckClient, error) {
-	client, err := cache.NewRedisClientForRole(cfg, "checks")
-	if err != nil {
-		return nil, err
-	}
-	if client == nil {
-		return nil, nil
-	}
-	return &redisSettingsCheckAdapter{client: client}, nil
 }
 
 var newAdminEmbeddingsSettingsCheckClient = func(
@@ -560,7 +531,7 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
 	}
 
-	client, err := newAdminRedisSettingsCheckClient(cfg.Redis)
+	client, err := cache.NewRedisClientForRole(cfg.Redis, "checks")
 	if err != nil {
 		return connectionCheckResponse{
 			Success: false,
@@ -570,11 +541,11 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 	if client == nil {
 		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
 	}
-	defer client.Close()
+	defer func() { _ = cache.CloseRedisClient(client) }()
 
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := client.Ping(checkCtx); err != nil {
+	if err := client.Ping(checkCtx).Err(); err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Redis connection check failed: %v", err),

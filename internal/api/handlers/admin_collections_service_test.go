@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,6 +88,49 @@ func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
 				t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
 			}
 		})
+	}
+}
+
+// The web editor changes a franchise list's TMDB collection ID by sending a
+// rebuilt tmdb_collection source; only Trakt sources are frozen.
+func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
+	existing := &models.LibraryCollection{
+		CollectionType: "tmdb",
+		LibraryIDs:     []int{1},
+		SourceURL:      "tmdb://collection/10",
+		SourceConfig:   json.RawMessage(`{"mode":"tmdb_collection","collection_id":10}`),
+	}
+	err := validateAdminCollectionSourceUpdate(existing, AdminCollectionUpdate{
+		SourceURL:    new("tmdb://collection/119"),
+		SourceConfig: json.RawMessage(`{"mode":"tmdb_collection","collection_id":119,"limit":20}`),
+	})
+	if err != nil {
+		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
+	}
+}
+
+// A v1 update that switches a collection to Smart activates its stored
+// rules, so it is refused when they use the v2 vocabulary; v2 may switch it.
+func TestAdminCollectionV1SmartSwitchKeepsTheV1RuleVocabularyDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{
+		LibraryID: f.library, Title: "The films", CollectionType: "manual",
+		QueryDefinition: json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"begins_with","value":"the "}]}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
+	})
+	smart := "smart"
+	if _, err := h.updateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart, V1Rules: true}, func(string, string, string) error { return nil }); err == nil {
+		t.Fatal("v1 switched to Smart with a title rule stored")
+	}
+	if _, err := h.UpdateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart}); err != nil {
+		t.Fatalf("v2 switch to Smart: %v", err)
 	}
 }
 

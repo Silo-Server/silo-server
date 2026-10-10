@@ -10,7 +10,8 @@ import type { AutoscanPathRewrite, AutoscanWebhookProvider, Library } from "@/ap
  * nothing is how "I followed the steps and it didn't work" starts.
  *
  * Labels are the checkbox captions as they appear in Sonarr/Radarr's Connect →
- * Webhook screen, so they can be matched by eye without translation.
+ * Webhook screen (Sonarr v4, Radarr v5 and later), so they can be matched by
+ * eye without translation.
  */
 export interface WebhookTrigger {
   /** Caption in the arr UI. */
@@ -23,12 +24,12 @@ export interface WebhookTrigger {
 
 const SHARED_TRIGGERS: WebhookTrigger[] = [
   {
-    label: "On Import",
+    label: "On File Import",
     reason: "The main one — fires when a download finishes and is moved into your library.",
     required: true,
   },
   {
-    label: "On Upgrade",
+    label: "On File Upgrade",
     reason: "Fires when an existing file is replaced by a better quality version.",
     required: true,
   },

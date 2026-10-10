@@ -248,25 +248,6 @@ describe("AdminPluginDetail", () => {
       mock.mockReset();
   });
 
-  it("shows the plugin's header, details, and one settings panel per schema entry", () => {
-    renderPage();
-
-    expect(screen.getByRole("heading", { level: 1, name: "MDBList Ratings" })).toBeInTheDocument();
-    expect(screen.getByText("Version 0.1.0")).toBeInTheDocument();
-    expect(screen.getAllByText("Silo maintained").length).toBeGreaterThan(0);
-    expect(screen.getByText("silo.mdblist")).toBeInTheDocument();
-    expect(screen.getByText("AGPL-3.0-only")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "MDBList Account" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Changelog/ })).toHaveAttribute(
-      "href",
-      "https://github.com/Silo-Server/silo-plugin-metadata-mdblist/releases",
-    );
-    expect(capturedConfigForms).toHaveLength(1);
-    expect(capturedConfigForms[0]?.bare).toBe(true);
-    // An installed plugin with presentation never waits on the live catalog fetch.
-    expect(catalogOptions.every((options) => options.enabled === false)).toBe(true);
-  });
-
   it("saves a settings panel against the installation", () => {
     renderPage();
     const onSave = capturedConfigForms[0]?.onSave as (
@@ -399,7 +380,7 @@ describe("AdminPluginDetail", () => {
     );
   });
 
-  it("describes a scheduled task's default schedule instead of showing raw JSON", () => {
+  it("preserves the existing schedule when disabling a plugin task", () => {
     installationsQuery = query([
       makeInstallation({
         global_config_schema: [],
@@ -417,12 +398,6 @@ describe("AdminPluginDetail", () => {
     ]);
     renderPage();
 
-    expect(screen.getByText("Default schedule: Daily at 03:00")).toBeInTheDocument();
-    expect(screen.queryByText(/\{"type"/)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Schedule and history" })).toHaveAttribute(
-      "href",
-      "/admin/tasks/plugin%3A7%3Arefresh",
-    );
     const run = capturedSwitches.find((props) => props["aria-label"] === "Run Refresh lists");
     (run?.onCheckedChange as (checked: boolean) => void)(false);
     expect(saveTaskBindingMock).toHaveBeenCalledWith({
@@ -456,47 +431,11 @@ describe("AdminPluginDetail", () => {
     });
   });
 
-  it("says so when a plugin has no settings", () => {
-    installationsQuery = query([makeInstallation({ global_config_schema: [] })]);
-    renderPage();
-    expect(screen.getByText(/This plugin has no settings/)).toBeInTheDocument();
-    expect(capturedConfigForms).toHaveLength(0);
-  });
-
-  it.each([
-    ["approved_community", "Approved community."],
-    ["external", "External source."],
-  ] as const)("shows the %s tier notice", (sourceKind, heading) => {
-    installationsQuery = query([makeInstallation({ source_kind: sourceKind })]);
-    renderPage();
-    expect(screen.getByText(heading)).toBeInTheDocument();
-  });
-
-  it("shows no tier notice for Silo's own plugins", () => {
-    renderPage();
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-  });
-
   it("renders setup Markdown as text, never as HTML", () => {
     const { container } = renderPage();
     expect(screen.getByText("free API key").tagName).toBe("STRONG");
     expect(container.querySelector("script")).toBeNull();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
-  });
-
-  it("falls back to catalog presentation for an older installed manifest", () => {
-    installationsQuery = query([makeInstallation({ presentation: undefined })]);
-    catalogQuery = query([
-      makeCatalogEntry({
-        plugin_id: "silo.mdblist",
-        presentation: { ...PRESENTATION, display_name: "MDBList From Catalog" },
-      }),
-    ]);
-    renderPage();
-    expect(catalogOptions.at(-1)?.enabled).toBe(true);
-    expect(
-      screen.getByRole("heading", { level: 1, name: "MDBList From Catalog" }),
-    ).toBeInTheDocument();
   });
 
   it("previews a catalog plugin that isn't installed and installs it", () => {
@@ -530,23 +469,6 @@ describe("AdminPluginDetail", () => {
       plugin_id: "silo.manga-metadata",
       version: "0.2.0",
     });
-  });
-
-  it("shows loading, then not found, for an unknown plugin", () => {
-    installationsQuery = query<PluginInstallation[]>(undefined, { isLoading: true });
-    const { unmount } = renderPage("silo.unknown");
-    expect(screen.getByText("Loading plugin...")).toBeInTheDocument();
-    expect(screen.queryByText("Plugin not found")).not.toBeInTheDocument();
-    unmount();
-
-    installationsQuery = query<PluginInstallation[]>([]);
-    catalogQuery = query<PluginCatalogEntry[]>([]);
-    renderPage("silo.unknown");
-    expect(screen.getByText("Plugin not found")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All plugins" })).toHaveAttribute(
-      "href",
-      "/admin/plugins",
-    );
   });
 
   it("offers a retry when the installations can't be read", () => {

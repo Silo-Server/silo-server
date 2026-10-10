@@ -194,3 +194,12 @@ func TestOverlayOnlineCarriesProviderWithdrawals(t *testing.T) {
 	assertOverlaySegment(t, got, models.MarkerSegmentIntro, 5, models.MarkerSourceManual)
 	assertOverlaySegment(t, got, models.MarkerSegmentCredits, 1690, models.MarkerSourceScanner)
 }
+
+func TestOverlayOnlineCannotRestoreManualDeletion(t *testing.T) {
+	stored := &models.MediaFile{ID: 42, Duration: 1000, IntroMarkersSource: new(models.MarkerSourceManual)}
+	view := &models.MediaFile{ID: 42, Duration: 1000, IntroStart: new(10.0), IntroEnd: new(30.0), IntroMarkersSource: new(models.MarkerSourceOnline)}
+	got := OverlayOnline(stored, view)
+	if got.IntroStart != nil || got.IntroEnd != nil || len(models.EffectiveMarkerSegments(got)) != 0 {
+		t.Fatal("old provider view restored a manually deleted intro")
+	}
+}

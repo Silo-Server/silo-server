@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/mail"
 )
 
 func TestEffectiveChannelMode(t *testing.T) {
@@ -252,7 +254,7 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 }
 
 func TestComposeVerificationEmail(t *testing.T) {
-	content := composeVerificationEmail(`<b>Emma</b>`, "https://silo.example.com/api/v2/notifications/email/verify?token=tok")
+	content := composeVerificationEmail(mail.Brand{}, `<b>Emma</b>`, "https://silo.example.com/api/v2/notifications/email/verify?token=tok")
 	if !strings.Contains(content.Text, "https://silo.example.com/api/v2/notifications/email/verify?token=tok") {
 		t.Fatalf("verify link missing from text:\n%s", content.Text)
 	}

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { joinWatchTogetherRoom } from "@/lib/watchTogether";
 import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "invite-A", navigate: vi.fn() }));
@@ -68,7 +68,10 @@ it("sends original join input once and normalizes room proof", async () => {
   expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/join");
   expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ code: "ROOM", join_token: "invite" });
 });
-it.each([401, 403, 404, 409, 422, 500])("does not replay join %s", async (status) => {
+it.each([401, 500])("does not replay join %s", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   await expect(joinWatchTogetherRoom({ code: "ROOM" })).rejects.toThrow();

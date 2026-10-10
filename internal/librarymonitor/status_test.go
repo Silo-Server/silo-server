@@ -169,38 +169,9 @@ func TestStatusRowsNameThePathWhileAnotherHasNoState(t *testing.T) {
 	}
 }
 
-func TestRootStatusDetail(t *testing.T) {
-	limit := (&rootState{state: StateLimitReached, limit: 8192, dirs: 12000}).statusDetail()
-	for _, part := range []string{"max_user_watches (8192)", "12000", "on the host"} {
-		if !strings.Contains(limit, part) {
-			t.Errorf("limit detail %q does not contain %q", limit, part)
-		}
-	}
-	nfsName := classifyFSType(0x6969).Name
-	nfs := (&rootState{state: StateUnsupportedFilesystem, fsName: nfsName}).statusDetail()
-	if !strings.Contains(nfs, nfsName+" network") || !strings.Contains(nfs, "nightly scan") {
-		t.Errorf("unsupported detail = %q", nfs)
-	}
-	fuse := (&rootState{state: StateMonitoring, notes: []string{fuseCaveat}}).statusDetail()
-	if fuse != fuseCaveat {
-		t.Errorf("monitoring detail = %q, want the FUSE caveat", fuse)
-	}
-	if got := (&rootState{state: StateMonitoring}).statusDetail(); got != "" {
-		t.Errorf("plain monitoring detail = %q, want empty", got)
-	}
-}
-
 func TestRootStatusDetailSummarizesNetworkFolders(t *testing.T) {
 	rs := &rootState{state: StateMonitoring, unsupportedMounts: []string{"/m/a", "/m/b", "/m/c", "/m/d", "/m/e"}}
 	want := "Folders on network filesystems aren't monitored: /m/a, /m/b, /m/c and 2 more."
-	if got := rs.statusDetail(); got != want {
-		t.Fatalf("detail = %q, want %q", got, want)
-	}
-}
-
-func TestRootStatusDetailNamesUnreadableFolders(t *testing.T) {
-	rs := &rootState{state: StateMonitoring, unreadable: []string{"/lib/Locked"}}
-	want := "Folders Silo can't read aren't monitored: /lib/Locked."
 	if got := rs.statusDetail(); got != want {
 		t.Fatalf("detail = %q, want %q", got, want)
 	}

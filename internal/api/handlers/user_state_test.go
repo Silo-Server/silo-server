@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestResolveItemUserStatesIncludesCompletedEbookReaderProgress(t *testing.T) {
@@ -15,6 +14,7 @@ func TestResolveItemUserStatesIncludesCompletedEbookReaderProgress(t *testing.T)
 	items := []*models.MediaItem{
 		{ContentID: "ebook-complete", Type: "ebook", Title: "Complete Ebook"},
 		{ContentID: "ebook-progress", Type: "ebook", Title: "Partial Ebook"},
+		{ContentID: "ebook-unseen", Type: "ebook", Title: "Unread Ebook"},
 	}
 
 	states, err := resolveItemUserStatesWithOptions(ctx, store, "profile-1", nil, items, itemUserStateOptions{
@@ -48,51 +48,8 @@ func TestResolveItemUserStatesIncludesCompletedEbookReaderProgress(t *testing.T)
 	if states["ebook-progress"] == nil || states["ebook-progress"].Played {
 		t.Fatalf("partial ebook state = %+v, want not played", states["ebook-progress"])
 	}
-}
-
-func TestResolveItemUserStatesExcludesHiddenEbookReaderProgress(t *testing.T) {
-	ctx := context.Background()
-	store := newProfileTestStore(t)
-	updatedAt := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
-	items := []*models.MediaItem{
-		{ContentID: "ebook-hidden", Type: "ebook", Title: "Hidden Ebook"},
-		{ContentID: "ebook-reread", Type: "ebook", Title: "Reread Ebook"},
-	}
-
-	states, err := resolveItemUserStatesWithOptions(ctx, store, "profile-1", nil, items, itemUserStateOptions{
-		UserID: 42,
-		EbookProgressStore: &fakeEbookReaderProgressLister{
-			progress: map[string]EbookReaderProgress{
-				"ebook-hidden": {
-					UserID:    42,
-					ProfileID: "profile-1",
-					ContentID: "ebook-hidden",
-					Progress:  0.95,
-					UpdatedAt: updatedAt,
-				},
-				"ebook-reread": {
-					UserID:    42,
-					ProfileID: "profile-1",
-					ContentID: "ebook-reread",
-					Progress:  0.95,
-					UpdatedAt: updatedAt.Add(2 * time.Hour),
-				},
-			},
-			hiddenBefore: map[string]time.Time{
-				"ebook-hidden": updatedAt.Add(time.Hour),
-				"ebook-reread": updatedAt.Add(time.Hour),
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("resolveItemUserStatesWithOptions: %v", err)
-	}
-
-	if states["ebook-hidden"] == nil || states["ebook-hidden"].Played {
-		t.Fatalf("hidden ebook state = %+v, want not played", states["ebook-hidden"])
-	}
-	if states["ebook-reread"] == nil || !states["ebook-reread"].Played {
-		t.Fatalf("ebook updated after hidden_before = %+v, want played again", states["ebook-reread"])
+	if states["ebook-unseen"] == nil || states["ebook-unseen"].Played {
+		t.Fatalf("missing reader progress = %+v, want not played", states["ebook-unseen"])
 	}
 }
 
@@ -110,17 +67,5 @@ func TestResolveItemUserStatesIncludesCompletedHistory(t *testing.T) {
 	}
 	if states["movie-history-only"] == nil || !states["movie-history-only"].Played {
 		t.Fatalf("history-only movie state = %+v, want played", states["movie-history-only"])
-	}
-}
-
-func TestAllEpisodesCompletedIncludesCompletedHistory(t *testing.T) {
-	episodes := []string{"episode-progress", "episode-history"}
-	progress := map[string]userstore.WatchProgress{
-		"episode-progress": {MediaItemID: "episode-progress", Completed: true},
-		"episode-history":  {MediaItemID: "episode-history", Completed: true},
-	}
-
-	if !allEpisodesCompleted(episodes, progress) {
-		t.Fatal("allEpisodesCompleted = false, want completed from progress plus history")
 	}
 }

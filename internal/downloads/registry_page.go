@@ -3,6 +3,7 @@ package downloads
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -17,7 +18,22 @@ func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID 
 	if deviceID != "" && profileID == "" {
 		return nil, ErrProfileRequired
 	}
-	return s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit)
+	rows, err := s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	if after == nil && deviceID != "" {
+		// A registry read is the device syncing: it is how a revoked copy
+		// reaches the device, and what makes "last seen" mean something.
+		if err := s.repo.TouchDeviceSeen(ctx, userID, profileID, deviceID); err != nil {
+			slog.WarnContext(ctx, "recording device sync failed", "component", "downloads", "error", err)
+		}
+	}
+	if err := s.repo.attachPreparations(ctx, rows); err != nil {
+		// Progress is decoration; the registry is still correct without it.
+		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "error", err)
+	}
+	return rows, nil
 }
 func (r *Repository) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
 	return r.listRegistryPage(ctx, userID, profileID, deviceID, "", after, limit)

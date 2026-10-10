@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -33,55 +34,61 @@ type PluginProviderConfig struct {
 }
 
 type PluginProvider struct {
-	config       PluginProviderConfig
-	client       pluginAuthClientFactory
-	sessions     *SessionRepository
-	users        *UserRepository
-	identityPool *pgxpool.Pool
-	accounts     *AccountProvisioner
+	config   PluginProviderConfig
+	client   pluginAuthClientFactory
+	sessions *SessionRepository
+	resolver *AccountResolver
 }
 
+// NewPluginProviderWithClientFactory builds a provider whose accounts are
+// resolved by resolver (shared by every provider of one server).
 func NewPluginProviderWithClientFactory(
 	config PluginProviderConfig,
 	sessions *SessionRepository,
-	users *UserRepository,
-	pool *pgxpool.Pool,
+	resolver *AccountResolver,
 	clientFactory pluginAuthClientFactory,
 ) *PluginProvider {
 	return &PluginProvider{
-		config:       config,
-		client:       clientFactory,
-		sessions:     sessions,
-		users:        users,
-		identityPool: pool,
-		accounts:     NewAccountProvisioner(users, nil),
+		config:   config,
+		client:   clientFactory,
+		sessions: sessions,
+		resolver: resolver,
 	}
+}
+
+// PluginAuthClientResolver loads the auth plugin client of one installation.
+// *plugins.Service implements it.
+type PluginAuthClientResolver interface {
+	AuthProviderClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.AuthProviderClient, error)
 }
 
 func NewPluginProvider(
 	config PluginProviderConfig,
 	sessions *SessionRepository,
-	users *UserRepository,
-	pool *pgxpool.Pool,
-	resolver interface {
-		AuthProviderClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.AuthProviderClient, error)
-	},
+	resolver *AccountResolver,
+	clients PluginAuthClientResolver,
 ) *PluginProvider {
-	return NewPluginProviderWithClientFactory(config, sessions, users, pool, func(ctx context.Context) (pluginAuthClient, error) {
-		return resolver.AuthProviderClient(ctx, config.InstallationID, config.CapabilityID)
+	return NewPluginProviderWithClientFactory(config, sessions, resolver, func(ctx context.Context) (pluginAuthClient, error) {
+		return clients.AuthProviderClient(ctx, config.InstallationID, config.CapabilityID)
 	})
 }
 
+// Authenticate is a password sign-in through the plugin (LDAP and other
+// credential providers), resolved to a Silo account.
 func (p *PluginProvider) Authenticate(ctx context.Context, creds Credentials) (*models.User, error) {
+	user, _, err := p.authenticateCredentials(ctx, creds, 0)
+	return user, err
+}
+
+// authenticateCredentials authenticates creds with the plugin and resolves
+// the answer: a sign-in when linkingUserID is 0 (every directory sign-in),
+// otherwise a link to that signed-in account
+// (Service.LinkCredentialsIdentity). It also answers the identity the
+// sign-in went through, for the login session it opens.
+func (p *PluginProvider) authenticateCredentials(ctx context.Context, creds Credentials, linkingUserID int) (*models.User, int64, error) {
 	client, err := p.client(ctx)
 	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrUserDisabled) {
-			return nil, err
-		}
-		if errors.Is(err, plugins.ErrInstallationDisabled) {
-			return nil, ErrInvalidCredentials
-		}
-		return nil, fmt.Errorf("load plugin auth client: %w", err)
+		return nil, 0, pluginCallError(ctx, p.config.InstallationID, "load", err)
 	}
 
 	response, err := client.Authenticate(ctx, &pluginv1.AuthenticateRequest{
@@ -89,71 +96,34 @@ func (p *PluginProvider) Authenticate(ctx context.Context, creds Credentials) (*
 		Password: creds.Password,
 	})
 	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrUserDisabled) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("plugin auth authenticate: %w", err)
+		return nil, 0, pluginCallError(ctx, p.config.InstallationID, "authenticate", err)
 	}
-	if response.GetExternalSubject() == "" {
-		return nil, ErrInvalidCredentials
-	}
-
-	user, err := p.lookupIdentity(ctx, response.GetExternalSubject())
-	if err == nil && user != nil {
-		if !user.Enabled {
-			return nil, ErrUserDisabled
-		}
-		return user, nil
-	}
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
-	if !p.config.AutoProvision {
-		return nil, ErrInvalidCredentials
-	}
-
-	user, err = p.autoProvisionUser(ctx, creds, response)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.upsertIdentity(ctx, response.GetExternalSubject(), user.ID); err != nil {
-		return nil, err
-	}
-	return user, nil
+	return p.resolve(ctx, response, linkingUserID, false)
 }
 
 // CompleteOAuth runs the post-RPC half of plugin authentication for an
-// OAuth flow: validate the AuthenticateResponse, look up an existing
-// plugin_auth_identities row, auto-provision a new user if needed, and
-// upsert the identity. The handler calls plugin ExchangeCode itself and
-// passes the response in here.
-func (p *PluginProvider) CompleteOAuth(ctx context.Context, response *pluginv1.AuthenticateResponse) (*models.User, error) {
-	if response.GetExternalSubject() == "" {
-		return nil, ErrInvalidCredentials
-	}
+// OAuth flow: the handler called the plugin's ExchangeCode itself and passes
+// the response in. linkingUserID is the signed-in account a linking flow
+// links to, 0 for an ordinary sign-in. It answers the account and the
+// identity the sign-in went through.
+func (p *PluginProvider) CompleteOAuth(ctx context.Context, response *pluginv1.AuthenticateResponse, linkingUserID int) (*models.User, int64, error) {
+	return p.resolve(ctx, response, linkingUserID, false)
+}
 
-	user, err := p.lookupIdentity(ctx, response.GetExternalSubject())
-	if err == nil && user != nil {
-		if !user.Enabled {
-			return nil, ErrUserDisabled
-		}
-		return user, nil
-	}
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
-	if !p.config.AutoProvision {
-		return nil, ErrInvalidCredentials
-	}
-
-	user, err = p.autoProvisionUser(ctx, Credentials{}, response)
+// resolve runs the plugin's answer through account resolution. network says
+// the answer is a network provider's (authenticatePeer).
+func (p *PluginProvider) resolve(ctx context.Context, response *pluginv1.AuthenticateResponse, linkingUserID int, network bool) (*models.User, int64, error) {
+	identity, err := externalIdentityFromResponse(ctx, p.config.InstallationID, response)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if err := p.upsertIdentity(ctx, response.GetExternalSubject(), user.ID); err != nil {
-		return nil, err
-	}
-	return user, nil
+	return p.resolver.Resolve(ctx, ResolveInput{
+		InstallationID: p.config.InstallationID,
+		AutoProvision:  p.config.AutoProvision,
+		Network:        network,
+		Identity:       identity,
+		LinkingUserID:  linkingUserID,
+	})
 }
 
 // InstallationID exposes the plugin install this provider is bound to —
@@ -174,6 +144,63 @@ func (p *PluginProvider) OAuthClient(ctx context.Context) (OAuthClient, error) {
 	return c, nil
 }
 
+// pluginEndSessionClient is the optional AuthProviderChecks.EndSessionUrl
+// half of a plugin client (*pluginhost.AuthProviderClient implements it).
+type pluginEndSessionClient interface {
+	EndSessionUrl(ctx context.Context, req *pluginv1.AuthEndSessionUrlRequest) (*pluginv1.AuthEndSessionUrlResponse, error)
+}
+
+// EndSessionURL asks the plugin for the provider logout URL of the
+// account's identity at this installation. Empty when the account has no
+// identity here, the plugin predates EndSessionUrl (Unimplemented), or it
+// has no end-session endpoint. Only an absolute http(s) URL is returned,
+// because the web client navigates to it.
+func (p *PluginProvider) EndSessionURL(ctx context.Context, userID int, postLogoutRedirectURI string) (string, error) {
+	if p.resolver == nil || p.resolver.pool == nil {
+		return "", nil
+	}
+	identity, err := scanIdentity(p.resolver.pool.QueryRow(ctx, `SELECT `+identityColumns+`
+		FROM plugin_auth_identities WHERE user_id = $1 AND plugin_installation_id = $2`, userID, p.config.InstallationID))
+	if err != nil {
+		if errors.Is(err, ErrIdentityNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	client, err := p.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	ender, ok := client.(pluginEndSessionClient)
+	if !ok {
+		return "", nil
+	}
+	state, err := p.resolver.loadRefreshState(ctx, p.resolver.pool, identity.ID)
+	if err != nil {
+		return "", err
+	}
+	resp, err := ender.EndSessionUrl(ctx, &pluginv1.AuthEndSessionUrlRequest{
+		ExternalSubject:       identity.ExternalSubject,
+		RefreshState:          state,
+		PostLogoutRedirectUri: postLogoutRedirectURI,
+	})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return "", nil
+		}
+		return "", err
+	}
+	raw := strings.TrimSpace(resp.GetUrl())
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != schemeHTTPS && parsed.Scheme != schemeHTTP) || parsed.Host == "" {
+		return "", fmt.Errorf("plugin returned an unusable end-session url")
+	}
+	return raw, nil
+}
+
 func (p *PluginProvider) ValidateSession(ctx context.Context, sessionID string) (bool, error) {
 	if p.sessions == nil {
 		return false, nil
@@ -185,97 +212,6 @@ func (p *PluginProvider) ValidateSession(ctx context.Context, sessionID string) 
 		return false, fmt.Errorf("load plugin auth client: %w", err)
 	}
 	return p.sessions.IsValid(ctx, sessionID)
-}
-
-func (p *PluginProvider) lookupIdentity(ctx context.Context, externalSubject string) (*models.User, error) {
-	var userID int
-	err := p.identityPool.QueryRow(ctx, `
-		SELECT user_id
-		FROM plugin_auth_identities
-		WHERE plugin_installation_id = $1 AND external_subject = $2
-	`,
-		p.config.InstallationID,
-		externalSubject,
-	).Scan(&userID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("lookup plugin auth identity: %w", err)
-	}
-	user, err := p.users.GetByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
-func (p *PluginProvider) upsertIdentity(ctx context.Context, externalSubject string, userID int) error {
-	_, err := p.identityPool.Exec(ctx, `
-		INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (plugin_installation_id, external_subject) DO UPDATE SET
-			user_id = EXCLUDED.user_id,
-			updated_at = NOW()
-	`,
-		p.config.InstallationID,
-		externalSubject,
-		userID,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert plugin auth identity: %w", err)
-	}
-	return nil
-}
-
-func (p *PluginProvider) autoProvisionUser(
-	ctx context.Context,
-	creds Credentials,
-	response *pluginv1.AuthenticateResponse,
-) (*models.User, error) {
-	usernameBase := strings.TrimSpace(response.GetDisplayName())
-	if usernameBase == "" {
-		usernameBase = strings.TrimSpace(creds.Username)
-	}
-	if usernameBase == "" {
-		usernameBase = response.GetExternalSubject()
-	}
-	usernameBase = sanitizeUsername(usernameBase)
-	if usernameBase == "" {
-		usernameBase = fmt.Sprintf("plugin_%d", p.config.InstallationID)
-	}
-
-	email := strings.TrimSpace(response.GetEmail())
-	if email == "" {
-		email = fmt.Sprintf("%s@plugin-%d.local", usernameBase, p.config.InstallationID)
-	}
-
-	localPasswordLoginEnabled := false
-	password, err := randomPluginOnlyPassword()
-	if err != nil {
-		return nil, fmt.Errorf("generate plugin-only password: %w", err)
-	}
-
-	username := usernameBase
-	for i := 0; i < 10; i++ {
-		user, err := p.accounts.CreateAccount(ctx, CreateAccountInput{
-			User: models.CreateUserInput{
-				Email:                     email,
-				Username:                  username,
-				Password:                  password,
-				LocalPasswordLoginEnabled: &localPasswordLoginEnabled,
-				Role:                      "user",
-			},
-		})
-		if err == nil {
-			return user, nil
-		}
-		if !IsDuplicate(err) {
-			return nil, fmt.Errorf("auto-provision plugin user: %w", err)
-		}
-		username = fmt.Sprintf("%s_%d", usernameBase, i+2)
-	}
-	return nil, fmt.Errorf("auto-provision plugin user: exhausted username attempts")
 }
 
 func randomPluginOnlyPassword() (string, error) {

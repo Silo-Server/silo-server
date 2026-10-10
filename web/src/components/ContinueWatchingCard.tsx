@@ -332,7 +332,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         <div className="px-0.5 pt-2.5">
           <ViewTransitionLink
             to={headingHref}
-            className="block truncate text-[13px] font-semibold hover:underline"
+            className="block truncate text-[0.8125rem] font-semibold hover:underline"
           >
             {heading}
           </ViewTransitionLink>
@@ -359,7 +359,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
                 ))}
               {premiereBadge && (
                 <span
-                  className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                  className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
                     premiereBadge,
                   )}`}
                 >

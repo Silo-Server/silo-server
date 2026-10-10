@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
@@ -15,7 +16,7 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading, isError: loadError } = useAdminServerSettings();
+  const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
   const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
   const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
@@ -109,27 +110,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, [dirtyCount]);
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
-  // In-app navigation is guarded by `UnsavedChangesGuard`, which blocks the
-  // router for as long as this registration is live. Reporting through a module
-  // store rather than owning the prompt keeps the hook usable where no guard is
-  // mounted (the setup wizard) and outside a router entirely.
+  // The shared registry guards tab close and reload. `UnsavedChangesGuard`
+  // also blocks in-app navigation while this registration is live. Reporting
+  // through the registry keeps the hook usable without a router or guard,
+  // including the setup wizard.
   useReportUnsavedChanges(dirtyCount > 0);
-
-  // Every admin settings tab stages edits and only writes them through the
-  // SaveBar, so closing or reloading the tab would silently drop them. One
-  // guard here covers all tabs, and it is the only thing the browser lets us
-  // intercept: a tab close or reload never reaches the router.
-  useEffect(() => {
-    if (dirtyCount === 0) return;
-    function warnOnUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      // Older browsers only show the prompt for a truthy returnValue; the text
-      // itself is ignored everywhere.
-      event.returnValue = "";
-    }
-    window.addEventListener("beforeunload", warnOnUnload);
-    return () => window.removeEventListener("beforeunload", warnOnUnload);
-  }, [dirtyCount]);
 
   const isDirty = useCallback((key: string) => dirty.has(key), [dirty]);
 
@@ -160,6 +145,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const submittedVersions = new Map(
         submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
       );
+      // Callers must distinguish failed writes from acknowledged saves before
+      // advancing a wizard or performing a dependent mutation.
+      if (!settings) {
+        const error = new Error("Reload settings before saving.");
+        toast.error(error.message);
+        throw error;
+      }
       const result = await updateSettings.mutateAsync(values);
       // An acknowledged save changes the validator even when newer local edits
       // remain dirty. Reconcile only with a refresh matching that write's revision;
@@ -191,7 +183,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         setRestartRequired(true);
       }
     },
-    [dirty, localValues, updateSettings],
+    [dirty, localValues, settings, updateSettings],
   );
 
   const discard = useCallback(() => {
@@ -219,6 +211,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     isPending: settings == null && !loadError,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
+    retryLoad: refetch,
     /** True once the settings snapshot is available to read and save against. */
     loaded: settings != null,
     getValue,

@@ -318,6 +318,9 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}))
 	defer server.Close()
 	client := HTTPPreparer{}
+	if _, err := client.Stat(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+		t.Fatalf("invalid artifact Stat error = %v, want invalid artifact id", err)
+	}
 	result, err := client.Stat(context.Background(), server.URL, "secret", "artifact-1")
 	if err != nil || result != (Result{ArtifactID: "artifact-1", FileSize: 42}) {
 		t.Fatalf("Stat = (%+v, %v)", result, err)
@@ -401,12 +404,6 @@ func TestHTTPPreparerDeleteStopsStalledErrorBodyRead(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("stalled delete response took %s, want a bounded failure", elapsed)
-	}
-}
-
-func TestHTTPPreparerRejectsArtifactPathTraversal(t *testing.T) {
-	if _, err := (HTTPPreparer{}).Stat(context.Background(), "http://node", "secret", "../escape"); err == nil {
-		t.Fatal("expected invalid artifact id error")
 	}
 }
 
@@ -532,5 +529,61 @@ func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
 	}
 	if string(body) != "onetwothree" {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestHTTPPreparerProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/downloads/prepare/running-1/progress":
+			_, _ = w.Write([]byte(`{"artifact_id":"running-1","running":true,"encoded_seconds":12.5,"duration_seconds":100,"speed":2.5}`))
+		case "/downloads/prepare/other-id/progress":
+			_, _ = w.Write([]byte(`{"artifact_id":"someone-else","running":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	p := HTTPPreparer{Client: server.Client()}
+
+	got, err := p.Progress(context.Background(), server.URL, "secret", "running-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Running || got.EncodedSeconds != 12.5 || got.DurationSeconds != 100 || got.Speed != 2.5 {
+		t.Fatalf("progress = %+v", got)
+	}
+	if _, err := p.Progress(context.Background(), server.URL, "secret", "old-node"); !errors.Is(err, ErrProgressUnsupported) {
+		t.Fatalf("404 err = %v, want ErrProgressUnsupported", err)
+	}
+	if _, err := p.Progress(context.Background(), server.URL, "secret", "other-id"); err == nil {
+		t.Fatal("accepted progress for a different artifact id")
+	}
+	if _, err := p.Progress(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+		t.Fatalf("invalid artifact Progress error = %v, want invalid artifact id", err)
+	}
+}
+
+func TestRequestLogSessionIDIsExcludedFromFingerprintAndValidated(t *testing.T) {
+	opts := playback.TranscodeOpts{InputPath: "/media/a.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		SessionID: playback.DownloadPrepareLogSessionID("art-1")}
+	labeled := NewRequest("attempt-1", opts)
+	if labeled.LogSessionID != "download-prepare-art-1" {
+		t.Fatalf("log session = %q", labeled.LogSessionID)
+	}
+	opts.SessionID = ""
+	if NewRequest("attempt-2", opts).ExecutionFingerprint() != labeled.ExecutionFingerprint() {
+		t.Fatal("the log label changed the execution fingerprint")
+	}
+	if got := labeled.TranscodeOpts("ffmpeg", "none", "", nil).SessionID; got != "download-prepare-art-1" {
+		t.Fatalf("node session id = %q", got)
+	}
+	labeled.LogSessionID = "some-playback-session"
+	if got := labeled.TranscodeOpts("ffmpeg", "none", "", nil).SessionID; got != "" {
+		t.Fatalf("node accepted foreign log session %q", got)
 	}
 }

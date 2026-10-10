@@ -184,7 +184,7 @@ type AdminTopTitle struct {
 	MediaType   string `json:"media_type"`
 	Plays       int64  `json:"plays"`
 	// TotalSeconds is watched time summed from finalized playback sessions, not
-	// the runtime of the titles played. A title that was only ever marked
-	// watched has no sessions and reports 0.
+	// the runtime of the titles played. A title with no finalized session in
+	// the window reports 0.
 	TotalSeconds int64 `json:"total_seconds"`
 }

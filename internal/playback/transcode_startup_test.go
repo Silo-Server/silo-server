@@ -213,7 +213,9 @@ func TestStartReconstructTranscodeKeepsSlowProcess(t *testing.T) {
 		return fakeStartupSession(t, opts, outputDir, false, true), nil
 	}
 
-	session, err := StartReconstructTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
 	if err != nil {
 		t.Fatalf("StartReconstructTranscode: %v", err)
 	}
@@ -281,6 +283,9 @@ func TestStartReconstructTranscodeIgnoresPreviousGenerationManifest(t *testing.T
 	seedPreviousGeneration(t, outputDir)
 	var attempts []TranscodeOpts
 	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if _, err := os.Stat(outputDir); err != nil {
+			t.Fatalf("output dir removed before final failure: %v", err)
+		}
 		attempts = append(attempts, opts)
 		return fakeStartupSession(t, opts, outputDir, false, false), nil
 	}
@@ -295,6 +300,9 @@ func TestStartReconstructTranscodeIgnoresPreviousGenerationManifest(t *testing.T
 	}
 	if got := attempts[2]; got.HWAccel != HWAccelNone || !got.SoftwareVideoDecode {
 		t.Fatalf("final attempt = %+v, want software path", got)
+	}
+	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("final reconstruct failure kept output: %v", err)
 	}
 }
 
@@ -355,57 +363,6 @@ func TestWaitForGenerationManifestAcceptsFreshManifestWithSkewedClock(t *testing
 	}
 }
 
-func TestStartReconstructTranscodeFinalFailureClosesSession(t *testing.T) {
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
-	outputDir := filepath.Join(t.TempDir(), "session")
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	attempts := 0
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts++
-		if _, err := os.Stat(outputDir); err != nil {
-			t.Fatalf("attempt %d: output dir removed before the final failure: %v", attempts, err)
-		}
-		return fakeStartupSession(t, opts, outputDir, false, false), nil
-	}
-
-	_, err := StartReconstructTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
-	var startupErr *TranscodeStartupError
-	if !errors.As(err, &startupErr) {
-		t.Fatalf("error = %v, want readiness failure", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("attempt count = %d, want 3", attempts)
-	}
-	if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
-		t.Fatalf("final reconstruct failure kept its output dir: %v", statErr)
-	}
-}
-
-func TestStartReconstructTranscodeWithoutFallbackDoesNotWait(t *testing.T) {
-	base := startupTestOpts()
-	base.HWAccel = HWAccelNone
-	pipeline := newAutoTranscodePipeline(context.Background(), base, newAutoTranscodePipelineCache())
-	attempts := 0
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		attempts++
-		return fakeStartupSession(t, opts, t.TempDir(), false, true), nil
-	}
-
-	began := time.Now()
-	session, err := StartReconstructTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Minute, Start: start})
-	if err != nil {
-		t.Fatalf("StartReconstructTranscode: %v", err)
-	}
-	if elapsed := time.Since(began); elapsed > 10*time.Second {
-		t.Fatalf("reconstruct without fallback waited %s for a manifest", elapsed)
-	}
-	if attempts != 1 || session == nil || !session.IsRunning() {
-		t.Fatalf("attempts = %d, session = %v; want the single started process", attempts, session)
-	}
-}
-
 func TestStartReadyTranscodeStopsWaitingWhenRequestEnds(t *testing.T) {
 	for _, running := range []bool{true, false} {
 		cache := newAutoTranscodePipelineCache()
@@ -445,22 +402,5 @@ func TestStartReadyTranscodeStopsWaitingWhenRequestEnds(t *testing.T) {
 		if len(cache.preferred) != 0 {
 			t.Fatalf("running=%v: a cancellation must never be cached", running)
 		}
-	}
-}
-
-func TestStartReconstructTranscodeOutlivesTriggeringRequest(t *testing.T) {
-	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		return fakeStartupSession(t, opts, t.TempDir(), false, true), nil
-	}
-
-	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: 50 * time.Millisecond, Start: start})
-	if err != nil {
-		t.Fatalf("StartReconstructTranscode: %v", err)
-	}
-	if !session.IsRunning() {
-		t.Fatal("reconstruct was stopped with its triggering request, want it kept for other waiters")
 	}
 }

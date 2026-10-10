@@ -71,7 +71,7 @@ function VersionDropdown({
             >
               <Layers3 className="size-3.5" />
               Edition
-              <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
+              <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
                 {selectedEdition.label}
               </span>
               <ChevronDown className="text-muted-foreground size-3" />
@@ -122,7 +122,7 @@ function VersionDropdown({
             >
               <Disc3 className="size-3.5" />
               Version
-              <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
+              <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
                 {activeVersion ? buildVersionTriggerSummary(activeVersion) : ""}
               </span>
               <ChevronDown className="text-muted-foreground size-3" />
@@ -154,7 +154,10 @@ function VersionDropdown({
                         {summary || `Version ${version.file_id}`}
                       </span>
                       {rangeLabel ? (
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
+                        <Badge
+                          variant="secondary"
+                          className="px-1.5 py-0 text-[0.625rem] uppercase"
+                        >
                           {rangeLabel}
                         </Badge>
                       ) : null}

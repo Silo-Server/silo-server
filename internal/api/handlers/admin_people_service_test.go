@@ -22,7 +22,10 @@ type adminPeopleRepo struct {
 }
 
 func (r *adminPeopleRepo) Get(context.Context, int64) (*models.Person, error) { return &r.person, nil }
-func (r *adminPeopleRepo) Search(context.Context, string, int) ([]models.Person, error) {
+func (r *adminPeopleRepo) GetVisible(context.Context, int64, catalog.AccessFilter) (*models.Person, error) {
+	return &r.person, nil
+}
+func (r *adminPeopleRepo) SearchAlphabetical(context.Context, string, int, catalog.AccessFilter) ([]models.Person, error) {
 	return nil, nil
 }
 func (r *adminPeopleRepo) SearchScoped(context.Context, string, int, string, catalog.AccessFilter) ([]models.Person, error) {

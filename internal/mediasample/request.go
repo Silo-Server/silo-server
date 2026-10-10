@@ -12,8 +12,8 @@ import (
 // turns it into ffmpeg arguments.
 //
 // A request names exactly one sampling mode (Window, Samples, or At) and at
-// least one output (Audio, Stats, or both; Samples takes only Stats, and At
-// only Images).
+// least one output (Audio, Stats, or both; Samples takes only Stats or
+// Sheets, and At only Images).
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
@@ -30,6 +30,8 @@ type Request struct {
 	Stats *StatsOutput `json:"stats,omitempty"`
 	// Images asks for the sampled frames as JPEG images.
 	Images *ImageOutput `json:"images,omitempty"`
+	// Sheets asks for the sampled frames tiled into JPEG sprite sheets.
+	Sheets *SheetsOutput `json:"sheets,omitempty"`
 	// Attempts are tried in order until one succeeds. Empty means a single
 	// software attempt bounded only by the caller's context.
 	Attempts []Attempt `json:"attempts,omitempty"`
@@ -61,13 +63,19 @@ type Window struct {
 // nothing between. Each frame reports the time it was sampled for rather than
 // its own, which lies up to one keyframe interval earlier. Times count from
 // the start of the file, as window starts do. A keyframe that serves several
-// times is reported once per time. Only Stats may be asked of samples.
-// Containers without a keyframe index, such as MPEG-TS, are read whole over
-// the sampled span, keyframes only (see probe.go).
+// times is reported once per time. Only Stats or Sheets may be asked of
+// samples. Containers without a keyframe index, such as MPEG-TS, are read
+// whole over the sampled span, keyframes only (see probe.go).
 type Samples struct {
 	// Seconds are the media times to sample, finite, non-negative, and
 	// strictly increasing.
 	Seconds []float64 `json:"seconds"`
+	// ReadThrough reads the sampled span as one keyframes-only window, as
+	// containers without a keyframe index always are, instead of seeking to
+	// each sample. It decodes every keyframe in the span but reads the file
+	// once, front to back, which can cost less than a seek per sample when
+	// samples lie closer together than the keyframes do.
+	ReadThrough bool `json:"read_through,omitempty"`
 }
 
 // At decodes the first video frame at or after a media time, decoding from
@@ -79,13 +87,16 @@ type At struct {
 }
 
 // AudioOutput selects audio features. Fingerprint and Silence may be combined
-// in one run.
+// in one run; Speech takes the run to itself.
 type AudioOutput struct {
 	// Fingerprint returns raw Chromaprint points for the sampled audio.
 	Fingerprint bool `json:"fingerprint,omitempty"`
 	// Silence returns the silences silencedetect finds, in absolute media
 	// seconds.
 	Silence *SilenceParams `json:"silence,omitempty"`
+	// Speech returns the speech-band level of one audio stream every 10 ms
+	// (see speech.go). It needs a window and no other output.
+	Speech *SpeechParams `json:"speech,omitempty"`
 }
 
 // SilenceParams configures silence detection.
@@ -116,8 +127,8 @@ type StatsOutput struct {
 // Attempt is one decode attempt.
 type Attempt struct {
 	// Hardware decodes video on the Runner's configured hardware (see
-	// hwdecode.go). It needs a video output (Images or Stats); audio always
-	// decodes in software.
+	// hwdecode.go). It needs a video output (Images, Stats, or Sheets); audio
+	// always decodes in software.
 	Hardware bool `json:"hardware,omitempty"`
 	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
 	// bounds it.
@@ -165,8 +176,8 @@ func (r Request) Validate() error {
 		if err := r.Samples.validate(); err != nil {
 			return err
 		}
-		if r.Audio != nil {
-			return errors.New("samples take no audio output")
+		if r.Audio != nil || r.Images != nil {
+			return errors.New("samples take only a stats or sheets output")
 		}
 		if _, err := concatPath(r.Input); err != nil {
 			return err
@@ -188,6 +199,14 @@ func (r Request) Validate() error {
 			return err
 		}
 	}
+	if r.Sheets != nil {
+		if r.Samples == nil || r.Stats != nil {
+			return errors.New("sheets need samples and no other output")
+		}
+		if err := r.Sheets.validate(); err != nil {
+			return err
+		}
+	}
 	if !r.hasOutput() {
 		return errors.New("request has no output")
 	}
@@ -197,6 +216,20 @@ func (r Request) Validate() error {
 	if r.Audio != nil && r.Audio.Silence != nil {
 		if err := r.Audio.Silence.validate(); err != nil {
 			return err
+		}
+	}
+	if r.Audio != nil && r.Audio.Speech != nil {
+		if err := r.Audio.Speech.validate(); err != nil {
+			return err
+		}
+		if r.Window == nil || r.Window.KeyframesOnly {
+			return errors.New("speech needs a window")
+		}
+		if r.Window.DurationSeconds > maxSpeechWindowSeconds {
+			return fmt.Errorf("speech window must be at most %d seconds", maxSpeechWindowSeconds)
+		}
+		if r.Audio.Fingerprint || r.Audio.Silence != nil || r.Stats != nil {
+			return errors.New("speech takes no other output")
 		}
 	}
 	if r.Stats != nil {
@@ -217,7 +250,7 @@ func (r Request) Validate() error {
 		if !finite(attempt.TimeoutSeconds) || attempt.TimeoutSeconds < 0 || attempt.TimeoutSeconds > maxAttemptSeconds {
 			return fmt.Errorf("attempt %d timeout must be between 0 and %d seconds", i+1, maxAttemptSeconds)
 		}
-		if attempt.Hardware && r.Images == nil && r.Stats == nil {
+		if attempt.Hardware && !r.hasVideoOutput() {
 			return fmt.Errorf("attempt %d asks for hardware decode without a video output", i+1)
 		}
 	}
@@ -225,11 +258,17 @@ func (r Request) Validate() error {
 }
 
 func (r Request) hasOutput() bool {
-	return r.hasAudioOutput() || r.Stats != nil || r.Images != nil
+	return r.hasAudioOutput() || r.hasVideoOutput()
+}
+
+// hasVideoOutput reports whether the request decodes video, which hardware
+// attempts need.
+func (r Request) hasVideoOutput() bool {
+	return r.Stats != nil || r.Images != nil || r.Sheets != nil
 }
 
 func (r Request) hasAudioOutput() bool {
-	return r.Audio != nil && (r.Audio.Fingerprint || r.Audio.Silence != nil)
+	return r.Audio != nil && (r.Audio.Fingerprint || r.Audio.Silence != nil || r.Audio.Speech != nil)
 }
 
 // attempts returns the attempts to make, defaulting to one software attempt.
@@ -240,10 +279,18 @@ func (r Request) attempts() []Attempt {
 	return r.Attempts
 }
 
+// speech returns the request's speech output, nil when it has none.
+func (r Request) speech() *SpeechParams {
+	if r.Audio == nil {
+		return nil
+	}
+	return r.Audio.Speech
+}
+
 // parsesStderr reports whether an output is read from ffmpeg's log, which
 // then has to run at info level.
 func (r Request) parsesStderr() bool {
-	return (r.Audio != nil && r.Audio.Silence != nil) || r.Stats != nil
+	return (r.Audio != nil && r.Audio.Silence != nil) || r.Stats != nil || r.Sheets != nil
 }
 
 func (w Window) validate() error {
@@ -310,6 +357,8 @@ func (s SilenceParams) validate() error {
 	}
 	return nil
 }
+
+var errAudioStreamRange = fmt.Errorf("audio stream must be between 0 and %d", maxAudioStream)
 
 // countSet counts the true values.
 func countSet(values ...bool) int {

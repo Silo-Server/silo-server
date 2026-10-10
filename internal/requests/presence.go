@@ -35,19 +35,52 @@ type tmdbBackfiller interface {
 
 type CatalogPresence struct {
 	items        presenceItemLookup
+	seasons      seasonLookup
 	tmdbBackfill tmdbBackfiller
+}
+
+type seasonLookup interface {
+	SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]catalog.SeasonAvailability, error)
 }
 
 func NewCatalogPresence(items *catalog.ItemRepository, providerIDs ...*catalog.ProviderIDRepository) *CatalogPresence {
 	var itemLookup presenceItemLookup
+	var seasons seasonLookup
 	if items != nil {
 		itemLookup = items
+		seasons = items
 	}
 	var backfill tmdbBackfiller
 	if len(providerIDs) > 0 && providerIDs[0] != nil {
 		backfill = providerIDs[0]
 	}
-	return &CatalogPresence{items: itemLookup, tmdbBackfill: backfill}
+	return &CatalogPresence{items: itemLookup, seasons: seasons, tmdbBackfill: backfill}
+}
+
+// SeasonAvailability implements SeasonPresenceResolver. Once a season has
+// aired episodes, only those count as present, so an episode that arrived
+// ahead of its air date cannot stand in for a missing aired one.
+func (p *CatalogPresence) SeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]SeasonCounts, error) {
+	if p == nil || p.seasons == nil {
+		return nil, nil
+	}
+	bySeries, err := p.seasons.SeriesSeasonAvailability(ctx, seriesContentIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[int]SeasonCounts, len(bySeries))
+	for series, rows := range bySeries {
+		counts := make(map[int]SeasonCounts, len(rows))
+		for season, row := range rows {
+			have := row.Have
+			if row.Aired > 0 {
+				have = row.HaveAired
+			}
+			counts[season] = SeasonCounts{Aired: row.Aired, Upcoming: row.Upcoming, Have: have}
+		}
+		out[series] = counts
+	}
+	return out, nil
 }
 
 func (p *CatalogPresence) Lookup(ctx context.Context, mediaType MediaType, candidates []PresenceCandidate) (map[int]PresenceMatch, error) {
