@@ -17,6 +17,8 @@ type fakeAdminTranslation struct {
 	content       string
 	jobID         int64
 	request       handlers.TranslateMetadataRequest
+	libraryID     int
+	language      string
 }
 
 func (f *fakeAdminTranslation) TranslateAdminMetadata(_ context.Context, id string, req handlers.TranslateMetadataRequest, userID int) (*translation.Job, error) {
@@ -32,6 +34,21 @@ func (f *fakeAdminTranslation) ListAdminMetadataTranslationJobs(_ context.Contex
 func (f *fakeAdminTranslation) CancelAdminMetadataTranslation(_ context.Context, id string, jobID int64) error {
 	f.calls++
 	f.content, f.jobID = id, jobID
+	return nil
+}
+func (f *fakeAdminTranslation) TranslateLibraryMetadata(_ context.Context, libraryID int, language string, userID int) (*translation.Job, error) {
+	f.calls++
+	f.libraryID, f.language, f.userID = libraryID, language, userID
+	return &translation.Job{ID: 9, TargetKind: translation.TargetLibrary, ContentID: translation.LibraryContentID(libraryID), TargetLanguage: language, IncludeChildren: true, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, nil
+}
+func (f *fakeAdminTranslation) ListLibraryMetadataTranslationJobs(_ context.Context, libraryID int) ([]translation.Job, error) {
+	f.calls++
+	f.libraryID = libraryID
+	return nil, nil
+}
+func (f *fakeAdminTranslation) CancelLibraryMetadataTranslation(_ context.Context, libraryID int, jobID int64) error {
+	f.calls++
+	f.libraryID, f.jobID = libraryID, jobID
 	return nil
 }
 func adminTranslationGate(next http.Handler) http.Handler {
@@ -86,5 +103,43 @@ func adminCatalogTranslationFixtureCases() []fixtureCase {
 		{name: "admin_metadata_translation_queued", operationID: "translateAdminItemMetadata", method: "POST", path: path, body: `{"target_language":"de"}`, headers: bearer(memberToken), status: 202, schema: "#/components/schemas/MetadataTranslationJob", assertHeaders: []string{"Content-Type", "Location"}, scenario: "A delegated curator queues the persisted translation job for an authorized item."},
 		{name: "admin_metadata_translation_jobs", operationID: "listAdminMetadataTranslationJobs", method: "GET", path: path + "/jobs", headers: bearer(memberToken), status: 200, schema: "#/components/schemas/AdminMetadataTranslationJobs", assertHeaders: []string{"Content-Type"}, scenario: "The recent-job list is bounded and empty arrays remain arrays."},
 		{name: "admin_metadata_translation_cancel", operationID: "cancelAdminMetadataTranslation", method: "POST", path: path + "/jobs/7/cancel", headers: bearer(memberToken), status: 204, scenario: "Cancellation binds both authorized content and exact job identity."},
+	}
+}
+
+func TestAdminLibraryTranslationIsAdminOnly(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := &fakeAdminTranslation{}
+	deps.AdminMetadataTranslation = f
+	h := newTestHandler(t, deps)
+	path := Prefix + "/admin/libraries/3/metadata-translation"
+
+	rec := do(t, h, "POST", path, `{"target_language":"de"}`, bearer(adminToken))
+	if rec.Code != 202 || f.libraryID != 3 || f.language != "de" || rec.Header().Get("Location") != path+"/jobs" ||
+		!strings.Contains(rec.Body.String(), `"target_kind":"library"`) {
+		t.Fatalf("enqueue: %d %s %#v", rec.Code, rec.Body, f)
+	}
+	rec = do(t, h, "GET", path+"/jobs", "", bearer(adminToken))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"jobs":[]`) {
+		t.Fatalf("jobs: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(t, h, "POST", path+"/jobs/9/cancel", "", bearer(adminToken))
+	if rec.Code != 204 || f.jobID != 9 || f.libraryID != 3 {
+		t.Fatalf("cancel: %d %s %#v", rec.Code, rec.Body, f)
+	}
+
+	before := f.calls
+	for _, tc := range []struct{ method, path, body string }{{"POST", "", `{"target_language":"de"}`}, {"GET", "/jobs", ""}, {"POST", "/jobs/9/cancel", ""}} {
+		rec = do(t, h, tc.method, path+tc.path, tc.body, bearer(memberToken))
+		if rec.Code != 403 || f.calls != before {
+			t.Fatalf("member reached library prewarm: %s %s %d calls=%d", tc.method, tc.path, rec.Code, f.calls)
+		}
+	}
+	rec = do(t, h, "POST", path, `{"target_language":""}`, bearer(adminToken))
+	if rec.Code != 422 || f.calls != before {
+		t.Fatalf("invalid reached service: %d", rec.Code)
+	}
+	rec = do(t, h, "POST", Prefix+"/admin/libraries/0/metadata-translation", `{"target_language":"de"}`, bearer(adminToken))
+	if rec.Code != 404 || f.calls != before {
+		t.Fatalf("bad library id: %d", rec.Code)
 	}
 }

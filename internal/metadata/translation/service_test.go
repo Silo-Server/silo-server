@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,13 +119,19 @@ func (r *fakeRepo) job(id int64) Job {
 }
 
 type fakeContent struct {
-	item     *ItemText
-	seasons  []ChildText
-	episodes []ChildText
-	missing  int
+	item         *ItemText
+	seasons      []ChildText
+	episodes     []ChildText
+	missing      int
+	libraryItems []string
 }
 
-func (c *fakeContent) ItemText(context.Context, string) (*ItemText, error) { return c.item, nil }
+func (c *fakeContent) ItemText(_ context.Context, contentID string) (*ItemText, error) {
+	if c.item == nil || contentID != c.item.ContentID {
+		return nil, nil
+	}
+	return c.item, nil
+}
 func (c *fakeContent) SeasonTexts(context.Context, string) ([]ChildText, error) {
 	return c.seasons, nil
 }
@@ -145,6 +152,9 @@ func (c *fakeContent) EpisodeByID(context.Context, string) (*ChildText, string, 
 }
 func (c *fakeContent) CountMissingFields(context.Context, string, string) (int, error) {
 	return c.missing, nil
+}
+func (c *fakeContent) LibraryItemsMissing(context.Context, int, string) ([]string, error) {
+	return c.libraryItems, nil
 }
 
 type aiWrite struct {
@@ -584,5 +594,125 @@ func TestRequestOnViewUsesRequestedTargetKind(t *testing.T) {
 	}
 	if !sawSeason || !sawEpisode {
 		t.Fatalf("missing target-kind writes: %+v", writes)
+	}
+}
+
+func TestLibraryPrewarmTranslatesEachMissingItem(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	// "removed" disappeared after the walk listed it and is skipped.
+	content.libraryItems = []string{"removed", "series1"}
+	svc := testService(t, repo, content, locs, chat)
+
+	job, err := svc.EnqueueLibrary(context.Background(), 7, "fr", nil)
+	if err != nil {
+		t.Fatalf("EnqueueLibrary: %v", err)
+	}
+	if job.TargetKind != TargetLibrary || job.ContentID != "library:7" || job.Force || !job.IncludeChildren {
+		t.Fatalf("job = %+v, want an unforced library job for library:7", job)
+	}
+	waitDone(t, repo)
+
+	final := repo.job(job.ID)
+	if final.Status != jobrunner.StatusCompleted || final.FieldsDone != 2 || final.FieldsTotal != 2 {
+		t.Fatalf("final = %+v, want completed with 2 of 2 items", final)
+	}
+	// The series' overview and tagline, season 1, and both episodes.
+	if got := len(locs.allWrites()); got != 5 {
+		t.Fatalf("writes = %d (%+v), want 5", got, locs.allWrites())
+	}
+	for _, write := range locs.allWrites() {
+		if write.force {
+			t.Fatalf("library prewarm forced a write: %+v", write)
+		}
+	}
+
+	// A repeat while nothing is running starts a new job; a prewarm request
+	// cannot ask for force.
+	if _, err := svc.Enqueue(context.Background(), JobRequest{TargetKind: TargetLibrary, ContentID: "library:x", TargetLanguage: "fr"}); err == nil {
+		t.Fatal("Enqueue accepted an invalid library target")
+	}
+	forced, err := svc.Enqueue(context.Background(), JobRequest{TargetKind: TargetLibrary, ContentID: "library:7", TargetLanguage: "de", Force: true})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if forced.Force {
+		t.Fatalf("library job kept force: %+v", forced)
+	}
+	waitDone(t, repo)
+}
+
+func TestLibraryPrewarmStopsOnProviderFailure(t *testing.T) {
+	repo, content, locs := newFakeRepo(), seriesContent(), &fakeLocs{}
+	content.libraryItems = []string{"series1", "series1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	failing := func(context.Context, string, string) (string, error) {
+		return "", fmt.Errorf("quota exceeded")
+	}
+	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
+	svc := NewService(ctx, cfg, repo, content, locs, failing, jobrunner.NewSemaphore(1), nil)
+
+	job, err := svc.EnqueueLibrary(context.Background(), 7, "fr", nil)
+	if err != nil {
+		t.Fatalf("EnqueueLibrary: %v", err)
+	}
+	waitDone(t, repo)
+	final := repo.job(job.ID)
+	if final.Status != jobrunner.StatusFailed || !strings.Contains(final.ErrorMessage, "quota exceeded") {
+		t.Fatalf("final = %+v, want failed with the provider error", final)
+	}
+	if final.FieldsDone != 0 {
+		t.Fatalf("progress = %d items, want the first item to stop the job", final.FieldsDone)
+	}
+}
+
+// A cancel recorded by another node stops the prewarm before its next item.
+func TestLibraryPrewarmStopsWhenCanceledElsewhere(t *testing.T) {
+	repo, content, locs := newFakeRepo(), seriesContent(), &fakeLocs{}
+	content.libraryItems = []string{"series1", "series1", "series1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var calls atomic.Int32
+	jobIDs := make(chan int64, 1)
+	started := make(chan struct{})
+	var jobID int64
+	chat := func(_ context.Context, _ string, user string) (string, error) {
+		if calls.Add(1) == 1 {
+			defer close(started)
+			jobID = <-jobIDs
+			// The first item is in flight when another node cancels the job.
+			repo.mu.Lock()
+			repo.jobs[jobID].Status = jobrunner.StatusCancelled
+			repo.mu.Unlock()
+		}
+		return (&upperChat{}).fn(ctx, "", user)
+	}
+	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{} // hold the job until its ID is known
+	svc := NewService(ctx, cfg, repo, content, locs, chat, sem, nil)
+	job, err := svc.EnqueueLibrary(context.Background(), 7, "fr", nil)
+	if err != nil {
+		t.Fatalf("EnqueueLibrary: %v", err)
+	}
+	jobIDs <- job.ID
+	<-sem
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the prewarm never called the provider")
+	}
+
+	// The runner frees its slot when the job returns.
+	select {
+	case sem <- struct{}{}:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the canceled prewarm kept running")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want the prewarm to stop after the item in flight", got)
+	}
+	if got := repo.job(job.ID).Status; got != jobrunner.StatusCancelled {
+		t.Fatalf("status = %s, want it left canceled", got)
 	}
 }

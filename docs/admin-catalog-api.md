@@ -195,6 +195,32 @@ Enqueue and cancellation have no durable request replay receipt. The web enqueue
 mutation disables both mutation retries and authentication replay. No existing
 web cancel control, native administrator caller, or Jellyfin equivalent exists.
 
+### Library prewarm
+
+A server administrator can fill a whole library's missing translations ahead
+of browsing. These routes require the acting-administrator role, not the
+per-item curation permission.
+
+| Endpoint | Result |
+| --- | --- |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation` | `202` with the canonical translation job |
+| `GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs` | `jobs`: the newest 50 prewarm jobs of the library |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
+
+Enqueue accepts only `target_language`. The job's `target_kind` is `library`
+and its `content_id` is `library:{library_id}`. It walks the library's items that still
+miss an overview, tagline, season overview, or episode overview in that
+language, in title order, and translates each item with its seasons and
+episodes. Items already in that language are skipped. A prewarm never forces:
+provider, manual, and earlier AI text is kept. `fields_done` and `fields_total`
+count items, and `progress_message` names the current one.
+
+One prewarm uses one slot of the shared AI job bound and translates one item
+at a time. A provider error stops the job instead of failing every remaining
+item; translated items stay. Re-running after a failure, a cancellation, or a
+restart resumes with whatever is still missing. An active prewarm for the same
+library and language is reused. An unknown library is `404`.
+
 ## Item metadata edits and refresh
 
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "quick"` (the

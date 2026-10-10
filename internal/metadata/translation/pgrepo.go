@@ -142,11 +142,19 @@ func (r *PgRepository) FailJob(ctx context.Context, id int64, status JobStatus, 
 	return nil
 }
 
+// Heartbeat keeps an active job alive. A job that is no longer pending or
+// running (canceled from another node, or reaped) reports
+// jobrunner.ErrJobTerminal, so the node still running it stops spending
+// provider calls on a job nobody waits for.
 func (r *PgRepository) Heartbeat(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE metadata_translation_jobs SET heartbeat_at = now() WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE metadata_translation_jobs SET heartbeat_at = now()
+		WHERE id = $1 AND status IN ('pending', 'running')`, id)
 	if err != nil {
 		return fmt.Errorf("heartbeat metadata translation job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return jobrunner.ErrJobTerminal
 	}
 	return nil
 }
@@ -276,4 +284,50 @@ func (r *PgRepository) CountMissingFields(ctx context.Context, itemContentID, la
 		return 0, fmt.Errorf("count missing localization fields: %w", err)
 	}
 	return missing, nil
+}
+
+// LibraryItemsMissing lists the library's items with at least one
+// translatable field missing for language: an item overview or tagline, a
+// season overview, or an episode overview that has source text in another
+// language and no localized value. Each row's own language decides, so a
+// series in the target language still qualifies for its other-language
+// episodes.
+func (r *PgRepository) LibraryItemsMissing(ctx context.Context, libraryID int, language string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT mi.content_id
+		FROM media_items mi
+		JOIN media_item_libraries mil ON mil.content_id = mi.content_id AND mil.media_folder_id = $1
+		LEFT JOIN media_item_localizations l ON l.content_id = mi.content_id AND l.language = $2
+		WHERE (
+				lower(COALESCE(mi.default_metadata_language, '')) <> lower($2)
+				AND ((COALESCE(mi.overview, '') <> '' AND COALESCE(l.overview, '') = '')
+				  OR (COALESCE(mi.tagline, '') <> '' AND COALESCE(l.tagline, '') = ''))
+			)
+			OR EXISTS (
+				SELECT 1 FROM seasons s
+				LEFT JOIN season_localizations sl ON sl.season_content_id = s.content_id AND sl.language = $2
+				WHERE s.series_id = mi.content_id
+				  AND lower(COALESCE(s.default_metadata_language, '')) <> lower($2)
+				  AND COALESCE(s.overview, '') <> '' AND COALESCE(sl.overview, '') = '')
+			OR EXISTS (
+				SELECT 1 FROM episodes e
+				LEFT JOIN episode_localizations el ON el.episode_content_id = e.content_id AND el.language = $2
+				WHERE e.series_id = mi.content_id
+				  AND lower(COALESCE(e.default_metadata_language, '')) <> lower($2)
+				  AND COALESCE(e.overview, '') <> '' AND COALESCE(el.overview, '') = '')
+		ORDER BY COALESCE(NULLIF(mi.sort_title, ''), mi.title), mi.content_id
+	`, libraryID, language)
+	if err != nil {
+		return nil, fmt.Errorf("list library items missing localization: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan library item: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

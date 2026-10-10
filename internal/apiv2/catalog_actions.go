@@ -111,7 +111,7 @@ type MetadataAICapabilityOutput struct {
 // MetadataTranslationJob is one queued or running translation.
 type MetadataTranslationJob struct {
 	ID              ID      `json:"id" example:"42"`
-	TargetKind      string  `json:"target_kind" doc:"item, season, or episode"`
+	TargetKind      string  `json:"target_kind" doc:"item, season, episode, or library (a prewarm, whose fields_done and fields_total count items)"`
 	ContentID       string  `json:"content_id"`
 	IncludeChildren bool    `json:"include_children"`
 	SourceLanguage  string  `json:"source_language"`

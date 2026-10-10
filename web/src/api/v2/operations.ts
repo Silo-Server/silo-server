@@ -168,6 +168,8 @@ export const v2Operations = {
   "GET /api/v2/admin/libraries/{library_id}/collection-groups": "listAdminCollectionGroups",
   "GET /api/v2/admin/libraries/{library_id}/collection-groups/order":
     "getAdminCollectionGroupOrder",
+  "GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs":
+    "listLibraryMetadataTranslationJobs",
   "GET /api/v2/admin/literary-works/items/{content_id}/candidates": "listAdminLiteraryCandidates",
   "GET /api/v2/admin/logs/app": "listAdminOperationalLogs",
   "GET /api/v2/admin/logs/audit": "listAdminAuditLogs",
@@ -613,6 +615,9 @@ export const v2Operations = {
   "POST /api/v2/admin/jellyfin-compat/web/remove": "removeAdminJellyfinCompatWeb",
   "POST /api/v2/admin/jobs/{id}/cancel": "cancelAdminJob",
   "POST /api/v2/admin/libraries/{library_id}/collection-groups": "createAdminCollectionGroup",
+  "POST /api/v2/admin/libraries/{library_id}/metadata-translation": "translateLibraryMetadata",
+  "POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel":
+    "cancelLibraryMetadataTranslation",
   "POST /api/v2/admin/literary-works/link": "linkAdminLiteraryItems",
   "POST /api/v2/admin/literary-works/matches/confirm": "confirmAdminLiteraryMatch",
   "POST /api/v2/admin/literary-works/matches/ignore": "ignoreAdminLiteraryMatch",

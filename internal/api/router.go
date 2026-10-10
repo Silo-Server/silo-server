@@ -3824,6 +3824,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
+						if deps.FolderRepo != nil {
+							metadataAIHandler.Libraries = deps.FolderRepo
+						}
 						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {

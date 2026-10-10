@@ -187,6 +187,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media
@@ -1442,6 +1445,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media

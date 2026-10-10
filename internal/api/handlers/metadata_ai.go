@@ -46,6 +46,8 @@ type MetadataAIHandler struct {
 	// detail pages to the parent series for authorization.
 	SeasonLookup  metadataAISeasonLookup
 	EpisodeLookup metadataAIEpisodeLookup
+	// Libraries resolves library prewarm targets; nil leaves them unavailable.
+	Libraries metadataAILibraryLookup
 }
 
 // NewMetadataAIHandler creates a handler backed by the given service.

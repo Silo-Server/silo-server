@@ -13,6 +13,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -38,7 +40,31 @@ const (
 	TargetItem    TargetKind = "item"
 	TargetSeason  TargetKind = "season"
 	TargetEpisode TargetKind = "episode"
+	// TargetLibrary prewarms every item of a library (with its seasons and
+	// episodes) that misses a localization; ContentID is LibraryContentID.
+	TargetLibrary TargetKind = "library"
 )
+
+const libraryContentIDPrefix = "library:"
+
+// LibraryContentID is the content_id a library prewarm job is stored under.
+// The prefix keeps it apart from catalog content IDs.
+func LibraryContentID(libraryID int) string {
+	return libraryContentIDPrefix + strconv.Itoa(libraryID)
+}
+
+// ParseLibraryContentID returns the library ID of a LibraryContentID.
+func ParseLibraryContentID(contentID string) (int, bool) {
+	raw, ok := strings.CutPrefix(contentID, libraryContentIDPrefix)
+	if !ok {
+		return 0, false
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
 
 // JobStatus is the lifecycle state of a job, shared with the other AI job
 // services via jobrunner.
@@ -129,6 +155,10 @@ type ContentReader interface {
 	// episode overviews) that have source text but no localized value for the
 	// language — the auto-translate trigger condition.
 	CountMissingFields(ctx context.Context, itemContentID, language string) (int, error)
+	// LibraryItemsMissing lists, in title order, the library's items whose
+	// own or children's descriptions have source text in another language and
+	// no localized value for language.
+	LibraryItemsMissing(ctx context.Context, libraryID int, language string) ([]string, error)
 }
 
 // idempotencyKey derives the dedup key for a job. Two requests for the same

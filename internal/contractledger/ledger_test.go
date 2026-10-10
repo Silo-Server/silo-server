@@ -1127,6 +1127,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
+	"cancelLibraryMetadataTranslation":         "V2-only cancellation of a library prewarm (v1 is frozen). Canceling a terminal job is a no-op, so a replay converges on the same state.",
 	"createShuffle":                            "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
 	"advanceShuffle":                           "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
 	"skipShuffleItem":                          "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",

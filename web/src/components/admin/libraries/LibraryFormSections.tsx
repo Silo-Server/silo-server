@@ -39,6 +39,7 @@ import {
 } from "./realtimeMonitoring";
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
+import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
 function SettingCard({
   htmlFor,
@@ -370,6 +371,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
+      {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
           <Label>Trailer &amp; extras types</Label>
