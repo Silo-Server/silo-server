@@ -469,21 +469,23 @@ func (h *RecommendationsHandler) buildSectionItems(
 			continue
 		}
 		item := sectionItemResponse{
-			ContentID:         mi.ContentID,
-			Type:              mi.Type,
-			Title:             mi.Title,
-			Year:              mi.Year,
-			Genres:            mi.Genres,
-			Keywords:          mi.Keywords,
-			Status:            mi.Status,
-			RatingIMDB:        mi.RatingIMDB,
-			RatingTMDB:        mi.RatingTMDB,
-			RatingRTCritic:    mi.RatingRTCritic,
-			RatingRTAudience:  mi.RatingRTAudience,
-			OriginalLanguage:  mi.OriginalLanguage,
-			Overview:          mi.Overview,
-			PosterThumbhash:   mi.PosterThumbhash,
-			BackdropThumbhash: mi.BackdropThumbhash,
+			ContentID:              mi.ContentID,
+			Type:                   mi.Type,
+			Title:                  mi.Title,
+			Year:                   mi.Year,
+			Genres:                 mi.Genres,
+			Keywords:               mi.Keywords,
+			Status:                 mi.Status,
+			RatingIMDB:             mi.RatingIMDB,
+			RatingTMDB:             mi.RatingTMDB,
+			RatingRTCritic:         mi.RatingRTCritic,
+			RatingRTAudience:       mi.RatingRTAudience,
+			OriginalLanguage:       mi.OriginalLanguage,
+			Overview:               mi.Overview,
+			PosterThumbhash:        mi.PosterThumbhash,
+			BackdropThumbhash:      mi.BackdropThumbhash,
+			PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
+			BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
 		}
 		if item.Genres == nil {
 			item.Genres = []string{}

@@ -2747,6 +2747,14 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 	return scanMediaItems(rows)
 }
 
+// markEpisodeStillProvenance records whether the artwork the episode query
+// picked is the episode's own still. It runs on the selected raw paths, before
+// sizing or signing, so the flags stay with the paths through the section cache.
+func markEpisodeStillProvenance(item *models.MediaItem, stillPath string) {
+	item.PosterIsEpisodeStill = new(stillPath != "" && item.PosterPath == stillPath)
+	item.BackdropIsEpisodeStill = new(stillPath != "" && item.BackdropPath == stillPath)
+}
+
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
@@ -2839,6 +2847,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
+		markEpisodeStillProvenance(&item, stillPath)
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
 			EpisodeStillPath: new(stillPath),

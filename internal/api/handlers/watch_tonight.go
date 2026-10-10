@@ -236,10 +236,6 @@ func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, p
 		// Fill in episode metadata from the enrichment step for items that came
 		// through the episodes table (CW/Next-Up episodes).
 		if epMeta, ok := enrichedEpMeta[m.scored.MediaItemID]; ok {
-			if epMeta.EpisodeStillPath != nil {
-				item.PosterIsEpisodeStill = new(*epMeta.EpisodeStillPath != "" && mi.PosterPath == *epMeta.EpisodeStillPath)
-				item.BackdropIsEpisodeStill = new(*epMeta.EpisodeStillPath != "" && mi.BackdropPath == *epMeta.EpisodeStillPath)
-			}
 			if epMeta.SeriesID != nil && item.SeriesID == "" {
 				item.SeriesID = *epMeta.SeriesID
 			}
@@ -446,20 +442,22 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 // applying presigning and overlay/state lookups.
 func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
 	item := sectionItemResponse{
-		ContentID:         mi.ContentID,
-		Type:              mi.Type,
-		Title:             mi.Title,
-		Year:              mi.Year,
-		Genres:            mi.Genres,
-		Status:            mi.Status,
-		RatingIMDB:        mi.RatingIMDB,
-		RatingTMDB:        mi.RatingTMDB,
-		RatingRTCritic:    mi.RatingRTCritic,
-		RatingRTAudience:  mi.RatingRTAudience,
-		OriginalLanguage:  mi.OriginalLanguage,
-		Overview:          mi.Overview,
-		PosterThumbhash:   mi.PosterThumbhash,
-		BackdropThumbhash: mi.BackdropThumbhash,
+		ContentID:              mi.ContentID,
+		Type:                   mi.Type,
+		Title:                  mi.Title,
+		Year:                   mi.Year,
+		Genres:                 mi.Genres,
+		Status:                 mi.Status,
+		RatingIMDB:             mi.RatingIMDB,
+		RatingTMDB:             mi.RatingTMDB,
+		RatingRTCritic:         mi.RatingRTCritic,
+		RatingRTAudience:       mi.RatingRTAudience,
+		OriginalLanguage:       mi.OriginalLanguage,
+		Overview:               mi.Overview,
+		PosterThumbhash:        mi.PosterThumbhash,
+		BackdropThumbhash:      mi.BackdropThumbhash,
+		PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
+		BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
 	}
 	if item.Genres == nil {
 		item.Genres = []string{}
