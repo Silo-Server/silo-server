@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -8,6 +8,19 @@ import { Search, X } from "lucide-react";
 import type { FormEvent } from "react";
 
 const SEARCH_NAVIGATION_DEBOUNCE_MS = 200;
+
+interface LiveSearchDraft {
+  query: string;
+  sentQueries: string[];
+  lastNavigatedQuery: string;
+}
+
+// The Search page renders one bar in its empty state and another above the
+// results, so its first live search unmounts the bar being typed in. Anything
+// typed while that navigation rendered exists only in the outgoing bar. It
+// leaves its text here as it unmounts, and the incoming bar takes it in the
+// same commit. A draft nobody took is dropped once that commit ends.
+let liveSearchHandoff: LiveSearchDraft | null = null;
 
 interface SearchBarProps {
   initialQuery?: string;
@@ -32,19 +45,73 @@ export default function SearchBar({
   const isInitialMount = useRef(true);
   const buildSearchHrefRef = useRef(buildSearchHref);
   const lastNavigatedQueryRef = useRef(initialQuery.trim());
+  // Queries this bar has put in the URL that the URL has not shown yet, oldest
+  // first. Router navigations commit as transitions, so each one lands after
+  // a delay, and the person may have typed more by then.
+  const sentQueriesRef = useRef<string[]>([]);
+  const queryRef = useRef(query);
+  const mountQueryRef = useRef(initialQuery);
   const debouncedQuery = useDebounce(query, SEARCH_NAVIGATION_DEBOUNCE_MS);
 
   useEffect(() => {
     buildSearchHrefRef.current = buildSearchHref;
   }, [buildSearchHref]);
 
+  useLayoutEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+
+  useLayoutEffect(() => {
+    const draft = liveSearchHandoff;
+    liveSearchHandoff = null;
+    if (prominent && draft?.sentQueries.includes(mountQueryRef.current.trim())) {
+      sentQueriesRef.current = draft.sentQueries;
+      lastNavigatedQueryRef.current = draft.lastNavigatedQuery;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- adopts the unmounted bar's text before paint
+      setQuery(draft.query);
+    }
+    return () => {
+      if (sentQueriesRef.current.length === 0) return;
+      const outgoing = {
+        query: queryRef.current,
+        sentQueries: [...sentQueriesRef.current],
+        lastNavigatedQuery: lastNavigatedQueryRef.current,
+      };
+      liveSearchHandoff = outgoing;
+      queueMicrotask(() => {
+        if (liveSearchHandoff === outgoing) liveSearchHandoff = null;
+      });
+    };
+  }, [prominent]);
+
   // Browser history, scope changes, and external navigation can update the
   // canonical query without remounting this component. Keep the input in sync
-  // instead of leaving it attached to a stale request key.
+  // instead of leaving it attached to a stale request key. A URL query this
+  // bar sent itself is only the router catching up: the input already holds
+  // that text or newer typing, and the URL query is trimmed, so copying it
+  // back would drop whatever was typed since, trailing spaces included.
   useEffect(() => {
+    const urlQuery = initialQuery.trim();
+    const sentQueries = sentQueriesRef.current;
+    const sentIndex = sentQueries.indexOf(urlQuery);
+    if (sentIndex >= 0) {
+      sentQueries.splice(0, sentIndex + 1);
+      return;
+    }
+    sentQueriesRef.current = [];
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL changed outside this bar
     setQuery(initialQuery);
-    lastNavigatedQueryRef.current = initialQuery.trim();
+    lastNavigatedQueryRef.current = urlQuery;
   }, [initialQuery]);
+
+  const navigateToQuery = useCallback(
+    (normalizedQuery: string, options?: { replace: true }) => {
+      lastNavigatedQueryRef.current = normalizedQuery;
+      sentQueriesRef.current.push(normalizedQuery);
+      navigateWithoutTransition(buildSearchHrefRef.current(normalizedQuery), options);
+    },
+    [navigateWithoutTransition],
+  );
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {
@@ -73,18 +140,14 @@ export default function SearchBar({
     // Updating only the query string is not a page transition. Animating a
     // full route snapshot for every debounced keystroke makes the search page
     // visibly wobble and adds compositor work to its hottest interaction.
-    lastNavigatedQueryRef.current = normalizedDebouncedQuery;
-    navigateWithoutTransition(buildSearchHrefRef.current(normalizedDebouncedQuery), {
-      replace: true,
-    });
-  }, [debouncedQuery, prominent, navigateWithoutTransition, query]);
+    navigateToQuery(normalizedDebouncedQuery, { replace: true });
+  }, [debouncedQuery, prominent, navigateToQuery, query]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (query.trim()) {
       if (prominent) {
-        lastNavigatedQueryRef.current = query.trim();
-        navigateWithoutTransition(buildSearchHref(query.trim()));
+        navigateToQuery(query.trim());
       } else {
         navigate(buildSearchHref(query.trim()));
       }
@@ -97,8 +160,7 @@ export default function SearchBar({
 
     // Clear is an explicit action, not typeahead. Remove the active route and
     // abort its request immediately instead of waiting for the debounce.
-    lastNavigatedQueryRef.current = "";
-    navigateWithoutTransition(buildSearchHrefRef.current(""), { replace: true });
+    navigateToQuery("", { replace: true });
   }
 
   if (prominent) {
