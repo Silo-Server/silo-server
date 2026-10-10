@@ -25,6 +25,17 @@ func isBareSeasonDirectory(segment string) bool {
 	return bareSeasonDirRe.MatchString(strings.TrimSpace(segment))
 }
 
+// isBareSeasonFolder is isBareSeasonDirectory for a folder that holds a file
+// whose own series title is fileTitle. When that title is the folder name, as
+// in Season/Season.S01E01.mkv, the folder is a show named "Season", not a
+// season level.
+func isBareSeasonFolder(segment, fileTitle string) bool {
+	if !isBareSeasonDirectory(segment) {
+		return false
+	}
+	return fileTitle == "" || normalizeComparableTitle(segment) != normalizeComparableTitle(fileTitle)
+}
+
 // seasonDirectoryNumber recognizes a season directory without borrowing numbers
 // from a show title. A title before the season label must match the parent show
 // directory, as in Show/Show.S02.1080p; Season 2 needs no parent evidence.

@@ -212,13 +212,13 @@ func TestBareSeasonFolderOnlyCountsAsImmediateParent(t *testing.T) {
 		"/tv/Season/Example.Show.S01E01.mkv":                           "/tv/Season",
 	}
 	for filePath, want := range cases {
-		root, ok := deriveSeriesRoot(filePath, true, false, "/tv")
+		root, ok := deriveSeriesRoot(filePath, "Example Show", true, false, "/tv")
 		if !ok || root.RootPath != want {
 			t.Errorf("%s: root %+v ok=%v, want %q", filePath, root, ok, want)
 		}
 	}
 	// A show named "Season" with a numbered season folder keeps its own name.
-	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", true, false, "/tv")
+	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", "Season", true, false, "/tv")
 	if !ok || root.RootPath != "/tv/Season" {
 		t.Errorf("show named Season: root %+v ok=%v", root, ok)
 	}
@@ -241,7 +241,7 @@ func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
 		t.Errorf("bare season folder must not supply a season number")
 	}
 	// A bare folder higher up is not season structure.
-	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, true, true); found {
+	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, "Example Show", true, true); found {
 		t.Errorf("ancestor bare season folder counted as season structure")
 	}
 	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
@@ -272,5 +272,28 @@ func TestBareSeasonFolderInsideNumberedSeasonKeepsShow(t *testing.T) {
 	}
 	if number, ok := firstSeasonNumber([]string{"Example Show", "Season 2", "Season"}, true, true); !ok || number != 2 {
 		t.Errorf("season number %d ok=%v, want 2 from the numbered ancestor", number, ok)
+	}
+}
+
+func TestShowNamedSeasonUnderCategoryFolderKeepsItsFolder(t *testing.T) {
+	filePath := "/tv/Genres/Season/Season.S01E01.mkv"
+	ctx := ResolvePathContext(filePath, "series", "/tv")
+	if ctx.RootPath != "/tv/Genres/Season" || ctx.Title != "Season" {
+		t.Errorf("ResolvePathContext root %q title %q, want /tv/Genres/Season and Season", ctx.RootPath, ctx.Title)
+	}
+	if ctx.HasSeasonStructure {
+		t.Errorf("ResolvePathContext: a show folder named Season counted as season structure")
+	}
+	if evidence := extractPathEvidence(filePath, "series", "/tv"); evidence.HasSeasonStructure {
+		t.Errorf("extractPathEvidence: a show folder named Season counted as season structure")
+	}
+	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
+	if got := assignments[filePath].RootPath; got != "/tv/Genres/Season" {
+		t.Errorf("InferRootAssignments root %q, want /tv/Genres/Season", got)
+	}
+	// Another show's file in a bare Season folder still lifts to that show.
+	other := "/tv/Genres/Example Show/Season/Example.Show.S01E01.mkv"
+	if got := ResolvePathContext(other, "series", "/tv").RootPath; got != "/tv/Genres/Example Show" {
+		t.Errorf("bare season folder root %q, want /tv/Genres/Example Show", got)
 	}
 }
