@@ -3,28 +3,16 @@ import { parseVTT, type ParsedCue } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
 import { toMediaTime } from "../utils/mediaTimeline";
+import {
+  nextSubtitleRetryDelay,
+  planSubtitleWindow,
+  SUBTITLE_FETCH_STALL_TIMEOUT_MS,
+  SUBTITLE_WINDOW_SECONDS,
+} from "../utils/subtitleWindows";
 
-// Explicitly bound each subtitle fetch to this many source-time seconds.
-const WINDOW_DURATION = 600;
-// Start fetching the next window this many seconds before the current
-// one's requested end, so the new cues are already on hand by the time
-// playback crosses into them.
-const PREFETCH_LEAD = 30;
-// Overlap consecutive windows by a few seconds so ffmpeg boundary
-// rounding can't drop a cue that straddles the join.
-const WINDOW_OVERLAP = 5;
 // Pull back this many seconds from the current position when starting
 // a fresh fetch, so a quick scrub back still lands inside the window.
 const SEEK_BACKOFF = 2;
-// Abort a window fetch when the response goes this long without delivering
-// a chunk. Extraction streams cues progressively, so a healthy-but-slow
-// ffmpeg keeps resetting the clock; only a genuinely hung one trips it.
-// Without this, one hung fetch blocks every future window for the session.
-const FETCH_STALL_TIMEOUT_MS = 30_000;
-// Wait this long after a failed window fetch before retrying, so a
-// persistently failing extraction doesn't turn timeupdate into a fetch storm.
-const FETCH_RETRY_BACKOFF_MS = 5_000;
-const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
 
 /**
  * Cues (in source time) and window coverage snapshotted from a track that is
@@ -76,7 +64,7 @@ function addCuesToTrack(
 /** Request the same bounded interval used by the coverage tracker. */
 function appendPosition(url: string, position: number): string {
   const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}position=${position}&duration=${WINDOW_DURATION}`;
+  return `${url}${sep}position=${position}&duration=${SUBTITLE_WINDOW_SECONDS}`;
 }
 
 /**
@@ -201,8 +189,8 @@ export function useSubtitleTracks(
     }
 
     // Skip entirely for ASS/SSA (JASSUB renders those via useASSSubtitles)
-    // and bitmap codecs (PGS/DVD/DVB are burned into the video server-side;
-    // rendering text cues for them would double up on screen).
+    // and bitmap codecs (usePGSSubtitles draws PGS; DVD/DVB are burned into
+    // the video server-side), which carry no text cues to show.
     if (isASSCodec(activeCodec) || isBitmapCodec(activeCodec)) {
       return;
     }
@@ -334,7 +322,7 @@ export function useSubtitleTracks(
       if (retryTimer !== null) clearTimeout(retryTimer);
       if (resetExisting) onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
 
-      const requestedEnd = seekStart + WINDOW_DURATION;
+      const requestedEnd = seekStart + SUBTITLE_WINDOW_SECONDS;
       if (resetExisting) {
         if (!placeholders) clearCues();
         coverageStart = seekStart;
@@ -347,7 +335,7 @@ export function useSubtitleTracks(
       let stallTimer: ReturnType<typeof setTimeout> | null = null;
       const armStallTimer = () => {
         if (stallTimer !== null) clearTimeout(stallTimer);
-        stallTimer = setTimeout(() => controller.abort(), FETCH_STALL_TIMEOUT_MS);
+        stallTimer = setTimeout(() => controller.abort(), SUBTITLE_FETCH_STALL_TIMEOUT_MS);
       };
 
       const url = appendPosition(activeUrl, seekStart);
@@ -430,24 +418,13 @@ export function useSubtitleTracks(
           // seek superseding this fetch — back off before retrying.
           lastFetchFailureAt = Date.now();
           onLoadStateRef.current?.("error");
-          retryDelay = Math.min(
-            retryDelay ? retryDelay * 2 : FETCH_RETRY_BACKOFF_MS,
-            FETCH_RETRY_MAX_BACKOFF_MS,
-          );
+          retryDelay = nextSubtitleRetryDelay(retryDelay);
           retryTimer = setTimeout(maybeFetch, retryDelay);
         }
       }
     }
 
-    // Picks the right fetch action for the current player position:
-    //   - no cues yet → initial fetch
-    //   - current position fell behind coverageStart (backward seek
-    //     outside window) → reset and fetch fresh window from here
-    //   - position jumped past windowEnd (forward seek outside window) →
-    //     reset and fetch fresh window from here, so the skipped-over gap
-    //     is never mistaken for covered range
-    //   - playback is nearing windowEnd and we haven't hit EOF → queue
-    //     the next window, overlapping slightly with the previous
+    // Picks the fetch for the current player position; see planSubtitleWindow.
     function maybeFetch() {
       if (cancelled) return;
       // Until the element has media loaded, currentTime reads 0 rather than
@@ -457,35 +434,22 @@ export function useSubtitleTracks(
         videoEl.readyState > 0
           ? toMediaTime(videoEl.currentTime, streamOriginRef.current ?? 0)
           : (fetchAnchorRef.current ?? 0);
-      if (inflight) {
-        if (
-          mediaTime >= Math.min(coverageStart, inflightStart) - 1 &&
-          mediaTime <= inflightStart + WINDOW_DURATION + 1
-        )
-          return;
-        // A seek outside the requested range must not wait for extraction.
-        fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
-        return;
-      }
-      if (lastFetchFailureAt > 0 && Date.now() - lastFetchFailureAt < retryDelay) return;
-      if (!hasFetched) {
-        fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
-        return;
-      }
-      if (mediaTime < coverageStart - 1) {
-        atEOF = false;
-        fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
-        return;
-      }
-      if (mediaTime > windowEnd + 1) {
-        atEOF = false;
-        fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
-        return;
-      }
-      if (!atEOF && mediaTime > windowEnd - PREFETCH_LEAD) {
-        const nextStart = Math.max(windowEnd - WINDOW_OVERLAP, mediaTime);
-        fetchWindow(nextStart, false);
-      }
+      const action = planSubtitleWindow(
+        {
+          hasFetched,
+          coverageStart,
+          windowEnd,
+          atEOF,
+          inflightStart: inflight ? inflightStart : null,
+          failedAt: lastFetchFailureAt,
+          retryDelayMs: retryDelay,
+        },
+        mediaTime,
+        Date.now(),
+        SEEK_BACKOFF,
+      );
+      if (action.kind === "fresh") fetchWindow(action.start, true);
+      else if (action.kind === "extend") fetchWindow(action.start, false);
     }
 
     // URL-backed tracks run the sliding-window fetcher; live tracks receive

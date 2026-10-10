@@ -30,14 +30,15 @@ const WEB_APP_VERSION = "web";
  * Subtitle capabilities of the web player, identical for every delivery class:
  * the server exposes external and embedded text as session-scoped sidecars,
  * which it renders as WebVTT or ASS via JASSUB (with container font
- * attachments). It has no bitmap subtitle renderer, so PGS/VOBSUB tracks must
- * still be burned in server-side.
+ * attachments). Embedded PGS arrives as a lossless `.sup` sidecar drawn by
+ * usePGSSubtitles. Embedded DVD/DVB bitmaps have no sidecar, so the server
+ * still burns them in; it refuses external bitmap files outright.
  */
 const WEB_SUBTITLE_CAPABILITIES: DeliverySubtitleCapabilitiesV3 = {
   embedded_text: true,
   sidecar_text: true,
   ass_styling: true,
-  embedded_bitmap: false,
+  embedded_bitmap: true,
   sidecar_bitmap: false,
   font_attachments: true,
 };
