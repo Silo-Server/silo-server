@@ -53,7 +53,7 @@ func TestProfileTokenSurvivesManagingAnotherProfile(t *testing.T) {
 	}
 	db.DB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	users := &revisionUsers{user: &models.User{ID: 1, Role: "user", Enabled: true, MaxProfiles: 5, AccessPolicyRevision: 1}}
+	users := &revisionUsers{user: &models.User{ID: 1, Role: "user", Enabled: true, MaxProfiles: new(5), AccessPolicyRevision: 1}}
 	store := userdb.NewSQLiteUserStore(db.DB)
 	for _, p := range []userstore.Profile{{ID: "p-parent", Name: "Parent"}, {ID: "p-kid", Name: "Kid"}} {
 		if err := store.CreateProfile(ctx, p); err != nil {

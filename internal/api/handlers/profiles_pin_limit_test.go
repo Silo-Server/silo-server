@@ -20,7 +20,7 @@ import (
 func newPINLimitHandler(t *testing.T, store userstore.UserStore, limiter *ratelimit.AttemptLimiter) *ProfileHandler {
 	t.Helper()
 	h := NewProfileHandler(testUserStoreProvider{store: store})
-	h.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: 5}}
+	h.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: new(5)}}
 	h.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 	h.PINAttempts = limiter
 	return h
