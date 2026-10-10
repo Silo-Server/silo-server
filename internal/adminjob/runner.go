@@ -273,6 +273,9 @@ func (r *Runner) runNext() {
 		message := "Library metadata refresh canceled"
 		if job.JobType == JobTypeImageCacheCleanup {
 			message = "Image cache cleanup canceled; cached images not yet deleted remain in storage"
+			if job.ProgressTotal > 0 && job.ProgressCurrent >= job.ProgressTotal {
+				message = imageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal)
+			}
 		}
 		if job.JobType == JobTypeStorageTransition {
 			message = "Storage transition canceled; verified copy checkpoints retained"
@@ -609,6 +612,16 @@ var (
 	errImageCacheCleanupClaimLost       = errors.New("image cache cleanup claim lost")
 )
 
+// imageCacheCleanupCanceledMessage describes a canceled cleanup that stopped
+// before prefix next of total. A cancel seen only after the last prefix left
+// nothing behind, so it must not say that undeleted images remain.
+func imageCacheCleanupCanceledMessage(next, total int) string {
+	if next >= total {
+		return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total)
+	}
+	return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; cached images not yet deleted remain in storage", next, total)
+}
+
 func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	if r.imageCacheCleanup == nil {
 		r.failJob(job.ID, 0, 0, "Image cache cleanup failed", "image cache cleanup executor is not configured")
@@ -710,7 +723,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	case errors.Is(cause, errImageCacheCleanupClaimLost):
 		slog.Warn("admin jobs: image cache cleanup claim lost; leaving the job to its new owner", "job_id", job.ID)
 	case errors.Is(cause, errImageCacheCleanupCancelRequested):
-		message := fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; cached images not yet deleted remain in storage", next, total)
+		message := imageCacheCleanupCanceledMessage(next, total)
 		// One claim-fenced write records the totals and the canceled status
 		// together. If it fails the job stays running; stale recovery then
 		// reclaims it and the claim-time cancel ends it with the last
@@ -732,7 +745,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 			ResultPayload:   result,
 			Message:         "Cached image cleanup completed",
-			CanceledMessage: fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total),
+			CanceledMessage: imageCacheCleanupCanceledMessage(total, total),
 			ProgressCurrent: total,
 			ProgressTotal:   total,
 			ExpiresAt:       time.Now().UTC().Add(r.retention),

@@ -50,3 +50,35 @@ func TestOpenAdminJobArtifactReportsMissingObjectAsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrJobArtifactNotFound", err)
 	}
 }
+
+type cancellationRequestingRepository struct {
+	fakeAdminJobRepository
+}
+
+func (r *cancellationRequestingRepository) RequestCancellation(_ context.Context, id string) (*models.AdminJob, error) {
+	if r.job == nil || r.job.ID != id {
+		return nil, adminjob.ErrJobNotFound
+	}
+	r.job.CancelRequested = true
+	cp := *r.job
+	return &cp, nil
+}
+
+// The cancel endpoint sets the shared flag that any node's runner polls. A
+// cleanup running in this process is also stopped through the cancel
+// registry, so it does not keep deleting until the next poll.
+func TestRequestAdminTaskJobCancellationStopsALocalImageCacheCleanup(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusRunning}
+	h := NewAdminJobsHandler(&cancellationRequestingRepository{fakeAdminJobRepository{job: job}}, nil)
+	h.CancelRegistry = adminjob.NewCancelRegistry()
+	stopped := false
+	defer h.CancelRegistry.Register(job.ID, func() { stopped = true })()
+
+	got, err := h.RequestAdminTaskJobCancellation(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CancelRequested || !stopped {
+		t.Fatalf("cancel_requested=%v stopped=%v, want the flag set and the local cleanup stopped", got.CancelRequested, stopped)
+	}
+}

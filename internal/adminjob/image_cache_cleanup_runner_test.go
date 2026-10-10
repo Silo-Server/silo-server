@@ -407,8 +407,9 @@ func TestImageCacheCleanupCanceledMidSliceStopsAndKeepsTotals(t *testing.T) {
 	}
 }
 
-// A cancellation that arrives after the last prefix still ends canceled, but
-// keeps the deletion totals rather than the empty result Complete would write.
+// A cancellation that arrives during the last prefix, and is only seen after
+// it, still ends canceled, but keeps the deletion totals rather than the empty
+// result Complete would write, and does not claim that undeleted images remain.
 func TestImageCacheCleanupCanceledAfterLastPrefixKeepsTotals(t *testing.T) {
 	r := lifecycleRepo(t)
 	prefixes := cleanupPrefixes(2)
@@ -434,6 +435,10 @@ func TestImageCacheCleanupCanceledAfterLastPrefixKeepsTotals(t *testing.T) {
 	}
 	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 2 {
 		t.Fatalf("canceled result %+v, want both prefixes counted", got)
+	}
+	const want = "Image cache cleanup canceled after 2/2 prefixes; all prefixes were already processed"
+	if canceled.Message != want || canceled.ProgressCurrent != 2 || canceled.ProgressTotal != 2 {
+		t.Fatalf("message=%q progress=%d/%d, want %q at 2/2", canceled.Message, canceled.ProgressCurrent, canceled.ProgressTotal, want)
 	}
 }
 
