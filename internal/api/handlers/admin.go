@@ -2260,6 +2260,10 @@ type updateSettingsResponse struct {
 
 const errCodeStorageUnavailable = "storage_unavailable"
 
+// errCodeInvalidSettings refuses a save whose settings cannot work together
+// or that the server could not start with.
+const errCodeInvalidSettings = "invalid_settings"
+
 func (h *AdminHandler) normalizeBatchSetting(
 	ctx context.Context,
 	key, value string,
@@ -2663,7 +2667,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = errCodeInvalidSettings
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -3032,7 +3036,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}
@@ -3047,7 +3051,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}
@@ -3057,7 +3061,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			if key == artworkStorageBackendKey || key == s3PublicBucketKey || key == s3OperationalBucketKey {
 				if err := config.ValidateArtworkStorageSettings(h.effectiveAdminSettings(prospective)); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}

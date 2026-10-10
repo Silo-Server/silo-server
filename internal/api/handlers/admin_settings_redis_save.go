@@ -16,7 +16,7 @@ import (
 // changed while this one was checking it.
 var errRedisSettingsMoved = &APIError{
 	Status:  http.StatusBadRequest,
-	Code:    "invalid_settings",
+	Code:    errCodeInvalidSettings,
 	Message: "The Redis settings changed while Silo was checking them. Reload the settings and save again.",
 }
 
@@ -86,7 +86,7 @@ func (h *AdminHandler) checkRedisSave(ctx context.Context, changes map[string]st
 	}
 	if err := pingRedis(ctx, next); err != nil {
 		slog.WarnContext(ctx, "refused a Redis settings save that Silo could not connect with", "error", err)
-		return config.RedisConfig{}, &APIError{Status: http.StatusBadRequest, Code: "invalid_settings", Message: redisSaveRefusal(err)}
+		return config.RedisConfig{}, &APIError{Status: http.StatusBadRequest, Code: errCodeInvalidSettings, Message: redisSaveRefusal(err)}
 	}
 	return next, nil
 }
