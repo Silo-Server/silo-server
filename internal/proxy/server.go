@@ -265,7 +265,7 @@ func (s *Server) router() chi.Router {
 		MaxAge: 86400,
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
-	// Unauthenticated, matching the API listener's own /metrics posture: a
+	// Unauthenticated, matching the main server's dedicated metrics listener: a
 	// scrape target that needs a credential is a scrape target that goes
 	// unmonitored, and the exposure is host resource counters, not media.
 	r.Method(http.MethodGet, "/metrics", promhttp.Handler())
