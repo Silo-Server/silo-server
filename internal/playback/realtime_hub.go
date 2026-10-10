@@ -142,3 +142,25 @@ func (h *RealtimeHub) Send(sessionID string, message any) error {
 	lane.mu.Unlock()
 	return err
 }
+
+// SendRegisteredIf writes a message only to the connection this registration
+// identifies, and only while send still reports true. A replacement connection
+// for the same session gets a new generation, so a write meant for an earlier
+// connection is dropped rather than delivered to its successor. send runs under
+// the per-session lane lock, so a later Send on the same session is ordered
+// after this write.
+func (h *RealtimeHub) SendRegisteredIf(reg *RealtimeRegistration, message any, send func() bool) (bool, error) {
+	if h == nil || reg == nil || reg.lane == nil {
+		return false, ErrRealtimeConnectionNotFound
+	}
+	lane := reg.lane
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	if lane.closed || lane.conn == nil || lane.generation != reg.generation {
+		return false, ErrRealtimeConnectionNotFound
+	}
+	if send != nil && !send() {
+		return false, nil
+	}
+	return true, lane.conn.WriteJSON(message)
+}
