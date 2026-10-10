@@ -1438,6 +1438,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		claims.PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 		claims.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 		claims.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		claims.KeyframePlaylist = source.KeyframePlaylist
 	}
 	if compatSession != nil {
 		claims.UserID = compatSession.StreamAppUserID
@@ -1735,6 +1736,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.TargetCodecVideo = compatCopyCodec
 		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		reqBody.KeyframePlaylist = source.KeyframePlaylist
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
 	if !compatHLSTranscodesAudio(source) {
@@ -1875,6 +1877,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
+	if err := transcodenode.ValidateKeyframePlaylistAttestation(reqBody, nodeResponse); err != nil {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
+	}
 	if reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		err := errors.New("remote transcode node did not confirm tone-map mode")
@@ -1940,6 +1946,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoSampleEntry:       reqBody.VideoSampleEntry,
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
+		KeyframePlaylist:       reqBody.KeyframePlaylist,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		SourceAudioChannels:    reqBody.SourceAudioChannels,
@@ -2296,6 +2303,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
+		// Only a copy stream is served from a keyframe playlist; subtitle
+		// delivery above can turn a copy into a transcode.
+		source.KeyframePlaylist = compatHLSCopiesVideo(source) && h.PlaybackConfig != nil && h.PlaybackConfig().KeyframePlaylist
 		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {
 			if !toneMapPolicyLoaded {
 				var policyErr error

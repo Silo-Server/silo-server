@@ -1392,6 +1392,21 @@ func TestValidateThrottleAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores a requested keyframe playlist would serve FFmpeg's
+// growing playlist under a recipe that records the planned one.
+func TestValidateKeyframePlaylistAttestation(t *testing.T) {
+	request := TranscodeStartRequest{KeyframePlaylist: true}
+	if err := ValidateKeyframePlaylistAttestation(request, TranscodeStartResponse{KeyframePlaylist: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateKeyframePlaylistAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrKeyframePlaylistAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrKeyframePlaylistAttestationMismatch)
+	}
+	if err := ValidateKeyframePlaylistAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("request without a keyframe playlist rejected a legacy node response: %v", err)
+	}
+}
+
 func TestHandleStartRejectsUnversionedSourceAudioRecipeBeforeExecution(t *testing.T) {
 	server := newTestServer(t)
 	body, err := json.Marshal(TranscodeStartRequest{
