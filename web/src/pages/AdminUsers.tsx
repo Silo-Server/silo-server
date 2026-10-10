@@ -1,4 +1,4 @@
-import { useState, useId, useMemo, useRef } from "react";
+import { useEffect, useState, useId, useMemo, useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
@@ -29,6 +29,7 @@ import {
   savedUserPolicyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
+  type LimitPolicyKey,
 } from "@/components/UserPolicyFields";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
@@ -789,6 +790,28 @@ function UserForm({
   );
   // Policy fields inherit from the access group unless explicitly overridden.
   const [policy, setPolicy] = useState(() => policyStateFromUser(user ?? null));
+  const [invalidLimitDrafts, setInvalidLimitDrafts] = useState<ReadonlyMap<LimitPolicyKey, string>>(
+    new Map(),
+  );
+  const [dialogTab, setDialogTab] = useState("account");
+  // Set when Save is refused for an invalid limit, so the browser reports the
+  // field once the Limits tab has rendered it.
+  const [reportLimits, setReportLimits] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!reportLimits || dialogTab !== "limits") return;
+    setReportLimits(false);
+    formRef.current?.reportValidity();
+  }, [reportLimits, dialogTab]);
+  function handleInvalidLimitDraftChange(key: LimitPolicyKey, draft: string | undefined) {
+    setInvalidLimitDrafts((current) => {
+      if (current.get(key) === draft) return current;
+      const next = new Map(current);
+      if (draft === undefined) next.delete(key);
+      else next.set(key, draft);
+      return next;
+    });
+  }
   const [maxProfiles, setMaxProfiles] = useState<number>(user?.max_profiles ?? 5);
   const usernameId = useId();
   const emailId = useId();
@@ -859,6 +882,13 @@ function UserForm({
       setError(INVALID_EMAIL_MESSAGE);
       return;
     }
+    // A cleared or half-typed limit is not in the policy state, which still
+    // holds the last valid value; saving now would send that instead.
+    if (!policyLocked && invalidLimitDrafts.size > 0) {
+      setDialogTab("limits");
+      setReportLimits(true);
+      return;
+    }
     busy.current = true;
     onBusy(true);
     setError("");
@@ -911,7 +941,7 @@ function UserForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
+    <form ref={formRef} onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
       {error && <p role="alert">{error}</p>}
       {(conflict || saved) && (
         <div>
@@ -936,7 +966,7 @@ function UserForm({
         </label>
       )}
 
-      <Tabs defaultValue="account" className="min-h-0 flex-1">
+      <Tabs value={dialogTab} onValueChange={setDialogTab} className="min-h-0 flex-1">
         <TabsList variant="line" className="border-border mb-4 w-full justify-start border-b pb-1">
           <TabsTrigger value="account" className="flex-none px-1">
             Account
@@ -1151,6 +1181,8 @@ function UserForm({
                 onChange={setPolicy}
                 source={hintSource}
                 effective={inheritHints}
+                invalidLimitDrafts={invalidLimitDrafts}
+                onInvalidLimitDraftChange={handleInvalidLimitDraftChange}
               />
             </fieldset>
             <div className="space-y-1">

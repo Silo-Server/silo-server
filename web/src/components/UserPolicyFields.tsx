@@ -203,6 +203,19 @@ interface PolicyContext {
   disabled?: boolean;
 }
 
+// Raw text of limit fields whose box holds no valid number. A cleared or
+// half-typed box is not in UserPolicyState, which keeps the last valid value,
+// so the form keeps these drafts itself and refuses to save while any remain,
+// even when the Limits tab is not mounted and native validation cannot see the
+// box. Keeping the text, not just a flag, lets a remounted field show it again.
+export type LimitPolicyKey = "maxStreams" | "maxTranscodes";
+
+export interface LimitValidity {
+  invalidLimitDrafts: ReadonlyMap<LimitPolicyKey, string>;
+  // `undefined` clears the entry once the box holds a valid number again.
+  onInvalidLimitDraftChange: (key: LimitPolicyKey, draft: string | undefined) => void;
+}
+
 function defaultHint(source: PolicyDefaultSource, effectiveText: string | undefined): string {
   const text = DEFAULT_SOURCE_TEXT[source];
   return effectiveText === undefined ? text.unknown : `${text.prefix}: ${effectiveText}`;
@@ -313,21 +326,28 @@ function LimitPolicyField({
   onValueChange,
   source,
   effectiveValue,
+  invalidDraft,
+  onInvalidDraftChange,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
+  // The invalid text left behind when the field last unmounted, or undefined.
+  // The field reopens overridden with that text so it shows the pending edit
+  // instead of the stale saved value.
+  invalidDraft: string | undefined;
+  onInvalidDraftChange: (draft: string | undefined) => void;
 }) {
   const id = useId();
   // Override is tracked locally because "overriding, but nothing typed yet" has
   // no representation in UserPolicyState: while the box is empty the field
   // keeps inheriting rather than pinning 0, which would mean unlimited.
-  const [overridden, setOverridden] = useState(value !== null);
+  const [overridden, setOverridden] = useState(value !== null || invalidDraft !== undefined);
   // The raw string stays local so a cleared or half-typed box is an unsaved
   // edit instead of collapsing to 0 or NaN.
-  const [draft, setDraft] = useState(() => (value === null ? "" : String(value)));
+  const [draft, setDraft] = useState(() => invalidDraft ?? (value === null ? "" : String(value)));
   const draftValue = limitDraftValue(draft);
 
   function handleOverrideChange(checked: boolean) {
@@ -335,6 +355,7 @@ function LimitPolicyField({
     if (!checked) {
       setDraft("");
       onValueChange(null);
+      onInvalidDraftChange(undefined);
       return;
     }
     // Seed the value the field already resolves to. With no hint available the
@@ -342,11 +363,13 @@ function LimitPolicyField({
     // value, so an unknown limit is never silently saved as unlimited.
     setDraft(effectiveValue === undefined ? "" : String(effectiveValue));
     onValueChange(effectiveValue ?? null);
+    onInvalidDraftChange(effectiveValue === undefined ? "" : undefined);
   }
 
   function handleDraftChange(raw: string) {
     setDraft(raw);
     const parsed = limitDraftValue(raw);
+    onInvalidDraftChange(parsed === null ? raw : undefined);
     if (parsed === null) return;
     onValueChange(parsed);
   }
@@ -495,7 +518,15 @@ export function PolicyAccessFields({
 }
 
 // Limits-tab policy fields: stream/transcode ceilings and the quality gate.
-export function PolicyLimitFields({ state, onChange, source, effective, disabled }: PolicyContext) {
+export function PolicyLimitFields({
+  state,
+  onChange,
+  source,
+  effective,
+  disabled,
+  invalidLimitDrafts,
+  onInvalidLimitDraftChange,
+}: PolicyContext & LimitValidity) {
   const qualityId = useId();
   const qualityValue: PlaybackQualityPreset | typeof INHERIT =
     state.maxPlaybackQuality === null
@@ -510,6 +541,8 @@ export function PolicyLimitFields({ state, onChange, source, effective, disabled
           onValueChange={(maxStreams) => onChange({ ...state, maxStreams })}
           source={source}
           effectiveValue={effective?.max_streams}
+          invalidDraft={invalidLimitDrafts.get("maxStreams")}
+          onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxStreams", draft)}
         />
         <LimitPolicyField
           label="Max Transcodes"
@@ -517,6 +550,8 @@ export function PolicyLimitFields({ state, onChange, source, effective, disabled
           onValueChange={(maxTranscodes) => onChange({ ...state, maxTranscodes })}
           source={source}
           effectiveValue={effective?.max_transcodes}
+          invalidDraft={invalidLimitDrafts.get("maxTranscodes")}
+          onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxTranscodes", draft)}
         />
         <StreamBitratePolicyField
           label="Max remote stream bitrate"
