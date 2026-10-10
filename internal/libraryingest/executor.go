@@ -360,8 +360,10 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 				return result, fmt.Errorf("retry scope %q: %w", scopePath, err)
 			}
 		}
-		if err := e.scanner.FinalizeVariantsByPathPrefix(scanCtx, folder, scopePath); err != nil {
-			return result, fmt.Errorf("finalize variants for scope %q: %w", scopePath, err)
+		if finalizesVariants(folder.Type) {
+			if err := e.scanner.FinalizeVariantsByPathPrefix(scanCtx, folder, scopePath); err != nil {
+				return result, fmt.Errorf("finalize variants for scope %q: %w", scopePath, err)
+			}
 		}
 	}
 
@@ -476,6 +478,15 @@ func scopeMatchPaths(folder *models.MediaFolder, mode scopeMode, scopePath strin
 
 func usesDedicatedEnrichment(folderType string) bool {
 	return librarykind.Of(folderType).Ebook
+}
+
+// finalizesVariants reports whether ingest recomputes edition and presentation
+// metadata from file names after matching. The audiobook scanner writes each
+// book's parts and their order itself, and it skips an unchanged book only
+// while those columns still match; the video file name parser would replace
+// them on every scan.
+func finalizesVariants(folderType string) bool {
+	return !librarykind.IsAudiobook(folderType)
 }
 
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
