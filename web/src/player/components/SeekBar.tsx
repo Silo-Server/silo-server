@@ -1,3 +1,4 @@
+import { PreviewImage } from "./PreviewImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarkerKind, MarkerRegionView, PlayerChapter } from "../types";
 import { trickplayTile, type PlayerTrickplay } from "../trickplay";
@@ -377,29 +378,14 @@ export function SeekBar({
                 }}
               />
             ) : (
-              hoverChapter &&
-              (hoverChapter.thumbnail_url ? (
-                <img
+              hoverChapter && (
+                <PreviewImage
                   src={hoverChapter.thumbnail_url}
                   alt={hoverChapter.title}
                   className="aspect-video w-full object-cover"
+                  placeholderClassName="flex items-center justify-center bg-gradient-to-b from-white/[0.06] to-white/[0.02]"
                 />
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center bg-gradient-to-b from-white/[0.06] to-white/[0.02]">
-                  <svg
-                    className="h-5 w-5 text-white/[0.12]"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                    <path d="m7 2 0 20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5" />
-                  </svg>
-                </div>
-              ))
+              )
             )}
             <div className="px-2.5 py-1.5">
               {hoverRegion && (
