@@ -94,6 +94,30 @@ func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, act
 	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
 }
 
+// MarkUnreachable publishes the node at url as unhealthy after a caller failed
+// to open a connection to it. Without it a node that died between health sweeps
+// keeps winning selection for up to a full sweep interval, so the sessions that
+// move off it could be placed straight back on it. The next sweep overwrites
+// the mark with whatever the node answers, so a node that is back recovers on
+// its own. Reports whether a healthy node was flipped.
+func (p *TranscodePool) MarkUnreachable(url string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, n := range p.nodes {
+		if n == nil || !sameNodeURL(n.URL, url) {
+			continue
+		}
+		if !n.Healthy {
+			return false
+		}
+		clone := *n
+		clone.Healthy = false
+		p.nodes[i] = &clone
+		return true
+	}
+	return false
+}
+
 // ApplyCapabilities records a freshly fetched capability report by swapping the
 // node for an updated copy, keeping published *Node values immutable.
 func (p *TranscodePool) ApplyCapabilities(id int, fetchedFrom string, capabilities []byte, hash string, refreshedAt time.Time, drift *string, driftBaseline []byte) {

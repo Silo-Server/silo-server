@@ -13,6 +13,16 @@ import (
 type Plan struct {
 	TranscodeNode *Node
 	ProxyNode     *Node
+	// Reservation is the capacity reservation this selection made, if any.
+	Reservation Reservation
+}
+
+// Reservation identifies one reservation a selection made. A later selection
+// for the same session replaces the stored reservation with a new one, so a
+// caller that gives back what it reserved releases only its own, even when the
+// newer reservation charges the same node. The zero value identifies none.
+type Reservation struct {
+	held *reservation
 }
 
 // RouteRequest describes the exact node topology a higher-level routing
@@ -200,6 +210,17 @@ func (p *Planner) TranscodeNodeHealthy(nodeURL string) bool {
 	return node != nil && node.Healthy && node.Enabled
 }
 
+// MarkTranscodeNodeUnreachable stops selecting the transcode node at nodeURL
+// until the next health sweep reports it healthy again. The API relay calls it
+// when it cannot connect to a node, which is usually well before the sweep
+// notices. Reports whether a healthy node was flipped.
+func (p *Planner) MarkTranscodeNodeUnreachable(nodeURL string) bool {
+	if p == nil || p.transcodes == nil || nodeURL == "" {
+		return false
+	}
+	return p.transcodes.MarkUnreachable(normalizeNodeURL(nodeURL))
+}
+
 // PlanDownload picks a healthy proxy for an unbounded file transfer. A
 // configured proxy bandwidth cap cannot be reserved accurately without a known
 // transfer rate, so capped proxies are excluded instead of being oversubscribed
@@ -312,6 +333,7 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 			res.kbps = estBitrateKbps
 		}
 		p.reserved[sessionID] = res
+		plan.Reservation = Reservation{held: res}
 	}
 	return plan
 }
@@ -383,6 +405,7 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 			res.kbps = request.EstimatedBitrateKbps
 		}
 		p.reserved[request.SessionID] = res
+		plan.Reservation = Reservation{held: res}
 	}
 	return plan
 }
@@ -459,6 +482,21 @@ func (p *Planner) ReleaseSession(sessionID string) {
 	p.mu.Lock()
 	delete(p.reserved, sessionID)
 	p.mu.Unlock()
+}
+
+// ReleaseReservation removes a session's reservation only while it is still
+// the one held identifies. A caller that reserved a node and then lost the
+// session to a concurrent replan uses it: the replan's selection replaced the
+// reservation under the same session id, and that one must stand.
+func (p *Planner) ReleaseReservation(sessionID string, held Reservation) {
+	if p == nil || held.held == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.reserved[sessionID] == held.held {
+		delete(p.reserved, sessionID)
+	}
 }
 
 // ReleaseSessionProxy drops only the proxy half of a session's reservation,

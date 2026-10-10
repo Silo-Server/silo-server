@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -1757,14 +1758,17 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
-	if transcodeSession == nil {
-		// No local session — try proxying to remote transcode node.
-		if session.TranscodeNodeURL != "" {
-			h.touchSessionActivity(sessionID)
-			h.proxyToTranscodeNode(w, r, session.TranscodeNodeURL,
-				"/transcode/"+remoteTransportID(session)+"/master.m3u8")
+	if transcodeSession == nil && session.TranscodeNodeURL != "" {
+		// No local session — relay to the remote transcode node, moving the
+		// transcode to another executor if that node cannot be reached.
+		h.touchSessionActivity(sessionID)
+		var served bool
+		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, -1, "/master.m3u8")
+		if served {
 			return
 		}
+	}
+	if transcodeSession == nil {
 		// Local transcode whose process state was lost: reconstruct it from the
 		// token recipe. The manifest path has no segment context, so pass -1 (use
 		// the token's seek position).
@@ -1872,14 +1876,16 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
-	if transcodeSession == nil {
-		if session.TranscodeNodeURL != "" {
-			h.touchSessionActivity(sessionID)
-			segmentName := chi.URLParam(r, "name")
-			h.proxyToTranscodeNode(w, r, session.TranscodeNodeURL,
-				"/transcode/"+remoteTransportID(session)+"/segment/"+segmentName)
+	if transcodeSession == nil && session.TranscodeNodeURL != "" {
+		h.touchSessionActivity(sessionID)
+		var served bool
+		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, requestedSegment,
+			"/segment/"+chi.URLParam(r, "name"))
+		if served {
 			return
 		}
+	}
+	if transcodeSession == nil {
 		// Resume near the segment the client is fetching so reconstruct does not
 		// restart from the original seek point and stall. A non-segment name
 		// (e.g. init.mp4) parses as negative and falls back to the token position.
@@ -2068,8 +2074,16 @@ func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyN
 	return nodepool.NodeEndpoint(base, "/stream/transcode/"+token+"/master.m3u8")
 }
 
-// proxyToTranscodeNode forwards a request to the remote transcode node.
-func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, transcodeNodeURL, path string) {
+func writeTranscodeNodeUnavailable(w http.ResponseWriter) {
+	http.Error(w, "transcode node unavailable", http.StatusBadGateway)
+}
+
+// relayToTranscodeNode forwards a request to the remote transcode node and
+// writes the response. It writes nothing and returns an error wrapping
+// errTranscodeNodeUnreachable when the node could not be reached at all, so the
+// caller can move the transcode elsewhere before answering; every other outcome,
+// node HTTP errors included, is written and returns nil.
+func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Request, transcodeNodeURL, path string) error {
 	sessionID := chi.URLParam(r, "session_id")
 	targetURL := transcodeNodeURL + path
 	isSegmentRoute := strings.Contains(path, "/segment/")
@@ -2091,7 +2105,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return nil
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
 	if isSegmentRoute {
@@ -2121,9 +2135,13 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		if r.Context().Err() == nil && h.transcodeNodeUnreachable(transcodeNodeURL, err) {
+			slog.WarnContext(r.Context(), "transcode node unreachable from the relay", "component", "api", "error", logredact.SanitizeText(err.Error()), "url", logredact.SanitizeURL(targetURL), "playback_session_id", sessionID)
+			return fmt.Errorf("%w: %w", errTranscodeNodeUnreachable, err)
+		}
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
-		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
-		return
+		writeTranscodeNodeUnavailable(w)
+		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -2137,8 +2155,8 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			slog.ErrorContext(r.Context(), "read transcode node manifest", "component", "api", "error", readErr, "url", targetURL, "playback_session_id", sessionID)
-			http.Error(w, "transcode node unavailable", http.StatusBadGateway)
-			return
+			writeTranscodeNodeUnavailable(w)
+			return nil
 		}
 		rewritten := playback.AppendManifestQueryParam(body, streamTokenParam, validToken)
 		for k, vv := range resp.Header {
@@ -2152,7 +2170,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		w.Header().Set("Content-Length", strconv.Itoa(len(rewritten)))
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(rewritten)
-		return
+		return nil
 	}
 
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
@@ -2162,7 +2180,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
-		return
+		return nil
 	}
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
@@ -2171,6 +2189,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}
+	return nil
 }
 
 // maybeStartThrottler reads throttle settings and starts the throttler if enabled.

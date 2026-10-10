@@ -109,6 +109,10 @@ type TranscodeManager struct {
 	// reconstruct, just not all in the same instant. Lazily sized on first use.
 	reconstructSemOnce sync.Once
 	reconstructSem     chan struct{}
+	// rehomeGroup single-flights moving a session's transcode off an executor
+	// that stopped answering, so every request that finds the node dead waits
+	// on one move instead of each starting its own replacement.
+	rehomeGroup singleflight.Group
 
 	// lifecycleMu guards lifecycleLocks, the per-session mutexes that serialize
 	// every path which spawns ffmpeg into a session's output directory (fresh
@@ -185,6 +189,56 @@ func (m *TranscodeManager) acquireReconstructSlot(ctx context.Context) (func(), 
 	case <-ctx.Done():
 		return nil, false
 	}
+}
+
+// WithReconstructSlot runs fn while holding one of the slots that pace
+// transcode reconstruction. Work that starts an FFmpeg process on another node
+// on a session's behalf takes the same slot as a local reconstruct, so a dead
+// node with many sessions is replaced at the same pace as a restart wave. It
+// returns the context error when ctx ends before a slot frees up.
+func (m *TranscodeManager) WithReconstructSlot(ctx context.Context, fn func() error) error {
+	release, ok := m.acquireReconstructSlot(ctx)
+	if !ok {
+		return ctx.Err()
+	}
+	defer release()
+	return fn()
+}
+
+// TranscodeRehomeTimeout bounds one move of a transcode off an unreachable
+// executor, including the wait for a reconstruct slot and the new executor's
+// first manifest. The move is detached from the request that triggered it,
+// because every concurrent request for the session waits on the same move.
+const TranscodeRehomeTimeout = 2 * time.Minute
+
+// RehomeTranscode runs move once for all concurrent callers of the same
+// session. move receives a context detached from any single request and bounded
+// by TranscodeRehomeTimeout. A caller whose own context ends stops waiting
+// without canceling the move the others are waiting on.
+func (m *TranscodeManager) RehomeTranscode(ctx context.Context, sessionID string, move func(context.Context) error) error {
+	if m == nil || sessionID == "" {
+		return errors.New("transcode rehome unavailable")
+	}
+	detached := context.WithoutCancel(ctx)
+	results := m.rehomeGroup.DoChan(sessionID, func() (interface{}, error) {
+		moveCtx, cancel := context.WithTimeout(detached, TranscodeRehomeTimeout)
+		defer cancel()
+		return nil, move(moveCtx)
+	})
+	select {
+	case result := <-results:
+		return result.Err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ReconstructResumePoint reports where a rebuilt transcode should start for a
+// client fetching requestedSegment. Every reconstruction uses this rule — after
+// a restart, on a restarted node, or on a new executor — so segment numbers and
+// timestamps continue the same way on each.
+func ReconstructResumePoint(card RecipeCard, requestedSegment int) (segment int, seekSeconds float64, ok bool) {
+	return fastResumeSeek(card, requestedSegment)
 }
 
 // GetTranscodeSession returns the live in-memory transcode session for sessionID,

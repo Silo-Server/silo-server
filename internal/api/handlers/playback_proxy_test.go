@@ -14,7 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
 
-func TestProxyToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T) {
+func TestRelayToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T) {
 	const (
 		body       = "complete segment"
 		generation = "17"
@@ -63,7 +63,9 @@ func TestProxyToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T
 			)
 			req.Header.Set("Range", tt.rangeHeader)
 			rr := httptest.NewRecorder()
-			handler.proxyToTranscodeNode(rr, req, node.URL, "/transcode/remote/segment/seg_00007.ts")
+			if err := handler.relayToTranscodeNode(rr, req, node.URL, "/transcode/remote/segment/seg_00007.ts"); err != nil {
+				t.Fatalf("relay error = %v", err)
+			}
 
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %q", rr.Code, tt.wantStatus, rr.Body.String())
@@ -81,7 +83,7 @@ func TestProxyToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T
 	}
 }
 
-func TestProxyToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
+func TestRelayToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 	const body = "complete segment"
 	var acknowledgements atomic.Int32
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +104,9 @@ func TestProxyToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.
 		"public",
 	)
 	w := &failingProxyResponseWriter{header: make(http.Header), remaining: 5}
-	handler.proxyToTranscodeNode(w, req, node.URL, "/transcode/remote/segment/seg_00007.ts")
+	if err := handler.relayToTranscodeNode(w, req, node.URL, "/transcode/remote/segment/seg_00007.ts"); err != nil {
+		t.Fatalf("relay error = %v", err)
+	}
 
 	if got := acknowledgements.Load(); got != 0 {
 		t.Fatalf("failed downstream transfer produced %d acknowledgement(s)", got)
@@ -128,12 +132,12 @@ func (w *failingProxyResponseWriter) Write(p []byte) (int, error) {
 	return n, io.ErrClosedPipe
 }
 
-// TestProxyToTranscodeNodeReusesNodeConnections guards the API→node relay pool.
+// TestRelayToTranscodeNodeReusesNodeConnections guards the API→node relay pool.
 // The relay holds a node connection while it streams a segment to the viewer,
 // so many sessions on one node keep many connections in flight at once. A pool
 // that keeps only two idle connections per host (http.DefaultClient) closes the
 // rest after every wave and dials them again for the next segment and its ack.
-func TestProxyToTranscodeNodeReusesNodeConnections(t *testing.T) {
+func TestRelayToTranscodeNodeReusesNodeConnections(t *testing.T) {
 	const (
 		concurrency = 20
 		waves       = 2
@@ -182,7 +186,9 @@ func relaySegment(t *testing.T, handler *PlaybackHandler, nodeURL string) {
 		"public",
 	)
 	rr := httptest.NewRecorder()
-	handler.proxyToTranscodeNode(rr, req, nodeURL, "/transcode/remote/segment/seg_00007.ts")
+	if err := handler.relayToTranscodeNode(rr, req, nodeURL, "/transcode/remote/segment/seg_00007.ts"); err != nil {
+		t.Errorf("relay error = %v", err)
+	}
 	if rr.Code != http.StatusOK {
 		t.Errorf("relay status = %d, want 200", rr.Code)
 	}

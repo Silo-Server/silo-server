@@ -1415,6 +1415,57 @@ func (m *SessionManager) SetTranscodeRoute(sessionID string, route TranscodeRout
 	return nil
 }
 
+// TranscodeExecutorMove is the new executor for a running transcode whose
+// previous executor stopped answering. The transport identity, the egress, and
+// every byte-affecting field stay as they were: only where FFmpeg runs changes.
+type TranscodeExecutorMove struct {
+	// NodeURL is the transcode node now running the transport, or empty when
+	// this API process runs it.
+	NodeURL string
+	// Execution and ExecutionNodeID are the routing vocabulary for the new
+	// executor. They are applied only to a session that already carries a
+	// committed routing assignment.
+	Execution       string
+	ExecutionNodeID int
+	// TranscodeHWAccel is the encoder backend the new executor reported. Empty
+	// keeps the previous value.
+	TranscodeHWAccel string
+}
+
+// MoveTranscodeExecutor re-points a live transcode at a new executor only while
+// the session still serves expected. It reports false, changing nothing, when a
+// replan or another move already replaced that route, so a stale move can never
+// overwrite a newer one. The check covers this process only: the moved route
+// is not shared with other API processes, and a session rebuilt from its
+// stream token still names the old node.
+func (m *SessionManager) MoveTranscodeExecutor(sessionID string, expected TranscodeRoute, move TranscodeExecutorMove) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return false, ErrSessionNotFound
+	}
+	if s.TranscodeNodeURL != expected.NodeURL || s.TranscodeTransportID != expected.TransportID {
+		return false, nil
+	}
+	s.TranscodeNodeURL = move.NodeURL
+	// A session without a routing assignment predates node routing. Writing
+	// only the execution half would read as a partially committed route, which
+	// the serve paths refuse.
+	if s.RoutingWorkload != "" {
+		s.RoutingExecution = move.Execution
+		s.RoutingExecutionNodeID = move.ExecutionNodeID
+		s.RoutingExecutionNodeURL = move.NodeURL
+	}
+	if move.TranscodeHWAccel != "" {
+		s.TranscodeHWAccel = move.TranscodeHWAccel
+	}
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return true, nil
+}
+
 // SetRealtimeConnection marks whether a realtime control connection is active for a session.
 func (m *SessionManager) SetRealtimeConnection(sessionID string, connected bool) error {
 	m.mu.Lock()

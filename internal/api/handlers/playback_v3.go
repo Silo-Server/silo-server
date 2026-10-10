@@ -3876,8 +3876,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		url = appendStreamToken(url, h.signSessionToken(card, mode.headerAuth))
 	}
 	committed := false
-	previousNodeURL := session.TranscodeNodeURL
-	previousTransportID := remoteTransportID(session)
+	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	return preparedTransportV3{
 		url:              url,
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
@@ -4108,9 +4107,8 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 	}
 	committed := false
-	previousNodeURL := session.TranscodeNodeURL
-	previousTransportID := remoteTransportID(session)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
+	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	routingEgress := noderouting.EgressAPI
 	egressNodeID := 0
 	egressNodeURL := ""
@@ -4178,6 +4176,18 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}, rollback: func() {
 			_ = rollbackTransport(false)
 		}, rollbackRequired: rollbackRequired}, nil
+}
+
+// liveTranscodeRouteV3 is the transcode route the session runs now, which a
+// replacement stops once it commits. Callers read it under the session
+// lifecycle lock, not from the snapshot they planned with: a move off a dead
+// node commits under that lock, so a route read here is the one the commit
+// replaces. A session the manager no longer has falls back to the snapshot.
+func (h *PlaybackHandler) liveTranscodeRouteV3(session *playback.Session) (nodeURL, transportID string) {
+	if current, err := h.sessionMgr.GetSession(session.ID); err == nil && current != nil {
+		return current.TranscodeNodeURL, remoteTransportID(current)
+	}
+	return session.TranscodeNodeURL, remoteTransportID(session)
 }
 
 // remoteTranscodeRecipeCardV3 captures the byte-affecting recipe of a started
