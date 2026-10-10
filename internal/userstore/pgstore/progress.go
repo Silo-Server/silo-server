@@ -1158,7 +1158,7 @@ func (s *PostgresUserStore) AddHistory(ctx context.Context, entry userstore.Watc
 		INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID,
-		entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source,
+		watchedAt, entry.DurationSeconds, entry.Completed, entry.Source,
 		string(identityJSON),
 	)
 	if err != nil {
@@ -1249,9 +1249,10 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 		return false, err
 	}
 	// The watermark is compared at full precision ($5), so an import later in
-	// the same second as a removal is kept. It is stored and deduplicated at
-	// the whole second ($10), as imports always were, unless that second is at
-	// or before the watermark; then it keeps its precise time to stay visible.
+	// the same second as a removal is kept. It is stored at the whole second
+	// ($10), as imports always were, unless that second is at or before the
+	// watermark; then it keeps its precise time to stay visible. Any row in the
+	// same second counts as the same play, whichever precision it was kept at.
 	tag, err := tx.Exec(ctx, `
         WITH visible AS (
             SELECT CASE
@@ -1269,7 +1270,7 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
         WHERE NOT EXISTS (
             SELECT 1 FROM user_watch_history
             WHERE user_id = $2 AND profile_id = $3 AND media_item_id = $4
-              AND watched_at = visible.watched_at
+              AND watched_at >= $10::timestamptz AND watched_at < $10::timestamptz + interval '1 second'
         )`,
 		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID, watchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
 		watchedAt.Truncate(time.Second))

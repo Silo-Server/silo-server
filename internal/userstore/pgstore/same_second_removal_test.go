@@ -96,9 +96,14 @@ func TestImportedWritesAfterSameSecondRemovalDB(t *testing.T) {
 				t.Fatalf("import at %s, at or before the %s removal: created %v, err %v; want hidden", at.Format(time.RFC3339Nano), removedAt.Format(time.RFC3339Nano), created, err)
 			}
 		}
-		for range 2 { // the replay dedupes
-			if _, err := store.AddHistoryIfMissing(ctx, imported(later.Format(time.RFC3339Nano))); err != nil {
-				t.Fatal(err)
+		if created, err := store.AddHistoryIfMissing(ctx, imported(later.Format(time.RFC3339Nano))); err != nil || !created {
+			t.Fatalf("import at %s, after the %s removal: created %v, err %v", later.Format(time.RFC3339Nano), removedAt.Format(time.RFC3339Nano), created, err)
+		}
+		// A replay, or the same play reported by another source a moment
+		// later, is a duplicate rather than a second watch.
+		for _, at := range []time.Time{later, later.Add(50 * time.Millisecond)} {
+			if created, err := store.AddHistoryIfMissing(ctx, imported(at.Format(time.RFC3339Nano))); err != nil || created {
+				t.Fatalf("import at %s, beside one at %s: created %v, err %v; want a duplicate", at.Format(time.RFC3339Nano), later.Format(time.RFC3339Nano), created, err)
 			}
 		}
 		completed, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{ProfileID: "p1", MediaItemIDs: []string{mediaItemID}})
