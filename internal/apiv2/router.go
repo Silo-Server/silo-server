@@ -670,10 +670,10 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 //   - a panic anywhere, including Huma's own marshal failure after the status
 //     would already have been sent, becomes the internal_error problem with no
 //     detail leakage;
-//   - a success body is never written once the client has gone away (net/http
-//     cancels the request context on disconnect);
-//   - a problem — including the 408 for a body-read timeout, which net/http
-//     also reports as a canceled context — is still delivered.
+//   - a success body, or a server error, is never written once the client has
+//     gone away (net/http cancels the request context on disconnect);
+//   - a problem below 500 — including the 408 for a body-read timeout, which
+//     net/http also reports as a canceled context — is still delivered.
 //
 // Structured responses are bounded JSON documents, so buffering them is
 // cheap; raw media and streams are not served through Huma.
@@ -759,8 +759,11 @@ func (b *bufferedWriter) flush() {
 	if b.status == 0 {
 		b.status = http.StatusOK
 	}
-	if b.ctx.Err() != nil && b.status < 400 {
-		// The client is gone; a success body has nobody to read it.
+	if err := b.ctx.Err(); err != nil && (b.status < 400 || b.status >= 500 && errors.Is(err, context.Canceled)) {
+		// The client is gone; a success body has nobody to read it, and a
+		// server error raised by its own cancellation is not a failure to
+		// report. Problems below 500 are still delivered, since net/http also
+		// cancels the context on a body-read timeout and its 408 must arrive.
 		return
 	}
 	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {

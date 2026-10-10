@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -1185,7 +1186,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
 		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
 		if err != nil {
-			slog.WarnContext(ctx, "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
 			return &CatalogItemDetailOutput{Body: out}, nil
 		}
 		out.Themes = &ThemeSongSet{OwnerID: themes.OwnerID, Items: []ThemeSong{}}

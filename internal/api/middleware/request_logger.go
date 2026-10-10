@@ -56,7 +56,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 				"method", r.Method,
 				"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
 				"path_pattern", pathPattern,
-				"status", wrapped.status,
+				"status", activitylog.RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
 				"duration_ms", time.Since(start).Milliseconds(),
 				"client_ip", clientip.FromContext(r.Context()),
 				"user_agent", r.UserAgent(),

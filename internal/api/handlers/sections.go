@@ -17,6 +17,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -1446,7 +1447,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			ProgressStore: h.sectionProgressStore(ctx),
 		})
 		if err != nil {
-			slog.WarnContext(ctx, "resolving section playable targets", "component", "api", "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "resolving section playable targets", "component", "api", "error", err)
 			return
 		}
 		playTargets = resolvedTargets

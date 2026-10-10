@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -886,7 +887,7 @@ func (h *ItemsHandler) resolvePlayableTargets(ctx context.Context, v ItemViewer,
 		ProgressStore: store,
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "resolving playable poster targets", "component", "api", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "resolving playable poster targets", "component", "api", "error", err)
 		return map[string]catalog.PlayableTarget{}
 	}
 	return targets
@@ -2589,7 +2590,7 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 	}
 	user, err := h.UserRepo.GetByID(ctx, claims.UserID)
 	if err != nil {
-		slog.WarnContext(ctx, "checking file path visibility permissions", "component", "api", "user_id", claims.UserID, "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "checking file path visibility permissions", "component", "api", "user_id", claims.UserID, "error", err)
 		return false
 	}
 	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)

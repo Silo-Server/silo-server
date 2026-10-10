@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -871,7 +872,7 @@ func (s *DetailService) markTrickplay(ctx context.Context, versions []FileVersio
 	}
 	grids, err := availability.TrickplayGrids(ctx, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "trickplay lookup failed", "component", "catalog", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "trickplay lookup failed", "component", "catalog", "error", err)
 		return
 	}
 	for i := range versions {
@@ -903,7 +904,7 @@ func (s *DetailService) prefetchTrickplay(ctx context.Context, filesByID map[str
 	}
 	grids, err := s.trickplay.TrickplayGrids(ctx, fileIDs)
 	if err != nil {
-		slog.WarnContext(ctx, "trickplay lookup failed", "component", "catalog", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "trickplay lookup failed", "component", "catalog", "error", err)
 		grids = nil
 	}
 	return prefetchedTrickplay(grids)
@@ -2019,7 +2020,7 @@ func (s *DetailService) fetchItemVideos(ctx context.Context, contentID string, p
 	} else if s.videoRepo != nil {
 		fetched, err := s.videoRepo.GetByContentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item videos", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item videos", "content_id", contentID, "error", err)
 			return nil
 		}
 		videos = fetched
@@ -2051,7 +2052,7 @@ func (s *DetailService) fetchItemRatingSources(ctx context.Context, contentID st
 	} else if s.ratingSourceRepo != nil {
 		fetched, err := s.ratingSourceRepo.GetByContentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item rating sources", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item rating sources", "content_id", contentID, "error", err)
 			return nil
 		}
 		sources = fetched
@@ -2079,7 +2080,7 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, p
 	} else if s.extraRepo != nil {
 		fetched, err := s.extraRepo.ListWithFilesByParentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item extras", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item extras", "content_id", contentID, "error", err)
 			return nil
 		}
 		extras = fetched

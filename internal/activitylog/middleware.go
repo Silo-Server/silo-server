@@ -3,6 +3,7 @@ package activitylog
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -152,7 +153,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				Method:             r.Method,
 				Path:               path,
 				PathPattern:        pathPattern,
-				StatusCode:         wrapped.status,
+				StatusCode:         RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
 				UserAgent:          r.UserAgent(),
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
@@ -167,6 +168,22 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			w.Write(entry)
 		})
 	}
+}
+
+// StatusClientClosedRequest is the status recorded for a request its client
+// abandoned, as nginx records it.
+const StatusClientClosedRequest = 499
+
+// RecordedStatus is the status to record for a request that ended with
+// status, where wrote says whether a response was started. A request whose
+// client went away and that got no response, or a server error, is recorded
+// as StatusClientClosedRequest: the client never saw an answer, and the
+// failure is not one the server has to count.
+func RecordedStatus(r *http.Request, status int, wrote bool) int {
+	if errors.Is(r.Context().Err(), context.Canceled) && (!wrote || status >= 500) {
+		return StatusClientClosedRequest
+	}
+	return status
 }
 
 // RedactSecretPathParams strips bearer credentials from a request path before
