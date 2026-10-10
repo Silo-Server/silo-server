@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -104,6 +105,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	defer cancelRead()
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
 
+	snapshotStarted := false
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -111,7 +113,57 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 		}
 		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
 			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			continue
 		}
+		h.afterRealtimeClientMessage(ctx, registration, sessionID, data, &snapshotStarted)
+	}
+}
+
+// afterRealtimeClientMessage runs after a client message was handled without
+// error, on both the legacy and the v2 control socket. Marker updates reach a
+// session only while it has a ready realtime connection, so a player that
+// reconnects may have missed one. After the connection's first valid hello, it
+// is sent the stored markers.
+func (h *PlaybackHandler) afterRealtimeClientMessage(ctx context.Context, registration *playback.RealtimeRegistration, sessionID string, data []byte, snapshotStarted *bool) {
+	if *snapshotStarted || !isRealtimeHello(data) {
+		return
+	}
+	*snapshotStarted = true
+	go h.sendRealtimeMarkerSnapshot(ctx, registration, sessionID)
+}
+
+// playbackMarkerSnapshotSender is implemented by the marker notifier that can
+// deliver stored markers to a single realtime registration.
+type playbackMarkerSnapshotSender interface {
+	SendSnapshot(ctx context.Context, registration *playback.RealtimeRegistration, fileID int, load func(context.Context, int) (*models.MediaFile, error)) (bool, error)
+}
+
+// isRealtimeHello reports whether a client frame is a hello, the message that
+// starts the connection's marker snapshot.
+func isRealtimeHello(data []byte) bool {
+	var base realtimeClientMessage
+	return json.Unmarshal(data, &base) == nil && base.Type == playback.RealtimeMessageTypeHello
+}
+
+// sendRealtimeMarkerSnapshot runs off the read loop: it reads the database and
+// writes to the socket, and holds no lock shared with other sessions. In
+// on-demand storage, online markers are never saved, so the stored row would
+// be missing markers the player already shows and the snapshot would clear
+// them; the snapshot is skipped there.
+func (h *PlaybackHandler) sendRealtimeMarkerSnapshot(ctx context.Context, registration *playback.RealtimeRegistration, sessionID string) {
+	sender, ok := h.MarkerUpdateNotifier.(playbackMarkerSnapshotSender)
+	if !ok || h.fileResolver == nil {
+		return
+	}
+	if onlineMarkersOnDemand(ctx, h.SettingsRepo) {
+		return
+	}
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil || session == nil || session.MediaFileID <= 0 {
+		return
+	}
+	if _, err := sender.SendSnapshot(ctx, registration, session.MediaFileID, h.fileResolver.GetByID); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "failed to send realtime marker snapshot", "component", "api", "session", sessionID, "playback_session_id", sessionID, "file_id", session.MediaFileID, "error", err)
 	}
 }
 
