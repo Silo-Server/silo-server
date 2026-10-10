@@ -273,8 +273,19 @@ func CheckEventBusChannels(ctx context.Context, client *redis.Client) error {
 	}
 	pubsub := client.Subscribe(ctx, channels...)
 	defer func() { _ = pubsub.Close() }()
-	_, err := pubsub.Receive(ctx)
-	return err
+	// Redis refuses the whole command when its ACL denies one channel, but a
+	// compatible server or a proxy can answer each channel on its own, so
+	// every channel's confirmation is read.
+	for confirmed := 0; confirmed < len(channels); {
+		msg, err := pubsub.Receive(ctx)
+		if err != nil {
+			return err
+		}
+		if _, ok := msg.(*redis.Subscription); ok {
+			confirmed++
+		}
+	}
+	return nil
 }
 
 // Publish serializes the event as JSON and publishes it on the given

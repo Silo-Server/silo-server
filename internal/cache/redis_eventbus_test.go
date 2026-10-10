@@ -156,6 +156,20 @@ func TestCheckEventBusChannels(t *testing.T) {
 	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "NOPERM") {
 		t.Errorf("a subscription the ACL denies: %v, want the NOPERM reply", err)
 	}
+
+	// A server that answers each channel on its own can confirm the first and
+	// refuse a later one.
+	server = startRESPTestServer(t, nil, func(args []string) (string, bool) {
+		if args[0] != "SUBSCRIBE" {
+			return "", false
+		}
+		return fmt.Sprintf("*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:1\r\n", len(args[1]), args[1]) +
+			"-NOPERM User silo has no permissions to access the '" + args[2] + "' channel\r\n", true
+	})
+	err = check(t, server, "/0")
+	if _, refused := errors.AsType[redis.Error](err); !refused || !strings.Contains(err.Error(), "silo:admin") {
+		t.Errorf("a later channel refused: %v, want the NOPERM reply for silo:admin", err)
+	}
 }
 
 func TestRedisEventBusRejectsInvalidDatabaseOnBareAddress(t *testing.T) {
