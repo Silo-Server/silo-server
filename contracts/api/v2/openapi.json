@@ -22177,6 +22177,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga": {
             "$ref": "#/components/schemas/MangaDetailExtension"
           },
@@ -28797,6 +28808,16 @@
           },
           "imdb_id": {
             "type": "string"
+          },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "overlay_summary": {
             "$ref": "#/components/schemas/CatalogItemOverlay"
@@ -42496,6 +42517,16 @@
           },
           "is_specials": {
             "type": "boolean"
+          },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "overview": {
             "type": "string"

@@ -22,6 +22,7 @@ import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 function seasonLabel(seasonNumber: number, title?: string) {
   if (title) return title;
@@ -131,6 +132,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
           actions={
             <WatchedActionBar
               compactMobile

@@ -403,6 +403,8 @@ type seasonResponse struct {
 	PosterURL       string                  `json:"poster_url,omitempty"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
+	// MachineTranslatedFields reaches the v2 season row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // seasonsResponse wraps the seasons list for JSON serialization.
@@ -451,6 +453,8 @@ type episodeResponse struct {
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
 	Files          []episodeFileResponse   `json:"files,omitempty"`
 	OverlaySummary *models.OverlaySummary  `json:"overlay_summary,omitempty"`
+	// MachineTranslatedFields reaches the v2 episode row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1247,6 +1251,8 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		TmdbID:         ep.TmdbID,
 		TvdbID:         ep.TvdbID,
 		StillThumbhash: stillThumbhash,
+
+		MachineTranslatedFields: ep.MachineTranslatedFields,
 	}
 
 	if ep.AirDate != nil {
@@ -1845,6 +1851,8 @@ func (h *ItemsHandler) localizedSeasonResponse(
 		Overview:        s.Overview,
 		EpisodeCount:    episodeCount,
 		PosterThumbhash: s.PosterThumbhash,
+
+		MachineTranslatedFields: s.MachineTranslatedFields,
 	}
 	if s.AirDate != nil {
 		resp.AirDate = s.AirDate.Format("2006-01-02")

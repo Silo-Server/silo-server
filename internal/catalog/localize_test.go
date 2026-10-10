@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -141,5 +142,33 @@ func TestApplyEpisodeLocalizationPartialRow(t *testing.T) {
 	}
 	if got.Title != "Pilot" {
 		t.Errorf("empty localized title blanked the base: %q", got.Title)
+	}
+}
+
+// Only fields an AI job wrote are marked; provider and manual text is not.
+func TestApplyLocalizationMarksMachineTranslatedFields(t *testing.T) {
+	item := applyItemLocalization(baseItem(), &models.MediaItemLocalization{
+		Overview: "Résumé IA.", OverviewSource: "ai",
+		Tagline: "Accroche fournisseur.", TaglineSource: "provider",
+	})
+	if !slices.Equal(item.MachineTranslatedFields, []string{MachineTranslatedOverview}) {
+		t.Errorf("item markers = %v, want [overview]", item.MachineTranslatedFields)
+	}
+	// An empty AI field falls back to the base text, which is not translated.
+	item = applyItemLocalization(baseItem(), &models.MediaItemLocalization{TaglineSource: "ai", OverviewSource: "manual", Overview: "Saisi."})
+	if len(item.MachineTranslatedFields) != 0 {
+		t.Errorf("item markers = %v, want none", item.MachineTranslatedFields)
+	}
+
+	season := applySeasonLocalization(&models.Season{Overview: "Base."}, &models.SeasonLocalization{Overview: "IA.", OverviewSource: "ai"}, false)
+	if !slices.Equal(season.MachineTranslatedFields, []string{MachineTranslatedOverview}) {
+		t.Errorf("season markers = %v, want [overview]", season.MachineTranslatedFields)
+	}
+
+	// Re-localizing an already localized model reports only the new row.
+	episode := applyEpisodeLocalization(&models.Episode{Overview: "Base."}, &models.EpisodeLocalization{Overview: "IA.", OverviewSource: "ai"})
+	episode = applyEpisodeLocalization(episode, &models.EpisodeLocalization{Overview: "Anbieter.", OverviewSource: "provider"})
+	if len(episode.MachineTranslatedFields) != 0 {
+		t.Errorf("episode markers = %v, want none", episode.MachineTranslatedFields)
 	}
 }

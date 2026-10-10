@@ -733,6 +733,8 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface SeasonsResponse {
@@ -1151,6 +1153,11 @@ export interface ItemDetail {
    * keys off this.
    */
   pending_translation_language?: string;
+  /**
+   * Localized fields ("overview", "tagline") whose text was machine-translated
+   * by AI rather than supplied by a metadata provider or a person.
+   */
+  machine_translated_fields?: string[];
   runtime: number;
   content_rating: string;
   /**
@@ -1305,6 +1312,8 @@ export interface EpisodeListItem {
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
   overlay_summary?: OverlaySummary | null;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface EpisodesResponse {

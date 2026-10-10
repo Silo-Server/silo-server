@@ -20175,6 +20175,8 @@ export interface components {
       locked_fields?: number[];
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were */
+      machine_translated_fields?: ("overview" | "tagline")[];
       manga?: components["schemas"]["MangaDetailExtension"];
       /** Format: int64 */
       manga_chapter_count?: number;
@@ -22689,6 +22691,8 @@ export interface components {
       episode_number: number;
       files?: components["schemas"]["EpisodeFile"][];
       imdb_id?: string;
+      /** @description Localized fields whose text was machine-translated by AI; absent when none were */
+      machine_translated_fields?: "overview"[];
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
       /**
@@ -28495,6 +28499,8 @@ export interface components {
       /** Format: int64 */
       episode_count: number;
       is_specials?: boolean;
+      /** @description Localized fields whose text was machine-translated by AI; absent when none were */
+      machine_translated_fields?: "overview"[];
       overview?: string;
       /** @description The episode to play next */
       play_content_id?: string;

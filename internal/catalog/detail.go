@@ -206,8 +206,12 @@ type ItemDetail struct {
 	// language that the description is missing — the on-view AI translation
 	// affordance keys off it.
 	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
-	Runtime                    int    `json:"runtime,omitempty"`
-	ContentRating              string `json:"content_rating,omitempty"`
+	// MachineTranslatedFields names the localized fields ("overview",
+	// "tagline") that AI translation wrote. The native v2 document carries it;
+	// the frozen v1 JSON does not.
+	MachineTranslatedFields []string `json:"-"`
+	Runtime                 int      `json:"runtime,omitempty"`
+	ContentRating           string   `json:"content_rating,omitempty"`
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 renderer. Kept out of this JSON contract the way OriginalLanguage is:
 	// /api/v1 is frozen, so the fields ride the Go struct and apiv2 emits them
@@ -2184,6 +2188,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Overview:                   item.Overview,
 		Tagline:                    item.Tagline,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    item.MachineTranslatedFields,
 		Runtime:                    item.Runtime,
 		ContentRating:              item.ContentRating,
 		AdvisoryAge:                item.AdvisoryAge,
@@ -3053,6 +3058,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		Title:                      title,
 		Overview:                   season.Overview,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    season.MachineTranslatedFields,
 		PosterThumbhash:            season.PosterThumbhash,
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   season.SeriesID,
@@ -3095,6 +3101,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		Title:                      episode.Title,
 		Overview:                   episode.Overview,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    episode.MachineTranslatedFields,
 		Runtime:                    episode.Runtime,
 		RatingIMDB:                 episode.RatingIMDB,
 		RatingTMDB:                 episode.RatingTMDB,

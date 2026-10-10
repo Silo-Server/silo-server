@@ -985,3 +985,23 @@ issue #937. They need V2 discovery and fixtures, settings, playback, and lifecyc
 support before enabling it. Provider downloads, theme videos, uploads, remote
 URLs, and HLS theme transcoding are outside this local-file capability. No V1
 route or V1 item-detail shape changes.
+
+## Description translation
+
+Silo can translate descriptions with an AI model into a profile's metadata
+language (`metadata_ai` settings). Localized text reaches clients through the
+ordinary localized fields; these members describe it:
+
+- `machine_translated_fields` on the item detail, season rows and episode rows
+  lists the localized fields whose text an AI translation wrote: `overview`
+  and, on items, `tagline`. It is absent when no shown field was
+  machine-translated, and it is never set for provider or manually entered
+  text. Clients label exactly the fields it names; an AI `tagline` alone says
+  nothing about the overview. The frozen v1 JSON does not carry it.
+- `pending_translation_language` on the item detail is this profile's
+  metadata language when the item's description is not available in it yet.
+  `POST /api/v2/catalog/items/{id}/translate-description` with that value as
+  `target_language` queues the translation; `GET
+  /api/v2/capabilities/metadata-ai` reports whether the server translates on
+  view automatically (`auto`), offers it as an action (`button`), or not at
+  all (`off`).

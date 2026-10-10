@@ -35,6 +35,7 @@ import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 /** Series lead with their creators; one without Creator credits keeps showing its directors. */
 const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
@@ -159,6 +160,11 @@ export default function SeriesContent({
             overview={item.overview}
             overviewTranslating={overviewTranslating}
             onTranslateOverview={onTranslateOverview}
+            overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+            taglineMachineTranslated={hasMachineTranslation(
+              item.machine_translated_fields,
+              "tagline",
+            )}
             crewLine={
               <HeroCrewLine
                 crew={item.crew ?? []}

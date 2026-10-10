@@ -44,6 +44,7 @@ import {
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function MovieContent({
   item,
@@ -271,6 +272,11 @@ export default function MovieContent({
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          taglineMachineTranslated={hasMachineTranslation(
+            item.machine_translated_fields,
+            "tagline",
+          )}
           crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
           actions={
             <MediaUserActionBar

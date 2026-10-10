@@ -707,6 +707,10 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// MachineTranslatedFields is transient presentation metadata set by
+	// localization: the fields ("overview", "tagline") whose localized text
+	// came from AI translation rather than a provider or a person.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.
@@ -735,6 +739,8 @@ type Season struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // Episode represents a row in the episodes table.
@@ -762,6 +768,8 @@ type Episode struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.
