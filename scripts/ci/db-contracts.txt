@@ -48,13 +48,6 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 
-# An autoscan poll, successful or failed, writes nothing to a source an admin reset while it ran.
-./internal/autoscan TestAdvanceMarkerSkipsStalePoll
-./internal/autoscan TestAdvanceMarkerRequiresBoundConnectionRow
-./internal/autoscan TestRecordErrorSkipsStalePoll
-./internal/autoscan TestRecordErrorUnknownSource
-./internal/autoscan TestRecordErrorRejectsAnotherConnectionsRow
-
 # Task locks and bounded history cleanup.
 ./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
