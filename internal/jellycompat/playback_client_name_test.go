@@ -2,7 +2,14 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -29,6 +36,38 @@ func TestHandlePlaybackInfoRecordsClientNameAndVersion(t *testing.T) {
 	}
 	if stored.ClientName != "Jellyfin Web" || stored.ClientVersion != "10.11.6" {
 		t.Fatalf("client = %q %q, want Jellyfin Web 10.11.6", stored.ClientName, stored.ClientVersion)
+	}
+}
+
+// TestHandlePlaybackInfoCleansRecordedClient checks that the recorded name and
+// version are cleaned and clamped like any other client identity.
+func TestHandlePlaybackInfoCleansRecordedClient(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`))
+	req.Header.Set("X-Emby-Authorization",
+		"MediaBrowser Client=\"Jellyfin\tWeb"+strings.Repeat("x", 300)+`", Device="Chrome", DeviceId="clean-device", Version=" 10.11.6 "`)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
+	recorder := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackInfoResponseDTO
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	stored, ok := handler.playbackStore.Get(response.PlaySessionID)
+	if !ok {
+		t.Fatal("negotiated play session was not stored")
+	}
+	if n := utf8.RuneCountInString(stored.ClientName); n != 128 || strings.ContainsRune(stored.ClientName, '\t') {
+		t.Fatalf("client name = %q (%d runes), want 128 runes without control characters", stored.ClientName, n)
+	}
+	if stored.ClientVersion != "10.11.6" {
+		t.Fatalf("client version = %q, want 10.11.6", stored.ClientVersion)
 	}
 }
 
