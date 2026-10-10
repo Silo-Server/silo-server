@@ -222,7 +222,11 @@ export function PlayingNextScreen({
                     }
                   />
                 ) : blurPlaceholder ? (
-                  <img src={blurPlaceholder} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={blurPlaceholder}
+                    alt=""
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-white/5 text-sm text-white/30">
                     No Preview

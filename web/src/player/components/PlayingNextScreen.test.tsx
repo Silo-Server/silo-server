@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   useEffectiveSettings: vi.fn(),
   useSetSettingValue: vi.fn(),
   useClearSettingValue: vi.fn(),
+  spoilerPrefs: { hideImages: false, hideOverviews: false },
 }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {
@@ -26,7 +27,11 @@ vi.mock("@/hooks/queries/settingValues", async () => {
 });
 
 vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
-  useEpisodeSpoilerPrefs: () => ({ hideImages: false, hideOverviews: false }),
+  useEpisodeSpoilerPrefs: () => mocks.spoilerPrefs,
+}));
+
+vi.mock("@/lib/thumbhash", () => ({
+  decodeThumbhash: (hash: string) => (hash ? `data:image/png;base64,${hash}` : ""),
 }));
 
 vi.mock("@/hooks/useDateTimeFormat", () => ({ useDateTimeFormat: () => undefined }));
@@ -326,5 +331,62 @@ describe("PlayingNextScreen shuffle", () => {
     expect(screen.getByText("Playing Next")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Pick Another" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop shuffling" })).toBeNull();
+  });
+});
+
+describe("PlayingNextScreen spoiler protection", () => {
+  beforeEach(() => {
+    mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
+    mocks.useSetSettingValue.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    });
+    mocks.useClearSettingValue.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    });
+    mocks.spoilerPrefs = { hideImages: true, hideOverviews: false };
+  });
+
+  afterEach(() => {
+    mocks.spoilerPrefs = { hideImages: false, hideOverviews: false };
+    cleanup();
+  });
+
+  const nextWithoutUrl = {
+    contentId: "ep-2",
+    title: "Episode Two",
+    seasonNumber: 1,
+    episodeNumber: 2,
+    runtime: 48,
+    stillThumbhash: "still-hash",
+    stillIsEpisodeStill: true,
+    watchState: { played: false },
+  };
+
+  function previewPlaceholder(): HTMLImageElement {
+    const images = Array.from(document.querySelectorAll<HTMLImageElement>("img")).filter(
+      (img) =>
+        img.getAttribute("src") === "data:image/png;base64,still-hash" &&
+        !img.className.includes("blur-3xl"),
+    );
+    const [image] = images;
+    if (images.length !== 1 || !image)
+      throw new Error(`expected one preview placeholder, found ${images.length}`);
+    return image;
+  }
+
+  it("blurs the still's placeholder when the still URL is missing", () => {
+    renderScreen({ nextEpisode: nextWithoutUrl });
+    expect(previewPlaceholder().className).toContain("blur-xl");
+  });
+
+  it("leaves the placeholder clear for a started episode", () => {
+    renderScreen({
+      nextEpisode: { ...nextWithoutUrl, watchState: { played: false, position_seconds: 120 } },
+    });
+    expect(previewPlaceholder().className).not.toContain("blur-xl");
   });
 });
