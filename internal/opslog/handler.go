@@ -189,7 +189,9 @@ func attrValue(v slog.Value) any {
 // errorText records an error's message for the stored entry. Requested URLs
 // inside the chain are sanitized with logredact.SanitizeURLError, the same
 // helper transport errors pass through elsewhere, so signed stream URLs and
-// query-string tokens are not written to the database. A typed-nil pointer
+// query-string tokens are not written to the database. Secret key=value pairs
+// left in plain text, such as a plugin's gRPC status description, are masked
+// with logredact.RedactSecretAssignments. A typed-nil pointer
 // that satisfies error is recorded as a placeholder instead of calling Error
 // on a nil receiver, and a panicking Error method is contained.
 func errorText(err error) (text string) {
@@ -201,7 +203,7 @@ func errorText(err error) (text string) {
 			text = fmt.Sprintf("<%T: Error panicked>", err)
 		}
 	}()
-	return logredact.SanitizeURLError(err).Error()
+	return logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error())
 }
 
 // snapshot encodes a value the caller still owns, such as a map, slice or

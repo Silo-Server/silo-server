@@ -126,3 +126,23 @@ func TestHandlerSanitizesErrorURLs(t *testing.T) {
 		t.Fatalf("attrs[error] = %q, want the wrapper and cause kept", got)
 	}
 }
+
+// TestHandlerRedactsSecretAssignmentsInErrorText checks that a secret
+// key=value pair in plain error text, as a plugin's gRPC status description
+// carries it, is masked before the entry is stored.
+func TestHandlerRedactsSecretAssignmentsInErrorText(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	err := errors.New("rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_SECRET rejected")
+	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("metadata lookup: %w", err))
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	got, _ := entry.Attrs["error"].(string)
+	if want := "metadata lookup: rpc error: code = Unauthenticated desc = api_key=[REDACTED] rejected"; got != want {
+		t.Fatalf("attrs[error] = %q, want %q", got, want)
+	}
+}
