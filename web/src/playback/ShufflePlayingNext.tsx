@@ -156,7 +156,13 @@ function shuffleNextEpisodeRef(shuffle: Shuffle): EpisodeRef {
     // portrait, so it shows its backdrop instead.
     stillUrl: (episode ? next.poster_url : undefined) ?? next.backdrop_url,
     stillThumbhash: (episode ? next.poster_thumbhash : undefined) ?? next.backdrop_thumbhash,
+    stillIsEpisodeStill:
+      episode && next.poster_url ? next.poster_is_episode_still : next.backdrop_is_episode_still,
     airDate: next.release_date ?? null,
+    watchState: episode
+      ? { played: next.user_state?.played, position_seconds: next.position_seconds }
+      : undefined,
+    isMovie: !episode,
   };
 }
 

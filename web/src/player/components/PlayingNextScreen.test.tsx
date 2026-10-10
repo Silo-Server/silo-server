@@ -383,6 +383,25 @@ describe("PlayingNextScreen spoiler protection", () => {
     expect(previewPlaceholder().className).toContain("blur-xl");
   });
 
+  it("leaves a shuffled movie's backdrop and overview visible", () => {
+    mocks.spoilerPrefs = { hideImages: true, hideOverviews: true };
+    renderScreen({
+      nextEpisode: {
+        contentId: "movie-1",
+        title: "Heat",
+        seasonNumber: 0,
+        episodeNumber: 0,
+        runtime: 170,
+        overview: "A heist crew plans one last job.",
+        stillThumbhash: "still-hash",
+        isMovie: true,
+      },
+      shuffle: { scopeLabel: "Movies", onReshuffle: () => {}, onStop: () => {} },
+    });
+    expect(previewPlaceholder().className).not.toContain("blur-xl");
+    expect(screen.getByText("A heist crew plans one last job.")).toBeTruthy();
+  });
+
   it("leaves the placeholder clear for a started episode", () => {
     renderScreen({
       nextEpisode: { ...nextWithoutUrl, watchState: { played: false, position_seconds: 120 } },

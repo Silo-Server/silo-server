@@ -136,7 +136,7 @@ export function PlayingNextScreen({
   const episodeStillUrl = nextEpisode?.stillUrl;
   const episodeThumbhash = nextEpisode?.stillThumbhash;
   const blurPlaceholder = episodeThumbhash ? decodeThumbhash(episodeThumbhash) : undefined;
-  const nextUnwatched = isEpisodeUnwatched(nextEpisode?.watchState);
+  const nextUnwatched = !nextEpisode?.isMovie && isEpisodeUnwatched(nextEpisode?.watchState);
   const hideStill =
     spoilerPrefs.hideImages && nextUnwatched && isEpisodeStill(nextEpisode?.stillIsEpisodeStill);
   const hideOverview = spoilerPrefs.hideOverviews && nextUnwatched;

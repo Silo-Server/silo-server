@@ -347,4 +347,6 @@ export interface EpisodeRef {
   airDate?: string | null;
   /** The profile's watch state, for spoiler protection. */
   watchState?: { played?: boolean; is_in_progress?: boolean; position_seconds?: number };
+  /** A shuffle can play a movie next; spoiler protection covers episodes only. */
+  isMovie?: boolean;
 }
