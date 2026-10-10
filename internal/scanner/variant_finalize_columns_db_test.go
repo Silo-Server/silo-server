@@ -196,3 +196,53 @@ func TestFinalizeVariantsRetotalsPartsLeftByARenameDB(t *testing.T) {
 		t.Fatalf("disc 1 part total = %d after disc 2 left the group, want 0", got)
 	}
 }
+
+// A stored part found outside the scope can belong to a group whose other
+// files are stored without part columns, as after a parser change. The group
+// is read in full, so the stored part keeps its total and the others get one.
+func TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB(t *testing.T) {
+	fx := seedVariantContractMovie(t, "widen")
+	ctx := context.Background()
+	dir := fx.root + "/Discs (2010)"
+	insert := func(path string) int {
+		t.Helper()
+		var id int
+		if err := fx.pool.QueryRow(ctx, `
+			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+			VALUES ($1, $2, $3, 1024) RETURNING id`, fx.movieID, fx.folderID, path).Scan(&id); err != nil {
+			t.Fatalf("seed %s: %v", path, err)
+		}
+		return id
+	}
+	partTotal := func(id int) int {
+		t.Helper()
+		var total int
+		if err := fx.pool.QueryRow(ctx, `SELECT COALESCE(presentation_part_total, 0) FROM media_files WHERE id = $1`, id).Scan(&total); err != nil {
+			t.Fatalf("load file %d: %v", id, err)
+		}
+		return total
+	}
+
+	discOne := insert(dir + "/Discs.2010.CD1.mkv")
+	discTwo := insert(dir + "/Discs.2010.CD2.mkv")
+	fx.finalize(t, dir)
+	if partTotal(discOne) != 2 || partTotal(discTwo) != 2 {
+		t.Fatalf("fixture: disc totals = %d and %d, want 2", partTotal(discOne), partTotal(discTwo))
+	}
+	if _, err := fx.pool.Exec(ctx, `
+		UPDATE media_files
+		SET presentation_kind = '', presentation_group_key = '', presentation_part_index = NULL, presentation_part_total = NULL
+		WHERE id = $1`, discTwo); err != nil {
+		t.Fatalf("clear disc 2 part columns: %v", err)
+	}
+	plain := fx.root + "/Discs (2010) Featurette/Discs.2010.1080p.mkv"
+	insert(plain)
+	fx.finalize(t, plain)
+
+	if got := partTotal(discOne); got != 2 {
+		t.Fatalf("disc 1 part total = %d, want 2", got)
+	}
+	if got := partTotal(discTwo); got != 2 {
+		t.Fatalf("disc 2 part total = %d, want 2", got)
+	}
+}

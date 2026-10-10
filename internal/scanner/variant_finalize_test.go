@@ -160,6 +160,34 @@ func TestVariantSiblingOwners(t *testing.T) {
 	}
 }
 
+func TestVariantOwnersToWiden(t *testing.T) {
+	movies := &models.MediaFolder{Type: "movies", Paths: []string{"/movies"}}
+	read := VariantOwners{
+		IDs:   []string{"movie-discs", "movie-read-whole", "movie-plain"},
+		Whole: map[string]struct{}{"movie-read-whole": {}},
+	}
+	found := newVariantCandidates([]VariantFile{
+		// A disc of an owner read only for its stored parts: read the rest.
+		{ID: 1, ContentID: "movie-discs", FilePath: "/movies/Discs (2010)/Discs.2010.CD1.mkv"},
+		// Already read in full.
+		{ID: 2, ContentID: "movie-read-whole", FilePath: "/movies/Whole (2010)/Whole.2010.CD1.mkv"},
+		// Stored with a part total but no longer a part: still a group to finish.
+		{ID: 3, ContentID: "movie-plain", FilePath: "/movies/Plain (2010)/Plain.2010.mkv", PresentationPartTotal: 2},
+	}, movies)
+
+	episodes, contents := variantOwnersToWiden(found, VariantOwners{}, read)
+	if len(episodes.IDs) != 0 || len(episodes.Whole) != 0 {
+		t.Fatalf("episode owners = %+v, want none", episodes)
+	}
+	want := VariantOwners{
+		IDs:   []string{"movie-discs", "movie-plain"},
+		Whole: map[string]struct{}{"movie-discs": {}, "movie-plain": {}},
+	}
+	if !reflect.DeepEqual(contents, want) {
+		t.Fatalf("content owners = %+v, want %+v", contents, want)
+	}
+}
+
 func TestVariantMetadataUpdates(t *testing.T) {
 	movies := &models.MediaFolder{Type: "movies", Paths: []string{"/movies"}}
 

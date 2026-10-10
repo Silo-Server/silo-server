@@ -15,8 +15,8 @@ import (
 // Every present file in the scope is re-parsed, so parser and folder changes
 // reach the whole scope. A file's part total is the only value that depends on
 // other files of the same owner, so files outside the scope are loaded only as
-// variantSiblingOwners chooses. Other out-of-scope files are finalized when
-// their own scope runs.
+// variantSiblingOwners and variantOwnersToWiden choose. Other out-of-scope
+// files are finalized when their own scope runs.
 func (s *Scanner) FinalizeVariantsByPathPrefix(
 	ctx context.Context,
 	folder *models.MediaFolder,
@@ -78,26 +78,49 @@ func (s *Scanner) variantFinalizationCandidates(
 	scopedFiles []VariantFile,
 ) ([]variantCandidate, error) {
 	candidates := newVariantCandidates(scopedFiles, folder)
-	episodes, contents := variantSiblingOwners(candidates)
-	if len(episodes.IDs) == 0 && len(contents.IDs) == 0 {
-		return candidates, nil
-	}
-
-	related, err := s.fileRepo.ListVariantFilesByOwners(ctx, folder.ID, episodes, contents)
-	if err != nil {
-		return nil, fmt.Errorf("loading related files for variant finalization: %w", err)
-	}
 	loaded := make(map[int]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		loaded[candidate.file.ID] = struct{}{}
 	}
-	var outside []VariantFile
+
+	episodes, contents := variantSiblingOwners(candidates)
+	found, err := s.loadVariantCandidates(ctx, folder, episodes, contents, loaded)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, found...)
+
+	episodes, contents = variantOwnersToWiden(found, episodes, contents)
+	more, err := s.loadVariantCandidates(ctx, folder, episodes, contents, loaded)
+	if err != nil {
+		return nil, err
+	}
+	return append(candidates, more...), nil
+}
+
+// loadVariantCandidates reads the files the owners name and returns those not
+// loaded yet, marking them loaded.
+func (s *Scanner) loadVariantCandidates(
+	ctx context.Context,
+	folder *models.MediaFolder,
+	episodes, contents VariantOwners,
+	loaded map[int]struct{},
+) ([]variantCandidate, error) {
+	if len(episodes.IDs) == 0 && len(contents.IDs) == 0 {
+		return nil, nil
+	}
+	related, err := s.fileRepo.ListVariantFilesByOwners(ctx, folder.ID, episodes, contents)
+	if err != nil {
+		return nil, fmt.Errorf("loading related files for variant finalization: %w", err)
+	}
+	var files []VariantFile
 	for _, file := range related {
 		if _, ok := loaded[file.ID]; !ok {
-			outside = append(outside, file)
+			loaded[file.ID] = struct{}{}
+			files = append(files, file)
 		}
 	}
-	return append(candidates, newVariantCandidates(outside, folder)...), nil
+	return newVariantCandidates(files, folder), nil
 }
 
 // variantSiblingOwners returns the owners of the in-scope files, episode
@@ -128,6 +151,30 @@ func variantSiblingOwners(candidates []variantCandidate) (episodes, contents Var
 	episodes.IDs = sortedVariantOwnerIDs(episodeIDs)
 	contents.IDs = sortedVariantOwnerIDs(contentIDs)
 	return episodes, contents
+}
+
+// variantOwnersToWiden returns the owners that were read only for their
+// stored parts but turned out to have a file in a multipart group, to be read
+// in full. The rest of that group can be stored without part columns, as after
+// a parser change, and the group's total needs every part.
+func variantOwnersToWiden(found []variantCandidate, episodes, contents VariantOwners) (widerEpisodes, widerContents VariantOwners) {
+	episodeIDs := make(map[string]struct{})
+	contentIDs := make(map[string]struct{})
+	for _, candidate := range found {
+		if candidate.ownerKey == "" || !variantCandidateInPartGroup(candidate) {
+			continue
+		}
+		ids, whole, id := episodeIDs, episodes.Whole, candidate.file.EpisodeID
+		if id == "" {
+			ids, whole, id = contentIDs, contents.Whole, candidate.file.ContentID
+		}
+		if _, ok := whole[id]; !ok {
+			ids[id] = struct{}{}
+		}
+	}
+	widerEpisodes = VariantOwners{IDs: sortedVariantOwnerIDs(episodeIDs), Whole: episodeIDs}
+	widerContents = VariantOwners{IDs: sortedVariantOwnerIDs(contentIDs), Whole: contentIDs}
+	return widerEpisodes, widerContents
 }
 
 func variantCandidateInPartGroup(candidate variantCandidate) bool {
