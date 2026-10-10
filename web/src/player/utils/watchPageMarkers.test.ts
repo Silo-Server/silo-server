@@ -229,3 +229,60 @@ describe("resolveAutoplayMarker", () => {
     expect(resolveAutoplayMarker(regions, 1800, true)).toEqual({ start: 1700, end: 1800 });
   });
 });
+
+it("keeps ready previews for unchanged occurrences when a provider inventory changes", () => {
+  const version = makeVersion({
+    marker_segments: [
+      {
+        kind: "intro",
+        start_seconds: 6,
+        end_seconds: 9,
+        thumbnail_url: "/yellow.webp",
+        thumbnail_capture_seconds: 6,
+      },
+      {
+        kind: "credits",
+        start_seconds: 30,
+        end_seconds: 33,
+        thumbnail_url: "/cyan.webp",
+        thumbnail_capture_seconds: 30,
+      },
+    ],
+  });
+  const updated = patchVersionMarkers(
+    [version],
+    1,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    segments(["intro", 6, 9], ["credits", 24, 27]),
+  );
+  expect(updated[0]?.marker_segments?.[0]?.thumbnail_url).toBe("/yellow.webp");
+  expect(updated[0]?.marker_segments?.[1]?.thumbnail_url).toBeUndefined();
+  const removed = patchVersionMarkers(
+    updated,
+    1,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    segments(["intro", 6, 9]),
+  );
+  expect(removed[0]?.marker_segments).toHaveLength(1);
+  expect(removed[0]?.marker_segments?.[0]?.thumbnail_url).toBe("/yellow.webp");
+});
+
+it("takes a new marker image for an unchanged range", () => {
+  const version = makeVersion({ marker_segments: segments(["intro", 6, 9]) });
+  const updated = patchVersionMarkers([version], 1, undefined, undefined, undefined, undefined, [
+    {
+      kind: "intro",
+      start_seconds: 6,
+      end_seconds: 9,
+      thumbnail_url: "/yellow.webp",
+      thumbnail_capture_seconds: 6,
+    },
+  ]);
+  expect(updated[0]?.marker_segments?.[0]?.thumbnail_url).toBe("/yellow.webp");
+});

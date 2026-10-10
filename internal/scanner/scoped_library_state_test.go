@@ -357,22 +357,44 @@ func TestScopedPathRangesMatchLiteralPathsWithGenericPlans(t *testing.T) {
 		{name: "empty scope", scope: root + "/absent", want: []string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			files, err := NewFileRepository(genericPool).GetScanStateByFolderAndPathPrefix(t.Context(), folderID, tc.scope)
+			repo := NewFileRepository(genericPool)
+			stateFiles, err := repo.GetScanStateByFolderAndPathPrefix(t.Context(), folderID, tc.scope)
 			if err != nil {
 				t.Fatalf("read generic-plan path scope: %v", err)
 			}
-			got := make([]string, 0, len(files))
-			for _, file := range files {
-				got = append(got, file.FilePath)
+			files, err := repo.GetByFolderAndPathPrefix(t.Context(), folderID, tc.scope)
+			if err != nil {
+				t.Fatalf("read generic-plan files by path prefix: %v", err)
 			}
 			want := slices.Clone(tc.want)
-			slices.Sort(got)
 			slices.Sort(want)
-			if !slices.Equal(got, want) {
-				t.Fatalf("scope %q paths = %q, want %q", tc.scope, got, want)
+			for name, got := range map[string][]string{
+				"GetScanStateByFolderAndPathPrefix": scanStatePaths(stateFiles),
+				"GetByFolderAndPathPrefix":          mediaFilePaths(files),
+			} {
+				slices.Sort(got)
+				if !slices.Equal(got, want) {
+					t.Fatalf("%s scope %q paths = %q, want %q", name, tc.scope, got, want)
+				}
 			}
 		})
 	}
+}
+
+func scanStatePaths(files []*scanStateFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.FilePath)
+	}
+	return paths
+}
+
+func mediaFilePaths(files []*models.MediaFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.FilePath)
+	}
+	return paths
 }
 
 func TestScopedLibraryReconciliationCleansFormerIdentityAfterRelinking(t *testing.T) {

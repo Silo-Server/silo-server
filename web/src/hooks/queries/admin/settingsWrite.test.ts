@@ -231,7 +231,7 @@ it.each([false, true])(
     expect(result.current.dirtyCount).toBe(1);
     expect(writes).toEqual([{ values: { "branding.server_name": "Casa" }, tag: '"tagA"' }]);
     await act(async () => {
-      if (competitor) await expect(result.current.save()).rejects.toThrow();
+      if (competitor) await expect(result.current.save()).rejects.toBeInstanceOf(Error);
       else await result.current.save();
     });
     expect(writes).toEqual([

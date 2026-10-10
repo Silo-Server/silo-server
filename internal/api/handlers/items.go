@@ -116,6 +116,9 @@ type ItemsHandler struct {
 	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	MarkerPopulation         MarkerPopulationService
 	MarkerFileResolver       FilePathResolver
+	MarkerImageURLs          interface {
+		ResolveURLs(context.Context, []string) map[string]catalog.ResolvedImageURL
+	}
 }
 
 // NewItemsHandler creates a new ItemsHandler.
@@ -218,6 +221,15 @@ func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchPr
 		return
 	}
 	h.catalogResolver.WithSearchProvider(provider)
+}
+
+// SetPersonalCollectionAccess limits the catalog's reads of another
+// profile's shared personal collection to its owner's access.
+func (h *ItemsHandler) SetPersonalCollectionAccess(owners catalog.PersonalCollectionAccess) {
+	if h == nil || h.catalogResolver == nil || owners == nil {
+		return
+	}
+	h.catalogResolver.WithPersonalCollectionAccess(owners)
 }
 
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {

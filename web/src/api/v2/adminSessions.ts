@@ -1,6 +1,6 @@
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminSession } from "@/api/types";
-import { requireAdminUserAuthority } from "./adminUsers";
+import { requireAdminAuthority } from "./adminAuthority";
 import { v2, type V2Result } from "./request";
 
 type Session = V2Result<"GET /api/v2/admin/sessions">["items"][number];
@@ -31,12 +31,12 @@ export async function listAdminPlaybackSessions(
   const seen = new Set<string>();
   let cursor: string | undefined;
   for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
-    requireAdminUserAuthority(context);
+    requireAdminAuthority(context);
     const page = await v2("GET /api/v2/admin/sessions", {
       profileContext: context,
       query: { limit: 100, cursor },
     });
-    requireAdminUserAuthority(context);
+    requireAdminAuthority(context);
     if (!page.page || typeof page.page.has_more !== "boolean")
       throw new Error("Invalid session page.");
     for (const row of page.items) rows.set(row.session_id, sessionOf(row));

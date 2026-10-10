@@ -13,7 +13,7 @@ import {
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
-import { deviceKeys, sectionKeys, settingsKeys } from "./keys";
+import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -319,6 +319,14 @@ function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, k
     .then(() => bumpHomeRefreshSignal(queryClient));
 }
 
+// A profile with a library limit gets its hidden libraries left out of the
+// server's library list, so the list has to refetch when the profile hides or
+// shows one; otherwise navigation keeps the old list until it goes stale.
+function refreshLibrariesForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
+  if (key !== SETTING_KEYS.UI_DISABLED_LIBRARY_IDS) return;
+  return queryClient.invalidateQueries({ queryKey: libraryKeys.all });
+}
+
 /** Refreshes the reads a setting write changes, as useSetSettingValue does. */
 export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -328,6 +336,7 @@ export function invalidateSettingValueQueries(
   const invalidations = [
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
     refreshHomeForSetting(queryClient, key),
+    refreshLibrariesForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -567,6 +576,7 @@ export function useSettingValuesRealtime() {
 
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
         void refreshHomeForSetting(qc, event.data?.key);
+        void refreshLibrariesForSetting(qc, event.data?.key);
       },
     }),
     [qc],

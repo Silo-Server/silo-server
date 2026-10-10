@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { endSessionWithProvider } from "@/api/v2/providerLogout";
-import { clearSignedOut, markSignedOut } from "@/lib/externalSignIn";
+import { clearSignedOut, markSignedOut, markSessionEnded } from "@/lib/externalSignIn";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -21,7 +21,8 @@ import {
   setRefreshToken,
   type SessionIdentitySnapshot,
 } from "@/api/client";
-import { storage } from "@/utils/storage";
+import { endProfileEpoch, storage } from "@/utils/storage";
+import { isProfileLaunchPending } from "@/lib/profileLaunch";
 import type { LoginResponse, Profile, User } from "@/api/types";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
@@ -85,6 +86,7 @@ interface AuthState {
    * for "Not you? Switch account" before signing in as someone else.
    */
   logoutOfSiloOnly: () => void;
+  clearLoginSession: () => void;
   selectProfile: (profile: Profile, profileToken?: string) => void;
   verifyProfilePin: (profileId: string, pin: string) => Promise<ProfileVerification>;
   clearProfile: () => void;
@@ -347,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!options.preserveStoredImpersonationAdminSession) {
         clearStoredImpersonationAdminSession();
       }
+      endProfileEpoch();
       clearProfile();
       setUser(data.user);
       setSetupRequired(false);
@@ -358,6 +361,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setRefreshToken(null);
     setSessionRestoreUnavailable(false);
+    endProfileEpoch();
     clearProfile();
     queryClient.clear();
     setUser(null);
@@ -377,6 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const restoredSession = await restoreUserSession(storedSession);
       // A sign-in that replaced the session during the exchange keeps it.
       if (!isCurrent()) return false;
+      endProfileEpoch();
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);
@@ -466,6 +471,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // session alone: the server answers no provider sign-out for it anyway.
   const logout = useCallback(() => endSession(!isImpersonating), [endSession, isImpersonating]);
   const logoutOfSiloOnly = useCallback(() => endSession(false), [endSession]);
+  // A successful session revocation already ended the server session.
+  const clearLoginSession = useCallback(() => {
+    markSessionEnded("signed-out");
+    clearAuthState();
+    void refreshSignInProviders();
+  }, [clearAuthState, refreshSignInProviders]);
 
   const verifyProfilePin = useCallback(
     async (profileId: string, pin: string): Promise<ProfileVerification> => {
@@ -520,7 +531,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // The admin session is gone too; fall through to sign-in.
         }
-        if (isCurrent()) clearActiveAuthState();
+        if (isCurrent()) {
+          markSessionEnded("ended");
+          clearActiveAuthState();
+        }
       })().finally(() => {
         if (sessionRejectionRef.current?.handling === handling) sessionRejectionRef.current = null;
       });
@@ -654,6 +668,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (profile || storage.get(storage.KEYS.PROFILE_ID)) {
+      return;
+    }
+    // Asked to show "Who's watching?" at launch: even a lone unlocked profile
+    // waits to be picked.
+    if (isProfileLaunchPending()) {
       return;
     }
 
@@ -792,6 +811,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         endImpersonation,
         logout,
         logoutOfSiloOnly,
+        clearLoginSession,
         selectProfile,
         verifyProfilePin,
         clearProfile,

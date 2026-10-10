@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -8,7 +8,10 @@ import {
 } from "@/hooks/queries/onboarding";
 import { captureProfileRequestContext } from "@/api/client";
 import { clearTourSuppressed, isTourSuppressed } from "@/lib/onboarding";
-import { TourHost } from "./TourHost";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
+
+// Profiles that have finished onboarding do not need the tour's UI or settings controls.
+const TourHost = lazy(() => import("./TourHost").then((module) => ({ default: module.TourHost })));
 
 /**
  * Overlays the first-run tour on Home when the active profile has never
@@ -64,11 +67,15 @@ function ProfileOnboardingGate({ children }: { children: ReactNode }) {
       {children}
       {progress.isError && <div role="alert">Progress could not be saved. Reload to continue.</div>}
       {shouldShow && !suppressed && flow.data && flow.data.steps.length > 0 && (
-        <TourHost
-          key={`${authority?.authContextVersion}:${authority?.profileId}`}
-          flow={flow.data}
-          onDone={() => setDismissed(true)}
-        />
+        <LocalErrorBoundary>
+          <Suspense fallback={null}>
+            <TourHost
+              key={`${authority?.authContextVersion}:${authority?.profileId}`}
+              flow={flow.data}
+              onDone={() => setDismissed(true)}
+            />
+          </Suspense>
+        </LocalErrorBoundary>
       )}
     </>
   );

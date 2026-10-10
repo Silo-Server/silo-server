@@ -23,7 +23,7 @@ import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -305,7 +305,7 @@ export default function PlaybackSettings() {
       setConfirmRemake(true);
       return;
     }
-    void form.save();
+    return form.save();
   };
   const chapterExecution =
     form.getValue("playback.chapter_thumbnail_execution") || IMAGE_EXECUTION_DEFAULT;
@@ -773,7 +773,9 @@ export default function PlaybackSettings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void form.save()}>Save</AlertDialogAction>
+            <AlertDialogAction onClick={() => void form.save().catch(() => {})}>
+              Save
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -978,6 +979,260 @@ func TestEnsureSeriesEpisodeLinks_PrefersSeriesProviderForAirDateMatch(t *testin
 	linked := h.fileRepo.files[file.ID]
 	if linked.SeasonNumber != 2026 || linked.EpisodeNumber != 82 {
 		t.Fatalf("linked season/episode = S%dE%d, want S2026E82", linked.SeasonNumber, linked.EpisodeNumber)
+	}
+}
+
+func seedAirDateSeries(ctx context.Context, t *testing.T, h *fallbackTestHarness, seriesID string, episodes ...*models.Episode) {
+	t.Helper()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: seriesID,
+		Title:     "Daily Show",
+		Type:      "series",
+		Status:    "matched",
+		TvdbID:    "77075",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	for _, episode := range episodes {
+		episode.SeriesID = seriesID
+		episode.SeasonID = fmt.Sprintf("season-%d", episode.SeasonNumber)
+		episode.MetadataSource = "provider"
+		if err := h.episodeRepo.Upsert(ctx, episode); err != nil {
+			t.Fatalf("seed episode %s: %v", episode.ContentID, err)
+		}
+	}
+}
+
+func addAirDateFile(h *fallbackTestHarness, seriesID string, id int, path string) {
+	h.fileRepo.addFile(&models.MediaFile{ID: id, MediaFolderID: 10, FilePath: path})
+	h.fileRepo.contentIDs[id] = seriesID
+}
+
+// TestEnsureSeriesEpisodeLinks_AirDateNarrowsPastProviderTie has the shape of
+// a daily show matched on TVDB: a same-day special and the year-season episode
+// both carry TVDB IDs, and a TMDB-numbered row carries only its own.
+func TestEnsureSeriesEpisodeLinks_AirDateNarrowsPastProviderTie(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-provider-tie"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-special", SeasonNumber: 0, EpisodeNumber: 5, Title: "Tournament Preview", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-tmdb-42-165", SeasonNumber: 42, EpisodeNumber: 165, Title: "Show #9550", AirDate: mustDate(t, "2026-04-24"), TmdbID: "7178079"},
+		&models.Episode{ContentID: "ep-tvdb-2026-82", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 110, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[110]; got != "ep-tvdb-2026-82" {
+		t.Fatalf("episode link = %q, want ep-tvdb-2026-82", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDateFolderSeasonPicksBetweenNumberings(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-folder-season"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-42-165", SeasonNumber: 42, EpisodeNumber: 165, Title: "Show #9550", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-2026-82", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 120, "/media/tv/Daily Show/Season 42/Daily Show - 2026-04-24.mkv")
+	addAirDateFile(h, seriesID, 121, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24.mkv")
+	// A folder season no candidate has decides nothing.
+	addAirDateFile(h, seriesID, 122, "/media/tv/Daily Show/Season 01/Daily Show - 2026-04-24.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	for id, want := range map[int]string{120: "ep-42-165", 121: "ep-2026-82", 122: ""} {
+		if got := h.fileRepo.episodeLinks[id]; got != want {
+			t.Fatalf("file %d linked to %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDateFilenameTitleOutranksFolderSeason(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-title-over-folder"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-special", SeasonNumber: 0, EpisodeNumber: 5, Title: "Tournament Preview", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-regular", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 123, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24 - Tournament Preview.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[123]; got != "ep-special" {
+		t.Fatalf("episode link = %q, want the special the filename names", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDateUnmatchedTitleDoesNotDefaultToRegularEpisode(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-unmatched-title"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-special", SeasonNumber: 0, EpisodeNumber: 5, Title: "Tournament Preview", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-regular", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 124, "/media/tv/Daily Show/Daily Show - 2026-04-24 - Tournament Preview Show.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[124]; got != "" {
+		t.Fatalf("episode link = %q, want no link for a title that names neither episode", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDatePrefersRegularEpisodeOverSameDaySpecial(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-special"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-special", SeasonNumber: 0, EpisodeNumber: 5, Title: "Tournament Preview", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-regular", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 111, "/media/tv/Daily Show/Daily Show - 2026-04-24.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[111]; got != "ep-regular" {
+		t.Fatalf("episode link = %q, want ep-regular over the same-day special", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDateSpecialsFolderKeepsSpecial(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-specials-folder"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-special", SeasonNumber: 0, EpisodeNumber: 5, Title: "Tournament Preview", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733001"},
+		&models.Episode{ContentID: "ep-regular", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Fri, Apr 24, 2026", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 112, "/media/tv/Daily Show/Specials/Daily Show - 2026-04-24.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[112]; got != "ep-special" {
+		t.Fatalf("episode link = %q, want ep-special from the Specials folder", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AirDateFilenameTitlePicksSameDayEpisode(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-two-a-day"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-early", SeasonNumber: 2026, EpisodeNumber: 81, Title: "Morning Edition", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733848"},
+		&models.Episode{ContentID: "ep-late", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Jamie Ding, Zach Pollock, Nicco Martinez", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+	)
+	addAirDateFile(h, seriesID, 113, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24 - Jamie Ding Zach Pollock Nicco Martinez.mkv")
+	addAirDateFile(h, seriesID, 114, "/media/tv/Daily Show/Season 2026/Daily.Show.2026.04.24.Morning.Edition.1080p.WEB.h264-GROUP.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	if got := h.fileRepo.episodeLinks[113]; got != "ep-late" {
+		t.Fatalf("titled file link = %q, want ep-late", got)
+	}
+	if got := h.fileRepo.episodeLinks[114]; got != "ep-early" {
+		t.Fatalf("dotted release file link = %q, want ep-early", got)
+	}
+}
+
+func TestEnsureSeriesEpisodeLinks_AmbiguousAirDatesLogOneSummaryPerSeries(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+	logs := captureDefaultLogs(t)
+
+	seriesID := "series-daily-unknown-titles"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-a", SeasonNumber: 2026, EpisodeNumber: 81, Title: "Unknown", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733848"},
+		&models.Episode{ContentID: "ep-b", SeasonNumber: 2026, EpisodeNumber: 82, Title: "Second Show", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733849"},
+		&models.Episode{ContentID: "ep-c", SeasonNumber: 2026, EpisodeNumber: 83, Title: "Episode 83", AirDate: mustDate(t, "2026-04-25"), TvdbID: "11733850"},
+		&models.Episode{ContentID: "ep-d", SeasonNumber: 2026, EpisodeNumber: 84, Title: "Episode 84", AirDate: mustDate(t, "2026-04-25"), TvdbID: "11733851"},
+	)
+	// "Unknown" is a placeholder, not evidence for the episode titled Unknown,
+	// and a generic title cannot pick between generic episode titles.
+	addAirDateFile(h, seriesID, 115, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24 - Unknown.mkv")
+	addAirDateFile(h, seriesID, 116, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-25 - Episode 83.mkv")
+	addAirDateFile(h, seriesID, 117, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-25.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	for _, id := range []int{115, 116, 117} {
+		if got := h.fileRepo.episodeLinks[id]; got != "" {
+			t.Fatalf("file %d linked to %q, want no link", id, got)
+		}
+	}
+	var warnings []string
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(line, "level=WARN") && strings.Contains(line, "ambiguous air-date") {
+			warnings = append(warnings, line)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("ambiguous air-date warnings = %d, want one summary for the series\n%s", len(warnings), logs.String())
+	}
+	if !strings.Contains(warnings[0], "files=3") {
+		t.Fatalf("summary warning should count all three files: %s", warnings[0])
+	}
+}
+
+// TestEnsureSeriesEpisodeLinks_AirDateGenericTitleSpellingsDecideNothing covers
+// generic titles that only read as generic once normalized.
+func TestEnsureSeriesEpisodeLinks_AirDateGenericTitleSpellingsDecideNothing(t *testing.T) {
+	h := newFallbackTestHarness()
+	ctx := context.Background()
+
+	seriesID := "series-daily-generic-spellings"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-83", SeasonNumber: 2026, EpisodeNumber: 83, Title: "Episode 83", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733850"},
+		&models.Episode{ContentID: "ep-84", SeasonNumber: 2026, EpisodeNumber: 84, Title: "Episode 84", AirDate: mustDate(t, "2026-04-24"), TvdbID: "11733851"},
+		&models.Episode{ContentID: "ep-tba", SeasonNumber: 2026, EpisodeNumber: 85, Title: "TBA", AirDate: mustDate(t, "2026-04-25"), TvdbID: "11733852"},
+		&models.Episode{ContentID: "ep-86", SeasonNumber: 2026, EpisodeNumber: 86, Title: "Second Show", AirDate: mustDate(t, "2026-04-25"), TvdbID: "11733853"},
+		&models.Episode{ContentID: "ep-one", SeasonNumber: 2026, EpisodeNumber: 87, Title: "Episode One", AirDate: mustDate(t, "2026-04-26"), TvdbID: "11733854"},
+		&models.Episode{ContentID: "ep-two", SeasonNumber: 2026, EpisodeNumber: 88, Title: "Episode Two", AirDate: mustDate(t, "2026-04-26"), TvdbID: "11733855"},
+	)
+	addAirDateFile(h, seriesID, 130, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-24 - Episode-83.mkv")
+	addAirDateFile(h, seriesID, 131, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-25 - (TBA).mkv")
+	addAirDateFile(h, seriesID, 132, "/media/tv/Daily Show/Season 2026/Daily Show - 2026-04-26 - Episode One.mkv")
+
+	if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+		t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+	}
+
+	for _, id := range []int{130, 131, 132} {
+		if got := h.fileRepo.episodeLinks[id]; got != "" {
+			t.Errorf("file %d linked to %q on a generic title, want no link", id, got)
+		}
 	}
 }
 

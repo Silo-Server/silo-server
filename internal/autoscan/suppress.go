@@ -74,7 +74,11 @@ func (s *redisSuppressor) Release(ctx context.Context, key, state string) error 
 	return releaseStateScript.Run(ctx, s.client, []string{suppressRedisKey(key)}, state).Err()
 }
 
-func suppressRedisKey(key string) string { return "autoscan:scanned:" + key }
+// suppressKeyPrefix keeps the claims under the server's silo: namespace, so a
+// Redis user limited to ~silo:* can write them.
+const suppressKeyPrefix = "silo:autoscan:scanned:"
+
+func suppressRedisKey(key string) string { return suppressKeyPrefix + key }
 
 // stateAbsent is the observed state of a path that does not exist.
 const stateAbsent = "absent"

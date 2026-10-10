@@ -248,7 +248,7 @@ export type HomeLayoutSkipReason =
 
 export const HOME_LAYOUT_SKIP_REASON_LABELS: Record<HomeLayoutSkipReason, string> = {
   unknown_recipe: "This server doesn't offer this section type",
-  custom_disabled: "This server doesn't let profiles build this section type",
+  custom_disabled: "Only an admin can add this kind of row",
   trakt: "Trakt-backed sections can't be added again",
   library: "Uses a library this profile doesn't have here",
   collection: "Uses a collection this profile can't see here",
@@ -260,6 +260,7 @@ export interface HomeLayoutImportTarget {
   libraries: HomeLayoutLibrary[];
   /** Recipe types the server's gallery lists, with whether each is admin-only. */
   recipes: ReadonlyMap<string, { adminOnly: boolean }>;
+  /** The importing account is an admin, so admin-only kinds (Editor's picks) may be added. */
   allowAdminOnlyRecipes: boolean;
   /** Personal collections the importing profile can see. */
   personalCollectionIds: ReadonlySet<string>;
@@ -384,9 +385,7 @@ function sectionSkipReason(
   // The gallery omits hidden recipes the server still resolves (award_winners),
   // so on the same server a saved row's type is trusted.
   if (!recipe && !isFilterType && !sameServer) return "unknown_recipe";
-  if ((recipe?.adminOnly || isFilterType) && !target.allowAdminOnlyRecipes) {
-    return "custom_disabled";
-  }
+  if (recipe?.adminOnly && !target.allowAdminOnlyRecipes) return "custom_disabled";
 
   const config = effectiveConfig(override);
   // The server refuses any new override whose config names Trakt as its source.

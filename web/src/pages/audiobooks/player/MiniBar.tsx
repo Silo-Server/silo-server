@@ -1,6 +1,7 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
 import { X, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { SeekBar, formatTime } from "@/player/components/SeekBar";
+import { SeekBar } from "@/player/components/SeekBar";
+import { formatTime } from "@/player/utils/formatTime";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
 import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";

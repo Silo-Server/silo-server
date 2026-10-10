@@ -723,71 +723,6 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// HandleDownload serves the original media file for /Items/{id}/Download.
-// This route backs the CanDownload flag set in mapping.go. CanDownload is
-// load-bearing for Infuse: it refuses Direct Play (Static=true streaming)
-// for items it believes it cannot download, so the flag must stay true and
-// this route must exist.
-func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request) {
-	session := SessionFromContext(r.Context())
-	if session == nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
-		return
-	}
-
-	contentID, routeFileID, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
-	if err != nil {
-		writeItemIDError(w, r, err)
-		return
-	}
-	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
-	if err != nil || detail == nil || len(detail.Versions) == 0 {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-		return
-	}
-
-	version := detail.Versions[0]
-	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
-	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
-	if sourceFromRoute {
-		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
-	}
-	if mediaSourceID != "" {
-		matched := false
-		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
-			for _, v := range detail.Versions {
-				if int64(v.FileID) == fileID {
-					version = v
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched && sourceFromRoute {
-			// The route named a version the item no longer has; do not serve
-			// a different file.
-			writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
-			return
-		}
-	}
-
-	if h.fileResolver == nil {
-		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
-		return
-	}
-	file, err := h.fileResolver.GetByID(r.Context(), version.FileID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
-		return
-	}
-	// §4.2b: a download has a user but no stable playback session, so it is a
-	// Transfer rather than a logical session.
-	attachCompatTransfer(r.Context(), session, version.FileID)
-
-	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filepath.Base(file.FilePath)))
-	_ = playback.ServeDirectPlay(w, r, file.FilePath)
-}
-
 // HandleMasterManifest serves the compat-owned HLS manifest route.
 // It returns a full-duration VOD manifest so clients can seek to any position.
 // Segments that haven't been transcoded yet are served on-demand by the segment handler.
@@ -1556,6 +1491,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// a missing subtitle then record an outcome on a real session, which is
 	// correct: they are failures by an already-authorized principal.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
+	segmentPTSOffset := compatSubtitleSegmentPTSOffset90k(playSession.UpstreamPlayMethod, *source, file)
 
 	routeIndex := chiURLParam(r, "routeIndex")
 	trackIndex, parseErr := strconv.Atoi(routeIndex)
@@ -1580,7 +1516,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					return
 				}
 				h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
-				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat)
+				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat, segmentPTSOffset)
 				return
 			}
 			// Serve ASS/SSA as raw data when requested.
@@ -1590,7 +1526,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
 				}
-				h.deliverSubtitle(w, r, "ass", data)
+				h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
 				return
 			}
 			if requestedFormat == "srt" && subtitleCanServeSRT(sub.Format) {
@@ -1599,7 +1535,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
 				}
-				h.deliverSubtitle(w, r, requestedFormat, data)
+				h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 				return
 			}
 			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
@@ -1607,7 +1543,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
 			}
-			h.deliverSubtitle(w, r, "vtt", data)
+			h.deliverSubtitle(w, r, "vtt", data, segmentPTSOffset)
 			return
 		}
 	}
@@ -1635,7 +1571,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			// The correction can change behind the same URL.
 			w.Header().Set("Cache-Control", "private, no-cache")
 			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
-			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat)
+			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
 			return
 		}
 	}
@@ -1657,7 +1593,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
 		}
-		h.deliverSubtitle(w, r, "ass", data)
+		h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
 		return
 	}
 
@@ -1668,7 +1604,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	}
 	format := "srt"
 	if requestedFormat == "srt" && subtitleCanServeSRT(format) {
-		h.deliverSubtitle(w, r, requestedFormat, data)
+		h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 		return
 	}
 	vttData, convErr := playback.ConvertToVTT(data, format)
@@ -1676,7 +1612,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
 		return
 	}
-	h.deliverSubtitle(w, r, "vtt", vttData)
+	h.deliverSubtitle(w, r, "vtt", vttData, segmentPTSOffset)
 }
 
 func findEmbeddedSubtitle(file *models.MediaFile, routeIndex int) (int, models.SubtitleTrack) {

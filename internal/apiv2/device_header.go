@@ -1,11 +1,14 @@
 package apiv2
 
 import (
+	"context"
 	"net/http"
 	"net/textproto"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
 // locationDeviceHeader names the device header in a validation problem.
@@ -51,4 +54,14 @@ func rejectMalformedDeviceHeader(next http.Handler) http.Handler {
 func deviceHeaderProblem(detail string) *Problem {
 	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 		WithErrors(ProblemError{Location: locationDeviceHeader, Code: codeInvalid, Detail: detail})
+}
+
+// withClientDevice attaches the request's X-Silo-Device-* headers for the
+// login session a sign-in operation opens (auth.WithClientDevice). The id has
+// already passed rejectMalformedDeviceHeader.
+func withClientDevice(ctx context.Context) context.Context {
+	if r := requestFrom(ctx); r != nil {
+		return auth.WithClientDevice(ctx, r.Header)
+	}
+	return ctx
 }

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { CheckSquare, RefreshCw, Search, Shuffle, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
+import { cn } from "@/lib/utils";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CastCarousel from "@/components/CastCarousel";
@@ -19,6 +20,7 @@ import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
+import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRequestFeatureStatus, useRequestSearch } from "@/hooks/queries/useRequests";
 import { useWatchlistTitles } from "@/hooks/queries/watchlistTitles";
 import WatchlistTabs, { WatchlistTabPanel } from "@/components/watchlist/WatchlistTabs";
@@ -36,6 +38,12 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  CollectionByline,
+  CollectionPageActions,
+  ReadOnlyCollectionCallout,
+} from "@/components/collections/CollectionPageActions";
+import { useCollectionPageAccess } from "@/hooks/useCollectionPageAccess";
 import {
   buildHistoryRemovalTarget,
   historyRemovalDialogDescription,
@@ -135,6 +143,7 @@ function CatalogResults({
     isCollectionSource || state.source === "watchlist" || state.source === "favorites";
   const allowPersonalizedOverlayControls = catalogSourceAllowsOverlay(state.source);
   const removeHistory = useRemoveHistory();
+  const { startShuffle, isStarting: isStartingShuffle } = useStartShuffle();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
@@ -342,6 +351,15 @@ function CatalogResults({
   // A collection the viewer cannot reach answers 404, the same for a deleted
   // collection and one they were never shown, so the page says neither.
   const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
+  const collectionAccess = useCollectionPageAccess(
+    isCollectionSource && state.collection_id
+      ? {
+          scope: state.source === "library_collection" ? "server" : "personal",
+          id: state.collection_id,
+          libraryId: state.library_id,
+        }
+      : null,
+  );
   const title = collectionUnavailable
     ? "Not found"
     : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
@@ -367,6 +385,8 @@ function CatalogResults({
   }, []);
 
   const totalItems = catalogQuery.data?.totalItems ?? 0;
+  const shuffleCollectionId = isCollectionSource ? state.collection_id?.trim() : undefined;
+  const canShuffleCollection = Boolean(shuffleCollectionId) && totalItems > 0;
   // For an in-app search the count reflects local library hits only; requestable
   // matches live in a separate section, so scope the label to avoid a "0 results"
   // reading while an outside-library result is visible.
@@ -390,28 +410,57 @@ function CatalogResults({
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
+      {searchParams.get("notice") === "read-only" ? (
+        <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
+      ) : null}
       <header className="page-header">
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
+          <CollectionByline access={collectionAccess} />
           <p className="page-subtitle text-sm sm:text-base">
             {defaultCatalogSubtitle(state.source)}
           </p>
         </div>
-        <div className="items-baseline gap-3 sm:flex">
-          <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
-          {showExactResultCount ? (
-            <div className="text-right tabular-nums" role="status" aria-live="polite">
-              <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                {totalItems}
-              </span>
-              <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
-                {resultNoun}
-              </span>
-              <span className="text-muted-foreground text-xs sm:hidden">
-                {totalItems} {resultNoun}
-              </span>
-            </div>
-          ) : null}
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          <CollectionPageActions access={collectionAccess} libraryId={state.library_id} />
+          <div
+            className={cn(
+              "items-baseline gap-3 sm:flex",
+              canShuffleCollection && "flex items-center",
+            )}
+          >
+            {canShuffleCollection && shuffleCollectionId ? (
+              <Button
+                variant="outline"
+                className="self-center rounded-full"
+                disabled={isStartingShuffle}
+                onClick={() =>
+                  startShuffle({
+                    kind:
+                      state.source === "user_collection" ? "user_collection" : "library_collection",
+                    id: shuffleCollectionId,
+                  })
+                }
+              >
+                <Shuffle aria-hidden="true" />
+                Shuffle
+              </Button>
+            ) : null}
+            <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
+            {showExactResultCount ? (
+              <div className="text-right tabular-nums" role="status" aria-live="polite">
+                <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
+                  {totalItems}
+                </span>
+                <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                  {resultNoun}
+                </span>
+                <span className="text-muted-foreground text-xs sm:hidden">
+                  {totalItems} {resultNoun}
+                </span>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 

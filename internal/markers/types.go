@@ -465,12 +465,16 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (r *Registry) logProviderError(providerID string, req Request, err error) {
-	logger := slog.Default()
+// log returns the registry's logger, or the default logger when it has none.
+func (r *Registry) log() *slog.Logger {
 	if r != nil && r.logger != nil {
-		logger = r.logger
+		return r.logger
 	}
-	logger.Warn("marker provider fetch failed",
+	return slog.Default()
+}
+
+func (r *Registry) logProviderError(providerID string, req Request, err error) {
+	r.log().Warn("marker provider fetch failed",
 		"provider", providerID,
 		"kind", req.Kind,
 		"external_ids", sanitizeExternalIDs(req.ExternalIDs),

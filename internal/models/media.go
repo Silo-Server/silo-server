@@ -79,6 +79,7 @@ type MediaFile struct {
 	SubtitleTracks               []SubtitleTrack    // JSONB
 	ExternalSubtitles            []ExternalSubtitle // JSONB
 	Chapters                     []MediaChapter     // JSONB; nil means not yet probed for chapters
+	MarkerThumbnails             []MarkerThumbnail  `json:"-"`
 	ChapterThumbnailRetryAfter   *time.Time
 	ChapterThumbnailFailureCount int
 	ChapterThumbnailLastError    string
@@ -142,6 +143,9 @@ type MediaFile struct {
 	FirstSeenScanRunID   string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+
+	// Non-nil only for an ephemeral on-demand overlay; fences canonical edits.
+	MarkerThumbnailBaseSegments []MarkerSegment `json:"-"`
 }
 
 // MediaChapter represents a single media chapter derived from embedded file metadata.
@@ -512,6 +516,8 @@ const (
 	PersonKindComposer  PersonKind = 6
 	PersonKindAuthor    PersonKind = 7
 	PersonKindNarrator  PersonKind = 8
+	// PersonKindCreator credits a series' creators, who are not its directors.
+	PersonKindCreator PersonKind = 9
 )
 
 // String returns the Jellyfin-compatible type string for this PersonKind.
@@ -533,6 +539,8 @@ func (k PersonKind) String() string {
 		return "Author"
 	case PersonKindNarrator:
 		return "Narrator"
+	case PersonKindCreator:
+		return "Creator"
 	default:
 		return "Unknown"
 	}
@@ -543,6 +551,8 @@ func PersonKindFromJob(job string) PersonKind {
 	switch strings.ToLower(strings.TrimSpace(job)) {
 	case "director":
 		return PersonKindDirector
+	case "creator":
+		return PersonKindCreator
 	case "writer", "screenplay", "story", "novel":
 		return PersonKindWriter
 	case "composer", "original music composer", "music":

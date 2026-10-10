@@ -177,3 +177,48 @@ it("restores a failed sheet when the same URL later loads", async () => {
   await act(async () => {});
   expect(screen.getByTestId("seek-preview-image").style.backgroundImage).toContain("sheet-0.jpg");
 });
+
+it("uses the marker frame at marker positions and never substitutes a chapter frame", () => {
+  const chapters = [
+    {
+      index: 0,
+      title: "RED",
+      start_seconds: 0,
+      end_seconds: 12,
+      source: "embedded",
+      thumbnail_url: "/red.webp",
+    },
+  ];
+  const common = {
+    currentTime: 0,
+    duration: 36,
+    buffered: null,
+    onSeek: vi.fn(),
+    onSkip: { back: vi.fn(), forward: vi.fn() },
+    chapters,
+  };
+  const { rerender } = render(
+    <SeekBar
+      {...common}
+      regions={[{ kind: "intro", start: 6, end: 9, thumbnail_url: "/yellow.webp" }]}
+    />,
+  );
+  const slider = screen.getByRole("slider");
+  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    width: 360,
+    top: 0,
+    height: 10,
+    right: 360,
+    bottom: 10,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  fireEvent.mouseMove(slider, { clientX: 65 });
+  expect(screen.getByRole("img", { name: "Intro" }).getAttribute("src")).toBe("/yellow.webp");
+  rerender(<SeekBar {...common} regions={[{ kind: "intro", start: 6, end: 9 }]} />);
+  expect(screen.queryByRole("img")).toBeNull();
+  fireEvent.mouseMove(slider, { clientX: 90 });
+  expect(screen.getByRole("img", { name: "RED" }).getAttribute("src")).toBe("/red.webp");
+});

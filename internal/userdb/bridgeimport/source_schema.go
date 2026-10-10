@@ -70,7 +70,7 @@ func validateSourceSchema(ctx context.Context, tx *sql.Tx) error {
 		if err != nil || i != len(expected) {
 			return fmt.Errorf("incomplete source columns in %s", mapping.Source)
 		}
-		if mapping.Target == "" {
+		if mapping.Target == "" && mapping.Source != sourceCollectionAudiences {
 			var count int64
 			// The identifier comes only from the fixed manifest, never a discovered name.
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+mapping.Source+`"`).Scan(&count); err != nil {

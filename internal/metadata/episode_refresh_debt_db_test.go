@@ -390,3 +390,53 @@ func TestDeleteEpisodeDebtsRetainsConcurrentUpdateWhileDeleteWaits(t *testing.T)
 		t.Fatalf("concurrent retry = %#v, error = %v", debt, err)
 	}
 }
+
+func TestRenewClaimsExtendsOnlyTheClaimStillHeld(t *testing.T) {
+	pool, _ := episodeRefreshDebtTestPool(t)
+	ctx := t.Context()
+	claimedAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
+	reclaimedAt := claimedAt.Add(5 * time.Minute)
+	// held: still under this claim. reclaimed: another claimant took it after
+	// the lease lapsed. settled: its refresh already cleared the claim.
+	if _, err := pool.Exec(ctx, `INSERT INTO metadata_refresh_debt
+		(target_type, content_id, next_refresh_at, claimed_at, lease_expires_at) VALUES
+		('episode', 'held', NOW(), $1, NOW() + interval '1 minute'),
+		('episode', 'reclaimed', NOW(), $2, NOW() + interval '1 minute'),
+		('season', 'settled', NOW(), NULL, NULL)`, claimedAt, reclaimedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	debts := NewRefreshDebtRepository(pool)
+	err := debts.RenewClaims(ctx,
+		[]string{RefreshTargetEpisode, RefreshTargetEpisode, RefreshTargetSeason},
+		[]string{"held", "reclaimed", "settled"},
+		[]time.Time{claimedAt, claimedAt, claimedAt},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leaseLeft := func(targetType, contentID string) *time.Duration {
+		t.Helper()
+		var left *time.Duration
+		var seconds *float64
+		if err := pool.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM lease_expires_at - NOW())::float8
+			FROM metadata_refresh_debt WHERE target_type = $1 AND content_id = $2`, targetType, contentID).Scan(&seconds); err != nil {
+			t.Fatal(err)
+		}
+		if seconds != nil {
+			d := time.Duration(*seconds * float64(time.Second))
+			left = &d
+		}
+		return left
+	}
+	if left := leaseLeft(RefreshTargetEpisode, "held"); left == nil || *left < RefreshDebtLeaseDuration-time.Minute {
+		t.Fatalf("held lease left = %v, want about %s", left, RefreshDebtLeaseDuration)
+	}
+	if left := leaseLeft(RefreshTargetEpisode, "reclaimed"); left == nil || *left > 2*time.Minute {
+		t.Fatalf("reclaimed lease left = %v, want the other claim's lease untouched", left)
+	}
+	if left := leaseLeft(RefreshTargetSeason, "settled"); left != nil {
+		t.Fatalf("settled lease left = %v, want no lease", *left)
+	}
+}

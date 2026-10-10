@@ -20,6 +20,10 @@ describe("admin command palette", () => {
     },
   );
 
+  it.each(["home rows", "sections", "rows", "rails"])("finds Sections for %s", (query) => {
+    expect(hrefsFor(query)).toContain("/admin/sections");
+  });
+
   it("still finds the request queue", () => {
     expect(hrefsFor("approvals")).toContain("/admin/requests");
   });

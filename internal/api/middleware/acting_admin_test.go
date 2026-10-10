@@ -12,7 +12,7 @@ import (
 
 func runActingAdminMiddleware(t *testing.T, role, profileID string, check PrimaryProfileChecker) int {
 	t.Helper()
-	next := RequireActingAdmin(check)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	next := RequireActingAdmin(check, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

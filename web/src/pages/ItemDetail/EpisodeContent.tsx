@@ -332,6 +332,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               compactMobile
               item={item}
               contentId={item.content_id}
+              canAddToCollection={false}
               watchTogether={watchTogether.menu}
               playHref={
                 item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined

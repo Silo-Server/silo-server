@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -281,5 +282,66 @@ func TestResolveOriginalPopulatesFileQualityFact(t *testing.T) {
 		in.RequestedQuality != QualityOriginal ||
 		in.DeviceID != "device-9" {
 		t.Fatalf("action input = %+v, want download action with file_quality asserted", in)
+	}
+}
+
+// ceilingOverrideSource is a custom action override that keeps every grant
+// but narrows the download quality ceiling to 1080p, the shape vendor test
+// test_quality_ceiling_override_tightens pins.
+const ceilingOverrideSource = `package silo_custom.action
+
+import rego.v1
+
+override(_, _) := {"allowed": true, "quality_ceiling": "1080p"}
+`
+
+// TestResolveDirectFileHonorsOverrideQualityCeiling is the #2234 regression.
+// A direct download serves the original unchanged, so an override that
+// narrows the download ceiling below the file's resolution refuses it, as a
+// managed original download of the same file is refused. The direct route has
+// no other quality to offer, so the refusal is a policy denial (403), not
+// quality_unavailable.
+func TestResolveDirectFileHonorsOverrideQualityCeiling(t *testing.T) {
+	ctx := context.Background()
+	engine, err := policyengine.NewEngineWithCustom(ctx, map[string]policyengine.ActiveSource{
+		policyengine.DomainAction: {DocumentID: 1, VersionID: 1, Source: ceilingOverrideSource},
+	})
+	if err != nil {
+		t.Fatalf("NewEngineWithCustom() error: %v", err)
+	}
+	if skipped := engine.SkippedSources(); len(skipped) != 0 {
+		t.Fatalf("override was skipped: %+v", skipped)
+	}
+	pdp := policyengine.NewPDP(engine)
+	user := &models.User{ID: 9, DownloadAllowed: ptrBool(true)}
+	cfg := config.DownloadConfig{Enabled: true}
+	resolveDirect := func(file *models.MediaFile, filter catalog.AccessFilter) (*FileTarget, error) {
+		svc := NewService(nil, nil, nil, fakeFileResolver{file: file}, nil, nil, fakeUserRepo{user}, &syncAccess{}, nil, &cfg)
+		svc.SetActionDecider(pdp)
+		return svc.ResolveDirectFile(ctx, user.ID, file.ID, "", filter)
+	}
+
+	uhd := &models.MediaFile{ID: 3, ContentID: "movie", FilePath: "/media/movie-2160p.mkv", Resolution: "2160p"}
+	if _, err := resolveDirect(uhd, catalog.AccessFilter{}); !errors.Is(err, ErrDownloadNotAllowed) {
+		t.Fatalf("ResolveDirectFile(2160p under a 1080p override) error = %v, want ErrDownloadNotAllowed", err)
+	}
+	policyUser := &PolicyUser{ID: user.ID, Policy: access.EffectiveUserPolicy{DownloadAllowed: true}}
+	if _, err := (DownloadQualityResolver{actionDecider: pdp}).Resolve(ctx, QualityOriginal, policyUser, cfg, uhd, playback.ClientCapabilities{}, false, ""); !errors.Is(err, ErrQualityUnavailable) {
+		t.Fatalf("managed Resolve(2160p original) error = %v, want ErrQualityUnavailable", err)
+	}
+
+	// A file the profile cannot see stays 404: the quality check runs after
+	// catalog access, so a refusal never confirms the file exists.
+	if _, err := resolveDirect(uhd, catalog.AccessFilter{MaxPlaybackQuality: "1080p"}); !errors.Is(err, catalog.ErrItemNotFound) {
+		t.Fatalf("ResolveDirectFile(out-of-scope 2160p) error = %v, want catalog.ErrItemNotFound", err)
+	}
+
+	hd := &models.MediaFile{ID: 4, ContentID: "movie", FilePath: "/media/movie-1080p.mkv", Resolution: "1080p"}
+	target, err := resolveDirect(hd, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("ResolveDirectFile(1080p under a 1080p override) error: %v", err)
+	}
+	if target.MediaFileID != hd.ID || target.Path != hd.FilePath {
+		t.Fatalf("target = %+v, want file %d at %s", target, hd.ID, hd.FilePath)
 	}
 }
