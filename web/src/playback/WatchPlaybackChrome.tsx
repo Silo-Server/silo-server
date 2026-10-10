@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pause, PictureInPicture2, Play, SkipBack, SkipForward, Tv, X } from "lucide-react";
 import { useLocation } from "react-router";
 import type { WatchDetail } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import {
   getAccessToken,
   getAuthContextVersion,
@@ -240,6 +241,37 @@ function PlaybackPreparingScreen() {
             Loading stream details, subtitles, and resume state.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The server answers the same 404 for a missing title and one the profile may
+ * not see, so the copy says neither, as the item page does.
+ */
+function playbackUnavailableMessage(error: Error): string {
+  if (isNotFoundProblem(error)) {
+    return "This title isn't available. It may have been removed, or you may not have access to it.";
+  }
+  return error.message || "Item not found";
+}
+
+function PlaybackUnavailableScreen({ error, onBack }: { error: Error; onBack: () => void }) {
+  return (
+    <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
+      <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
+        <div className="space-y-2">
+          <p className="text-base font-semibold text-white">Playback unavailable</p>
+          <div className="text-sm text-white/60">{playbackUnavailableMessage(error)}</div>
+        </div>
+        <button
+          onClick={onBack}
+          type="button"
+          className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
+        >
+          Go Back
+        </button>
       </div>
     </div>
   );
@@ -585,11 +617,11 @@ function WatchPlaybackHostContent() {
   });
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
-  const { data: item, error } = useWatchDetail(
-    request?.contentId,
-    request?.fileId,
-    request?.libraryId,
-  );
+  const {
+    data: item,
+    error,
+    isFetching: isFetchingItem,
+  } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
   const [renderedSession, setRenderedSession] = useState<{
     request: WatchRouteRequest;
     item: WatchDetail;
@@ -1034,29 +1066,19 @@ function WatchPlaybackHostContent() {
       return null;
     }
 
+    // The detail read failed for this request and is not being retried, so
+    // waiting on it would hold the preparing screen forever. The query is
+    // keyed by the title, file, and library, so an error from an earlier
+    // title cannot land here; a refetch of the same title waits for its answer.
+    if (error && !isFetchingItem) {
+      return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
+    }
+
     return <PlaybackPreparingScreen />;
   }
 
   if (error && isForeground) {
-    return (
-      <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
-        <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
-          <div className="space-y-2">
-            <p className="text-base font-semibold text-white">Playback unavailable</p>
-            <div className="text-sm text-white/60">
-              {error instanceof Error ? error.message : "Item not found"}
-            </div>
-          </div>
-          <button
-            onClick={() => navigate(-1)}
-            type="button"
-            className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
+    return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
   }
 
   const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]

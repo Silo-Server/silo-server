@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ type CatalogBrowseInput struct {
 	Q             string   `query:"q" doc:"Search text" example:"heat"`
 	NamePrefix    string   `query:"name_prefix" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
 	Match         string   `query:"match" enum:"all,any" doc:"How the filters combine; default all"`
-	Type          string   `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, podcast, video, …" example:"movie"`
+	Type          string   `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, manga, or video (movies and series). video_with_episodes, for source=query only, searches movies, series, and episodes when q is set and lists movies and series without q; check getCatalogSearchCapabilities.video_with_episodes_scope first" example:"movie"`
 	Genre         string   `query:"genre" example:"Crime"`
 	Status        string   `query:"status" doc:"Metadata match state" example:"matched"`
 	YearMin       int      `query:"year_min" minimum:"0" example:"1990"`
@@ -62,9 +63,10 @@ type CatalogFiltersInput struct {
 	Scope         string `query:"scope" enum:"home,library"`
 	SectionID     string `query:"section_id"`
 	LibraryID     ID     `query:"library_id" example:"1"`
+	LibraryIDs    []ID   `query:"library_ids,explode" maxItems:"200" doc:"Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section" example:"[\"1\",\"2\"]"`
 	CollectionID  string `query:"collection_id"`
 	PersonID      ID     `query:"person_id"`
-	Type          string `query:"type" example:"movie"`
+	Type          string `query:"type" doc:"Media scope, as on listCatalogItems; video_with_episodes lists the facets of video" example:"movie"`
 	SkipTechnical bool   `query:"skip_technical" doc:"true omits the file-derived facets (resolutions, audio and subtitle languages)"`
 }
 
@@ -72,8 +74,8 @@ type CatalogFiltersInput struct {
 type CatalogFacetSearchInput struct {
 	CatalogFiltersInput
 	Facet string `query:"facet" required:"true" enum:"genre,studio,network,country,original_language,content_rating,author,narrator,series" doc:"The facet to search" example:"author"`
-	Q     string `query:"q" doc:"Case-insensitive prefix" example:"ste"`
-	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most matches to return; default 20, maximum 100"`
+	Q     string `query:"q" doc:"Case-insensitive search text; see matches and values for how each answers it" example:"ste"`
+	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most values to return in matches and in values; default 20, maximum 100"`
 }
 
 // AudiobookGroupsInput is the listAudiobookGroups query.
@@ -110,7 +112,7 @@ type CatalogQuery struct {
 	PersonID     ID                  `json:"person_id,omitempty"`
 	Q            string              `json:"q,omitempty"`
 	NamePrefix   string              `json:"name_prefix,omitempty" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
-	Type         string              `json:"type,omitempty"`
+	Type         string              `json:"type,omitempty" doc:"Media scope, as the listCatalogItems type parameter"`
 	Group        string              `json:"group,omitempty" enum:"work"`
 	SkipTotal    bool                `json:"skip_total,omitzero"`
 	QueryLimit   int                 `json:"query_limit,omitzero" minimum:"0"`
@@ -137,6 +139,14 @@ type CatalogItemInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
 	LibraryID ID     `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
 	FileID    ID     `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
+}
+
+// CatalogItemDeviceInput names one item whose answer carries the effective
+// playback choice (effective_audio_*, effective_subtitle_*), which the
+// caller's device-scoped preferences decide.
+type CatalogItemDeviceInput struct {
+	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The stable device identifier used to resolve device-scoped playback preferences; absent resolves the profile's preferences" example:"tv-1"`
+	CatalogItemInput
 }
 
 // CatalogSeriesInput names one series.
@@ -227,10 +237,20 @@ type CatalogFiltersOutput struct {
 	Body CatalogFilters
 }
 
-// CatalogFacetMatches is a facet typeahead answer.
+// CatalogFacetMatches is a facet typeahead answer. matches is the prefix
+// answer every client has read; values is the ranked answer with counts.
 type CatalogFacetMatches struct {
-	Matches []string `json:"matches" doc:"Empty, never null"`
-	HasMore bool     `json:"has_more" doc:"Whether more values matched than limit"`
+	Matches       []string            `json:"matches" doc:"Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null"`
+	HasMore       bool                `json:"has_more" doc:"Whether more values than limit start with q"`
+	Values        []CatalogFacetValue `json:"values" doc:"The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null"`
+	ValuesHasMore bool                `json:"values_has_more" doc:"Whether more values matched than limit for values"`
+}
+
+// CatalogFacetValue is one facet value with the number of titles in the
+// scope that carry it.
+type CatalogFacetValue struct {
+	Value string `json:"value" example:"Warner Bros. Pictures"`
+	Count int    `json:"count" doc:"Titles in the scope with this value; values can lag catalog changes by up to two minutes" example:"42"`
 }
 
 // CatalogFacetMatchesOutput is the searchCatalogFacet response.
@@ -578,7 +598,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
 		"The facet values available in a scope, for filter menus.")), reg.getCatalogFilters)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
-		"Prefix typeahead over one facet of a scope.")), reg.searchCatalogFacet)
+		"Typeahead over one facet of a scope, with title counts.")), reg.searchCatalogFacet)
 	query := humaOp(http.MethodPost, Prefix+"/catalog/query", opQueryCatalogItems, "catalog",
 		"Page the catalog by a JSON rule-group query; the body form of the browse.")
 	query.DefaultStatus = http.StatusOK
@@ -623,14 +643,21 @@ func (reg *Registry) catalogItems() (CatalogItemService, *Problem) {
 
 // itemViewer resolves the caller into the seams' viewer: identity from the
 // context, access policy from the access seam, artwork size and
-// presentation hints from the query. The v2 listener reads no device
-// header, so the filter carries no device id.
+// presentation hints from the query. The filter carries no device id; reads
+// that resolve device-scoped preferences use itemViewerOnDevice.
 func (reg *Registry) itemViewer(ctx context.Context, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+	return reg.itemViewerOnDevice(ctx, "", imageSize, libraryID, fileID)
+}
+
+// itemViewerOnDevice is itemViewer for the caller's declared
+// X-Silo-Device-Id, so device-scoped playback preferences resolve as they
+// do on v1 and in getWatchState. The id is clamped like v1's header read.
+func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
 	_, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.ItemViewer{}, p
 	}
-	opts := handlers.AccessFilterOptions{}
+	opts := handlers.AccessFilterOptions{DeviceID: handlers.NewDeviceMetadata(deviceID, "", "").DeviceID}
 	if libraryID != "" {
 		n, p := libraryID.positive("query.library_id")
 		if p != nil {
@@ -834,11 +861,40 @@ func (in *CatalogFiltersInput) catalogValues() url.Values {
 	return v
 }
 
+// catalogRequest parses the scope and adds library_ids to the libraries it
+// names, sorted and without repeats, so one set of libraries shares one
+// cached facet value list in whatever order a client sends it. The resolver
+// intersects them with the viewer's libraries, so they can narrow a scope
+// but never widen it.
+func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Problem) {
+	req, p := parseCatalogRequest(in.catalogValues())
+	if p != nil || len(in.LibraryIDs) == 0 {
+		return req, p
+	}
+	if req.Source == catalogpkg.CatalogSourceSection {
+		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids does not apply to source=section"})
+	}
+	for _, id := range in.LibraryIDs {
+		n, p := id.positive("query.library_ids")
+		if p != nil {
+			return catalogpkg.CatalogRequest{}, p
+		}
+		req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
+	}
+	slices.Sort(req.Query.LibraryIDs)
+	req.Query.LibraryIDs = slices.Compact(req.Query.LibraryIDs)
+	return req, nil
+}
+
 // parseCatalogRequest runs the shared parser and reports its refusal as a
 // 422 on the query parameter the message names; the source when it names
 // none, since the source decides what the rest must carry.
 func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem) {
-	req, err := catalogpkg.ParseCatalogRequest(values)
+	req, err := catalogpkg.ParseCatalogRequestWithOptions(values, catalogpkg.CatalogRequestOptions{
+		SearchMediaScopes: true,
+		ExtendedRules:     true,
+	})
 	if err != nil {
 		location := "query.source"
 		for _, name := range []string{"section_id", "collection_id", "person_id", "library_id", "scope", "groups"} {
@@ -846,6 +902,9 @@ func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem
 				location = "query." + name
 				break
 			}
+		}
+		if errors.Is(err, catalogpkg.ErrSearchMediaScopeSource) {
+			location = "query.type"
 		}
 		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: err.Error()})
@@ -1031,7 +1090,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1059,7 +1118,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1067,7 +1126,14 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if err != nil {
 		return nil, catalogProblem(err, "query.facet")
 	}
-	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: NonNil(view.Matches), HasMore: view.HasMore}}, nil
+	values := make([]CatalogFacetValue, len(view.Values))
+	for i, v := range view.Values {
+		values[i] = CatalogFacetValue{Value: v.Value, Count: v.Count}
+	}
+	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{
+		Matches: NonNil(view.Matches), HasMore: view.HasMore,
+		Values: values, ValuesHasMore: view.ValuesHasMore,
+	}}, nil
 }
 
 func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
@@ -1102,12 +1168,12 @@ func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in
 	return output, err
 }
 
-func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (*CatalogItemDetailOutput, error) {
+func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceInput) (*CatalogItemDetailOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1130,12 +1196,12 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	return &CatalogItemDetailOutput{Body: out}, nil
 }
 
-func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemInput) (*FileVersionCollectionOutput, error) {
+func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemDeviceInput) (*FileVersionCollectionOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}

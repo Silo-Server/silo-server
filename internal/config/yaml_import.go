@@ -227,10 +227,6 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 
 	// Redis
 	m["redis.url"] = raw.Redis.URL
-	// Redis Sentinel
-	setIfNonEmpty(m, "redis.sentinel_master", raw.Redis.SentinelMaster)
-	setIfNonEmpty(m, "redis.sentinel_password", raw.Redis.SentinelPassword)
-	// SentinelAddresses is []string — stored in YAML only, not in the flat map
 
 	// Rate Limiting
 	m["ratelimit.enabled"] = strconv.FormatBool(raw.RateLimit.Enabled)

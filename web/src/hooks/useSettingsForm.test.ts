@@ -5,10 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useHasUnsavedChanges } from "./useUnsavedChanges";
 import { useSettingsForm } from "./useSettingsForm";
+import { useStepSubmit } from "@/pages/setup-wizard/useStep";
 
-const { mutateAsync, authority } = vi.hoisted(() => ({
+const { mutateAsync, markDone, snapshot, authority } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
+  markDone: vi.fn(),
+  snapshot: { loaded: true },
   authority: { profileId: "profile-a" },
+}));
+vi.mock("@/pages/setup-wizard/WizardContext", () => ({
+  useWizardContext: () => ({ markDone }),
 }));
 vi.mock("@/api/client", () => ({
   captureProfileRequestContext: () => ({
@@ -26,7 +32,10 @@ const settingsData = { "branding.server_name": "Silo", "database.max_connections
 const sensitiveData = { configured: [], managed_by_env: [] };
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
-  useAdminServerSettings: () => ({ data: settingsData, isLoading: false }),
+  useAdminServerSettings: () => ({
+    data: snapshot.loaded ? settingsData : undefined,
+    isLoading: false,
+  }),
   useAdminSensitiveStatus: () => ({ data: sensitiveData }),
   useUpdateServerSettings: () => ({ mutateAsync, isPending: false }),
 }));
@@ -34,10 +43,66 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
+  markDone.mockReset();
+  snapshot.loaded = true;
   authority.profileId = "profile-a";
 });
 
 describe("useSettingsForm save()", () => {
+  it("rejects a failed write and keeps the staged draft for retry", async () => {
+    const error = new Error("412 precondition failed");
+    mutateAsync.mockRejectedValue(error);
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+
+    await act(async () => {
+      await expect(result.current.save()).rejects.toBe(error);
+    });
+
+    expect(result.current.getValue("branding.server_name")).toBe("Casa");
+    expect(result.current.dirtyCount).toBe(1);
+    expect(result.current.restartRequired).toBe(false);
+  });
+
+  it("rejects saving before a settings snapshot has loaded", async () => {
+    snapshot.loaded = false;
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+
+    await act(async () => {
+      await expect(result.current.save()).rejects.toThrow("Reload settings before saving.");
+    });
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(result.current.dirtyCount).toBe(1);
+  });
+
+  it.each([false, true])(
+    "advances the wizard only after a successful save (failure=%s)",
+    async (failure) => {
+      if (failure) mutateAsync.mockRejectedValue(new Error("412 precondition failed"));
+      else
+        mutateAsync.mockResolvedValue({
+          values: { "branding.server_name": "Casa" },
+          restart_required: false,
+        });
+      const { result } = renderHook(() => {
+        const form = useSettingsForm({ keys: KEYS });
+        return { form, step: useStepSubmit("server", form, "Save failed") };
+      });
+      act(() => result.current.form.setValue("branding.server_name", "Casa"));
+      await act(async () => {
+        await result.current.step.handleSubmit({ preventDefault() {} } as Parameters<
+          typeof result.current.step.handleSubmit
+        >[0]);
+      });
+
+      if (failure) expect(markDone).not.toHaveBeenCalled();
+      else expect(markDone).toHaveBeenCalledWith("server");
+      expect(result.current.form.dirtyCount).toBe(failure ? 1 : 0);
+    },
+  );
+
   it("clears staged secrets when the acting profile changes", () => {
     const { result, rerender } = renderHook(() =>
       useSettingsForm({ keys: ["email.smtp_password"] }),

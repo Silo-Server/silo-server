@@ -1,39 +1,38 @@
 import {
   captureProfileRequestContext,
-  captureSessionIdentity,
-  getAccessToken,
   isCapturedProfileAuthorityActive,
-  isSessionIdentityCurrent,
   StaleApiRequestContextError,
 } from "@/api/client";
+import { v2 } from "./request";
 
-// Browser navigation cannot set headers. Retain the existing account-token
-// authority; do not imply that the selected profile/PIN travels in this URL.
+// Browser navigation cannot send headers. An ordinary API request, which does
+// carry the selected profile and its PIN proof, mints a short-lived link bound
+// to that profile and file; the navigation URL carries only that link, never
+// the account access token.
 export async function launchDirectDownload(
   fileId: number,
   isCurrent: () => boolean,
 ): Promise<void> {
   if (!Number.isSafeInteger(fileId) || fileId <= 0) throw new Error("Invalid file ID.");
-  const token = getAccessToken();
-  const identity = captureSessionIdentity();
-  const profile = captureProfileRequestContext();
+  const profileContext = captureProfileRequestContext();
   const requireCurrent = () => {
-    if (
-      !token ||
-      !isCurrent() ||
-      !isSessionIdentityCurrent(identity) ||
-      (profile && !isCapturedProfileAuthorityActive(profile))
-    )
+    if (!profileContext || !isCurrent() || !isCapturedProfileAuthorityActive(profileContext))
       throw new StaleApiRequestContextError();
   };
   requireCurrent();
-  const url = `/api/v2/direct-download?${new URLSearchParams({ file_id: String(fileId), token: token! })}`;
-  // One probe only: no refresh replay, token replacement or proxy URL invention.
+  let url: string;
   let res: Response;
   try {
+    const link = await v2("POST /api/v2/direct-download/links", {
+      body: { file_id: String(fileId) },
+      profileContext: profileContext!,
+    });
+    requireCurrent();
+    url = link.url;
+    // One probe only: no refresh replay, link replacement or proxy URL invention.
     res = await fetch(url, { method: "HEAD", cache: "no-store" });
   } catch (error) {
-    // A rejected probe must not report into a replacement authority either.
+    // A rejected mint or probe must not report into a replacement authority either.
     requireCurrent();
     throw error;
   }

@@ -461,7 +461,7 @@ func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *mod
 
 // HandleListUserLibraries preserves the frozen bridge projection and errors.
 func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.Request) {
-	views, err := h.ListUserLibraries(r.Context(), apimw.GetUserID(r.Context()))
+	views, err := h.ListUserLibraries(r.Context(), apimw.GetUserID(r.Context()), false)
 	if err != nil {
 		writeAPIError(w, err)
 		return

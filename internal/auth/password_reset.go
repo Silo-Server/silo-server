@@ -37,11 +37,13 @@ func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newP
 
 // RevokeSignInsInTransaction signs an account out everywhere within the
 // caller's transaction: every login session it holds or impersonates from,
-// its Audiobookshelf-compatible sessions, and any device sign-in it approved
-// that the device has not collected yet, which would otherwise mint a fresh
-// session afterwards. Personal API keys are credentials the account created on
-// purpose and survive; see docs/architecture/password-resets.md. Callers run
-// the OnUserSessionsRevoked hook after commit for Jellyfin-compatible sessions.
+// its Audiobookshelf- and Jellyfin-compatible sessions, and any device sign-in
+// it approved that the device has not collected yet, which would otherwise
+// mint a fresh session afterwards. Personal API keys are credentials the
+// account created on purpose and survive; see
+// docs/architecture/password-resets.md. Callers run the OnUserSessionsRevoked
+// hook after commit so every replica drops the Jellyfin-compatible sessions it
+// holds in memory.
 func RevokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int) error {
 	return RevokeSignInsForUsersInTransaction(ctx, tx, []int{userID})
 }
@@ -57,16 +59,32 @@ func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs 
 		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
+	if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
+	if err := deleteJellyfinSessionsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
+	return withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+}
+
+func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE abs_sessions SET revoked_at = NOW()
 		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
 	}
+	return nil
+}
+
+// deleteJellyfinSessionsInTransaction deletes the accounts' stored
+// Jellyfin-compatible sessions, so no replica can load one again once the
+// transaction commits. Copies a replica already holds in memory stay usable
+// until the OnUserSessionsRevoked hook drops them.
+func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
 	if _, err := tx.Exec(ctx, `
-		UPDATE device_login_requests SET status = $2, updated_at = NOW()
-		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
-		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
+		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs); err != nil {
+		return fmt.Errorf("deleting Jellyfin-compatible sessions: %w", err)
 	}
 	return nil
 }

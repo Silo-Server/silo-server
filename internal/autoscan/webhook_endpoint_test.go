@@ -3,44 +3,16 @@ package autoscan
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 // newWebhookDBTest connects to SILO_TEST_DATABASE_URL (skipping when unset or
 // unmigrated) and returns a repository plus a fresh webhook-mode source row.
 func newWebhookDBTest(t *testing.T) (context.Context, *Repository, Source) {
 	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	var tableName *string
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.autoscan_webhook_endpoints')::text`).Scan(&tableName); err != nil {
-		t.Fatalf("check autoscan_webhook_endpoints table: %v", err)
-	}
-	if tableName == nil || *tableName == "" {
-		t.Skip("test database has not applied the autoscan webhook intake migration")
-	}
-
-	cipher, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatalf("new cipher: %v", err)
-	}
-	repo := NewRepository(pool, cipher)
+	ctx, repo := newRepositoryDBTest(t, "autoscan_webhook_endpoints")
 
 	src, err := repo.CreateSource(ctx, Source{
 		PluginID:     BuiltinArrWebhookPluginID,

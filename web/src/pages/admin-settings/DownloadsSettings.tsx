@@ -1,16 +1,18 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { LimitField } from "@/components/settings/LimitField";
 import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 import { effectiveDownloadArtifactDir } from "./settingsPathDefaults";
 
@@ -39,6 +41,8 @@ const GLOBAL_ADVANCED_KEYS = [
   "download.artifact_dir",
   "download.max_concurrent_prepares",
   "download.artifact_max_bytes",
+  "download.artifact_cache_hours",
+  "download.artifact_disk_ceiling_percent",
 ];
 
 const ADVANCED_KEYS = [...PER_USER_ADVANCED_KEYS, ...GLOBAL_ADVANCED_KEYS];
@@ -61,7 +65,7 @@ export default function DownloadsSettings() {
     form.getValue("playback.transcode_dir"),
   );
 
-  if (form.isLoading)
+  if (form.isPending)
     return (
       <div className="space-y-6" role="status" aria-label="Loading settings">
         <Skeleton className="h-8 w-40" />
@@ -73,9 +77,29 @@ export default function DownloadsSettings() {
       </div>
     );
 
+  if (form.loadError && !form.loaded) {
+    return (
+      <div className="space-y-4">
+        <SettingsPageHeader title="Downloads" />
+        <p role="alert">Download settings could not be loaded. Retry before editing limits.</p>
+        <Button variant="outline" onClick={() => void form.retryLoad()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Downloads" className="mb-8" />
+      <SettingsPageHeader
+        title="Downloads"
+        className="mb-8"
+        actions={
+          <Link to="/admin/downloads" className="text-sm underline underline-offset-3">
+            See storage on the server and nodes
+          </Link>
+        }
+      />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Downloads" restartAll={allRestart(KEYS)} dirty={anyDirty(KEYS)}>
@@ -151,7 +175,7 @@ export default function DownloadsSettings() {
             <PathSettingField
               label="Prepared file directory"
               defaultValue={derivedArtifactDir}
-              description="Leave blank for a silo-download-artifacts folder beside the transcode directory."
+              description="Leave blank for a silo-download-artifacts folder beside this server's transcode directory. Transcode nodes use download-artifacts inside their own transcode directory unless a node has its own directory."
               value={form.getValue("download.artifact_dir")}
               onChange={(v) => form.setValue("download.artifact_dir", v)}
               restartRequired={restartKeys.has("download.artifact_dir")}
@@ -170,13 +194,29 @@ export default function DownloadsSettings() {
                 because nobody sizes a disk budget in bytes. Unlimited stays
                 the default and still writes the 0 sentinel. */}
             <LimitField
-              label="Prepared file storage budget"
+              label="Default storage budget per location"
               unit="GB"
               scale={BYTES_PER_GB}
-              hint="Least recently used files are deleted first."
+              hint="Applies to this server and to every node without its own budget. Over budget, cached files go first, least recently used first; files a device is still waiting on stay."
               value={form.getValue("download.artifact_max_bytes")}
               onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
               restartRequired={restartKeys.has("download.artifact_max_bytes")}
+            />
+            <SettingField
+              label="Keep cached files for"
+              type="number"
+              description="Hours a prepared file nothing is waiting on stays after its last use, so another download or a re-download can reuse it. 0 to 720; 0 deletes it once nothing needs it and it has gone unused for ten minutes."
+              value={form.getValue("download.artifact_cache_hours")}
+              onChange={(v) => form.setValue("download.artifact_cache_hours", v)}
+              restartRequired={restartKeys.has("download.artifact_cache_hours")}
+            />
+            <SettingField
+              label="Disk ceiling (%)"
+              type="number"
+              description="Above this disk fill, cached files at that location are deleted early, whatever the budget. 50 to 95; nodes stop taking playback at 95% when downloads share their transcode disk."
+              value={form.getValue("download.artifact_disk_ceiling_percent")}
+              onChange={(v) => form.setValue("download.artifact_disk_ceiling_percent", v)}
+              restartRequired={restartKeys.has("download.artifact_disk_ceiling_percent")}
             />
           </AdvancedSection>
         </FieldGroup>
@@ -187,6 +227,7 @@ export default function DownloadsSettings() {
         onSave={form.save}
         onDiscard={form.discard}
         isSaving={form.isSaving}
+        canSave={form.loaded}
       />
     </div>
   );

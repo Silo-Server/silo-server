@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import DefaultArtwork from "@/components/DefaultArtwork";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
@@ -30,44 +31,38 @@ const SCRIM_CLASS = {
 interface MediaCardArtworkProps {
   src?: string | null;
   alt: string;
-  /** Shown in place of a missing poster. */
-  fallbackLabel: string;
+  /** The item's type, which picks the mark on the default artwork. */
+  mediaType?: string | null;
   thumbhash?: string | null;
   square?: boolean;
   lazy?: boolean;
   scrim?: keyof typeof SCRIM_CLASS;
   /** Recedes the artwork, for titles the viewer can't act on. */
   dim?: boolean;
-  /**
-   * Shows the missing-poster fallback when the poster fails to load. Library
-   * cards leave their thumbhash in place instead; TMDB titles have none, so
-   * without this a failed poster is an empty box.
-   */
-  fallbackOnError?: boolean;
   /** Overlays drawn inside the rounded artwork box. */
   children?: ReactNode;
 }
 
 /**
  * The artwork box of a poster card: rounded frame, thumbhash placeholder,
- * fade-in on load, the missing-poster fallback, and the bottom scrim.
+ * fade-in on load, the default artwork for a missing or failed poster, and the
+ * bottom scrim. A failed poster with a thumbhash keeps the thumbhash.
  */
 export default function MediaCardArtwork({
   src,
   alt,
-  fallbackLabel,
+  mediaType,
   thumbhash,
   square = false,
   lazy = false,
   scrim = "black",
   dim = false,
-  fallbackOnError = false,
   children,
 }: MediaCardArtworkProps) {
   const { loaded, onLoad, onError } = useImageLoaded(src);
   const thumbhashUrl = thumbhash ? decodeThumbhash(thumbhash) : "";
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const showImage = Boolean(src) && !(fallbackOnError && failedSrc === src);
+  const showImage = Boolean(src) && failedSrc !== src;
   const dimClass = dim ? "brightness-[0.85] saturate-[0.8]" : "";
 
   return (
@@ -100,14 +95,7 @@ export default function MediaCardArtwork({
           }}
         />
       ) : (
-        <div
-          className={cn(
-            "text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm",
-            dimClass,
-          )}
-        >
-          <span className="line-clamp-3 font-medium">{fallbackLabel || "No Poster"}</span>
-        </div>
+        !thumbhashUrl && <DefaultArtwork mediaType={mediaType} className={dimClass} />
       )}
       <div className={SCRIM_CLASS[scrim]} />
       {children}

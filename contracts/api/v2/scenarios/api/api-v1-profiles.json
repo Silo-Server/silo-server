@@ -1338,7 +1338,7 @@
         {
           "id": "profiles_create.admin_any_profile",
           "category": "authorization",
-          "description": "A server admin may create profiles on its own account from any declared profile.",
+          "description": "A server admin's non-primary profile cannot create profiles; household management belongs to the primary profile (critical v1 bridge fix).",
           "principal": {
             "class": "acting_admin",
             "profile": "admin_secondary"
@@ -1350,7 +1350,44 @@
             }
           },
           "expect": {
-            "status": 201
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile management requires the primary profile or admin access"
+              }
+            ]
           },
           "fresh_state": true,
           "v2_expectation": {
@@ -1366,7 +1403,7 @@
               }
             },
             "expect": {
-              "status": 201,
+              "status": 403,
               "headers": [
                 {
                   "name": "Cache-Control",
@@ -1376,12 +1413,7 @@
                 {
                   "name": "Content-Type",
                   "op": "equals",
-                  "value": "application/json"
-                },
-                {
-                  "name": "Location",
-                  "op": "matches",
-                  "value": "^/api/v2/profiles/[0-9a-f-]+$"
+                  "value": "application/problem+json"
                 }
               ],
               "body": [
@@ -1398,41 +1430,14 @@
                   "op": "absent"
                 },
                 {
-                  "pointer": "/id",
-                  "op": "non_empty"
-                },
-                {
-                  "pointer": "/name",
+                  "pointer": "/status",
                   "op": "equals",
-                  "value": "Fixture New"
+                  "value": 403
                 },
                 {
-                  "pointer": "/is_primary",
-                  "op": "equals",
-                  "value": false
-                },
-                {
-                  "pointer": "/has_pin",
-                  "op": "equals",
-                  "value": false
-                },
-                {
-                  "pointer": "/show_forced_subtitles",
-                  "op": "equals",
-                  "value": true
-                },
-                {
-                  "pointer": "/allowed_library_ids",
-                  "op": "length",
-                  "value": 0
-                },
-                {
-                  "pointer": "/created_at",
-                  "op": "rfc3339"
-                },
-                {
-                  "pointer": "/updated_at",
-                  "op": "rfc3339"
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/docs/api/v2/problems/permission_denied$"
                 }
               ]
             }
@@ -9001,7 +9006,7 @@
         {
           "id": "household.admin",
           "category": "authorization",
-          "description": "An admin sees its own household regardless of profile.",
+          "description": "An admin session that declares no profile cannot list the household sessions once a profile on the account has a PIN or a limit; household management belongs to the primary profile (critical v1 bridge fix).",
           "principal": {
             "class": "admin"
           },
@@ -9009,7 +9014,44 @@
             "path": "/api/v1/profiles/household/sessions"
           },
           "expect": {
-            "status": 200
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Profile management requires the primary profile or admin access"
+              }
+            ]
           },
           "v2_expectation": {
             "kind": "intentional_difference",
@@ -9021,12 +9063,12 @@
               "path": "/api/v2/profiles/household/sessions"
             },
             "expect": {
-              "status": 200,
+              "status": 403,
               "headers": [
                 {
                   "name": "Content-Type",
                   "op": "equals",
-                  "value": "application/json"
+                  "value": "application/problem+json"
                 },
                 {
                   "name": "Cache-Control",
@@ -9036,16 +9078,14 @@
               ],
               "body": [
                 {
-                  "pointer": "",
-                  "op": "keys_equal",
-                  "value": [
-                    "items"
-                  ]
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
                 },
                 {
-                  "pointer": "/items",
-                  "op": "length",
-                  "value": 0
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
                 }
               ]
             }

@@ -162,7 +162,9 @@ them locally beside the media file and manifest.
 ### Key invariants
 
 - **No DRM, expiry, or lease.** Already-downloaded files remain playable until the
-  user deletes them. The server can revoke future serves, not reach into a device.
+  user deletes them or an administrator revokes the entry. Revocation asks the app to
+  delete its copy at its next sync (§9.3); the server cannot reach into a device
+  that never syncs.
 - **Device authority is the header only.** A `device_id` in body/query is ignored.
 - **Every managed asset re-checks profile access.** A download id alone never grants
   content access.
@@ -252,7 +254,10 @@ Response:
   "bounded_subscription_sync": true,
   "bulk_quality": true,
   "monitor_quality": true,
-  "preparation_progress": true
+  "preparation_progress": true,
+  "direct_download_links": true,
+  "prepare_again": true,
+  "revoked_removes_local": true
 }
 ```
 
@@ -274,6 +279,9 @@ Response:
 | `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
 | `bulk_quality`           | Series and season batches (§4.1) accept any of `quality_presets`. Without it, send `original`. |
 | `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
+| `direct_download_links`  | `POST /api/v2/direct-download/links` (§4.10) mints profile-bound direct-download links. |
+| `prepare_again`          | The server cleans up prepared files after the device finishes; the file route answers `409 prepared_file_expired` for such an entry and `POST /api/v2/downloads/{id}/prepare` (§4.12) prepares it again. |
+| `revoked_removes_local`  | Administrators can revoke entries. A `revoked` entry means: delete the local copy, then delete the entry (§9.3). |
 | `bounded_manifests`      | Bounded manifest and batch-manifest operations (§4.6, §4.7) are available.         |
 | `subscription_reads`     | Subscription reads (§8.3) are available.                                          |
 | `subscription_mutations` | Subscription create/patch/delete (§8.1, §8.3) are available.                       |
@@ -532,6 +540,9 @@ Deletes the managed entry owned by `(account, profile, header device)` or cancel
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
 entries return `404`. The client is responsible for deleting local files.
 
+Deleting a `revoked` entry is how the app confirms it removed its copy; the server
+records that in the administrator's history.
+
 Deleting an episode of a series this device monitors also stops that monitor from
 registering the episode again. Creating a download for the episode, its season or its
 series re-allows it. Deleting the monitor, or creating it again, forgets these
@@ -553,7 +564,10 @@ Common responses:
 
 - `200` or `206`: media bytes. Multipart ranges and `416` follow ordinary HTTP
   semantics, as do conditional requests and bodyless `HEAD` metadata.
-- `409`: the entry is revoked or otherwise not servable.
+- `409 prepared_file_expired`: the entry finished and the server has since cleaned
+  up its prepared file. Call `POST /api/v2/downloads/{id}/prepare` (§4.12), wait for
+  `ready`, then fetch again.
+- `409 conflict`: the entry is revoked or otherwise not servable.
 - `404`: entry/content missing or outside profile access.
 - A `preparing` artifact is not servable yet; wait for `ready`.
 
@@ -678,12 +692,58 @@ should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
 
-For browser-friendly links, the endpoint accepts the session access token as a
-`?token=` query parameter in place of the `Authorization` header.
+A browser navigation cannot send headers, so it opens a short-lived link
+instead. Mint one with an ordinary profile-scoped request:
 
-> **Security note:** the query token is the session access token. Treat
-> direct-download URLs as secrets — they end up in browser history and proxy
-> logs. A short-lived download-scoped URL is a planned follow-up.
+```http
+POST /api/v2/direct-download/links
+X-Profile-Id: {profile}
+X-Profile-Token: {pin proof, for a locked profile}
+
+{"file_id": "42"}
+```
+
+```json
+{
+  "url": "/api/v2/direct-download?dl=…&file_id=42",
+  "proxy_url": "/api/v2/direct-download-proxy?dl=…&file_id=42",
+  "expires_at": "2026-01-01T00:05:00Z"
+}
+```
+
+`createDirectDownloadLink` requires `X-Profile-Id`, and the PIN proof for a
+locked profile. It authorizes the file the way the download itself does: the
+download policy, then catalog and file access under the profile's limits. A
+file the profile cannot see, or that does not exist, is `404`; a refused
+download policy is `403 permission_denied`. API keys get `403`, since a link is
+bound to a login session; they call direct download with their key instead.
+Nothing is served or recorded. The URLs are server-relative; use `proxy_url`
+only when `proxy_delivery` is true.
+
+The `dl` link token authorizes one file, as the profile that minted it, for
+five minutes. It is checked when a request arrives, so a transfer that started
+in time may run longer. The direct-download routes authorize the request again
+under that profile's limits; any `X-Profile-Id` or `X-Profile-Token` header is
+ignored. An expired or altered link is `401 invalid_token`, a link for another
+`file_id` is `403 permission_denied`, and a link whose login session was
+revoked is `401 session_expired`. When the session cannot be checked because
+its store is unavailable, the answer is `503 dependency_unavailable` with
+`Retry-After`, as for any other credential. A link is accepted only as `dl` on
+these routes, never as a bearer credential. Do not send `dl` together with
+`token`: the link is checked first, so an invalid one is still `401`, and a
+valid one is refused with `422`.
+
+Without a link, the routes keep the existing credentials: the `Authorization`
+header, or the session access token as a `?token=` query parameter. On an
+account where any profile has a PIN, a rating ceiling, an advisory-age limit or
+library restrictions, such a request must also send `X-Profile-Id`; without it
+the answer is `422 validation_failed` at `header.x-profile-id`, the household
+rule in [the API contract](architecture/api-contract.md). So a `?token=` URL
+works only on accounts whose profiles are all unrestricted. API keys are exempt.
+
+> **Security note:** treat direct-download URLs as secrets until they expire —
+> they end up in browser history and proxy logs. A `?token=` URL carries the
+> session access token itself; prefer a link.
 
 ### 4.11 Distributed proxy delivery
 
@@ -712,6 +772,32 @@ serves source files only and has no artifact case.
 
 Treat proxy delivery as an advertised capability, not something inferred from a
 server version.
+
+### 4.12 Prepare a finished download again
+
+```http
+POST /api/v2/downloads/{id}/prepare
+```
+
+Managed-only; `X-Silo-Device-Id` is required. Available when the capability reports
+`prepare_again`.
+
+The server keeps a remux or transcode file only while some download still needs it,
+plus a short cache period (`download.artifact_cache_hours`, 72 hours by default).
+After a device finishes, its copy is the one that matters, so the server may delete
+its own. A device that needs the bytes again (it lost its copy, or a transfer resumes
+after the cache period) gets `409 prepared_file_expired` from the file route and calls
+this operation.
+
+The response is `200` with the current `DownloadEntry`. A finished entry whose file
+expired returns to `preparing` and becomes `ready` like a new download, with the same
+`revision`, because the recipe is unchanged. An entry whose file is still on the
+server, an `original` entry (served from the source), and one already preparing come
+back unchanged. A `revoked`, `failed`, or `cancelled` entry answers `409 conflict`;
+create a new download instead. Returning to `preparing` counts toward the account's
+concurrent download cap like a new download (`429 rate_limited` when at the cap), and a
+transcode entry answers `501 capability_unsupported` when transcoding is now off. The
+operation is idempotent.
 
 ---
 
@@ -762,15 +848,17 @@ Managed lifecycle:
 original:              ready -> downloading -> completed
 compat/remux:          preparing -> ready -> downloading -> completed
 bitrate/transcode:     preparing -> ready -> downloading -> completed
-revoked:               any -> revoked (reserved)
+revoked:               any -> revoked (administrator)
+prepared again:        completed -> preparing -> ready -> downloading -> completed
 failed artifact job:   preparing -> failed
 ```
 
 Direct original rows are `ready` immediately; remux and transcode rows start at
 `preparing` and become `ready` when the artifact completes. `failed` means the
-artifact job exhausted its retries. `revoked` is reserved: nothing sets it
-today, but an admin revoke flow is planned in a separate effort, so clients
-must handle it. `downloading` and `completed` are set by the client via `PATCH`.
+artifact job exhausted its retries. `revoked` means an administrator revoked the
+entry (§9.3). `completed` returns to `preparing` only when the device asks for an
+expired file again (§4.12). `downloading` and `completed` are set by the client via
+`PATCH`.
 
 ---
 
@@ -1140,8 +1228,15 @@ files or existing download rows.
 ### 9.3 Robustness rules
 
 - Re-check capability on profile switch.
-- Keep already-downloaded files playable after an entry becomes `revoked` or stops
-  being servable.
+- When the capability reports `revoked_removes_local`, an entry that becomes
+  `revoked` was revoked by an administrator: delete the local media, manifest, and
+  assets, then `DELETE /api/v2/downloads/{id}` (queue the delete if offline). Without
+  the flag, keep the files playable and stop fetching for that row. Check for revoked
+  entries whenever the app reads the registry, including background syncs.
+- Keep already-downloaded files playable when an entry stops being servable for any
+  other reason.
+- A `409 prepared_file_expired` from the file route is not an error to show: call
+  `POST /api/v2/downloads/{id}/prepare`, wait for `ready`, then resume the transfer.
 - Do not automatically retry `POST /api/v2/downloads`. After an uncertain response,
   re-read `GET /api/v2/downloads` and make an explicit new request for work that is
   still missing.
@@ -1410,8 +1505,10 @@ Deleting from the Apple offline library should:
 4. Call `DELETE /downloads/{id}` while online, or queue that delete for the next
    reconnect.
 
-If the server later reports the entry as `revoked` or not servable, keep existing local
-files playable but stop retrying server fetches for that row.
+If the server later reports the entry as `revoked`, follow §9.3: delete the local files
+and then the entry. If it is not servable for another reason, keep existing local files
+playable but stop retrying server fetches for that row. On `409 prepared_file_expired`,
+call `POST /downloads/{id}/prepare` and resume the transfer once the entry is `ready`.
 
 ---
 
@@ -1499,6 +1596,12 @@ constraints fit the app:
    after the file and required assets are moved into durable storage.
 6. If auth expires while a transfer is queued, recreate the request with a fresh
    token and resume.
+7. On `409 prepared_file_expired`, call `POST /downloads/{id}/prepare` and resume
+   once the row is `ready` again (9.3). Other `409`s are not "still preparing".
+
+When a registry read, including the periodic WorkManager sync in 11.8, returns an
+entry as `revoked` and the capability reports `revoked_removes_local`, delete its
+local files and then the entry (9.3).
 
 ### 11.5 Offline playback
 
@@ -1566,7 +1669,8 @@ operations use:
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |
-| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request. |
+| 409  | `conflict`               | A revision or monitor guard lost: the entry or monitor changed under the request; or the entry is revoked or otherwise not servable. |
+| 409  | `prepared_file_expired`  | The file route for a finished entry whose prepared file the server cleaned up. Call `POST /downloads/{id}/prepare` (§4.12). |
 | 413  | `payload_too_large`      | The request body or an encoded manifest exceeds its bound.                |
 | 416  | `range_not_satisfiable`  | An unsatisfiable `Range` on a byte route.                                 |
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
@@ -1587,10 +1691,11 @@ bytes have been written aborts the stream and never appends JSON to a partial as
 
 ## 13. Out of scope
 
-Cross-device download visibility, DRM/leases, cumulative per-user storage quotas,
-and server-initiated deletion of client files remain out of scope. Artifact garbage
-collection may remove server-side prepared files only when no managed row still
-references them.
+Cross-device download visibility for users, DRM/leases, cumulative per-user storage
+quotas, and enforced deletion of client files remain out of scope. An administrator's
+revoke is a request the app honors at its next sync. The server removes its own
+prepared files once no in-flight download needs them and the cache period has passed;
+finished rows keep the recipe so the file can be prepared again (§4.12).
 
 ---
 
@@ -1617,10 +1722,11 @@ finalization pass), so both go through a prepare-to-file job that writes a
 two devices requesting the same target reuse one encode. The artifact table is
 a durable, leased job queue: transactional claims (`FOR UPDATE SKIP LOCKED`),
 lease heartbeats, attempt counting, and a startup sweep guarantee a crash
-mid-encode cannot strand a download in `preparing` or double-encode. Ready
-artifacts are evicted LRU under a byte budget, but never while a managed row —
-including a completed one representing a device's local library — still
-references them.
+mid-encode cannot strand a download in `preparing` or double-encode. A ready
+artifact is kept while an in-flight download needs it and for a cache period after
+its last use; then its bytes are deleted and the row becomes `expired`. Budgets,
+the disk ceiling, measurement, history, and revocation are described in
+[prepared download storage](architecture/download-storage.md).
 
 ### Preparation progress (admin)
 
@@ -1874,13 +1980,13 @@ prevents duplicate ephemeral transfers. The download capability exposes
 
 GET and HEAD `/api/v2/direct-download?file_id={id}` preserve synchronous original-file delivery. GET and HEAD `/api/v2/direct-download-proxy?file_id={id}` preserve the proxy-aware variant. `file_id` is a canonical positive decimal string; `format` may be absent, empty or `original`. Duplicate and unknown query parameters return 422. These routes use the existing download capability/policy service; they do not create a managed download, artifact or playback session.
 
-Every request applies account authentication, viewer/demo gates, account download policy and catalog/file access. Header callers may supply the existing profile and PIN headers. Browser navigation retains the existing account `token` query fallback: the selected profile/PIN does not travel in that URL, and the request uses account-scoped access without a selected profile. This migration introduces no new signed browser grant or profile query credential. Account URLs remain secrets with the limitations described in section 4.10.
+Every request applies authentication, viewer/demo gates, the household profile rule, account download policy and catalog/file access. Header callers may supply the existing profile and PIN headers. Browser navigation uses a link from `POST /api/v2/direct-download/links` (section 4.10): its `dl` token carries the profile that minted it, so the request runs under that profile's limits. The account `token` query fallback remains, but carries no profile, so the household rule refuses it on accounts with a locked or restricted profile. URLs remain secrets with the limitations described in section 4.10.
 
 The service opens the authorized source file and closes it after streaming. Success preserves Content-Disposition, original MIME type, Content-Length, Last-Modified, HEAD, ranges/206 and conditional/304 semantics. Missing files return 404. Malformed input returns 422; invalid range 416 retains Content-Range. Failures before output become redacted v2 problems. A failure after output has begun aborts the stream instead of appending JSON; neither partial bytes nor a lost response prove completion. No replay or durable local-file receipt is provided.
 
 The proxy producer resolves permission before creating a token for the selected FileTarget. The existing planner, short-lived signed target, preflight and local fallback remain authoritative; callers cannot supply a path or proxy URL. A successful proxy preflight may yield 307. HEAD releases its provisional planner reservation; GET retains the existing reservation lifecycle, with no new completion/cleanup guarantee. Preflight failure releases the reservation and falls back to a freshly authorized local serve. A redirect is not proof of delivery, and an issued proxy token retains its existing expiration/revocation limits.
 
-The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, probes once with HEAD, and launches browser GET using the identical captured account URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
+The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, mints a link with those headers, probes the link once with HEAD, and launches browser GET on the identical link URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
 
 ---
 

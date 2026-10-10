@@ -73,6 +73,34 @@ func TestApplySettingsOverlaysNodeHWOverrides(t *testing.T) {
 	}
 }
 
+// A node's own prepared-download directory replaces the cluster setting; with
+// no override the cluster value stands.
+func TestApplySettingsOverlaysNodeArtifactDir(t *testing.T) {
+	dir := "/mnt/fast-ssd/silo-downloads"
+	for _, test := range []struct {
+		name      string
+		overrides nodeHWOverrides
+		want      string
+	}{
+		{name: "overridden", overrides: nodeHWOverrides{ArtifactDir: &dir}, want: dir},
+		{name: "inherited", want: "/srv/cluster-downloads"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := newOverrideWatcher(t, "http://node-1", func(context.Context, string, string) (nodeHWOverrides, bool, error) {
+				return test.overrides, true, nil
+			})
+			settings := clusterSettings()
+			settings["download.artifact_dir"] = "/srv/cluster-downloads"
+			if err := w.applySettings(context.Background(), settings); err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			if got := w.Config().Download.ArtifactDir; got != test.want {
+				t.Fatalf("artifact dir = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // The API host has no stream_nodes row and must never pay for a lookup.
 func TestApplySettingsSkipsOverlayWithoutNodeIdentity(t *testing.T) {
 	looked := false

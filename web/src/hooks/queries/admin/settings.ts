@@ -280,7 +280,13 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       }
     },
     mutateAsync: async (values: SettingsValues) => {
-      const intent = capture(values);
+      let intent;
+      try {
+        intent = capture(values);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        throw error;
+      }
       const result = await mutation.mutateAsync(intent);
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();

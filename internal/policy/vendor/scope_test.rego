@@ -94,6 +94,23 @@ test_disabled_subtracts_when_restricted if {
 	got.disabled_library_ids == []
 }
 
+test_hidden_reports_allowed_libraries_the_profile_hid if {
+	got := decision with input as object.union(base_input, {
+		"account_restricted": true,
+		"account_library_ids": [1, 2, 3],
+		"disabled_library_ids": [5, 2],
+	})
+	got.allowed_library_ids == [1, 3]
+	got.hidden_library_ids == [2]
+}
+
+test_hidden_is_empty_when_unrestricted if {
+	got := decision with input as object.union(base_input, {
+		"disabled_library_ids": [2],
+	})
+	got.hidden_library_ids == []
+}
+
 test_disabled_passes_through_when_unrestricted if {
 	got := decision with input as object.union(base_input, {
 		"disabled_library_ids": [2],
@@ -215,4 +232,48 @@ test_unusable_advisory_age_override_fails_closed if {
 		got := decision with input as advisory_input with data.silo_custom.scope.override as advisory_override(value)
 		got.max_advisory_age == 1
 	}
+}
+
+override_hides_three(_, _) := {
+	"allowed_library_ids": [1, 2, 3, 4],
+	"disabled_library_ids": [3],
+}
+
+test_override_hidden_library_is_not_reported_as_profile_hidden if {
+	got := decision
+		with input as object.union(base_input, {
+			"account_restricted": true,
+			"account_library_ids": [1, 2, 3, 4],
+			"disabled_library_ids": [2, 3],
+		})
+		with data.silo_custom.scope.override as override_hides_three
+	got.allowed_library_ids == [1, 4]
+	got.hidden_library_ids == [2]
+}
+
+test_restricting_override_narrows_profile_hidden_libraries if {
+	got := decision
+		with input as object.union(base_input, {
+			"disabled_library_ids": [2, 3],
+		})
+		with data.silo_custom.scope.override as tightening_override
+	got.allowed_library_ids == []
+	got.hidden_library_ids == [2]
+}
+
+override_lifts_restriction_hides_three(_, _) := {
+	"unrestricted": true,
+	"disabled_library_ids": [3],
+}
+
+test_unrestricting_override_keeps_profile_hidden_libraries_it_allows if {
+	got := decision
+		with input as object.union(base_input, {
+			"account_restricted": true,
+			"account_library_ids": [1, 2, 3],
+			"disabled_library_ids": [2, 3],
+		})
+		with data.silo_custom.scope.override as override_lifts_restriction_hides_three
+	got.allowed_library_ids == [1]
+	got.hidden_library_ids == [2]
 }

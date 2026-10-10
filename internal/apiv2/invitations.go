@@ -287,7 +287,7 @@ func registerInvitations(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.AcceptInvitation(ctx, in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+		view, err := svc.AcceptInvitation(withClientDevice(ctx), in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
 		if err != nil && !errors.Is(err, invitations.ErrSessionStart) {
 			return nil, invitationProblem(err, true)
 		}

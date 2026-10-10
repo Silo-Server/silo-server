@@ -92,6 +92,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -104,11 +105,21 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/downloads/devices	non-media
+GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media
 POST /api/v2/admin/downloads/preparations/cancel	non-media
 GET /api/v2/admin/downloads/preparations/capabilities	non-media
 POST /api/v2/admin/downloads/preparations/pause	non-media
 POST /api/v2/admin/downloads/preparations/resume	non-media
+POST /api/v2/admin/downloads/revoke	non-media
+GET /api/v2/admin/downloads/storage	non-media
+GET /api/v2/admin/downloads/storage/capabilities	non-media
+GET /api/v2/admin/downloads/storage/events	non-media
+GET /api/v2/admin/downloads/storage/files	non-media
+POST /api/v2/admin/downloads/storage/files/delete	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/cleanup	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media
@@ -326,8 +337,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
@@ -382,11 +391,18 @@ POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections/settings	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
+GET /api/v2/admin/users/{user_id}/login-sessions	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -420,6 +436,7 @@ GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
 POST /api/v2/auth/refresh	non-media
 GET /api/v2/auth/sessions	non-media
+GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
 GET /api/v2/auth/signup	non-media
@@ -507,6 +524,7 @@ GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
+POST /api/v2/direct-download/links	non-media
 GET /api/v2/docs	non-media
 HEAD /api/v2/docs	non-media
 GET /api/v2/docs/init.js	non-media
@@ -534,6 +552,7 @@ HEAD /api/v2/downloads/{id}/file	non-media
 GET /api/v2/downloads/{id}/file-proxy	non-media
 HEAD /api/v2/downloads/{id}/file-proxy	non-media
 GET /api/v2/downloads/{id}/manifest	non-media
+POST /api/v2/downloads/{id}/prepare	non-media
 GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
@@ -553,6 +572,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media
@@ -1327,6 +1347,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -1339,11 +1360,21 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/downloads/devices	non-media
+GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media
 POST /api/v2/admin/downloads/preparations/cancel	non-media
 GET /api/v2/admin/downloads/preparations/capabilities	non-media
 POST /api/v2/admin/downloads/preparations/pause	non-media
 POST /api/v2/admin/downloads/preparations/resume	non-media
+POST /api/v2/admin/downloads/revoke	non-media
+GET /api/v2/admin/downloads/storage	non-media
+GET /api/v2/admin/downloads/storage/capabilities	non-media
+GET /api/v2/admin/downloads/storage/events	non-media
+GET /api/v2/admin/downloads/storage/files	non-media
+POST /api/v2/admin/downloads/storage/files/delete	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/cleanup	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media
@@ -1561,8 +1592,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
@@ -1617,11 +1646,18 @@ POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections/settings	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
+GET /api/v2/admin/users/{user_id}/login-sessions	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1655,6 +1691,7 @@ GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
 POST /api/v2/auth/refresh	non-media
 GET /api/v2/auth/sessions	non-media
+GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
 GET /api/v2/auth/signup	non-media
@@ -1742,6 +1779,7 @@ GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
+POST /api/v2/direct-download/links	non-media
 GET /api/v2/docs	non-media
 HEAD /api/v2/docs	non-media
 GET /api/v2/docs/init.js	non-media
@@ -1769,6 +1807,7 @@ HEAD /api/v2/downloads/{id}/file	non-media
 GET /api/v2/downloads/{id}/file-proxy	non-media
 HEAD /api/v2/downloads/{id}/file-proxy	non-media
 GET /api/v2/downloads/{id}/manifest	non-media
+POST /api/v2/downloads/{id}/prepare	non-media
 GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
@@ -1788,6 +1827,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media

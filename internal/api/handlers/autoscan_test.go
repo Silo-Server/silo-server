@@ -256,6 +256,8 @@ type fakeAutoscanTriggerer struct {
 	// available is returned by ListAvailableScanSources (the Add-source picker /
 	// create-validation set).
 	available []autoscan.AvailableScanSource
+	// availableErr, when set, fails ListAvailableScanSources.
+	availableErr error
 	// testResult / testErr drive TestConnection + TestConnectionByID.
 	testResult autoscan.ConnectionTestResult
 	testErr    error
@@ -285,6 +287,9 @@ func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 }
 
 func (f *fakeAutoscanTriggerer) ListAvailableScanSources(context.Context) ([]autoscan.AvailableScanSource, error) {
+	if f.availableErr != nil {
+		return nil, f.availableErr
+	}
 	return f.available, nil
 }
 

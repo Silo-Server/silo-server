@@ -92,7 +92,7 @@ func TestServiceRequeuesReadyArtifactWhenRemoteFileIsMissing(t *testing.T) {
 	downloadRepo := NewRepository(pool)
 	if err := downloadRepo.Create(ctx, &Download{
 		ID: downloadID, UserID: userID, MediaFileID: fileID,
-		ContentID: "missing-remote-content", Kind: KindQueued, Status: StatusCompleted,
+		ContentID: "missing-remote-content", Kind: KindQueued, Status: StatusReady,
 		Format: FormatTranscode, ArtifactID: artifact.ID, FileSize: 23,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}); err != nil {

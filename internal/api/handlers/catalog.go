@@ -477,8 +477,8 @@ func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, view)
 }
 
-// catalogFacetSearchResponse mirrors catalog.CatalogFacetSearchResult on
-// the wire. matches[] is always present (empty when no hits); has_more
+// catalogFacetSearchResponse is the v1 facet typeahead answer.
+// matches[] is always present (empty when no hits); has_more
 // is true when the underlying result set held more entries than the
 // requested limit.
 type catalogFacetSearchResponse struct {
@@ -530,12 +530,12 @@ func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *h
 		return
 	}
 
-	view, err := h.SearchFacet(r.Context(), viewerFromRequest(r, accessFilter), req, facet, prefix, limit)
+	matches, hasMore, err := h.resolver.SearchFacetV1(r.Context(), req, accessFilter, facet, prefix, limit)
 	if err != nil {
-		writeAPIError(w, err)
+		writeAPIError(w, facetSearchError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{Matches: matches, HasMore: hasMore})
 }
 
 func parseIncludeTechnical(raw string) bool {
@@ -569,7 +569,12 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 	}
 
 	// The filter body is validated before the access filter so an invalid
-	// filter and an unresolvable policy answer in the v1 order.
+	// filter and an unresolvable policy answer in the v1 order. A rule /api/v2
+	// added is refused as v1 refused it before.
+	if err := catalog.ValidateV1Rules(req.FilterConfig); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
+		return
+	}
 	if _, _, err := sections.NewFilterBuilder("mi").Build(req.FilterConfig); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
 		return

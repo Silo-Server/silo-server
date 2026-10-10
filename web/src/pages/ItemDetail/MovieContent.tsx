@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
@@ -55,6 +55,11 @@ export default function MovieContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
@@ -301,8 +306,7 @@ export default function MovieContent({
                       refreshMetadataMutation.mutate({
                         item,
                         mode,
-                        onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                        onReplaced: followReplacedItem,
                       })
                   : undefined
               }
@@ -368,6 +372,7 @@ export default function MovieContent({
               item={item}
               open={matchOpen}
               onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
             />
           )}
           {canCurateMetadata && (

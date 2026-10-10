@@ -92,6 +92,16 @@ describe("v2 request deadline", () => {
     expect(await outcome).toBeInstanceOf(V2TimeoutError);
   });
 
+  it("bounds the admin Home row preview, a read sent as POST", async () => {
+    vi.stubGlobal("fetch", hungFetch());
+
+    const outcome = v2("POST /api/v2/admin/sections/preview", {
+      body: { section_type: "recently_added", config: {} },
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
+    expect(await outcome).toBeInstanceOf(V2TimeoutError);
+  });
+
   it("honours a caller's own deadline", async () => {
     vi.stubGlobal("fetch", hungFetch());
 

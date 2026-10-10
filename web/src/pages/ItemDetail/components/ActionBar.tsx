@@ -176,6 +176,9 @@ export interface ActionBarLink {
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
+  canAddToCollection?: boolean;
+  /** The item's title, named by Add to collection. */
+  itemTitle?: string;
   watchTogether?: ActionBarWatchTogether;
   /** Replaces the Play action. */
   primaryAction?: ActionBarPrimaryAction;
@@ -251,6 +254,8 @@ export interface ActionBarProps {
 export default function ActionBar({
   compactMobile = false,
   contentId,
+  canAddToCollection = true,
+  itemTitle,
   watchTogether,
   primaryAction,
   secondaryActions,
@@ -584,7 +589,7 @@ export default function ActionBar({
     hasOverflowActions ||
     hasAdminActions ||
     hasMetadataActions ||
-    Boolean(contentId) ||
+    Boolean(contentId && canAddToCollection) ||
     (compactMobile && Boolean(onToggleFavorite || onRatingChange)) ||
     Boolean(watchTogether);
 
@@ -825,7 +830,7 @@ export default function ActionBar({
                   {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
                 </DetailOverflowMenuItem>
               )}
-              {contentId && (
+              {contentId && canAddToCollection && (
                 <DetailOverflowMenuItem
                   closeMenu={closeOverflowMenu}
                   onAction={() => setAddToCollectionOpen(true)}
@@ -1044,11 +1049,12 @@ export default function ActionBar({
             isPending={isRedetectingMarkers}
           />
         )}
-        {contentId && (
+        {contentId && canAddToCollection && (
           <AddToCollectionDialog
             open={addToCollectionOpen}
             onOpenChange={setAddToCollectionOpen}
             mediaItemId={contentId}
+            itemTitle={itemTitle}
           />
         )}
       </div>

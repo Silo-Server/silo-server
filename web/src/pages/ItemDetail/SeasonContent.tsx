@@ -136,6 +136,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
               compactMobile
               item={item}
               contentId={item.content_id}
+              canAddToCollection={false}
               watchTogether={watchTogether.menu}
               playHref={firstEpisode ? `/watch/${firstEpisode.content_id}` : undefined}
               playLabel="Play First Episode"

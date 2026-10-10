@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail } from "@/api/types";
+import type { CrewMember, ItemDetail } from "@/api/types";
 import SeasonContent from "./SeasonContent";
 
 const mocks = vi.hoisted(() => {
@@ -93,10 +93,6 @@ vi.mock("@/components/CastCarousel", () => ({
   default: () => <div />,
 }));
 
-vi.mock("@/components/CrewList", () => ({
-  default: () => <div />,
-}));
-
 vi.mock("@/components/ui/skeleton", () => ({
   Skeleton: () => <div />,
 }));
@@ -169,6 +165,18 @@ function makeSeasonItem(
 }
 
 describe("SeasonContent", () => {
+  it("disables collection membership without removing the item identity", () => {
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      contentId: "season-1",
+      canAddToCollection: false,
+    });
+  });
+
   beforeEach(() => {
     mocks.useDetailWatchTogether.mockClear();
     mocks.capturedActionBarProps.value = null;
@@ -276,5 +284,23 @@ describe("SeasonContent", () => {
       mediaType: "episode",
       hasPartialProgress: true,
     });
+  });
+
+  it("keeps the series' creators out of the season Crew section", () => {
+    const crew: CrewMember[] = [
+      { name: "Series Creator", job: "Creator", person_id: "creator-1" },
+      { name: "Season Director", job: "Director", person_id: "director-1" },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1"]}>
+        <SeasonContent item={makeSeasonItem({ crew })} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain(">Directors</dt>");
+    expect(markup).toContain("Season Director");
+    expect(markup).not.toContain("Creators");
+    expect(markup).not.toContain("Series Creator");
   });
 });

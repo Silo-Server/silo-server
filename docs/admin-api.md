@@ -264,6 +264,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `physical_gpu_keys` | string[] | Stable identities of the GPUs behind this node, derived from `capabilities` (see below). Omitted when the node reports no identifiable GPU. |
 | `last_stats` | object | The node's most recent host resource sample — `{"system": …, "gpu": […]}` in the shape below. Omitted when the node reported none. |
 | `hw_accel_override`, `hw_device_override` | string | This node's own acceleration policy (see below). Omitted when the node inherits the cluster-wide settings, which is the normal case. |
+| `download_artifact_dir_override` | string | This node's own directory for prepared download files. Omitted when the node inherits `download.artifact_dir`, or, when that is blank, uses `download-artifacts` inside its transcode directory. |
+| `download_artifact_max_bytes_override` | int64 | This node's own prepared-download budget in bytes; `0` means no budget. Omitted when the node uses `download.artifact_max_bytes`. |
 | `capability_drift` | string | Human-readable note describing how the node's hardware got worse at the last capability refetch. Omitted when the last refetch found no regression (see below). |
 | `capability_drift_baseline` | object | What that note is waiting on — `{"backends": ["nvenc"], "devices": [{"uuid": "GPU-8a7b…", "aliases": ["GPU-8a7b…", "0000:03:00.0", "/dev/dri/renderD128"]}]}`. Never present without `capability_drift`; absent with it only for a note written before this field existed (see below). Each device carries every stable name it answered to, so it is recognized if it returns renumbered; `uuid` is held apart because it is the only name that can prove a *different* card, a replacement in the same slot inheriting both the slot and the render path. Either key is omitted when empty. |
 | `network_access` | object | The node's last report about the network access provider plugins running beside it, keyed by provider slug — `{"tailscale": {"state": "connected", "origin": "https://proxy-1.tail1234.ts.net", "hostname": "proxy-1.tail1234.ts.net", "updated_at": "…"}}`. `state` is one of `disconnected`, `awaiting_authorization`, `connecting`, `connected`, `error`; `origin`, `hostname` and `updated_at` are omitted when the provider did not report them. Written by the same health check that writes `last_stats`, so it is exactly as fresh as `last_health_check`, and a check that carries no report clears it. Omitted when the node reports no providers. Only proxy nodes report it: clients never talk to transcode nodes. See [proxy origins by access path](#proxy-origins-by-access-path). |
@@ -426,6 +428,16 @@ dashboard uses it to flag a node whose `revision` differs from the server's
 during a rollout — and is omitted on a node predating build reporting. Unlike
 the resource fields it is present on a node that cannot be sampled, so a
 `last_stats` object may carry `build` and nothing else.
+
+`last_stats.artifacts` is the node's latest measurement of its prepared-download
+directory: `measured_at`, `files` and `bytes` (finished files), `partial_files` and
+`partial_bytes` (encodes in progress or left behind), `other_bytes`,
+`fs_used_bytes` and `fs_total_bytes` for the filesystem, `fs_type`,
+`shares_scratch`, `ephemeral`, and `stale` and `error` when the last measurement did
+not finish. It carries no path, for the same reason as `disks`. The node measures at
+most every five minutes, so this can be older than `last_health_check`. Omitted on a
+node predating storage reporting. `GET /api/v2/admin/downloads/storage` presents it
+with the server's own measurement.
 
 ### Scratch admission
 
@@ -639,6 +651,15 @@ indistinguishable from omission.
 dispatch honors a new override immediately; the target node itself picks it up
 on its next config reload — see "Acceleration overrides" above for what waits
 for a restart.
+
+`download_artifact_dir_override` (an absolute path; `null` or empty restores the
+inherited directory) and `download_artifact_max_bytes_override` (bytes, `0` for no
+budget; `null` or `-1` restores `download.artifact_max_bytes`) are writable here too.
+A new budget applies at the next storage maintenance pass. A new directory applies
+when the node restarts; files in the old directory are not moved, so in-use files are
+prepared again and cached ones are dropped. See
+[prepared download storage](architecture/download-storage.md). The frozen
+`/api/v1/admin/nodes` routes neither accept nor return these two fields.
 
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
@@ -1290,28 +1311,32 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with the same source
-exclusions as `profiles_active_24h` above, so marking something watched counts
-as a play. Episodes are rolled up to their series, so a season binge reads as
-one show and a title's `media_item_id` is a series content id for TV.
+`plays` on both lists counts `user_watch_history` rows with source `playback`
+or `legacy` (the default for rows written without a source). Playback from Silo
+and Jellyfin clients both writes `playback` rows. Marking something watched is
+not a play: `manual` rows from Silo clients and `jellycompat` rows from
+Jellyfin clients are all marks, and marking a series writes one row per
+episode, so both are excluded. Episodes are rolled up to their series, so a
+season binge reads as one show and a title's `media_item_id` is a series
+content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
 (`admin_playback_history.watched_seconds`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry that was only ever marked watched has no sessions and reports
-`0`. Because `watched_seconds` records a session's final absolute position, a
-resumed session would claim the already-watched stretch again, so each
+minute. An entry with no finalized session in the window reports `0`. Because
+`watched_seconds` records a session's final absolute position, a resumed
+session would claim the already-watched stretch again, so each
 session's contribution is capped at its wall-clock length; the figure is an
 estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
-row; a profile that has only ever marked things watched falls back to its
-profile id. Ties are broken on a stable key (`media_item_id`, or
-`user_id`/`profile_id`) so equal rows keep their order between refreshes. No
-poster URLs are returned — the bar-list widgets do not need them, and it keeps
+row with a nonempty profile name; a profile with no such row falls back to its
+profile id, even if it has unnamed rows. Ties are broken on a stable key
+(`media_item_id`, or `user_id`/`profile_id`) so equal rows keep their order
+between refreshes. No poster URLs are returned — the bar-list widgets do not need them, and it keeps
 the query cheap.
 
 Both lists are `[]` on a server with no history, never `null`.
@@ -1519,11 +1544,14 @@ issued token so the administrator can assign it to a source.
 
 Personal history imports on both `/api/v1` and `/api/v2` use the acting
 `X-Profile-Id`. A non-primary profile can import only into itself and see only runs
-targeting itself. The primary profile (with its PIN verified when it has one) and
-server admins can act for any profile on their own account. An API key's exemption
+targeting itself. The primary profile (with its PIN verified when it has one) can act
+for any profile on its own account, whether or not the account is an admin. Another
+profile on an admin account acts only for itself; an admin login session without an
+acting profile acts for the household only while no profile on the account has a PIN, a
+maturity limit, or library restrictions, and an admin API key without one always does. An API key's exemption
 from PIN entry does not grant household authority to a locked primary profile.
 Creating a run for another profile without this authority returns 403; reading its
-run returns 404. A non-admin request without an acting profile cannot create a run
+run returns 404. Any other request without an acting profile cannot create a run
 and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
 are bound to the account and acting profile.
 
@@ -1566,6 +1594,19 @@ for every account. The policy is read again when a queued run starts, so a run
 admitted before the setting was turned off fails with the same message. v1 run
 responses and realtime history-import events carry the same safe summaries as
 the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
+
+A Plex import races the addresses plex.tv advertised for the selected server, up to
+eight, and keeps the first that returns a library listing for the rest of the run. A
+session-backed run (`plex_session_id`) takes the list from the stored session; a client
+holding its own token sends the preferred address in `plex_base_url` and the rest in
+`plex_base_urls` (up to 31). When any address is HTTPS, cleartext ones are dropped,
+because each probe carries the Plex token. Addresses the account may not reach under
+the policy above are skipped, and the run is refused only when none remain; the eight
+raced are the first that remain. The Plex token is removed from any redirect that
+leaves the host it was sent to or downgrades from HTTPS to HTTP.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
+`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
+member, so check the capability before sending the field.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.
@@ -1725,12 +1766,10 @@ sensitive and machine-managed keys with 404. Missing and empty values also remai
 404. The setup wizard uses this route for its Redis configuration read and treats
 only 404 as absence, rejecting stale responses after an authority change.
 
-`GET /api/v2/admin/settings/sections` reuses the existing profile-section flag
-reader: read failures preserve the disabled default. It requires acting-admin
-authority. `GET /api/v2/admin/playback-routing/capabilities` exposes the shared
-routing vocabulary under the same authority; these are configuration choices,
-not evidence of available worker capacity. No recorded first-party consumer uses
-these two discovery reads.
+`GET /api/v2/admin/playback-routing/capabilities` exposes the shared routing
+vocabulary under acting-admin authority; these are configuration choices, not
+evidence of available worker capacity. No recorded first-party consumer uses
+this read.
 
 ### Jellyfin compatibility status
 
@@ -1871,16 +1910,12 @@ web query and manual-refresh cache writer share the captured authority key and
 reject results decoded after an authority switch. These are aggregate observations,
 not an atomic cluster snapshot. No native or Jellyfin caller uses this admin read.
 
-`PUT /api/v2/admin/settings/sections` replaces `allow_profile_custom_sections`.
-The administrator GET on the same path now returns an actor/profile-bound ETag
-and supports conditional reads. PUT requires `If-Match`, accepts `If-None-Match` as an additional exclusion, and
-evaluates both against current canonical state inside the existing settings
-transaction; stale state returns 412, and unchanged state performs no write.
-The required boolean rejects omitted and null values. The response contains the
-canonical flag and its ETag. The profile-facing flag reader keeps its existing
-disabled default on read failure; the write fails closed without an atomic store.
-No first-party or internal writer is recorded, so no new UI or native flow is added.
-The bridge writer and profile section enforcement remain unchanged.
+There is no setting for whether profiles may add rule rows: they always may.
+`GET`/`PUT /api/v2/admin/settings/sections` (`getAdminSectionSettings`,
+`updateAdminSectionSettings`) were removed before the v2 lock. The frozen v1
+`GET /api/v1/admin/settings/sections` answers `allow_profile_custom_sections:
+true`, and v1 `PUT` checks that the body is JSON, changes nothing, and answers
+the same. A stored `sections.allow_profile_custom_sections` row is ignored.
 
 ### Offline-download preparation
 
@@ -1923,6 +1958,94 @@ five seconds per running job. The subscription snapshot is `null`; re-read the
 list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the
 server records it.
+
+### Offline-download storage
+
+These operations show where prepared download files are, how much space they take,
+and which devices hold copies, and let an administrator free space or revoke device
+copies. [Prepared download storage](architecture/download-storage.md) describes the
+retention rule, budgets, measurement, and revocation they act on. Every operation
+requires an acting administrator; the mutations are refused in demo mode.
+
+`GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
+channel (`download_preparations`), and `devices` and `revocation` when device copies
+can be listed and revoked.
+
+`GET /api/v2/admin/downloads/storage` returns one entry per location, the server
+first and then transcode nodes by name, plus the settings that govern them
+(`cache_hours`, `disk_ceiling_percent`, `default_budget_bytes`,
+`stale_device_days`), `preparing_jobs`, and `freed_last_30_days_bytes`. A location
+carries its `key` (`server` or `node:<id>`), `name`, `online`, `dir` (for a node,
+the directory it was last listed in, which is the one it uses), `dir_source` (where
+the configured directory comes from), `pending_dir` (a node's configured directory
+when it differs from `dir`; the node moves there when it restarts), the latest on-disk `usage` (absent until one is reported), what Silo's
+records say is `in_use` and `cached` (files and bytes), `waiting_downloads`,
+`stale_waiting_bytes` (in-use bytes kept only for devices not seen within
+`stale_device_days`), `untracked_files` and `untracked_bytes` from the last
+reconciliation, its `budget_bytes` and `budget_source`, `cleanup_backlog` (node
+files queued for deletion), `storage_full` (over its budget or the disk ceiling with
+nothing left to free: a full node gets no new preparations, and while the server is
+full, jobs that would be prepared on it wait), and `replicas_disagree` when API replicas
+report different directories for the server's files.
+
+`GET /api/v2/admin/downloads/storage/files` lists prepared files with their
+`state` (`in_use`, `cached`, or `expired`), recipe, location, size, `last_used_at`,
+a cached file's `expires_at`, and how many downloads are waiting on, downloading, or
+finished with it. Filters: `location`, `state` (ready files by default), `format`,
+`library_id`, `q` (title). `sort` is `size` (default), `last_used`, or `created`.
+Keyset-paged with `limit` and `cursor`.
+
+`POST /api/v2/admin/downloads/storage/files/delete` takes `{"ids": [...]}`
+(1–500) and `include_in_use`, and returns one `{id, outcome, bytes}` per distinct id
+in request order. `outcome` is `deleted`, `requeued` (it was in use and
+`include_in_use` was set: deleted and queued to be prepared again for the waiting
+downloads), `in_use` (refused), `not_found`, `not_ready`, or `failed` (an error
+stopped this file's delete; the other files went ahead, and a file left on disk is
+reported as untracked). Devices that finished keep their copies. A file a download linked in the last minute is refused.
+
+`POST /api/v2/admin/downloads/storage/locations/{location}/cleanup` runs clean-up at
+one location now and returns `freed_bytes`; `0` when nothing was due or another
+replica was already cleaning up. An unknown location is `404`.
+`POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete` lists
+the directory again and deletes files named like Silo's prepared files that no
+prepared-file record accounts for and that nothing has written to for an hour,
+returning `files` and `bytes` deleted and `failed_files` it could not delete (they stay
+untracked); other files in the directory are never touched. It
+answers `404` for an unknown location and `503` when the directory cannot be listed
+(an offline node). Filters and bodies that name an account, library, or node id larger
+than the database holds are `422`.
+
+`GET /api/v2/admin/downloads/storage/events` lists clean-up and revocation history,
+newest first, one row per batch (a maintenance pass or an administrator action) at
+one location for one reason and account:
+`reason`, `location` (`server`, `node:<id>`, or `device`), `count`, `bytes`, up to
+three `titles`, `detail` (an administrator's reason or a note), `actor`, and for
+revocations `account`. Filters: `reason`, `location`, `days` (0–90; 0 for all kept
+history).
+
+`GET /api/v2/admin/downloads/devices` lists every device holding managed downloads,
+across accounts: account, profile, device, `last_seen_at` (last registry sync or
+download request), `stale`, counts of copies by state, `revoked` copies waiting for
+the device, `bytes_on_device` (finished copies, including revoked ones the device has
+not yet confirmed deleting), and active series `monitors`.
+Filters: `q`, `stale`, `platform`; `sort` is `last_seen` (longest unseen first,
+default) or `size`. `GET /api/v2/admin/downloads/entries` lists the managed
+downloads themselves, filtered by `user_id`, `profile_id`, `device_id`, or `status`,
+with where each one's prepared file is and any revocation.
+
+`POST /api/v2/admin/downloads/revoke` takes either `ids` (up to 500 download ids)
+or `user_id`, `profile_id`, and `device_id` for every download on one device, plus
+optional `pause_monitors` (whole-device only) and `reason` (up to 500 characters,
+kept in history). It returns `revoked` (newly revoked; already revoked rows are not
+counted), `bytes` (the size of the revoked copies the device had finished
+downloading), `paused_monitors`, and `download_ids`. The server stops serving
+the files at once; an app that supports revocation deletes its copies at its next
+sync and then deletes the entries (see
+[downloads-api.md](downloads-api.md#93-robustness-rules)).
+
+The `download_preparations` channel also carries `download_storage.changed` (`{}`)
+after a clean-up pass that freed bytes or any of these actions; re-read the
+views that are open.
 
 ### Sequenced administrator playback commands (v2)
 
@@ -2190,6 +2313,10 @@ read reuses discovery and its defaults without invoking a provider or reading
 stored source configuration. Descriptor fields, setup form controls, options,
 conditions, validation and manifest defaults retain their existing meanings;
 `default_value` is a plugin-defined JSON extension value, not a stored secret.
+First-party plugins whose manifests predate descriptors get a host compatibility
+descriptor (`internal/autoscan/compat.go`): the CephFS watcher needs no connection,
+and the Sonarr/Radarr poller (`silo.autoscan.arr`) requires a `sonarr` or `radarr`
+connection. Any field the manifest declares itself wins over the compatibility value.
 
 Each page enumerates the full current discovery list, sorts by `(plugin_id,
 capability_id)`, and returns at most `limit` entries (default 50, maximum 200).
@@ -2368,6 +2495,16 @@ submission. No automatic retry, authentication replay or provider update occurs.
 The web edit submission captures identity and input before queueing and refuses
 late completion from another authority or a newer dialog draft.
 
+An update that changes the upstream the plugin is handed clears the poll marker of
+every source bound to it, in the same transaction, so those sources restart from
+now against the new upstream. That upstream is the linked Requests integration
+when there is one, otherwise the connection's base URL: linking, unlinking or
+switching the integration, or changing an unlinked connection's base URL, resets
+markers. Changing the name, kind or API key, or the stored base URL of a linked
+connection, keeps them. The frozen v1 connection update shares this repository
+path. Editing the linked Requests integration itself does not reset markers. A poll that was already running does not restore the old marker; see the
+source update below.
+
 ### Delete an autoscan connection (v2)
 
 `DELETE /api/v2/admin/autoscan/connections/{id}` (`deleteAdminAutoscanConnection`)
@@ -2421,6 +2558,15 @@ inserts can move rows between pages; neither count nor continuation provides a
 snapshot. A full final page may require one additional empty read. Missing service
 returns503; source errors are masked. No scan/worker execution changes.
 
+Completed runs carry `result`: `new`, `updated`, `unchanged`, `missing`,
+`missing_skipped_protected`, `files_deleted`, `items_deleted`,
+`memberships_removed`, `errors` and `skipped`, read from the run's stored result. `missing` counts the files the run
+newly marked missing; files an earlier scan already marked are not counted again.
+`skipped` is non-zero when the run did no work because an overlapping scan of the
+same scope was already in progress.
+Queued, running, failed and cancelled runs omit `result`, because a running run's
+stored value is progress, not an outcome.
+
 The Activity panel retains polling and numbered pages through at most100 cursor
 reads per request. It rejects unsupported/unsafe row values and invalid continuation
 without partial success. Cache identity includes captured profile/PIN generation;
@@ -2439,6 +2585,29 @@ positions do not provide snapshot consistency; full final pages may require an
 additional empty read. Running events retain the existing start-time placeholder
 in completed_at and their running status. Missing service returns503, private
 source failures500. No execution or worker behavior changes.
+
+Each item also carries `changes`, the changes the event received in reported
+order, capped at 50 entries, and `changes_truncated`, which is true when the event
+received more (`changes_returned` keeps the full count). Events recorded before
+change logging have an empty list. Each change has `source_path` (as reported),
+`rewritten_path` (after the source's path rewrites), optional `scope`, and
+`outcome`: `queued` (created a scan run), `joined` (coalesced into a run for the
+same scope that was already queued or running), `suppressed` (debounced),
+`unresolved` (did not map to a scannable library location), `ignored` (empty path,
+or a file change that resolved to a whole library) or `error` (resolve or enqueue
+failure). `reason` is a machine code for unresolved, ignored and error outcomes:
+resolver reasons such as `no_library_match`, `library_root_offline` or
+`unsupported_extension`, plus `resolves_to_library`, `resolve_failed` and
+`enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
+may show `detail`. Resolved changes include `library_id`, `target_mode` and
+`target_path`; queued and joined changes include the covering `scan_run_id`, which
+is how a joined change names a run another event created. A change that joins a
+run that is already running carries reason `follow_up_scan` and no `scan_run_id`:
+that run may have passed the path already, so a follow-up scan of the same scope,
+queued when it finishes, covers the change. Paths are capped at 1024 bytes, and NUL
+characters in them are stored as U+FFFD. `q` also matches the reported and
+rewritten paths in the change log. Nested `scan_runs` carry the same optional
+`result` as the scan history.
 
 The Activity panel keeps polling and numbered pages through at most100 cursor
 reads per requested page. Captured authority/PIN cache identity, stale-response
@@ -2551,10 +2720,53 @@ Both require an acting administrator, an enabled boolean and path_rewrites array
 and cap request bodies at64KiB. Nullable/omitted connection unbinds; nullable/omitted
 poll interval inherits the default, otherwise it is1–2147483647 seconds. Empty update
 delivery mode preserves the stored mode. Rewrites need nonblank from/to values.
+
+An update that changes the bound connection (including unbinding it) or the stored
+source configuration clears the source's poll marker, so the next poll starts from
+now. A marker is the plugin's continuation token for one upstream; replaying it
+against another server can repeat or skip that server's history. Changing only the
+label, enabled state, delivery mode, poll interval or path rewrites keeps the marker.
+The rule lives in the repository update, so the frozen v1 source update applies it too.
+A poll cycle re-reads each source just before polling it, so an edit made earlier in
+the cycle is honored; a source whose row cannot be read is skipped until the next cycle. A poll already running during the reset cannot write the old
+upstream's marker back: the poll stores its next marker only if the source's marker,
+connection and source configuration, and the connection's upstream (its linked
+Requests integration, or its base URL when unlinked), still match what the poll
+started from. Otherwise it skips the
+write without an error, leaves `last_run_at` and `last_error` as they were (so the next
+cycle polls the new upstream without waiting for the interval), records its starting
+marker as the event's `marker_after` with a note that the marker was not stored, and
+the next poll starts from the reset marker.
+
 Configuration keys/values, connection and label are normalized as in the bridge.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider
 validation. Creation does not create a webhook endpoint. Update returns existing
 webhook state with v2 callback URL projection; reveal failures can omit the URL.
+
+An enabled poll source whose resolved setup descriptor has `connection: required`
+must name a connection: create or update without one returns422 with a `required`
+error at `body.connection_id`. A disabled source may be saved without one, so a
+source stored before this check can still be switched off; enabling it then needs
+a server. When the descriptor cannot be resolved (the plugin is no longer
+installed, or discovery fails during an update) the write is not blocked. The
+frozen v1 source routes do not apply this check.
+
+At poll time, a source whose descriptor requires a connection and has none bound
+is not sent to its plugin; the source and its activity event record "No server
+selected. Edit the source and choose a server." An error a plugin returns over
+gRPC is stored as the status description (the plugin's own text) without the
+`rpc error: code = ... desc =` framing, whatever code the plugin chose. When the
+description is empty, `DeadlineExceeded` stores "Plugin timed out.", `Canceled`
+"Poll canceled.", `Unimplemented` "Plugin does not support polling for changes."
+and any other code `Plugin error: <code>`. Failures the host side produces carry
+transport detail rather than operator-useful text and get a fixed host message:
+the host's call deadline passing stores "Plugin timed out.", a canceled poll
+"Poll canceled.", and every `Unavailable` status "Plugin unavailable.", because
+grpc-go returns that code when the plugin process is gone and it cannot be told
+apart from a plugin-chosen one. A plugin reporting an unreachable upstream server
+should use another code. Failures in host code before the call, such as a
+disabled or stopped plugin, are stored as the host's error text. The full error
+is logged on the server.
 
 Missing source or connection returns404; invalid configuration422; missing dependency503;
 private failures500 with uncertain completion. Both operations are non_retryable.
@@ -2901,3 +3113,37 @@ out-of-range numeric query parameters instead of rejecting them. Those routes ar
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
 against `/api/v2`.
+
+### Account and permission audit details (v2)
+
+Successful v2 administrator account and access-group mutations record an audit
+row in the mutation transaction. Actions are `user.created`, `user.updated`,
+`user.deleted`, `access_group.created`, `access_group.updated`, and
+`access_group.deleted`. `target_type` and `target_id` identify the affected
+entity; `user_id` identifies the authenticated subject, and a present
+`impersonator_user_id` identifies the acting administrator. Actor filters use
+`COALESCE(impersonator_user_id, user_id)`.
+
+`changes` lists changed allowlisted identity/policy fields. `before` and `after`
+are optional strings containing canonical JSON values: JSON null represents an
+unset account override, while an absent side represents creation/deletion.
+A password change includes only `{ "field": "password" }`; passwords, hashes,
+tokens, arbitrary request bodies and headers are excluded. Permission arrays
+show the exact prior and resulting membership. Rollbacks record no successful
+domain action, and a repeated identical policy write has no change details.
+
+Audit history and live streams accept `action`, `actor_user_id`, `target_type`,
+and `target_id` alongside existing filters. History cursors bind these filters.
+`GET /api/v2/admin/logs/ws/capabilities` advertises `audit_change_details` and
+`audit_actions`. Historical request rows continue to have no domain details.
+Live rows publish after commit; history remains authoritative if a frame is
+missed. Existing live delivery does not promise gap-free or late-commit traversal.
+The frozen v1 read/socket projections retain their previous fields.
+
+Audit detail index readiness: the additive migration creates metadata-only
+partitioned indexes for action and target filters. Primary API startup and
+`--migrate-only` build historical leaf indexes concurrently and attach them before
+reporting readiness. A failed or canceled build leaves startup incomplete and is
+safe to retry; ordinary request writers remain available on existing API nodes.
+Future partitions inherit the completed parent indexes. Proxy/transcode nodes do
+not run this schema maintenance.

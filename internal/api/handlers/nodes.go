@@ -170,7 +170,23 @@ func (h *NodeHandler) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list nodes")
 		return
 	}
-	writeJSON(w, http.StatusOK, nodes)
+	v1 := make([]*nodepool.Node, len(nodes))
+	for i, n := range nodes {
+		v1[i] = v1Node(n)
+	}
+	writeJSON(w, http.StatusOK, v1)
+}
+
+// v1Node returns a copy of n without the fields added after /api/v1 froze.
+// Only /api/v2 reads and writes the prepared-download storage overrides.
+func v1Node(n *nodepool.Node) *nodepool.Node {
+	if n == nil {
+		return nil
+	}
+	c := *n
+	c.DownloadArtifactDirOverride = nil
+	c.DownloadArtifactMaxBytesOverride = nil
+	return &c
 }
 
 // overlayAdvertisedHashes copies each node's last advertised capability hash
@@ -226,7 +242,7 @@ func (h *NodeHandler) HandleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, node)
+	writeJSON(w, http.StatusCreated, v1Node(node))
 	h.reloadPools(r.Context())
 }
 
@@ -243,6 +259,8 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	// The storage overrides are v2-only; v1 ignores them as it always has.
+	input.DownloadArtifactDirOverride, input.DownloadArtifactMaxBytesOverride = nil, nil
 
 	// Read the row before the write so the nudge below can tell a real policy
 	// change from a resubmit: the admin form posts every field on each save, so
@@ -273,7 +291,7 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, node)
+	writeJSON(w, http.StatusOK, v1Node(node))
 	// Order matters: the node has to adopt its policy before this server starts
 	// dispatching under it. reloadPools publishes the updated row, and
 	// EffectiveHWAccel then names its backend on every start request; the node

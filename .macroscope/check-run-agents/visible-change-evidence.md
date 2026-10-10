@@ -52,8 +52,16 @@ Find the `## Evidence` section of the PR body. For a visible change, it passes w
 - evidence that matches the change: a UI change needs screenshots or a recording, not only API
   output; a change to which items appear or their order needs a before and an after of the same
   query, screen, or section;
+- for web app or web admin UI under `web/src/`, desktop and mobile web when the change is also
+  visible at phone width: desktop-only screenshots are incomplete unless the PR shows mobile is
+  unaffected;
 - a recording when the change is about motion, timing, focus movement, or a multi-step flow;
 - the surface and build or commit the captures came from.
+
+Evidence on `evidence.siloserver.org` is private, and you cannot open it. For a section that links
+a page there, count the link as evidence, do not ask for the surface or build in the body, and
+list what the page should show so the reviewer can check it, such as desktop and mobile web
+captures for a web change.
 
 An explanation of why evidence could not be captured is acceptable; report it so the reviewer can
 decide, and do not count it as a pass.

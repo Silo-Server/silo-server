@@ -150,6 +150,7 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		"unverified profile": {access.ErrProfileUnverified, http.StatusForbidden, "profile_unverified", ""},
 		"unknown profile":    {access.ErrProfileNotFound, http.StatusNotFound, "not_found", ""},
 		"resolver failure":   {errors.New("boom"), http.StatusInternalServerError, "internal_error", ""},
+		"policy timeout":     {errPolicyEvalTimeout, http.StatusServiceUnavailable, CodeServiceUnavailable, ReasonViewerAccessUnavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -180,7 +181,7 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/x", nil)
 		r = r.WithContext(SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s"}))
 		rec := newReasonWriter()
-		RequireActingAdmin(nil)(ok).ServeHTTP(rec, r)
+		RequireActingAdmin(nil, nil)(ok).ServeHTTP(rec, r)
 		got := decodeDenial(t, rec)
 		if rec.Code != http.StatusForbidden || got.Error != "forbidden" {
 			t.Fatalf("%d %q", rec.Code, got.Error)

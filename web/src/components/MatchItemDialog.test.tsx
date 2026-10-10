@@ -1,5 +1,6 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
@@ -233,5 +234,79 @@ describe("MatchItemDialog", () => {
     expect(markup).toContain("Inception (2010)/");
     expect(markup).toContain("Inception.4K.mkv");
     expect(markup).toContain("2160p");
+  });
+});
+
+describe("MatchItemDialog apply", () => {
+  const item = { content_id: "local-abc", title: "The Office", year: 0, type: "series" as const };
+  const applyMutate = vi.fn();
+
+  beforeEach(() => {
+    applyMutate.mockReset();
+    mocks.useSearchItemMatchCandidates.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      data: {
+        candidates: [
+          {
+            title: "The Office",
+            year: 2001,
+            content_type: "series",
+            overview: "",
+            image_url: "",
+            provider_ids: { tvdb: "78107" },
+            sources: ["tvdb"],
+            agreement_hints: [],
+          },
+        ],
+      },
+    });
+    mocks.useApplyItemMatch.mockReturnValue({ mutate: applyMutate, isPending: false });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("hands onReplaced to the apply mutation and closes on success", () => {
+    const onOpenChange = vi.fn();
+    const onReplaced = vi.fn();
+    render(
+      <MatchItemDialog item={item} open onOpenChange={onOpenChange} onReplaced={onReplaced} />,
+    );
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+
+    const [variables, options] = applyMutate.mock.calls[0] as [
+      {
+        item: typeof item;
+        providerIds: Record<string, string>;
+        onReplaced: (contentID: string) => void;
+      },
+      { onSuccess: () => void },
+    ];
+    expect(variables).toMatchObject({ item, providerIds: { tvdb: "78107" } });
+    options.onSuccess();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // The page keys the dialog by content ID, so following the new ID unmounts
+  // it before the per-call onSuccess runs; the dialog has to close first.
+  it("closes before following a moved item", () => {
+    const calls: string[] = [];
+    const onOpenChange = vi.fn((open: boolean) => calls.push(`open:${open}`));
+    const onReplaced = vi.fn((contentID: string) => {
+      calls.push(`replaced:${contentID}`);
+    });
+    render(
+      <MatchItemDialog item={item} open onOpenChange={onOpenChange} onReplaced={onReplaced} />,
+    );
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+
+    const [variables] = applyMutate.mock.calls[0] as [{ onReplaced: (contentID: string) => void }];
+    variables.onReplaced("series-tvdb-78107");
+    expect(calls).toEqual(["open:false", "replaced:series-tvdb-78107"]);
   });
 });
