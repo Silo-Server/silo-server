@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // ErrSessionNotFound is returned when a compat session does not exist.
@@ -15,6 +18,7 @@ var ErrSessionNotFound = errors.New("compat session not found")
 
 type sessionPersistence interface {
 	Upsert(ctx context.Context, session Session) error
+	UpdateByToken(ctx context.Context, session Session) error
 	GetByToken(ctx context.Context, token string, now time.Time) (*Session, error)
 	DeleteByToken(ctx context.Context, token string) error
 }
@@ -39,9 +43,11 @@ type Session struct {
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]Session
-	ttl      time.Duration
-	now      func() time.Time
-	repo     sessionPersistence
+	// evictions counts EvictUser calls; see cache.
+	evictions uint64
+	ttl       time.Duration
+	now       func() time.Time
+	repo      sessionPersistence
 }
 
 // NewSessionStore creates a new in-memory session store.
@@ -89,100 +95,143 @@ func (s *SessionStore) Put(session Session) error {
 
 // Get returns a compat session when it exists and is not expired.
 // If the session's remaining lifetime is less than half the configured TTL,
-// ExpiresAt is extended by the full TTL (sliding window).
+// ExpiresAt is extended by the full TTL (sliding window). A persistent store
+// that cannot be read reports the session as missing; callers that must tell
+// the two apart use Lookup.
 func (s *SessionStore) Get(token string) (*Session, bool) {
+	session, err := s.Lookup(context.Background(), token)
+	if err != nil {
+		if !errors.Is(err, ErrSessionNotFound) {
+			slog.Warn("jellycompat session store load failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		}
+		return nil, false
+	}
+	return session, true
+}
+
+// Lookup is Get that reports why no session came back: ErrSessionNotFound
+// for a token with no live session (or one whose stored tokens cannot be
+// decrypted), any other error for a persistent store that could not be read,
+// which judges nothing about the token.
+func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[token]
+	evictions := s.evictions
 	s.mu.RUnlock()
 	if ok {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 			s.Delete(token)
-			return nil, false
+			return nil, ErrSessionNotFound
 		}
-		s.maybeExtendSession(&session, token)
+		if err := s.maybeExtendSession(&session, token, evictions); err != nil {
+			return nil, err
+		}
 		sessionCopy := session
-		return &sessionCopy, true
+		return &sessionCopy, nil
 	}
 
-	if s.repo == nil {
-		return nil, false
+	// A token Postgres cannot take as text (invalid UTF-8 or a NUL byte)
+	// matches no session; querying with it would fail like an outage.
+	if s.repo == nil || !auth.ValidTextKey(token) {
+		return nil, ErrSessionNotFound
 	}
 
-	persisted, err := s.repo.GetByToken(context.Background(), token, s.now())
+	persisted, err := s.repo.GetByToken(ctx, token, s.now())
+	if errors.Is(err, errSessionUnreadable) {
+		slog.WarnContext(ctx, "jellycompat session cannot be decrypted; treating it as signed out", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		return nil, ErrSessionNotFound
+	}
 	if err != nil {
-		if !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store load failed", "token", token, "error", err)
-		}
-		return nil, false
+		return nil, err
 	}
 
-	s.maybeExtendSession(persisted, token)
-
-	s.mu.Lock()
-	s.sessions[token] = *persisted
-	s.mu.Unlock()
+	if err := s.maybeExtendSession(persisted, token, evictions); err != nil {
+		return nil, err
+	}
+	s.cache(token, *persisted, evictions)
 
 	sessionCopy := *persisted
-	return &sessionCopy, true
+	return &sessionCopy, nil
 }
 
-// maybeExtendSession extends the session's ExpiresAt if more than half the TTL has elapsed.
-func (s *SessionStore) maybeExtendSession(session *Session, token string) {
+// maybeExtendSession extends the session's ExpiresAt if more than half the TTL
+// has elapsed. The stored row is updated, never re-created: when it is gone,
+// the session was signed out, possibly by an account-wide revocation this
+// replica has not evicted yet, so the copy is dropped and ErrSessionNotFound
+// returned. Any other store error keeps the session and is only logged.
+func (s *SessionStore) maybeExtendSession(session *Session, token string, evictions uint64) error {
 	if s.ttl <= 0 || session.ExpiresAt.IsZero() {
-		return
+		return nil
 	}
 	remaining := session.ExpiresAt.Sub(s.now())
 	if remaining >= s.ttl/2 {
-		return
+		return nil
 	}
 	session.ExpiresAt = s.now().Add(s.ttl)
 
-	s.mu.Lock()
-	s.sessions[token] = *session
-	s.mu.Unlock()
-
 	if s.repo != nil {
-		if err := s.repo.Upsert(context.Background(), *session); err != nil {
-			slog.Warn("jellycompat session store extend failed", "token", token, "error", err)
+		err := s.repo.UpdateByToken(context.Background(), *session)
+		if errors.Is(err, ErrSessionNotFound) {
+			s.uncache(token)
+			return ErrSessionNotFound
+		}
+		if err != nil {
+			slog.Warn("jellycompat session store extend failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
+	s.cache(token, *session, evictions)
+	return nil
+}
+
+// cache stores a session read when EvictUser had run evictions times. If it
+// has run since, the copy may predate the revocation that evicted the
+// account, so it is left out and the next request reads the stored row.
+func (s *SessionStore) cache(token string, session Session, evictions uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.evictions == evictions {
+		s.sessions[token] = session
+	}
+}
+
+func (s *SessionStore) uncache(token string) {
+	s.mu.Lock()
+	delete(s.sessions, token)
+	s.mu.Unlock()
 }
 
 // Delete removes a compat session.
 func (s *SessionStore) Delete(token string) {
-	s.mu.Lock()
-	delete(s.sessions, token)
-	s.mu.Unlock()
+	s.uncache(token)
 	if s.repo != nil {
 		if err := s.repo.DeleteByToken(context.Background(), token); err != nil && !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store delete failed", "token", token, "error", err)
+			slog.Warn("jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
 }
 
-// DeleteByUserID removes all compat sessions for a given Silo user ID.
-func (s *SessionStore) DeleteByUserID(userID int) {
+// EvictUser drops a Silo account's compat sessions from this store's memory.
+// Signing an account out deletes its stored sessions in the revoking
+// transaction (auth.RevokeSignInsInTransaction); each replica then calls
+// EvictUser so the copies it already loaded stop working too.
+func (s *SessionStore) EvictUser(userID int) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evictions++
 	for token, session := range s.sessions {
 		if session.StreamAppUserID == userID {
 			delete(s.sessions, token)
 		}
 	}
-	s.mu.Unlock()
-	if s.repo != nil {
-		if repo, ok := s.repo.(*SessionRepository); ok {
-			if _, err := repo.DeleteByUserID(context.Background(), userID); err != nil {
-				slog.Warn("jellycompat session store delete by user failed", "user_id", userID, "error", err)
-			}
-		}
-	}
 }
 
-// Update modifies a compat session in place.
+// Update modifies a compat session in place. It returns ErrSessionNotFound
+// when the stored row is gone, even if this replica still caches a copy.
 func (s *SessionStore) Update(token string, fn func(*Session) error) error {
-	s.mu.Lock()
+	s.mu.RLock()
 	session, ok := s.sessions[token]
-	s.mu.Unlock()
+	evictions := s.evictions
+	s.mu.RUnlock()
 
 	if !ok && s.repo != nil {
 		persisted, err := s.repo.GetByToken(context.Background(), token, s.now())
@@ -208,13 +257,14 @@ func (s *SessionStore) Update(token string, fn func(*Session) error) error {
 	}
 
 	if s.repo != nil {
-		if err := s.repo.Upsert(context.Background(), session); err != nil {
+		if err := s.repo.UpdateByToken(context.Background(), session); err != nil {
+			if errors.Is(err, ErrSessionNotFound) {
+				s.uncache(token)
+			}
 			return err
 		}
 	}
 
-	s.mu.Lock()
-	s.sessions[token] = session
-	s.mu.Unlock()
+	s.cache(token, session, evictions)
 	return nil
 }

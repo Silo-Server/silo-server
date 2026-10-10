@@ -1,0 +1,3 @@
+{
+  "authorize_url": "https://sso.example.test/authorize?prompt=login&redirect_uri=https%3A%2F%2Fsilo.example.test%2Fapi%2Fv2%2Fauth%2Foauth%2F3%2Fcallback&next=%2Fsettings%2Faccount"
+}

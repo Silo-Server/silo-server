@@ -105,18 +105,21 @@ func TestEncodedOutputConditionsDoNotUseSourceCodecFacts(t *testing.T) {
 
 func TestPlaybackBitrateResolutionDoesNotUpscale(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		height     int
-		resolution string
+		name          string
+		width, height int
+		resolution    string
 	}{
-		{"smaller source", 480, ""},
-		{"matching source", 720, ""},
-		{"larger source", 1080, "720p"},
-		{"unknown source", 0, "720p"},
+		{"smaller source", 854, 480, ""},
+		{"matching source", 1280, 720, ""},
+		{"larger source", 1920, 1080, "720p"},
+		{"scope source keeps its shape", 1920, 800, "532p"},
+		{"unknown source", 0, 0, "720p"},
+		{"height known, width not, fits", 0, 480, ""},
+		{"height known, width not, too tall", 0, 1080, "720p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			version := testCompatVersion()
-			version.VideoTracks[0].Height = tc.height
+			version.VideoTracks[0].Width, version.VideoTracks[0].Height = tc.width, tc.height
 			h := &PlaybackHandler{codec: NewResourceIDCodec()}
 			source := h.buildPlaybackSource("item", "play", version, DefaultDeviceProfile(), playbackInfoRequest{MaxStreamingBitrate: 4000000}, true)
 			if !source.SupportsTranscoding || source.TargetResolution != tc.resolution {

@@ -17,7 +17,7 @@ import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
-import { controlKindFor, optionsFor } from "@/lib/settingsDisplay";
+import { controlKindFor, formatSettingValue, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
 
 const EMPTY_SELECT_VALUE = "__empty__";
@@ -38,6 +38,13 @@ export interface DeviceSettingGroupsProps {
    * the device already stores a value, which must stay clearable.
    */
   devicePlatform?: string;
+  /**
+   * Values the device stores for keys whose profile value outranks the
+   * device's own (ui.title_art's "apply to all devices"). The effective answer
+   * names only the profile row then, so a retained device row needs this to
+   * stay visible and resettable.
+   */
+  storedOnDevice?: Partial<Record<SettingKey, unknown>>;
   disabled?: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
   onReset: (key: SettingKey) => void;
@@ -50,16 +57,18 @@ export function DeviceSettingGroups({
   keys,
   ownerLabel,
   devicePlatform,
+  storedOnDevice,
   disabled = false,
   onChange,
   onReset,
   onOpenPanel,
 }: DeviceSettingGroupsProps) {
-  const storedHere = new Set(
-    (Object.keys(settings) as SettingKey[]).filter(
+  const storedHere = new Set([
+    ...(Object.keys(settings) as SettingKey[]).filter(
       (key) => settings[key]?.scope === "profile_device",
     ),
-  );
+    ...(Object.keys(storedOnDevice ?? {}) as SettingKey[]),
+  ]);
   return (
     <div className="space-y-4">
       {groupDeviceSettings(keys, {
@@ -72,6 +81,7 @@ export function DeviceSettingGroups({
               key={key}
               settingKey={key}
               effective={settings[key]}
+              storedOnDevice={storedOnDevice}
               ownerLabel={ownerLabel}
               disabled={disabled}
               onChange={onChange}
@@ -88,6 +98,7 @@ export function DeviceSettingGroups({
 interface DeviceSettingRowProps {
   settingKey: SettingKey;
   effective: EffectiveSetting | undefined;
+  storedOnDevice: Partial<Record<SettingKey, unknown>> | undefined;
   ownerLabel: string;
   disabled: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
@@ -98,6 +109,7 @@ interface DeviceSettingRowProps {
 function DeviceSettingRow({
   settingKey,
   effective,
+  storedOnDevice,
   ownerLabel,
   disabled,
   onChange,
@@ -107,82 +119,131 @@ function DeviceSettingRow({
   const definition = SETTING_DEFINITIONS[settingKey];
   if (!definition) return null;
 
+  // A key that resolves its profile value first (ui.title_art's "apply to all
+  // devices") ignores device values while one is set, so a device edit here
+  // would save without effect.
+  const profileWide =
+    effective?.source === "profile" && definition.resolutionOrder[0] === "profile";
+  // The device row the profile value passes over is still stored, still
+  // counted as a change, and still this device's choice once the profile
+  // value goes.
+  const retainedHere = profileWide && storedOnDevice !== undefined && settingKey in storedOnDevice;
   // "Changed here" means a row exists at this exact device, which is also what
   // makes the reset meaningful — reset clears that row rather than copying the
   // profile value into it.
-  const changedHere = effective?.scope === "profile_device";
+  const changedHere = effective?.scope === "profile_device" || retainedHere;
   const locked = effective?.constraint_kind === "locked";
   const constrained = Boolean(effective?.constrained);
+  // Where an unchanged row's value comes from. Skipped when the profile-wide
+  // note already says so, and under a household limit, where the value shown
+  // is the limit's (the badge names it) while `source` still names the choice
+  // the limit capped.
+  const inheritedFrom =
+    changedHere || profileWide || constrained ? null : sourceLabel(effective, ownerLabel);
   const value = effective?.value ?? definition.defaultValue;
   const inlineControl = controlKindFor(definition) === "switch";
 
   return (
-    <div
-      className={cn(
-        "border-border/50 grid gap-3 border-t pt-4 first:border-t-0 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center",
-        // A switch fits beside its label even at 360px, and keeping it there
-        // saves a whole row on each of the ~18 toggles this screen renders.
-        // Wider controls still drop below, where they have room.
-        inlineControl && "grid-cols-[minmax(0,1fr)_auto] items-center",
-      )}
-    >
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">{definition.label}</span>
-          {changedHere ? (
-            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] text-amber-300 uppercase">
-              Changed here
-            </span>
-          ) : null}
-          {constrained ? (
-            <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] uppercase">
-              <Lock className="h-2.5 w-2.5" />
-              Household limit
-            </span>
-          ) : null}
-        </div>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
-          {definition.description}
-        </p>
-        {constrained ? (
-          <p className="text-[12.5px] leading-relaxed text-amber-300/90">
-            {constraintExplanation(effective)}
-          </p>
-        ) : null}
-      </div>
-
+    // The row sizes itself by its own width, not the viewport's: from xl up the
+    // settings sit in a pane beside the device list, so a 1440px window leaves
+    // a row about 360px wide. Measured against the viewport, the label column
+    // shrank to a few words per line beside a 220px select.
+    <div className="border-border/50 @container border-t pt-4 first:border-t-0 first:pt-0">
       <div
         className={cn(
-          "flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap sm:justify-end",
-          inlineControl && "justify-end",
+          "grid gap-3 @lg:grid-cols-[minmax(0,1fr)_auto] @lg:items-center",
+          // A switch fits beside its label even at 360px, and keeping it there
+          // saves a whole row on each of the ~18 toggles this screen renders.
+          // Wider controls drop below until the row has room for both.
+          inlineControl && "grid-cols-[minmax(0,1fr)_auto] items-center",
         )}
       >
-        {changedHere && !locked ? (
-          <button
-            type="button"
-            onClick={() => onReset(settingKey)}
-            disabled={disabled}
-            className={cn(
-              "text-muted-foreground hover:text-foreground order-2 inline-flex min-h-11 shrink-0 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:order-none sm:min-h-0 sm:text-xs",
-              // Inline rows have no room beside the switch; the reset sits
-              // under the description instead.
-              inlineControl && "col-start-1 row-start-2 -mt-1 sm:col-auto sm:row-auto sm:mt-0",
-            )}
-          >
-            <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-            Use {ownerLabel} setting
-          </button>
-        ) : null}
-        <DeviceSettingControl
-          settingKey={settingKey}
-          effective={effective}
-          value={value}
-          disabled={disabled || locked}
-          onChange={onChange}
-          onOpenPanel={onOpenPanel}
-        />
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{definition.label}</span>
+            {changedHere ? (
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] text-amber-300 uppercase">
+                Changed here
+              </span>
+            ) : null}
+            {inheritedFrom ? (
+              <span className="text-muted-foreground text-xs">{inheritedFrom}</span>
+            ) : null}
+            {constrained ? (
+              <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] uppercase">
+                <Lock className="h-2.5 w-2.5" />
+                Household limit
+              </span>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            {definition.description}
+          </p>
+          {constrained ? (
+            <p className="text-[12.5px] leading-relaxed text-amber-300/90">
+              {constraintExplanation(effective)}
+            </p>
+          ) : null}
+          {profileWide ? (
+            <p className="text-muted-foreground text-[12.5px] leading-relaxed">
+              {retainedHere
+                ? `Set for all devices on this profile, so this device's own choice (${retainedValueLabel(settingKey, storedOnDevice?.[settingKey])}) isn't used right now. `
+                : "Set for all devices on this profile. "}
+              Turn off &ldquo;Apply to all devices&rdquo; to choose per device.
+            </p>
+          ) : null}
+          {/* Under the description rather than beside the control, so it never
+              takes width from either. */}
+          {changedHere && !locked ? (
+            <button
+              type="button"
+              onClick={() => onReset(settingKey)}
+              disabled={disabled}
+              className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0 sm:pt-0.5 sm:text-xs"
+            >
+              <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+              Use {ownerLabel} setting
+            </button>
+          ) : null}
+        </div>
+
+        <div className={cn("flex items-center", inlineControl ? "justify-end" : "@lg:justify-end")}>
+          <DeviceSettingControl
+            settingKey={settingKey}
+            effective={effective}
+            value={value}
+            disabled={disabled || locked || profileWide}
+            onChange={onChange}
+            onOpenPanel={onOpenPanel}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Names where a value not stored on this device comes from.
+ *
+ * Asked for one device without a library or series, the server can only
+ * answer from the profile or the default for the keys this screen shows.
+ * Anything else it might name is left unlabelled rather than guessed at.
+ */
+function sourceLabel(effective: EffectiveSetting | undefined, ownerLabel: string): string | null {
+  switch (effective?.source) {
+    case "profile":
+      return `From ${ownerLabel} profile`;
+    case "default":
+      return "App default";
+    default:
+      return null;
+  }
+}
+
+function retainedValueLabel(settingKey: SettingKey, value: unknown): string {
+  return formatSettingValue(
+    settingKey,
+    value === null || value === undefined ? null : String(value),
   );
 }
 
@@ -234,7 +295,7 @@ function DeviceSettingControl({
         variant="outline"
         disabled={disabled}
         onClick={() => onOpenPanel?.(settingKey)}
-        className="order-1 min-h-11 w-full sm:order-none sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
+        className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm @lg:w-auto"
       >
         Change how they look
       </Button>
@@ -243,8 +304,9 @@ function DeviceSettingControl({
 
   if (control === "switch") {
     return (
-      <span className="order-1 flex min-h-11 items-center sm:order-none sm:min-h-0">
+      <span className="flex min-h-11 items-center sm:min-h-0">
         <Switch
+          aria-label={definition.label}
           checked={value === true}
           disabled={disabled}
           onCheckedChange={(checked) => onChange(settingKey, checked)}
@@ -257,7 +319,7 @@ function DeviceSettingControl({
     const numeric = typeof value === "number" ? value : Number(definition.defaultValue ?? 0);
     return (
       <SettingSlider
-        className="order-1 flex w-full items-center gap-3 sm:order-none sm:max-w-[260px]"
+        className="flex w-full items-center gap-3 @lg:w-[260px]"
         value={numeric}
         min={definition.minimum}
         max={definition.maximum}
@@ -283,7 +345,7 @@ function DeviceSettingControl({
       (option) => !permitted?.length || permitted.some((entry) => String(entry) === option.value),
     );
     return (
-      <div className="order-1 w-full sm:order-none sm:w-[220px] sm:min-w-[180px]">
+      <div className="w-full @lg:w-[220px]">
         <LanguageSelect
           aria-label={definition.label}
           value={asString === "" ? EMPTY_SELECT_VALUE : asString}
@@ -318,9 +380,7 @@ function DeviceSettingControl({
       >
         <SelectTrigger
           aria-label={definition.label}
-          className={cn(
-            "order-1 h-11 w-full text-base sm:order-none sm:h-9 sm:w-[220px] sm:min-w-[180px] sm:text-sm",
-          )}
+          className={cn("h-11 w-full text-base sm:h-9 sm:text-sm @lg:w-[220px]")}
         >
           <SelectValue />
         </SelectTrigger>
@@ -351,9 +411,7 @@ function DeviceSettingControl({
     >
       <SelectTrigger
         aria-label={definition.label}
-        className={cn(
-          "order-1 h-11 w-full text-base sm:order-none sm:h-9 sm:w-[220px] sm:min-w-[180px] sm:text-sm",
-        )}
+        className={cn("h-11 w-full text-base sm:h-9 sm:text-sm @lg:w-[220px]")}
       >
         <SelectValue />
       </SelectTrigger>

@@ -2,10 +2,13 @@ package historyimport
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 type JellyfinProvider struct {
@@ -25,16 +28,23 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 	if err != nil {
 		return nil, nil, err
 	}
-	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
-	if err != nil {
-		return nil, nil, err
-	}
 	var warnings []string
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
+	// Resume positions are secondary to the played history: a slow or failing
+	// resume query must not discard it. Cancellation still ends the run.
+	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, err
+		}
+		slog.WarnContext(ctx, "jellyfin history import: resume positions unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
+		warnings = append(warnings, warnJellyfinResumeUnavailable)
+		resumable = nil
+	}
 	favorites, err := p.client.FetchItems(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes)
 	if err != nil {
-		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", err)
+		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
 		warnings = append(warnings, warnJellyfinFavoritesUnavailable)
 		favorites = nil
 	}
@@ -51,7 +61,7 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		return ok
 	})
 	if extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries); err != nil {
-		slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", err)
+		slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
 		warnings = append(warnings, warnJellyfinFavoriteSeriesUnavailable)
 	} else {
 		maps.Copy(seriesMeta, extra)
@@ -78,6 +88,21 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		records = append(records, record)
 	}
 	return records, warnings, nil
+}
+
+func jellyfinWarningLogError(err error) string {
+	return warningLogError("jellyfin", err)
+}
+
+// warningLogError renders a non-fatal fetch error from source for the log. An
+// HTTP error keeps only its status: its body is up to 2 KB of server text that
+// can echo credentials in forms logredact.SanitizeText doesn't recognize, such
+// as JSON-escaped quotes.
+func warningLogError(source string, err error) string {
+	if status := UpstreamHTTPStatus(err); status != 0 {
+		return fmt.Sprintf("%s http %d", source, status)
+	}
+	return logredact.SanitizeText(logredact.SanitizeURLError(err).Error())
 }
 
 func (p *JellyfinProvider) fetchSeriesMetadata(ctx context.Context, items []jellyfinItem) (map[string]jellyfinItem, error) {

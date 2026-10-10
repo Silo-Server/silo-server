@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -15,6 +19,7 @@ import (
 type scanStateFile struct {
 	ID                     int
 	ContentID              string
+	EpisodeID              string
 	ExtraID                string
 	CanonicalRootPath      string
 	ObservedRootPath       string
@@ -45,6 +50,7 @@ type scanStateFile struct {
 	MultiEpisodeEnd        int
 	ProbeSource            string
 	ProbeUpdatedAt         *time.Time
+	ProbeFailedAt          *time.Time
 	MissingSince           *time.Time
 	HasVideoTracks         bool
 	HasNonImageVideoTracks bool
@@ -54,7 +60,7 @@ type scanStateFile struct {
 	ExternalSubtitlePaths  []string
 }
 
-const scanStateColumns = `id, content_id, extra_id,
+const scanStateColumns = `id, content_id, episode_id, extra_id,
 	canonical_root_path, observed_root_path, content_group_key, group_key_version,
 	base_title, base_year, base_type, identity_confidence, identity_json,
 	file_path, file_size, file_modified_at, file_hash,
@@ -62,7 +68,7 @@ const scanStateColumns = `id, content_id, extra_id,
 	edition_raw, edition_key, edition_confidence, edition_source,
 	presentation_kind, presentation_group_key, presentation_part_index,
 	multi_episode_start, multi_episode_end,
-	probe_source, probe_updated_at, missing_since,
+	probe_source, probe_updated_at, probe_failed_at, missing_since,
 	COALESCE(jsonb_typeof(video_tracks) = 'array' AND jsonb_array_length(video_tracks) > 0, FALSE) AS has_video_tracks,
 	COALESCE((
 		SELECT bool_or(lower(btrim(COALESCE(track->>'codec', ''))) NOT IN ('mjpeg', 'jpeg', 'png', 'webp', 'gif', 'bmp'))
@@ -87,7 +93,7 @@ const scanStateColumns = `id, content_id, extra_id,
 
 func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var state scanStateFile
-	var contentID *string
+	var contentID, episodeID *string
 	var extraID *string
 	var canonicalRootPath, observedRootPath, contentGroupKey, baseTitle, baseType *string
 	var groupKeyVersion, baseYear *int
@@ -107,6 +113,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	if err := row.Scan(
 		&state.ID,
 		&contentID,
+		&episodeID,
 		&extraID,
 		&canonicalRootPath,
 		&observedRootPath,
@@ -137,6 +144,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		&multiEpisodeEnd,
 		&probeSource,
 		&state.ProbeUpdatedAt,
+		&state.ProbeFailedAt,
 		&state.MissingSince,
 		&state.HasVideoTracks,
 		&state.HasNonImageVideoTracks,
@@ -150,6 +158,9 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 
 	if contentID != nil {
 		state.ContentID = *contentID
+	}
+	if episodeID != nil {
+		state.EpisodeID = *episodeID
 	}
 	if extraID != nil {
 		state.ExtraID = *extraID
@@ -267,15 +278,51 @@ func (r *FileRepository) GetScanStateByFolder(ctx context.Context, folderID int)
 // GetScanStateByFolderAndPathPrefix returns lightweight scan-state rows for a
 // folder subtree.
 func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*scanStateFile, error) {
-	query := `SELECT ` + scanStateColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	query, args := folderPathPrefixQuery(scanStateColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying scan state by folder and path prefix: %w", err)
 	}
 	return scanScanStateRows(rows)
+}
+
+// ListMembershipTargets returns the distinct content and episode IDs linked to
+// files at or beneath pathPrefix in a folder. With includeMissing it also
+// returns the links of every missing file in the folder, so their membership
+// and orphan checks run before a folder-wide trash sweep deletes those rows.
+func (r *FileRepository) ListMembershipTargets(ctx context.Context, folderID int, pathPrefix string, includeMissing bool) ([]string, []string, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT content_id, episode_id FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)`
+	if includeMissing {
+		query += `
+		UNION
+		SELECT content_id, episode_id FROM media_files
+		WHERE media_folder_id = $1 AND missing_since IS NOT NULL`
+	}
+	rows, err := r.pool.Query(ctx, query, append([]any{folderID}, args...)...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("querying membership targets: %w", err)
+	}
+	defer rows.Close()
+	contentIDs := make(map[string]struct{})
+	episodeIDs := make(map[string]struct{})
+	for rows.Next() {
+		var contentID, episodeID *string
+		if err := rows.Scan(&contentID, &episodeID); err != nil {
+			return nil, nil, fmt.Errorf("scanning membership target: %w", err)
+		}
+		if contentID != nil && *contentID != "" {
+			contentIDs[*contentID] = struct{}{}
+		}
+		if episodeID != nil && *episodeID != "" {
+			episodeIDs[*episodeID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterating membership targets: %w", err)
+	}
+	return slices.Sorted(maps.Keys(contentIDs)), slices.Sorted(maps.Keys(episodeIDs)), nil
 }
 
 func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
@@ -286,6 +333,7 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 	return &scanStateFile{
 		ID:                     file.ID,
 		ContentID:              file.ContentID,
+		EpisodeID:              file.EpisodeID,
 		ExtraID:                file.ExtraID,
 		CanonicalRootPath:      file.CanonicalRootPath,
 		ObservedRootPath:       file.ObservedRootPath,
@@ -316,6 +364,7 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 		MultiEpisodeEnd:        file.MultiEpisodeEnd,
 		ProbeSource:            file.ProbeSource,
 		ProbeUpdatedAt:         file.ProbeUpdatedAt,
+		ProbeFailedAt:          file.ProbeFailedAt,
 		MissingSince:           file.MissingSince,
 		HasVideoTracks:         len(file.VideoTracks) > 0,
 		HasNonImageVideoTracks: probeFacts.HasNonImageVideoTracks,

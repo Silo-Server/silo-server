@@ -145,6 +145,11 @@ type ResolvedSection struct {
 	Customized  bool            `json:"customized"`
 	Hidden      bool            `json:"hidden,omitempty"`
 
+	// DefaultTitle is the admin section's own title, before the profile's
+	// title override. Only ResolveForSettings fills it, and it is empty for a
+	// profile-built section. Not serialized: v1 bodies embed this struct.
+	DefaultTitle string `json:"-"`
+
 	// SuppressNextUp, when true on a continue-watching section, skips the
 	// next-up injection (and the combined series collapse/sort that pairs with
 	// it) so the section returns in-progress resume points only. Callers that

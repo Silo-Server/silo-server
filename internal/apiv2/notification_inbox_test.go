@@ -222,7 +222,7 @@ func TestNotificationDisplayCredentialScope(t *testing.T) {
 		"revoked": {UserID: 1, Role: "user", SessionID: "dead", ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
 		"deleted": {UserID: 1, Role: "user", SessionID: "live", ProfileID: "p-gone", TokenType: auth.TokenTypeApplePushDisplay},
 	}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"live": true}}, nil, nil)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"live": "user"}}, nil, nil)
 	h := NewHandler(deps)
 	displayPath := Prefix + "/notifications/push/apple/display/" + notificationFixtureID
 	for _, tc := range []struct {

@@ -53,6 +53,9 @@ type serviceFakeRepo struct {
 	ratingStates           []RatingSyncState
 	droppedStates          []DroppedSyncState
 	listMedia              map[string]LocalFavorite
+	mediaTitles            map[string]MediaTitles
+	mediaTitlesRelease     chan struct{} // when set, title lookups stall until it closes
+	mediaTitleLookups      [][]string
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
 	pendingReconciliations []ScrobbleSession
@@ -69,6 +72,13 @@ type serviceFakeRepo struct {
 	// sync lock; ratingLocks records each lock taken, with whether it waited.
 	ratingLockBusy map[string]bool
 	ratingLocks    []string
+	// tokenRefreshMu gives the token refresh lock its one-holder-at-a-time
+	// behavior. onTokenRefreshWait runs as a caller starts waiting for the
+	// lock; beforeTokenRefresh stands in for another holder that finishes just
+	// before this caller acquires it.
+	tokenRefreshMu     sync.Mutex
+	onTokenRefreshWait func()
+	beforeTokenRefresh func()
 	// upsertRatingErr fails UpsertRatingSyncStates when set.
 	upsertRatingErr error
 }
@@ -142,6 +152,22 @@ func (r *serviceFakeRepo) GetConnection(
 ) (Connection, bool, error) {
 	conn, ok := r.connections[connectionKey(provider, userID, profileID)]
 	return cloneConnectionForTest(conn), ok, nil
+}
+
+func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error) {
+	current, ok, err := r.GetConnectionByID(ctx, expected.ID)
+	if err != nil {
+		return Connection{}, err
+	}
+	if !ok {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(current, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	current = connectionWithTokens(current, storedTokens(updated))
+	current.LastError = updated.LastError
+	return r.UpsertConnection(ctx, current)
 }
 
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
@@ -588,6 +614,18 @@ func (r *serviceFakeRepo) WithRatingSyncLock(ctx context.Context, connectionID s
 	return true, fn(ctx)
 }
 
+func (r *serviceFakeRepo) WithTokenRefreshLock(ctx context.Context, _ string, fn func(context.Context) error) error {
+	if r.onTokenRefreshWait != nil {
+		r.onTokenRefreshWait()
+	}
+	r.tokenRefreshMu.Lock()
+	defer r.tokenRefreshMu.Unlock()
+	if r.beforeTokenRefresh != nil {
+		r.beforeTokenRefresh()
+	}
+	return fn(ctx)
+}
+
 func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
 	kept := r.ratingStates[:0]
 	for _, state := range r.ratingStates {
@@ -708,6 +746,32 @@ func (r *serviceFakeRepo) GetListMediaItems(_ context.Context, mediaItemIDs []st
 	return result, nil
 }
 
+func (r *serviceFakeRepo) GetMediaTitles(ctx context.Context, mediaItemIDs []string) (map[string]MediaTitles, error) {
+	r.scrobbleMu.Lock()
+	r.mediaTitleLookups = append(r.mediaTitleLookups, append([]string(nil), mediaItemIDs...))
+	r.scrobbleMu.Unlock()
+	if r.mediaTitlesRelease != nil {
+		select {
+		case <-r.mediaTitlesRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	result := make(map[string]MediaTitles, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if titles, ok := r.mediaTitles[id]; ok {
+			result[id] = titles
+		}
+	}
+	return result, nil
+}
+
+func (r *serviceFakeRepo) mediaTitleLookupCount() int {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	return len(r.mediaTitleLookups)
+}
+
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {
 	conns := make([]Connection, 0, len(r.scrobbleConnections))
 	for _, conn := range r.scrobbleConnections {
@@ -789,7 +853,10 @@ func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackS
 	return nil
 }
 
-func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
+func (r *serviceFakeRepo) UpdateScrobbleSession(ctx context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
@@ -876,6 +943,11 @@ type authProviderStub struct {
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
+	beforeRefresh func(context.Context, Connection) error
+	// refreshEntered, when set, receives once RefreshToken is called, which
+	// then waits for refreshRelease: a refresh in flight at the provider.
+	refreshEntered chan<- struct{}
+	refreshRelease <-chan struct{}
 }
 
 func (p *authProviderStub) Key() string {
@@ -918,8 +990,17 @@ func (p *authProviderStub) PollDeviceAuth(
 	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
 
-func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
+func (p *authProviderStub) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
+	if p.refreshEntered != nil {
+		p.refreshEntered <- struct{}{}
+		<-p.refreshRelease
+	}
 	p.refreshed = true
+	if p.beforeRefresh != nil {
+		if err := p.beforeRefresh(ctx, conn); err != nil {
+			return TokenSet{}, err
+		}
+	}
 	if p.refreshErr != nil {
 		return TokenSet{}, p.refreshErr
 	}
@@ -1010,6 +1091,8 @@ type watchedExporterStub struct {
 	exportErr    error
 	exportResult ExportResult
 	exported     *[]LocalPlay
+	remote       []RemotePlay
+	precision    time.Duration
 	key          string
 	source       userstore.WatchHistorySource
 }
@@ -1039,7 +1122,11 @@ func (p watchedExporterStub) Capabilities() Capabilities {
 }
 
 func (p watchedExporterStub) FetchHistory(context.Context, ServerConfig, Connection) ([]RemotePlay, error) {
-	return nil, nil
+	return p.remote, nil
+}
+
+func (p watchedExporterStub) HistoryTimePrecision() time.Duration {
+	return p.precision
 }
 
 func (p watchedExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
@@ -1755,23 +1842,10 @@ func TestServiceSyncConnectionRejectsBlankAccessToken(t *testing.T) {
 }
 
 func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
-	repo := newServiceFakeRepo()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(-time.Minute)
 	refreshedExpiresAt := now.Add(time.Hour)
-	provider := &authProviderStub{
-		refreshTokens: TokenSet{
-			AccessToken:    "new-access",
-			RefreshToken:   "new-refresh",
-			TokenExpiresAt: &refreshedExpiresAt,
-		},
-	}
-	reg := NewRegistry()
-	if err := reg.Register(provider); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	service := NewService(repo, reg)
-	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
 	conn := Connection{
 		ID:             "conn-1",
 		Provider:       "trakt",
@@ -1781,20 +1855,219 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 		RefreshToken:   testOldRefreshToken,
 		TokenExpiresAt: &expiresAt,
 	}
-	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
+	tests := []struct {
+		name string
+		// otherRefresher stores rotated tokens while the sync waits for the
+		// refresh lock. Trakt refresh tokens are single-use, so spending the
+		// old one again would be refused.
+		otherRefresher bool
+		wantRefresh    bool
+	}{
+		{name: "refreshes the expired token", wantRefresh: true},
+		{name: "uses tokens another refresher stored", otherRefresher: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			provider := &authProviderStub{
+				refreshTokens: TokenSet{
+					AccessToken:    "new-access",
+					RefreshToken:   "new-refresh",
+					TokenExpiresAt: &refreshedExpiresAt,
+				},
+			}
+			if tt.otherRefresher {
+				provider.refreshErr = errors.New("refresh token already spent")
+				repo.beforeTokenRefresh = func() {
+					stored := repo.connections[key]
+					stored.AccessToken, stored.RefreshToken, stored.TokenExpiresAt = "new-access", "new-refresh", &refreshedExpiresAt
+					repo.connections[key] = stored
+				}
+			}
+			reg := NewRegistry()
+			if err := reg.Register(provider); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			service := NewService(repo, reg)
+			service.now = func() time.Time { return now }
+			repo.connections[key] = conn
 
-	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
-		t.Fatalf("SyncConnection: %v", err)
+			if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
+				t.Fatalf("SyncConnection: %v", err)
+			}
+			if provider.refreshed != tt.wantRefresh {
+				t.Fatalf("provider refreshed = %v, want %v", provider.refreshed, tt.wantRefresh)
+			}
+			updated := repo.connections[key]
+			if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
+				t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+			}
+			if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
+				t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+			}
+		})
 	}
-	if !provider.refreshed {
-		t.Fatal("provider was not asked to refresh the expired token")
+}
+
+func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
+	for _, change := range []string{"disconnect", "reconnect", "account switch", "sync state"} {
+		t.Run(change, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+			conn := Connection{
+				ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+				ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+				RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
+				ExportWatchedEnabled: true, ScrobbleEnabled: true,
+			}
+			key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+			repo.connections[key] = conn
+			provider := &authProviderStub{refreshTokens: TokenSet{
+				AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour)),
+			}}
+			registry := NewRegistry()
+			if err := registry.Register(provider); err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(repo, registry)
+			service.now = func() time.Time { return now }
+			provider.beforeRefresh = func(ctx context.Context, _ Connection) error {
+				if change == "disconnect" {
+					return repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID)
+				}
+				current := repo.connections[key]
+				switch change {
+				case "reconnect", "account switch":
+					current.AccessToken, current.RefreshToken = "reconnected-access", "reconnected-refresh"
+					if change == "account switch" {
+						current.ProviderAccountID = "new-account"
+					}
+				case "sync state":
+					current.SyncCursors = map[string]string{"trakt.watched": "new-cursor"}
+					current.LastOutboundSyncAt = new(now)
+					current.ScrobbleEnabled = false
+				}
+				repo.connections[key] = current
+				return nil
+			}
+			_, err := service.AccessToken(t.Context(), conn.ID)
+			current, exists := repo.connections[key]
+			switch change {
+			case "disconnect":
+				if exists || !errors.Is(err, ErrConnectionNotFound) {
+					t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
+				}
+			case "reconnect", "account switch":
+				if !errors.Is(err, ErrStaleConnection) || current.AccessToken != "reconnected-access" {
+					t.Fatalf("reconnected credentials overwritten: access=%q err=%v", current.AccessToken, err)
+				}
+				if change == "account switch" && current.ProviderAccountID != "new-account" {
+					t.Fatal("account switch overwritten")
+				}
+			case "sync state":
+				if err != nil || current.AccessToken != "new-access" || current.SyncCursors["trakt.watched"] != "new-cursor" || current.LastOutboundSyncAt == nil || current.ScrobbleEnabled {
+					t.Fatalf("sync state lost during refresh: connection=%+v err=%v", current, err)
+				}
+			}
+		})
 	}
-	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
-	if updated.AccessToken != "new-access" || updated.RefreshToken != "new-refresh" {
-		t.Fatalf("connection tokens = %q/%q, want refreshed tokens", updated.AccessToken, updated.RefreshToken)
+}
+
+func TestServiceTokenRefreshReloadsAccountBinding(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	conn := Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+		ProviderAccountID: "old-account", AccessToken: testOldAccessToken,
+		RefreshToken: testOldRefreshToken, TokenExpiresAt: new(now.Add(-time.Minute)),
 	}
-	if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
-		t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+	key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+	repo.connections[key] = conn
+	repo.beforeTokenRefresh = func() {
+		current := repo.connections[key]
+		current.ProviderAccountID = "new-account"
+		repo.connections[key] = current
+	}
+	provider := &authProviderStub{
+		refreshTokens: TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(time.Hour))},
+		beforeRefresh: func(_ context.Context, current Connection) error {
+			if current.ProviderAccountID != "new-account" {
+				t.Fatalf("refresh received old account binding: %q", current.ProviderAccountID)
+			}
+			return nil
+		},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	service.now = func() time.Time { return now }
+	if _, err := service.AccessToken(t.Context(), conn.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A disconnect waits for the refresh to finish before deleting its connection.
+func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Minute)
+	refreshedExpiresAt := now.Add(time.Hour)
+	entered, release := make(chan struct{}), make(chan struct{})
+	provider := &authProviderStub{
+		refreshTokens:  TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: &refreshedExpiresAt},
+		refreshEntered: entered,
+		refreshRelease: release,
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, reg)
+	service.now = func() time.Time { return now }
+	key := connectionKey("trakt", 7, "profile-1")
+	repo.connections[key] = Connection{
+		ID:             "conn-1",
+		Provider:       "trakt",
+		UserID:         7,
+		ProfileID:      "profile-1",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
+		TokenExpiresAt: &expiresAt,
+	}
+	ctx := context.Background()
+
+	refreshDone := make(chan error, 1)
+	go func() {
+		_, err := service.AccessToken(ctx, "conn-1")
+		refreshDone <- err
+	}()
+	<-entered
+
+	deleteWaiting := make(chan struct{}, 1)
+	repo.onTokenRefreshWait = func() { deleteWaiting <- struct{}{} }
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- service.DeleteConnection(ctx, 7, "profile-1", "trakt") }()
+	var deleteErr error
+	deleted := false
+	select {
+	case <-deleteWaiting:
+	case deleteErr = <-deleteDone:
+		deleted = true
+	}
+	close(release)
+	if err := <-refreshDone; err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if !deleted {
+		deleteErr = <-deleteDone
+	}
+	if deleteErr != nil {
+		t.Fatalf("DeleteConnection: %v", deleteErr)
+	}
+	if _, ok := repo.connections[key]; ok {
+		t.Fatal("the refresh recreated the disconnected connection")
 	}
 }
 
@@ -2254,6 +2527,74 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	}
 }
 
+// A provider that stores watch times to the minute (Trakt) returns :00 for a
+// local play that kept its seconds; one that keeps seconds must not match a
+// different time in the same minute.
+func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T) {
+	tests := []struct {
+		name         string
+		precision    time.Duration
+		wantMatched  bool
+		wantExported int
+	}{
+		{name: "provider stores minutes", precision: time.Minute, wantMatched: true},
+		{name: "provider stores seconds", wantExported: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			if err := userdb.InitSchema(db); err != nil {
+				t.Fatalf("InitSchema: %v", err)
+			}
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID:              "history-1",
+				ProfileID:       "profile-1",
+				MediaItemID:     testMovieMediaID,
+				WatchedAt:       "2026-05-04T12:00:37Z",
+				DurationSeconds: 7200,
+				Completed:       true,
+				Source:          userstore.WatchHistorySourcePlayback,
+				Identity: userstore.WatchIdentity{
+					StableType:  "movie",
+					ProviderIDs: map[string]string{"tmdb": "603"},
+				},
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+
+			var exported []LocalPlay
+			provider := watchedExporterStub{
+				exported:  &exported,
+				precision: tt.precision,
+				remote: []RemotePlay{{
+					ProviderItemKey: "tmdb:603",
+					WatchedAt:       time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+				}},
+			}
+			repo := newServiceFakeRepo()
+			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+				store: userdb.NewSQLiteUserStore(db),
+			})
+			result, err := service.ExportWatched(context.Background(), Connection{
+				ID:        "conn-1",
+				Provider:  "trakt",
+				UserID:    7,
+				ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ExportWatched: %v", err)
+			}
+			if matched := result.RemotePresent == 1; matched != tt.wantMatched || len(exported) != tt.wantExported {
+				t.Fatalf("result = %+v, exported %d plays; want matched=%v and %d exported", result, len(exported), tt.wantMatched, tt.wantExported)
+			}
+		})
+	}
+}
+
 func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -2399,6 +2740,156 @@ func TestServiceCompletedScrobblePersistsAndSatisfiesHistoryExport(t *testing.T)
 	}
 	if repo.historyExports[0].Status != historyExportStatusSatisfiedByScrobble {
 		t.Fatalf("history export status = %q", repo.historyExports[0].Status)
+	}
+}
+
+// Playback events reach a plugin with the catalog's titles, so a provider can
+// create a title it has never seen (#2196). An episode whose identity fell back
+// to a movie gets none, or the plugin would see a movie named after it.
+func TestServiceSendsCatalogTitlesWithPluginScrobbles(t *testing.T) {
+	episode := ScrobbleEvent{
+		MediaItemID: testEpisodeMediaID, Kind: historyimport.KindEpisode,
+		SeriesTMDBID: "1396", SeasonNumber: 1, EpisodeNumber: 1,
+	}
+	unresolved := ScrobbleEvent{MediaItemID: testEpisodeMediaID, Kind: historyimport.KindMovie}
+	for _, tc := range []struct {
+		name  string
+		event ScrobbleEvent
+		want  []any
+	}{
+		{"episode", episode, []any{"Pilot", int32(2008), "Breaking Bad", int32(2008)}},
+		{"episode resolved as movie", unresolved, []any{"", int32(0), "", int32(0)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			repo.mediaTitles = map[string]MediaTitles{testEpisodeMediaID: {
+				Kind: historyimport.KindEpisode, Title: "Pilot", Year: 2008, SeriesTitle: "Breaking Bad", SeriesYear: 2008,
+			}}
+			repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: testPluginProviderKey, UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+			client := &fakeWatchSyncPluginClient{applyStatus: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED}
+			reg := NewRegistry()
+			if err := reg.Register(testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods:      []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+				ScrobblePlayback: true, MaxBatchSize: 25,
+			})); err != nil {
+				t.Fatal(err)
+			}
+			event := tc.event
+			event.PlaybackSessionID, event.UserID, event.ProfileID, event.OccurredAt = testPlaybackSessionID, 7, "profile-1", time.Now().UTC()
+			if err := NewService(repo, reg).ScrobbleStopConfirmed(context.Background(), event); err != nil {
+				t.Fatal(err)
+			}
+			media := client.applyRequest.GetEvents()[0].GetMedia()
+			got := []any{media.GetTitle(), media.GetYear(), media.GetSeriesTitle(), media.GetSeriesYear()}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("title, year, series title, series year = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A stalled title lookup must not use up the caller's deadline: the session
+// write and enqueue happen first, and the event still reaches the provider.
+func TestServiceScrobbleTitleLookupDoesNotHoldCallerDeadline(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "1917", Year: 2019}}
+	release := make(chan struct{})
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	events := make(chan ScrobbleEvent, 1)
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{stopEvents: events}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := NewService(repo, reg).ScrobbleStop(ctx, ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1",
+		MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie,
+	}); err != nil {
+		t.Fatalf("ScrobbleStop = %v", err)
+	}
+	<-ctx.Done()
+	close(release)
+	select {
+	case event := <-events:
+		if event.Title != "1917" || event.Year != 2019 {
+			t.Fatalf("stop event title, year = %q, %d", event.Title, event.Year)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stop was never dispatched")
+	}
+}
+
+// A confirmed stop has a deadline of its own; a stalled title lookup gets only
+// part of it, and the stop goes out with IDs alone rather than failing.
+func TestServiceConfirmedStopSendsIDsWhenTitleLookupStalls(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "1917", Year: 2019}}
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	events := make(chan ScrobbleEvent, 1)
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{stopEvents: events}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := NewService(repo, reg).ScrobbleStopConfirmed(ctx, ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1",
+		MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie,
+	}); err != nil {
+		t.Fatalf("ScrobbleStopConfirmed = %v", err)
+	}
+	if event := <-events; event.MediaItemID != testMovieMediaID || event.Title != "" {
+		t.Fatalf("stop event = %+v, want IDs without titles", event)
+	}
+}
+
+type recordingWatchedExporter struct {
+	watchedImportExportStub
+	exported *[]LocalPlay
+	ctxErrs  *[]error
+}
+
+func (p recordingWatchedExporter) ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error) {
+	*p.exported = append(*p.exported, plays...)
+	if p.ctxErrs != nil {
+		*p.ctxErrs = append(*p.ctxErrs, ctx.Err())
+	}
+	return p.watchedImportExportStub.ExportHistory(ctx, cfg, conn, plays)
+}
+
+// Watched exports carry the catalog's titles too; history rows store only IDs.
+func TestServiceExportWatchedSendsCatalogTitles(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID: testWatchHistoryID, ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+		WatchedAt: "2026-05-04T12:00:00Z", DurationSeconds: 7200, Completed: true,
+		Source:   userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "16996"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "17 Again", Year: 2009}}
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	var exported []LocalPlay
+	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, nil}
+	if _, err := service.ExportWatched(context.Background(), Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 1 || exported[0].Title != "17 Again" || exported[0].Year != 2009 {
+		t.Fatalf("exported plays = %+v", exported)
 	}
 }
 
@@ -3094,6 +3585,110 @@ func TestServiceSweepOpenScrobblesRetriesProviderStop(t *testing.T) {
 	}
 }
 
+// A sync near its deadline gives the title lookup only part of the time left,
+// so the provider call that follows still has a live context.
+func TestServiceExportWatchedKeepsDeadlineForProviderWhenTitlesStall(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID: testWatchHistoryID, ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+		WatchedAt: "2026-05-04T12:00:00Z", DurationSeconds: 7200, Completed: true,
+		Source:   userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "16996"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "17 Again", Year: 2009}}
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	var exported []LocalPlay
+	var ctxErrs []error
+	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, &ctxErrs}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	if _, err := service.ExportWatched(ctx, Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(ctxErrs) != 1 || ctxErrs[0] != nil || len(exported) != 1 || exported[0].Title != "" {
+		t.Fatalf("export context errors = %v, plays = %+v; want one live call with IDs alone", ctxErrs, exported)
+	}
+}
+
+// The sweep resends stops for every open session after a restart; it loads
+// their titles in one lookup rather than one per session.
+func TestServiceSweepOpenScrobblesLoadsTitlesOnce(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.connections[connectionKey("trakt", 7, "profile-1")] = Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: testAccessToken, ScrobbleEnabled: true,
+	}
+	repo.mediaTitles = map[string]MediaTitles{
+		"movie-a": {Kind: historyimport.KindMovie, Title: "1917", Year: 2019},
+		"movie-b": {Kind: historyimport.KindMovie, Title: "2 Guns", Year: 2013},
+	}
+	repo.scrobbleSessions = []ScrobbleSession{
+		{PlaybackSessionID: "playback-a", ConnectionID: "conn-1", MediaItemID: "movie-a", Kind: "movie", TMDBID: "530915"},
+		{PlaybackSessionID: "playback-b", ConnectionID: "conn-1", MediaItemID: "movie-b", Kind: "movie", TMDBID: "136400"},
+	}
+	provider := scrobblerStub{stopEvents: make(chan ScrobbleEvent, 2)}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewService(repo, reg).SweepOpenScrobbles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for range 2 {
+		event := <-provider.stopEvents
+		got[event.MediaItemID] = event.Title
+	}
+	if got["movie-a"] != "1917" || got["movie-b"] != "2 Guns" {
+		t.Fatalf("stop titles = %v", got)
+	}
+	if len(repo.mediaTitleLookups) != 1 || len(repo.mediaTitleLookups[0]) != 2 {
+		t.Fatalf("title lookups = %v, want one lookup for both sessions", repo.mediaTitleLookups)
+	}
+}
+
+// Lookups for events waiting in one ordered queue run side by side, so a slow
+// catalog delays the queue by one timeout rather than one per event.
+func TestServiceScrobbleTitleLookupsStartBeforeTheirQueueTurn(t *testing.T) {
+	repo := newServiceFakeRepo()
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1", MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie}
+	if err := service.ScrobbleStart(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ScrobblePause(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	// Well before one lookup can time out and free the queue for the next.
+	deadline := time.Now().Add(mediaTitleLookupTimeout / 2)
+	for repo.mediaTitleLookupCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("title lookups in flight = %d, want both queued events looking up", repo.mediaTitleLookupCount())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestServiceSweepOpenScrobblesKeepsFailedStopOpen(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.connections[connectionKey("trakt", 7, "profile-1")] = Connection{
@@ -3586,48 +4181,6 @@ func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending || repo.historyExports[0].AttemptCount != 0 {
-		t.Fatalf("history exports = %#v", repo.historyExports)
-	}
-}
-
-func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing.T) {
-	repo := newServiceFakeRepo()
-	repo.historyExports = []HistoryExport{{
-		ID:           testHistoryExportID,
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusSent,
-	}}
-	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
-		t.Fatal(err)
-	}
-	if repo.historyExports[0].Status != historyExportStatusSent {
-		t.Fatalf("history exports = %#v", repo.historyExports)
-	}
-}
-
-func TestServiceFakeRepoPreservesNotFoundHistoryExport(t *testing.T) {
-	repo := newServiceFakeRepo()
-	repo.historyExports = []HistoryExport{{
-		ID:           testHistoryExportID,
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusNotFound,
-	}}
-	if err := repo.UpsertHistoryExports(context.Background(), []HistoryExport{{
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusPending,
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.MarkHistoryExportStatus(context.Background(), testHistoryExportID, historyExportStatusFailed, "retry"); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
-		t.Fatal(err)
-	}
-	if repo.historyExports[0].Status != historyExportStatusNotFound || repo.historyExports[0].AttemptCount != 0 {
 		t.Fatalf("history exports = %#v", repo.historyExports)
 	}
 }

@@ -135,6 +135,8 @@ HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
+GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media
@@ -287,6 +289,8 @@ HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
 GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}	media	playback	viewer_egress	true	true
+GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8	non-media
+GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg	non-media
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}	media	playback	viewer_egress	true	true
 GET /api/v2/artwork/*	non-media

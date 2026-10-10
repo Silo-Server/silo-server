@@ -48,7 +48,6 @@ import Login from "@/pages/Login";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import TasteSeedGate from "@/components/TasteSeedGate";
-import SettingsLayout from "@/pages/SettingsLayout";
 import {
   WatchPlaybackBar,
   WatchPlaybackHost,
@@ -62,6 +61,8 @@ import {
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
 import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
+import LegacyAdminHomeRowsRedirect from "@/pages/LegacyAdminHomeRowsRedirect";
+import LegacyRequestDetailRedirect from "@/pages/LegacyRequestDetailRedirect";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { guardRedirectTarget } from "@/lib/authRedirect";
 import { toast } from "sonner";
@@ -78,6 +79,11 @@ const importCollections = () => import("@/pages/Collections");
 const importRecommendations = () => import("@/pages/Recommendations");
 
 const AdminLayout = lazy(() => import("@/components/AdminLayout"));
+const AdminDownloadPreparationsRefresh = lazy(
+  () => import("@/components/AdminDownloadPreparationsRefresh"),
+);
+const SettingsLayout = lazy(() => import("@/pages/SettingsLayout"));
+const SignedInSessions = lazy(() => import("@/pages/settings/SignedInSessions"));
 const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));
@@ -88,14 +94,15 @@ const ItemDetail = lazy(importItemDetail);
 const EbookReader = lazy(() => import("@/pages/EbookReader"));
 const PersonDetail = lazy(importPersonDetail);
 const Collections = lazy(importCollections);
-const CollectionEditor = lazy(() => import("@/pages/CollectionEditor"));
+const CollectionEditorPage = lazy(() => import("@/pages/CollectionEditorPage"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
-const RequestDetail = lazy(() => import("@/pages/RequestDetail"));
+const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
+const TitleDetail = lazy(() => import("@/pages/TitleDetail"));
 const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const AdminActivity = lazy(() => import("@/pages/AdminActivity"));
 const AdminLogs = lazy(() => import("@/pages/AdminLogs"));
@@ -107,9 +114,9 @@ const AdminDevices = lazy(() => import("@/pages/AdminDevices"));
 const AdminLibraries = lazy(() => import("@/pages/AdminLibraries"));
 const AdminSettingsLayout = lazy(() => import("@/pages/admin-settings/AdminSettingsLayout"));
 const AdminNodes = lazy(() => import("@/pages/AdminNodes"));
-const AdminSections = lazy(() => import("@/pages/AdminSections"));
+const AdminDownloads = lazy(() => import("@/pages/AdminDownloads"));
+const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
-const AdminCollectionEditor = lazy(() => import("@/pages/AdminCollectionEditor"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
@@ -136,6 +143,7 @@ const TasteSeed = lazy(() => import("@/pages/TasteSeed"));
 const AccessibilitySettings = lazy(() => import("@/pages/settings/AccessibilitySettings"));
 const ProfilesSettings = lazy(() => import("@/pages/settings/ProfilesSettings"));
 const LibrarySettings = lazy(() => import("@/pages/settings/LibrarySettings"));
+const RequestsSettings = lazy(() => import("@/pages/settings/RequestsSettings"));
 const HistoryImportSettings = lazy(() => import("@/pages/settings/HistoryImportSettings"));
 const WebhookSyncSettings = lazy(() => import("@/pages/settings/WebhookSyncSettings"));
 const WatchProvidersSettings = lazy(() => import("@/pages/settings/WatchProvidersSettings"));
@@ -152,7 +160,6 @@ const WatchPartyHub = lazy(() => import("@/pages/watchtogether/WatchPartyHub"));
 const WatchPartyInvite = lazy(() => import("@/pages/watchtogether/WatchPartyInvite"));
 const WatchTogetherRoomPage = lazy(() => import("@/pages/watchtogether/WatchTogetherRoomPage"));
 const WatchRoute = lazy(() => import("@/pages/WatchRoute"));
-const ProfileCustomizeHome = lazy(() => import("@/pages/ProfileCustomizeHome"));
 
 /**
  * Routes a browsing session reaches within the first few interactions. Home
@@ -273,9 +280,15 @@ function RequireProfile({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function RequireAdmin({ children }: { children: ReactNode }) {
+export function RequireAdmin({ children }: { children: ReactNode }) {
   const actingAdmin = useIsActingAdmin();
+  const { profile } = useAuth();
+  const location = useLocation();
   if (!actingAdmin) return <Navigate to="/" replace />;
+  // The server keeps admin powers for a session with no profile only while no
+  // profile on the account has a PIN or an access limit, so choose the
+  // profile first rather than open the admin area onto refusals.
+  if (!profile) return <Navigate to={guardRedirectTarget("/profiles", location)} replace />;
   return <>{children}</>;
 }
 
@@ -331,6 +344,8 @@ export function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["libraryPlaybackPreferences"] });
       qc.removeQueries({ queryKey: ["progress"] });
       qc.removeQueries({ queryKey: ["sections"] });
+      // Home rows poster peeks (lib/homeRows/peek) show rows as the profile sees them.
+      qc.removeQueries({ queryKey: ["home-row-peek"] });
       qc.removeQueries({ queryKey: ["calendar"] });
       qc.removeQueries({ queryKey: ["requests"] });
       qc.removeQueries({ queryKey: ["notifications"] });
@@ -492,7 +507,7 @@ function AppRoutes() {
                     </RequireProfile>
                   }
                 />
-                {/* Admin area — own layout, no profile required */}
+                {/* Admin area — own layout; RequireAdmin needs a selected profile */}
                 <Route
                   path="/admin/*"
                   element={
@@ -508,8 +523,11 @@ function AppRoutes() {
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
                   <Route path="collections" element={<AdminCollections />} />
-                  <Route path="collections/new" element={<AdminCollectionEditor />} />
-                  <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
+                  {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
+                  <Route element={<CollectionEditorPage scope="server" />}>
+                    <Route path="collections/new" />
+                    <Route path="collections/:id/edit" />
+                  </Route>
                   <Route path="requests" element={<AdminRequests />} />
                   {/* Autoscan is a tab on Libraries now; keep old links working. */}
                   <Route path="autoscan" element={<LegacyAutoscanRedirect />} />
@@ -523,7 +541,9 @@ function AppRoutes() {
                   <Route path="devices" element={<AdminDevices />} />
                   <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
                   <Route path="nodes" element={<AdminNodes />} />
-                  <Route path="sections" element={<AdminSections />} />
+                  <Route path="downloads" element={<AdminDownloads />} />
+                  <Route path="sections" element={<AdminHomeRows />} />
+                  <Route path="home-rows" element={<LegacyAdminHomeRowsRedirect />} />
                   <Route path="plugins" element={<AdminPlugins />} />
                   <Route path="plugins/:pluginId" element={<AdminPluginDetail />} />
                   <Route path="settings/*" element={<AdminSettingsLayout />} />
@@ -548,6 +568,18 @@ function AppRoutes() {
                   }
                 >
                   <Route index element={<AccountSettings />} />
+                </Route>
+                <Route
+                  path="/settings/sessions"
+                  element={
+                    <RequirePrimaryOrAdmin>
+                      <UICustomizedLayout>
+                        <SettingsLayout />
+                      </UICustomizedLayout>
+                    </RequirePrimaryOrAdmin>
+                  }
+                >
+                  <Route index element={<SignedInSessions />} />
                 </Route>
                 {/* Remaining settings use profile-scoped values and require a profile. */}
                 <Route
@@ -591,6 +623,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
@@ -633,8 +666,10 @@ function AppRoutes() {
                             element={<LegacyPersonalCatalogRedirect source="history" />}
                           />
                           <Route path="/collections" element={<Collections />} />
-                          <Route path="/collections/new" element={<CollectionEditor />} />
-                          <Route path="/collections/:id/edit" element={<CollectionEditor />} />
+                          <Route element={<CollectionEditorPage scope="personal" />}>
+                            <Route path="/collections/new" />
+                            <Route path="/collections/:id/edit" />
+                          </Route>
                           <Route
                             path="/collections/:id"
                             element={<LegacyUserCollectionRedirect />}
@@ -649,9 +684,21 @@ function AppRoutes() {
                           />
                           <Route
                             path="/requests/:mediaType/:tmdbId"
+                            element={<LegacyRequestDetailRedirect />}
+                          />
+                          <Route
+                            path="/title/:mediaType/:tmdbId"
                             element={
                               <RequireRequestsEnabled>
-                                <RequestDetail />
+                                <TitleDetail />
+                              </RequireRequestsEnabled>
+                            }
+                          />
+                          <Route
+                            path="/requests/discover/:section"
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestDiscoverSection />
                               </RequireRequestsEnabled>
                             }
                           />
@@ -690,9 +737,10 @@ function AppRoutes() {
                           />
                           <Route path="/calendar" element={<Calendar />} />
                           <Route path="/notifications" element={<Notifications />} />
+                          {/* Retired second profile Home editor; keep old links working. */}
                           <Route
                             path="/profile/customize-home"
-                            element={<ProfileCustomizeHome />}
+                            element={<Navigate to="/settings/home-screen" replace />}
                           />
                           <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>
@@ -730,7 +778,12 @@ function AdminRealtimeEventChannels() {
   useEventChannel("tasks");
   useEventChannel("scans");
   useEventChannel("settings");
-  return null;
+  useEventChannel("download_preparations");
+  return (
+    <Suspense fallback={null}>
+      <AdminDownloadPreparationsRefresh />
+    </Suspense>
+  );
 }
 
 function PlaybackCapabilityPrewarmer() {

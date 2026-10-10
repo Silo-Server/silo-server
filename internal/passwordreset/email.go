@@ -19,7 +19,7 @@ type emailContent struct {
 // composeResetEmail renders the reset message, for a link an administrator
 // sent or one the account holder requested. username is escaped anyway;
 // resetURL is server-built.
-func composeResetEmail(requested bool, username, serverName, resetURL string, expiresAt, now time.Time) emailContent {
+func composeResetEmail(brand mail.Brand, requested bool, username, serverName, resetURL string, expiresAt, now time.Time) emailContent {
 	product := strings.TrimSpace(serverName)
 	if product == "" {
 		product = "Silo"
@@ -40,7 +40,7 @@ func composeResetEmail(requested bool, username, serverName, resetURL string, ex
 
 	var body strings.Builder
 	body.WriteString(mail.EmailParagraph(intro))
-	body.WriteString(mail.EmailButton("Choose a new password", resetURL))
+	body.WriteString(mail.EmailButton(brand, "Choose a new password", resetURL))
 	body.WriteString(mail.EmailFacts(
 		mail.EmailFact{Label: "Account", ValueHTML: html.EscapeString(username), Mono: true},
 		mail.EmailFact{Label: "Link expires", ValueHTML: html.EscapeString(expiry)},
@@ -51,6 +51,7 @@ func composeResetEmail(requested bool, username, serverName, resetURL string, ex
 		Subject: fmt.Sprintf("Choose a new password for %s", product),
 		Text:    text.String(),
 		HTML: mail.RenderLayout(mail.LayoutOptions{
+			Brand:      brand,
 			Preheader:  fmt.Sprintf("Choose a new password — the link expires %s.", expiry),
 			Title:      "Reset your password",
 			BodyHTML:   body.String(),

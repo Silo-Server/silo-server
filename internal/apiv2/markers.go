@@ -91,10 +91,10 @@ type FileMarkersOutput struct{ Body FileMarkers }
 
 func registerMarkers(reg *Registry) {
 	read := func(path, id string) Operation {
-		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "playback", "Read the file's effective markers and provenance."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "playback", "Read the file's effective markers and provenance."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	}
 	write := func(method, path, id string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+path, id, "playback", "Update supplied manual marker segments atomically."), Class: ClassPermissionGated, Permission: policy.PermissionMarkerEdit, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+		return Operation{Operation: humaOp(method, Prefix+path, id, "playback", "Update supplied manual marker segments atomically."), Class: ClassPermissionGated, Permission: policy.PermissionMarkerEdit, HouseholdProfileGate: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	}
 	Register(reg, read("/markers/files/{file_id}", "getFileMarkers"), func(ctx context.Context, in *FileMarkerInput) (*FileMarkersOutput, error) {
 		id, p := in.FileID.positive("path.file_id")

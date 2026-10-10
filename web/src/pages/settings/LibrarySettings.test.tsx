@@ -8,7 +8,6 @@ import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/set
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import {
   buildLibraryPlaybackMutations,
-  buildLibraryPlaybackSummaryFromState,
   createLibraryPlaybackEditorState,
 } from "./libraryPlaybackPreferences";
 
@@ -140,23 +139,6 @@ describe("library playback editor state", () => {
     ).toBe("none");
     expect(createLibraryPlaybackEditorState({}).subtitleLanguage).toBe("inherit");
   });
-
-  it("summarizes an untouched library as using profile defaults", () => {
-    expect(buildLibraryPlaybackSummaryFromState(createLibraryPlaybackEditorState({}))).toBe(
-      "Uses profile defaults",
-    );
-  });
-
-  it("summarizes only the overridden playback fields", () => {
-    expect(
-      buildLibraryPlaybackSummaryFromState({
-        audioLanguage: "ja",
-        subtitleLanguage: "en",
-        subtitleMode: "always",
-        showForcedSubtitles: "off",
-      }),
-    ).toBe("Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off");
-  });
 });
 
 describe("library playback mutations", () => {
@@ -230,6 +212,12 @@ describe("LibrarySettings", () => {
       mutate: vi.fn(),
       mutateAsync: vi.fn(),
     });
+  });
+
+  it("lists hidden libraries so each keeps a switch to show it again", () => {
+    renderToStaticMarkup(<LibrarySettings />);
+
+    expect(mocks.useAvailableUserLibraries).toHaveBeenCalledWith({ includeHidden: true });
   });
 
   it("renders the inherited summary for libraries without playback overrides", () => {

@@ -14,6 +14,8 @@ interface SearchBarProps {
   autoFocus?: boolean;
   prominent?: boolean;
   buildSearchHref?: (query: string) => string;
+  /** Hint for the compact variant's input, which also names it. */
+  placeholder?: string;
 }
 
 export default function SearchBar({
@@ -21,6 +23,7 @@ export default function SearchBar({
   autoFocus = false,
   prominent = false,
   buildSearchHref = buildQueryCatalogHref,
+  placeholder = "Search...",
 }: SearchBarProps) {
   const [query, setQuery] = useState(initialQuery);
   const navigate = useViewTransitionNavigate();
@@ -124,11 +127,15 @@ export default function SearchBar({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="relative">
-      <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
+    <form onSubmit={handleSubmit} role="search" className="relative">
+      <Search
+        className="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 h-4 w-4"
+        aria-hidden
+      />
       <Input
         ref={inputRef}
-        placeholder="Search..."
+        placeholder={placeholder}
+        aria-label={placeholder}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="pl-9"

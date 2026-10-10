@@ -3,6 +3,7 @@ package historyimport
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,7 +90,7 @@ func TestPersonalAdmissionSessionRace(t *testing.T) {
 					if err == nil {
 						won.Add(1)
 						credential, readErr := repo.readPersonalRunCredentials(t.Context(), claimPersonalForTest(t, repo, run.ID))
-						if readErr != nil || credential != in.Credentials {
+						if readErr != nil || !reflect.DeepEqual(credential, in.Credentials) {
 							t.Errorf("reconstruction mismatch: %v", readErr)
 						}
 					} else if !errors.Is(err, ErrConnectSessionUsed) && !errors.Is(err, ErrPlexSessionUsed) {

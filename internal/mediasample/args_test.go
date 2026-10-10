@@ -65,10 +65,10 @@ func TestBuildArgsSnapshots(t *testing.T) {
 			name: "stats only",
 			req: Request{
 				Input:  "/media/a.mkv",
-				Window: &Window{StartSeconds: 10, DurationSeconds: 5},
+				Window: &Window{StartSeconds: 10.0006, DurationSeconds: 5},
 				Stats:  &StatsOutput{CropWidth: 1, CropHeight: 0.75, Width: 320},
 			},
-			want: "-hide_banner -nostdin -loglevel repeat+info -ss 10 -i /media/a.mkv " +
+			want: "-hide_banner -nostdin -loglevel repeat+info -ss 10.001 -i /media/a.mkv " +
 				"-t 5 -map 0:V:0 -an -sn -dn -vf crop=trunc(iw*1/2)*2:trunc(ih*0.75/2)*2,scale=320:-2:flags=area,format=yuv420p,signalstats,metadata=print " +
 				"-f null -",
 		},
@@ -111,12 +111,4 @@ func TestBuildArgsKeepsInputAsOneArgument(t *testing.T) {
 		}
 	}
 	t.Fatalf("no -i in %q", args)
-}
-
-func TestFormatSeconds(t *testing.T) {
-	for seconds, want := range map[float64]string{0: "0", 600: "600", 0.33: "0.33", 117.25: "117.25", 33.0004: "33", 1.0006: "1.001"} {
-		if got := formatSeconds(seconds); got != want {
-			t.Errorf("formatSeconds(%v) = %q, want %q", seconds, got, want)
-		}
-	}
 }

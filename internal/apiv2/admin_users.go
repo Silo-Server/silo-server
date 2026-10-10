@@ -50,9 +50,10 @@ type AdminUser struct {
 	DownloadTranscodeAllowed   *bool           `json:"download_transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
 	RequestsAllowed            *bool           `json:"requests_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
 	AccessGroupID              *ID             `json:"access_group_id" nullable:"true" doc:"The access group the account belongs to; null when none" example:"2"`
-	PasswordLogin              bool            `json:"password_login" doc:"Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then" example:"true"`
+	PasswordLogin              bool            `json:"password_login" doc:"Whether the account can sign in with a local password: local password sign-in is on for it and it has a password. Linking an external sign-in identity turns it off unless the account is break-glass. Setting a password with updateAdminUser turns it back on (with or without require_password_change); a password reset link needs it" example:"true"`
 	PasswordChangeRequired     bool            `json:"password_change_required" doc:"Whether the account holds a temporary password it must replace at its next sign-in" example:"false"`
 	IsOwner                    bool            `json:"is_owner" doc:"Whether the account is the server Owner: the account created at first-run setup, or on servers set up before the Owner existed, the earliest-created enabled admin. Other admins cannot edit, reset the password of, impersonate or manage API keys for it, and it cannot be demoted, disabled or deleted" example:"false"`
+	BreakGlass                 bool            `json:"break_glass" doc:"Whether the account is a break-glass admin: it keeps local password sign-in while the server turns local password sign-in off (auth.local_password_login). Only admins can be break-glass accounts" example:"false"`
 	EffectivePolicy            EffectivePolicy `json:"effective_policy" doc:"The resolved policy the server enforces"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt                  Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
@@ -173,6 +174,7 @@ func adminUserFromView(v handlers.AdminUserView) AdminUser {
 		PasswordLogin:              v.PasswordLogin,
 		PasswordChangeRequired:     v.PasswordChangeRequired,
 		IsOwner:                    v.IsOwner,
+		BreakGlass:                 v.BreakGlass,
 		EffectivePolicy: EffectivePolicy{
 			LibraryIDs:                 idsOfInts(v.EffectivePolicy.LibraryIDs),
 			MaxPlaybackQuality:         v.EffectivePolicy.MaxPlaybackQuality,

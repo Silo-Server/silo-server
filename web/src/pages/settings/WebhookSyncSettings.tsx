@@ -80,7 +80,7 @@ const JELLYFIN_TEMPLATE = `{
   "server_name": "{{ServerName}}",
   "user": {
     "id": "{{UserId}}",
-    "name": "{{{Username}}}"
+    "name": "{{{NotificationUsername}}}"
   },
   "item": {
     "id": "{{ItemId}}",
@@ -101,6 +101,10 @@ const JELLYFIN_TEMPLATE = `{
     "position_ticks": {{#if_exist PlaybackPositionTicks}}{{PlaybackPositionTicks}}{{else}}0{{/if_exist}},
     "played_to_completion": {{#if_equals PlayedToCompletion 'true'}}true{{else}}false{{/if_equals}},
     "runtime_ticks": {{#if_exist RunTimeTicks}}{{RunTimeTicks}}{{else}}0{{/if_exist}}
+  },
+  "user_data": {
+    "save_reason": "{{SaveReason}}",
+    "played": {{#if_exist Played}}{{#if_equals Played 'true'}}true{{else}}false{{/if_equals}}{{else}}null{{/if_exist}}
   }
 }`;
 
@@ -1038,6 +1042,10 @@ export default function WebhookSyncSettings() {
                             Save. Plex sends events automatically — no per-event toggles to
                             configure.
                           </li>
+                          <li>
+                            Plex sends no webhook when someone marks an item watched or unwatched by
+                            hand, so only playback reaches Silo.
+                          </li>
                         </ol>
                       ) : null}
                       {selectedConnection.provider === "emby" ? (
@@ -1117,10 +1125,13 @@ export default function WebhookSyncSettings() {
                             </li>
                             <li>
                               Under <span className="text-foreground">Notification Type</span>,
-                              enable only <span className="text-foreground">Playback Stop</span>.
-                              Leave <span className="text-foreground">Playback Progress</span> and{" "}
-                              <span className="text-foreground">User Data Saved</span> off — Silo
-                              ignores them and they generate heavy traffic.
+                              enable <span className="text-foreground">Playback Stop</span> for
+                              watch progress and{" "}
+                              <span className="text-foreground">User Data Saved</span> for items
+                              marked played or unplayed. User Data Saved also fires during playback;
+                              Silo ignores those deliveries. Leave{" "}
+                              <span className="text-foreground">Playback Progress</span> off — Silo
+                              ignores it and it generates heavy traffic.
                             </li>
                             <li>
                               Paste the template below into{" "}

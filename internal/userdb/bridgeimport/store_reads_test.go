@@ -69,3 +69,12 @@ func assertImportedStoreReads(t *testing.T, pool *pgxpool.Pool, fixture importFi
 		t.Fatal("opaque setting changed")
 	}
 }
+
+func pgstoreForTest(t *testing.T, pool *pgxpool.Pool, accountID int) userstore.UserStore {
+	t.Helper()
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(t.Context(), accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}

@@ -13,6 +13,7 @@ import type {
 } from "@/api/types";
 import {
   useAdminLibraries,
+  useLibraryCapabilities,
   useCancelLibraryScans,
   useReorderLibraries,
   useSkippedLibraryRoots,
@@ -34,12 +35,14 @@ import {
   useUnmatchedLibraryItems,
   UNMATCHED_PAGE_SIZE,
 } from "@/hooks/queries/admin/libraries";
+import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
+import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -144,6 +147,12 @@ const EMPTY_ROOT_WARNING_HINT =
 const LIBRARY_TABS = ["libraries", "autoscan"] as const;
 type LibraryTab = (typeof LIBRARY_TABS)[number];
 
+// Stable fallbacks while queries load. A fresh `[]` on every render re-ran the
+// effect that copies libraries into the reorder state, so the page re-rendered
+// until the query resolved.
+const NO_LIBRARIES: Library[] = [];
+const NO_ACTIVE_SCANS: ScanRun[] = [];
+
 export default function AdminLibraries() {
   useEventChannel("scans");
   // Autoscan used to be its own sidebar page even though it only ever
@@ -166,9 +175,15 @@ export default function AdminLibraries() {
     setSearchParams(next, { replace: true });
   }
 
-  const { data: libraries = [], isLoading } = useAdminLibraries();
-  const { data: activeScans = [] } = useActiveScans();
+  const { data: libraries = NO_LIBRARIES, isLoading } = useAdminLibraries();
+  const { data: libraryCapabilities } = useLibraryCapabilities();
+  const { data: activeScans = NO_ACTIVE_SCANS } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
+  const { data: trickplayLibraries } = useAdminTrickplayLibraries();
+  const trickplayByLibraryId = useMemo(
+    () => new Map(trickplayLibraries?.map((entry) => [Number(entry.library_id), entry]) ?? []),
+    [trickplayLibraries],
+  );
   const realtimeMonitoringByLibraryId = useMemo(
     () => new Map(realtimeMonitoring?.libraries.map((entry) => [entry.library_id, entry]) ?? []),
     [realtimeMonitoring],
@@ -414,6 +429,13 @@ export default function AdminLibraries() {
               libraries[0]?.chapter_thumbnails_supported ??
               true
             }
+            trickplaySupported={
+              editingLib?.trickplay_supported ??
+              libraries[0]?.trickplay_supported ??
+              (libraryCapabilities?.trickplay === true
+                ? libraryCapabilities.trickplay_supported
+                : undefined)
+            }
           />
           <LibraryRefreshDialog
             libraryName={refreshLib?.name ?? null}
@@ -534,6 +556,7 @@ export default function AdminLibraries() {
                                 <RealtimeMonitoringBadge
                                   entry={realtimeMonitoringByLibraryId.get(lib.id)}
                                 />
+                                <TrickplayLibraryBadge library={trickplayByLibraryId.get(lib.id)} />
                               </div>
                             </TableCell>
                             <TableCell className="text-muted-foreground text-xs">
@@ -1884,7 +1907,7 @@ function SkippedRootsSection() {
   return (
     <CollapsibleDiagnosticsSection
       title="Troubleshooting"
-      description="Roots where the inferred canonical folder lacks embedded provider IDs."
+      description="Roots with no provider IDs in the folder name or, for movies, in a file name."
       count={data?.pages[0]?.total}
       icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
       open={open}

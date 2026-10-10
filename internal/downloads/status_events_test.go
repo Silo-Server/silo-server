@@ -48,7 +48,8 @@ func statusEventTestRepo(t *testing.T) *Repository {
 	_, err = pool.Exec(t.Context(), `CREATE TABLE downloads(
  id text PRIMARY KEY,user_id integer NOT NULL,profile_id text,device_id text,media_file_id integer NOT NULL,content_id text NOT NULL,episode_id text,batch_id text,
  kind text NOT NULL,status text NOT NULL,format text NOT NULL,quality text NOT NULL,effective_quality text NOT NULL,target_bitrate_kbps integer NOT NULL,revision integer NOT NULL,
- artifact_id text,file_size bigint NOT NULL,bytes_sent bigint NOT NULL,error_message text NOT NULL,created_at timestamptz NOT NULL,updated_at timestamptz NOT NULL,completed_at timestamptz)`)
+ artifact_id text,file_size bigint NOT NULL,bytes_sent bigint NOT NULL,error_message text NOT NULL,created_at timestamptz NOT NULL,updated_at timestamptz NOT NULL,completed_at timestamptz,
+ revoked_at timestamptz,revoked_by integer,revoked_reason text NOT NULL DEFAULT '')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,11 +71,18 @@ func TestDownloadStatusEventsPostgres(t *testing.T) {
 	if err := repo.Create(t.Context(), original); err != nil {
 		t.Fatal(err)
 	}
-	service := &Service{repo: repo}
+	artifacts := &ArtifactManager{}
+	storageChanges := 0
+	artifacts.SetStorageNotifier(func(context.Context) { storageChanges++ })
+	service := &Service{repo: repo, artifacts: artifacts}
 	event := StatusEvent{Status: StatusCompleted, UpdatedAt: base.Add(time.Minute), Revision: 1}
 	current, err := service.ReportStatus(t.Context(), 1, "one", "device", "entry", event)
 	if err != nil || current.Status != StatusCompleted || !current.CompletedAt.Equal(event.UpdatedAt) {
 		t.Fatalf("%+v %v", current, err)
+	}
+	// A finished copy turns its prepared file from in use to cached.
+	if storageChanges != 1 {
+		t.Fatalf("storage views notified %d times after a completed report, want 1", storageChanges)
 	}
 	for _, at := range []time.Time{event.UpdatedAt, event.UpdatedAt.Add(-time.Second)} {
 		got, err := service.ReportStatus(t.Context(), 1, "one", "device", "entry", StatusEvent{Status: StatusDownloading, UpdatedAt: at, Revision: 1})

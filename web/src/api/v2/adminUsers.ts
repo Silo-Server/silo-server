@@ -1,5 +1,11 @@
 import type { ProfileRequestContextSnapshot } from "@/api/client";
-import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
+import type {
+  AdminPolicyDefaultLayer,
+  AdminPolicyDefaults,
+  AdminUser,
+  CreateUserRequest,
+  UpdateUserRequest,
+} from "@/api/types";
 import { v2, type V2Body, type V2Result } from "./request";
 import { sessionFromTokenPair } from "./account";
 import {
@@ -20,8 +26,12 @@ function numericID(value: string) {
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Unsupported user ID.");
   return id;
 }
+/** Whether a response validator can guard an If-Match write. */
+export function isStrongTag(value: string | null): value is string {
+  return Boolean(value && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value));
+}
 function strongTag(value: string | null) {
-  if (!value || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value))
+  if (!isStrongTag(value))
     throw new Error("Reload this user before saving: a strong ETag is required.");
   return value;
 }
@@ -54,6 +64,7 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
     password_login: user.password_login,
     password_change_required: user.password_change_required,
     is_owner: user.is_owner,
+    break_glass: user.break_glass,
     effective_policy: {
       library_ids:
         user.effective_policy.library_ids === null
@@ -113,6 +124,16 @@ export async function getAdminUser(
   id: number,
   profileContext = captureAdminUserAuthority(),
 ): Promise<AdminUserEditor> {
+  const snapshot = await getAdminUserSnapshot(id, profileContext);
+  return { ...snapshot, etag: strongTag(snapshot.etag) };
+}
+
+/** Reading an account remains possible when a proxy omits its validator.
+ * Guarded edits still require the server's strong ETag. */
+export async function getAdminUserSnapshot(
+  id: number,
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminUserEditor> {
   requireAdminUserAuthority(profileContext);
   let etag: string | null = null;
   const user = await v2("GET /api/v2/admin/users/{id}", {
@@ -123,7 +144,7 @@ export async function getAdminUser(
     },
   });
   requireAdminUserAuthority(profileContext);
-  return { user: adminUserFromV2(user), etag: strongTag(etag), profileContext };
+  return { user: adminUserFromV2(user), etag: etag ?? "", profileContext };
 }
 function policyWire(body: UpdateUserRequest) {
   return {
@@ -229,4 +250,24 @@ export async function getAdminUserCapabilities(profileContext = captureAdminUser
   const result = await v2("GET /api/v2/admin/users/capabilities", { profileContext });
   requireAdminUserAuthority(profileContext);
   return result;
+}
+
+type PolicyDefaultLayerV2 = V2Result<"GET /api/v2/admin/users/policy-defaults">["admin"];
+function policyDefaultLayer(layer: PolicyDefaultLayerV2): AdminPolicyDefaultLayer {
+  return {
+    ...layer,
+    library_ids: layer.library_ids === null ? null : layer.library_ids.map(numericID),
+  };
+}
+/** The server's built-in policy for admins and for regular accounts with no group. */
+export async function getAdminUserPolicyDefaults(
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminPolicyDefaults> {
+  requireAdminUserAuthority(profileContext);
+  const result = await v2("GET /api/v2/admin/users/policy-defaults", { profileContext });
+  requireAdminUserAuthority(profileContext);
+  return {
+    admin: policyDefaultLayer(result.admin),
+    ungrouped: policyDefaultLayer(result.ungrouped),
+  };
 }

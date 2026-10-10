@@ -1,0 +1,16 @@
+{
+  "id": "entry-1",
+  "content_id": "movie",
+  "device_id": "device-one",
+  "media_file_id": "42",
+  "file_size": 0,
+  "bytes_sent": 0,
+  "kind": "",
+  "status": "preparing",
+  "quality": "10mbps",
+  "effective_quality": "10mbps",
+  "delivery_format": "transcode",
+  "target_bitrate_kbps": 0,
+  "revision": 1,
+  "created_at": "2026-10-08T09:30:00.000Z"
+}

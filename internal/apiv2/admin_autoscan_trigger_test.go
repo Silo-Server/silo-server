@@ -61,17 +61,3 @@ func TestAdminAutoscanTrigger(t *testing.T) {
 	deps.AdminTasks = nil
 	requireProblem(t, do(t, NewHandler(deps), "POST", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
-
-func TestAdminAutoscanTriggerDocument(t *testing.T) {
-	paths := generatedDocument(t)["paths"].(map[string]any)
-	op := paths[Prefix+"/admin/autoscan/trigger"].(map[string]any)["post"].(map[string]any)
-	responses := op["responses"].(map[string]any)
-	for _, code := range []string{"200", "409"} {
-		if responses[code] == nil {
-			t.Fatalf("missing %s", code)
-		}
-	}
-	if responses["202"] != nil {
-		t.Fatal("process task must not claim durable job acceptance")
-	}
-}

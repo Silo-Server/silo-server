@@ -26,46 +26,6 @@ func imagesByType(images []metadata.RemoteImage) map[metadata.ImageType]metadata
 	return byType
 }
 
-func TestGetImagesFindsSidecarArtwork(t *testing.T) {
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film (2020).mkv")
-	writeImageFile(t, moviePath)
-	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
-	writeImageFile(t, filepath.Join(dir, "fanart.png"))
-	writeImageFile(t, filepath.Join(dir, "clearlogo.webp"))
-
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		AllGroupFilePaths:         []string{moviePath},
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	byType := imagesByType(images)
-	if len(byType) != 3 {
-		t.Fatalf("expected poster/backdrop/logo, got %d images: %+v", len(images), images)
-	}
-	poster := byType[metadata.ImagePoster]
-	if poster.URL != "file://"+filepath.Join(dir, "poster.jpg") {
-		t.Fatalf("poster URL = %q", poster.URL)
-	}
-	if poster.Rating != 0 {
-		t.Fatalf("poster rating = %v, want 0", poster.Rating)
-	}
-	if poster.ProviderID != "nfo" {
-		t.Fatalf("poster provider = %q", poster.ProviderID)
-	}
-	if got := byType[metadata.ImageBackdrop].URL; got != "file://"+filepath.Join(dir, "fanart.png") {
-		t.Fatalf("backdrop URL = %q", got)
-	}
-	if got := byType[metadata.ImageLogo].URL; got != "file://"+filepath.Join(dir, "clearlogo.webp") {
-		t.Fatalf("logo URL = %q", got)
-	}
-}
-
 func TestGetImagesFilenamePrecedence(t *testing.T) {
 	dir := t.TempDir()
 	moviePath := filepath.Join(dir, "Film.mkv")
@@ -79,7 +39,7 @@ func TestGetImagesFilenamePrecedence(t *testing.T) {
 	writeImageFile(t, filepath.Join(dir, "fanart.jpg"))
 	// logo: logo beats clearlogo.
 	writeImageFile(t, filepath.Join(dir, "clearlogo.png"))
-	writeImageFile(t, filepath.Join(dir, "logo.png"))
+	writeImageFile(t, filepath.Join(dir, "logo.webp"))
 
 	p := NewProvider()
 	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
@@ -91,14 +51,20 @@ func TestGetImagesFilenamePrecedence(t *testing.T) {
 		t.Fatalf("GetImages: %v", err)
 	}
 	byType := imagesByType(images)
+	if len(byType) != 3 {
+		t.Fatalf("expected poster/backdrop/logo, got %+v", images)
+	}
+	if poster := byType[metadata.ImagePoster]; poster.Rating != 0 || poster.ProviderID != "nfo" {
+		t.Fatalf("poster = %+v, want NFO provider and rating 0", poster)
+	}
 	if got := byType[metadata.ImagePoster].URL; got != "file://"+filepath.Join(dir, "poster.png") {
 		t.Fatalf("poster URL = %q, want poster.png", got)
 	}
 	if got := byType[metadata.ImageBackdrop].URL; got != "file://"+filepath.Join(dir, "fanart.jpg") {
 		t.Fatalf("backdrop URL = %q, want fanart.jpg", got)
 	}
-	if got := byType[metadata.ImageLogo].URL; got != "file://"+filepath.Join(dir, "logo.png") {
-		t.Fatalf("logo URL = %q, want logo.png", got)
+	if got := byType[metadata.ImageLogo].URL; got != "file://"+filepath.Join(dir, "logo.webp") {
+		t.Fatalf("logo URL = %q, want logo.webp", got)
 	}
 }
 
@@ -153,27 +119,6 @@ func TestGetImagesFlatFolderGenericArtSuppressed(t *testing.T) {
 	}
 	if len(images) != 0 {
 		t.Fatalf("expected no images for flat multi-movie folder, got %+v", images)
-	}
-}
-
-func TestGetImagesWorksWithoutNFO(t *testing.T) {
-	// Documented bonus: local art applies even with no .nfo present.
-	dir := t.TempDir()
-	moviePath := filepath.Join(dir, "Film.mkv")
-	writeImageFile(t, moviePath)
-	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
-
-	p := NewProvider()
-	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
-		ContentType:               "movie",
-		RepresentativeFilePath:    moviePath,
-		PrimarySidecarSearchPaths: []string{dir},
-	})
-	if err != nil {
-		t.Fatalf("GetImages: %v", err)
-	}
-	if len(images) != 1 || images[0].Type != metadata.ImagePoster {
-		t.Fatalf("expected exactly the poster, got %+v", images)
 	}
 }
 

@@ -8,10 +8,11 @@ The temporary-password state lives in `internal/auth` and the auth middleware. T
 wire contract is in [admin-users-api.md](../admin-users-api.md#passwords) and
 [auth-api.md](../auth-api.md#temporary-passwords).
 
-Both apply only to accounts that sign in with a local password
+Reset links apply only to accounts that sign in with a local password
 (`users.local_password_login_enabled`). An account an external authentication
-provider manages has no password here to reset, so the server refuses the actions
-and clients hide them.
+provider manages has no password here to reset, so the server refuses reset links
+for it and clients hide them. An administrator can still set a password on such an
+account; see Temporary passwords.
 
 ## Reset links
 
@@ -42,7 +43,8 @@ The public operations spend the `password_reset` per-IP rate-limit budget; with
 expiry against `clock_timestamp()`, deletes the link, replaces the password,
 clears `password_change_required`, and revokes every login session the account
 owns or impersonates from, then commits. The same transaction revokes the
-account's Audiobookshelf-compatible sessions and denies any device sign-in it
+account's Audiobookshelf-compatible sessions, deletes its stored
+Jellyfin-compatible sessions, and denies any device sign-in it
 approved that the device has not collected yet, which would otherwise mint a
 fresh session afterwards. Personal API keys survive: the account created them on
 purpose, and revoking them would break its integrations, so the account or an
@@ -97,8 +99,9 @@ budget.
 
 **Every password write decides the flag.** `users.password_change_required` is
 written only together with a password. An administrator's create or update sets it
-from `require_password_change`, false when omitted, and refuses it for an account
-without local password sign-in, which could never run the change. A self-service change or a
+from `require_password_change`, false when omitted. An administrator's password
+write also turns local password sign-in back on for an account that had it off,
+so `require_password_change` applies to such an account too. A self-service change or a
 completed reset clears it. A write without a password never touches it, so no path
 leaves a stale flag behind.
 

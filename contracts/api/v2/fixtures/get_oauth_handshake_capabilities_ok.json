@@ -1,0 +1,9 @@
+{
+  "revision": "536468a609e2f1c6316fa61622c8d9fad4b447d965efcf21e5d7c979dfdbd605",
+  "state": "available",
+  "available": true,
+  "native": true,
+  "linking": true,
+  "provider_logout": true,
+  "select_account": true
+}

@@ -135,6 +135,13 @@ type singleBatchWatchedExporter interface {
 	ExportBatchSize() int
 }
 
+// historyPrecisionExporter is implemented by providers that store watch times
+// more coarsely than to the second. History matching truncates both sides to
+// that precision, so a local play keeps matching its stored copy.
+type historyPrecisionExporter interface {
+	HistoryTimePrecision() time.Duration
+}
+
 type UnwatchedExporter interface {
 	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
@@ -754,9 +761,13 @@ type ScrobbleEvent struct {
 	MediaItemID       string
 	ProviderItemKey   string
 	Kind              string
+	Title             string // Title, Year and the series pair are filled at dispatch; see Service.withScrobbleTitles.
+	Year              int
 	IMDbID            string
 	TMDBID            string
 	TVDBID            string
+	SeriesTitle       string
+	SeriesYear        int
 	SeriesIMDbID      string
 	SeriesTMDBID      string
 	SeriesTVDBID      string
@@ -949,3 +960,13 @@ type ProviderCapabilityError struct {
 }
 
 func (e ProviderCapabilityError) Error() string { return fmt.Sprintf("provider %q %s", e.Key, e.What) }
+
+// InvalidConnectionInputError reports a connect request whose connection
+// configuration or other input the host or the provider rejected, as opposed
+// to a rejected credential or an internal failure. Message is sanitized of
+// the supplied secrets and safe to show the user.
+type InvalidConnectionInputError struct {
+	Message string
+}
+
+func (e InvalidConnectionInputError) Error() string { return e.Message }

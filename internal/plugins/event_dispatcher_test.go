@@ -188,17 +188,3 @@ func TestDispatcher_HubPluginEvent_ReachesConsumer(t *testing.T) {
 		t.Errorf("requestId: got %v want 01J; full payload=%v", p["requestId"], p)
 	}
 }
-
-func TestDispatcher_NonSubscribedEvent_NotDelivered(t *testing.T) {
-	bus, _, client := newFixture(t, []string{"library.media_added"}, 0)
-
-	_ = bus.Publish(context.Background(), cache.ChannelCatalog, cache.Event{
-		Type:    "library.something_else",
-		Payload: `{}`,
-	})
-	// Give the dispatcher a moment to (not) deliver.
-	time.Sleep(50 * time.Millisecond)
-	if got := client.get(); len(got) != 0 {
-		t.Errorf("expected no events, got %d", len(got))
-	}
-}

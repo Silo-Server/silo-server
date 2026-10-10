@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -313,7 +314,7 @@ func TestReloadWatchSyncPluginProvidersPreservesConnectionForm(t *testing.T) {
 
 	registry := watchsync.NewRegistry()
 	if err := reloadWatchSyncPluginProviders(
-		context.Background(), registry, staticWatchSyncCapabilityStore{capabilities: capabilities}, &plugins.Service{}, nil,
+		context.Background(), registry, staticWatchSyncCapabilityStore{capabilities: capabilities}, &plugins.Service{}, nil, nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +357,7 @@ func TestReloadWatchSyncPluginProvidersDropsStaleProvidersOnCapabilityReadFailur
 	}
 
 	if err := reloadWatchSyncPluginProviders(
-		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{}, nil,
+		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{}, nil, nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -550,5 +551,178 @@ func TestCapabilityFetchBackstopExceedsTheAdvertisedBudget(t *testing.T) {
 	if nodepool.CapabilityRefreshTimeout <= budget {
 		t.Fatalf("health sweep backstop %v does not exceed the %v a two-device node advertises",
 			nodepool.CapabilityRefreshTimeout, budget)
+	}
+}
+
+type firstPartyWatchSyncStore struct {
+	installations []*plugins.Installation
+	capabilities  []*plugins.Capability
+}
+
+func (s firstPartyWatchSyncStore) ListEnabled(context.Context) ([]*plugins.Installation, error) {
+	return s.installations, nil
+}
+
+func (s firstPartyWatchSyncStore) ListCapabilities(context.Context, int) ([]*plugins.Capability, error) {
+	return s.capabilities, nil
+}
+
+// fakeWatchSyncPluginService treats every installation as Silo-managed. Its
+// seeding is create-only like the real one, and a seed that saves config runs
+// onSeed, as the lifecycle hook a config save fires does.
+type fakeWatchSyncPluginService struct {
+	cacheInvalidations int
+	onSeed             func(context.Context)
+	seeded             []int
+	created            bool
+}
+
+func (f *fakeWatchSyncPluginService) InvalidateInstallationCache() {
+	f.cacheInvalidations++
+}
+
+func (f *fakeWatchSyncPluginService) InstalledFromSiloRepository(context.Context, *plugins.Installation) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeWatchSyncPluginService) WatchSyncProviderClient(context.Context, int, string) (*pluginhost.WatchSyncProviderClient, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeWatchSyncPluginService) WatchSyncProviderConfig(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
+	return &pluginv1.WatchSyncProviderConfig{}, nil
+}
+
+func (f *fakeWatchSyncPluginService) WatchSyncConfigReady(context.Context, int) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeWatchSyncPluginService) SeedGlobalConfig(ctx context.Context, installationID int, _ string, _ map[string]any) (bool, error) {
+	f.seeded = append(f.seeded, installationID)
+	if f.created {
+		return false, nil
+	}
+	f.created = true
+	if f.onSeed != nil {
+		f.onSeed(ctx)
+	}
+	return true, nil
+}
+
+type fakeWatchSyncMigrationStore struct {
+	mu       sync.Mutex
+	settings map[string]string
+}
+
+func (f *fakeWatchSyncMigrationStore) GetServerSetting(_ context.Context, key string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.settings[key], nil
+}
+
+func (f *fakeWatchSyncMigrationStore) SetServerSetting(_ context.Context, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings[key] = value
+	return nil
+}
+
+func (f *fakeWatchSyncMigrationStore) HasConnections(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+func traktPluginCapabilities(t *testing.T) []*plugins.Capability {
+	t.Helper()
+	records, err := plugins.CapabilityRecordsFromManifest(&pluginv1.PluginManifest{Capabilities: []*pluginv1.CapabilityDescriptor{{
+		Type: "watch_sync_provider.v1", Id: "trakt", DisplayName: "Trakt",
+		WatchSyncProvider: &pluginv1.WatchSyncProviderDescriptor{
+			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
+			ExportWatched: true,
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := make([]*plugins.Capability, 0, len(records))
+	for i := range records {
+		record := records[i]
+		capabilities = append(capabilities, &record)
+	}
+	return capabilities
+}
+
+// Two API nodes can auto-install the same first-party plugin at once. The
+// older installation keeps the legacy key, and the reload still succeeds.
+func TestReloadWatchSyncPluginProvidersKeepsOneFirstPartyInstallation(t *testing.T) {
+	store := firstPartyWatchSyncStore{
+		installations: []*plugins.Installation{
+			{ID: 9, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin},
+			{ID: 7, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin},
+		},
+		capabilities: traktPluginCapabilities(t),
+	}
+	registry := watchsync.NewRegistry()
+	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{"watchsync.trakt.client_id": "id"}}
+	service := &fakeWatchSyncPluginService{}
+	if err := reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration); err != nil {
+		t.Fatal(err)
+	}
+	if service.cacheInvalidations != 1 {
+		t.Fatalf("cache invalidations = %d, want one before reloading providers", service.cacheInvalidations)
+	}
+	summaries := registry.List()
+	if len(summaries) != 1 || summaries[0].Key != "trakt" {
+		t.Fatalf("registered providers = %#v, want only trakt", summaries)
+	}
+	if !slices.Equal(service.seeded, []int{7}) {
+		t.Fatalf("seeded installations = %v, want the older one", service.seeded)
+	}
+	if migration.settings["watchsync.plugin_migration.trakt"] == "" {
+		t.Fatal("migration was not recorded")
+	}
+}
+
+// Seeding saves plugin config, and the save fires the lifecycle hook that
+// reloads again. The nested reload must not wait on the outer one.
+func TestReloadWatchSyncPluginProvidersSeedsOutsideTheReloadLock(t *testing.T) {
+	store := firstPartyWatchSyncStore{
+		installations: []*plugins.Installation{{ID: 7, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin}},
+		capabilities:  traktPluginCapabilities(t),
+	}
+	registry := watchsync.NewRegistry()
+	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{
+		"watchsync.trakt.client_id":     "id",
+		"watchsync.trakt.client_secret": "secret",
+	}}
+	service := &fakeWatchSyncPluginService{}
+	nested := make(chan error, 1)
+	service.onSeed = func(ctx context.Context) {
+		nested <- reloadWatchSyncPluginProviders(ctx, registry, store, service, nil, migration)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reload deadlocked while seeding")
+	}
+	if err := <-nested; err != nil {
+		t.Fatal(err)
+	}
+	// The nested reload found the app config already saved, so its seed wrote
+	// nothing and fired no further reload. Later reloads skip seeding.
+	if len(service.seeded) != 2 {
+		t.Fatalf("seed calls = %d, want the outer seed and one no-op nested seed", len(service.seeded))
+	}
+	if err := reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.seeded) != 2 {
+		t.Fatalf("seed calls after seeding finished = %d, want 2", len(service.seeded))
 	}
 }

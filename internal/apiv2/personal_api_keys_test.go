@@ -36,6 +36,9 @@ func (f *fakePersonalAPIKeys) RevokePersonalAPIKey(_ context.Context, user int, 
 	}
 	return nil
 }
+func (f *fakePersonalAPIKeys) MayCreatePersonalAPIKey(context.Context, int, string, func(string) error) (bool, error) {
+	return true, nil
+}
 func personalKeyHandler() (http.Handler, *fakePersonalAPIKeys) {
 	f := &fakePersonalAPIKeys{fakeAdminAPIKeys: fixtureAdminAPIKeys()}
 	deps := pilotDeps(nil, nil)

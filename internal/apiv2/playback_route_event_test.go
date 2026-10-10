@@ -1,11 +1,14 @@
 package apiv2
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 const playbackTestEvent = "55555555-5555-4555-8555-555555555555"
@@ -62,40 +65,59 @@ func TestPlaybackV2RouteEventIsAcceptedAndIdentified(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/playback/route-events", playbackJSON(t, playbackRouteEventFixture()), nil), TypeAuthenticationRequired)
 }
 
-// TestPlaybackV2RouteEventCarriesTheSiloClientName pins where a route event's
-// client name comes from. The first-party apps name themselves with
-// X-Silo-Client, the header the v2 request metrics read, rather than the
-// declared X-Client-Name, and the first-frame histogram's client label depends
-// on the name reaching the service.
-func TestPlaybackV2RouteEventCarriesTheSiloClientName(t *testing.T) {
+// TestPlaybackV2CallerResolvesClientIdentity pins where a v2 playback
+// caller's app identity comes from. The first-party apps and the web player
+// name themselves with X-Silo-Client* rather than the declared X-Client-*
+// headers; the session label on the admin Activity page and the first-frame
+// histogram's client label both depend on that identity reaching the service.
+func TestPlaybackV2CallerResolvesClientIdentity(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	fake := &fakePlaybackService{}
+	data, err := os.ReadFile("../playback/testdata/protocol_v3/decision_response.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &fake.response); err != nil {
+		t.Fatal(err)
+	}
 	deps.Playback = fake
 	h := newTestHandler(t, deps)
+	siloApp := map[string]string{"X-Silo-Client": "Silo Android TV", "X-Silo-Client-Version": "1.0.0", "X-Silo-Client-Build": "5", "X-Silo-Client-Channel": "beta"}
 	for _, tc := range []struct {
-		name       string
-		headers    map[string]string
-		clientName string
-		siloClient string
+		name    string
+		headers map[string]string
+		want    playback.ClientInfo
 	}{
-		{name: "first-party app", headers: map[string]string{"X-Silo-Client": "Silo Android"}, siloClient: "Silo Android"},
-		{name: "declared header", headers: map[string]string{"X-Client-Name": "Third Party"}, clientName: "Third Party"},
-		{name: "both", headers: map[string]string{"X-Client-Name": "Third Party", "X-Silo-Client": "Silo Web"}, clientName: "Third Party", siloClient: "Silo Web"},
+		{name: "first-party app", headers: siloApp, want: playback.ClientInfo{Name: "Silo Android TV", Version: "1.0.0", Build: "5", Channel: "beta"}},
+		{name: "declared headers", headers: map[string]string{"X-Client-Name": "Third Party", "X-Client-Version": "2.1", "X-Client-Build": "77", "X-Client-Channel": "release"}, want: playback.ClientInfo{Name: "Third Party", Version: "2.1", Build: "77", Channel: "release"}},
+		{name: "declared name wins as a set", headers: with(siloApp, "X-Client-Name", "Third Party"), want: playback.ClientInfo{Name: "Third Party"}},
+		{name: "blank declared name", headers: with(with(siloApp, "X-Client-Name", " "), "X-Client-Version", "9"), want: playback.ClientInfo{Name: "Silo Android TV", Version: "1.0.0", Build: "5", Channel: "beta"}},
+		{name: "clamped", headers: map[string]string{"X-Silo-Client": " " + strings.Repeat("n", 200) + " ", "X-Silo-Client-Channel": strings.Repeat("c", 40)}, want: playback.ClientInfo{Name: strings.Repeat("n", 128), Channel: strings.Repeat("c", 32)}},
 		{name: "nameless", headers: map[string]string{}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			headers := viewerHeaders()
-			for k, v := range tc.headers {
-				headers[k] = v
-			}
-			rec := do(t, h, http.MethodPost, Prefix+"/playback/route-events", playbackJSON(t, playbackRouteEventFixture()), headers)
-			if rec.Code != 202 {
-				t.Fatalf("route event: %d %s", rec.Code, rec.Body.String())
-			}
-			if fake.caller.ClientName != tc.clientName || fake.caller.SiloClientName != tc.siloClient {
-				t.Fatalf("caller client = %q, silo client = %q; want %q, %q", fake.caller.ClientName, fake.caller.SiloClientName, tc.clientName, tc.siloClient)
-			}
-		})
+		for _, op := range []struct {
+			name, path, body string
+			status           int
+		}{
+			{name: "start", path: Prefix + "/playback/start", body: playbackJSON(t, playbackStartFixture(t)), status: 201},
+			{name: "route event", path: Prefix + "/playback/route-events", body: playbackJSON(t, playbackRouteEventFixture()), status: 202},
+		} {
+			t.Run(tc.name+"/"+op.name, func(t *testing.T) {
+				headers := viewerHeaders()
+				for k, v := range tc.headers {
+					headers[k] = v
+				}
+				fake.caller = handlers.PlaybackCaller{}
+				rec := do(t, h, http.MethodPost, op.path, op.body, headers)
+				if rec.Code != op.status {
+					t.Fatalf("%s: %d %s", op.name, rec.Code, rec.Body.String())
+				}
+				got := playback.ClientInfo{Name: fake.caller.ClientName, Version: fake.caller.ClientVersion, Build: fake.caller.ClientBuild, Channel: fake.caller.ClientChannel}
+				if got != tc.want {
+					t.Fatalf("caller client = %+v; want %+v", got, tc.want)
+				}
+			})
+		}
 	}
 }
 

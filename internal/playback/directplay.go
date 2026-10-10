@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,42 +17,69 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
+// unknownMediaMIME is the MIME type of a file with an unknown extension.
+const unknownMediaMIME = "application/octet-stream"
+
+const (
+	mimeVideoMatroska = "video/x-matroska"
+	mimeVideoWebM     = "video/webm"
+	mimeVideoMPEGTS   = "video/mp2t"
+	mimeVideoMPEGPS   = "video/mpeg"
+	mimeVideoOgg      = "video/ogg"
+)
+
+// mediaMIMETypes maps the media file extensions the scanner catalogs to the
+// MIME type their original bytes are served with.
+var mediaMIMETypes = mimeTypesByExtension(map[string]string{
+	mimeVideoMP4V3:       ".mp4 .m4v .f4v",
+	mimeVideoMatroska:    ".mkv",
+	mimeVideoWebM:        ".webm",
+	"video/x-msvideo":    ".avi .divx",
+	"video/quicktime":    ".mov",
+	"video/3gpp":         ".3gp",
+	"video/3gpp2":        ".3g2",
+	mimeVideoMPEGTS:      ".ts .m2ts .mts",
+	mimeVideoMPEGPS:      ".mpg .mpeg",
+	"video/x-flv":        ".flv",
+	"video/x-ms-wmv":     ".wmv",
+	"video/x-ms-asf":     ".asf",
+	mimeVideoOgg:         ".ogv .ogm",
+	AudioOnlyRemuxMIMEV3: ".m4b .m4a",
+	"audio/mpeg":         ".mp3",
+	"audio/flac":         ".flac",
+	"audio/ogg":          ".opus .ogg",
+	"audio/wav":          ".wav",
+	"audio/aac":          ".aac",
+})
+
+// mimeTypesByExtension inverts a table of MIME type to space-separated
+// extensions.
+func mimeTypesByExtension(extensionsByMIME map[string]string) map[string]string {
+	byExtension := make(map[string]string)
+	for mime, extensions := range extensionsByMIME {
+		for _, ext := range strings.Fields(extensions) {
+			byExtension[ext] = mime
+		}
+	}
+	return byExtension
+}
+
 // MimeFromExtension returns a MIME type based on the file extension.
 // Falls back to "application/octet-stream" for unknown extensions.
 func MimeFromExtension(name string) string {
-	ext := strings.ToLower(filepath.Ext(name))
-	switch ext {
-	case ".mp4", ".m4v":
-		return "video/mp4"
-	case ".mkv":
-		return "video/x-matroska"
-	case ".webm":
-		return "video/webm"
-	case ".avi":
-		return "video/x-msvideo"
-	case ".mov":
-		return "video/quicktime"
-	case ".ts":
-		return "video/mp2t"
-	case ".flv":
-		return "video/x-flv"
-	case ".wmv":
-		return "video/x-ms-wmv"
-	case ".m4b", ".m4a":
-		return "audio/mp4"
-	case ".mp3":
-		return "audio/mpeg"
-	case ".flac":
-		return "audio/flac"
-	case ".opus", ".ogg":
-		return "audio/ogg"
-	case ".wav":
-		return "audio/wav"
-	case ".aac":
-		return "audio/aac"
-	default:
-		return "application/octet-stream"
+	if mime, ok := mediaMIMETypes[strings.ToLower(filepath.Ext(name))]; ok {
+		return mime
 	}
+	return unknownMediaMIME
+}
+
+// MediaMIMETypes returns, sorted and without duplicates, every MIME type
+// MimeFromExtension returns for a known extension. Contracts that declare the
+// content types of original media bytes list these.
+func MediaMIMETypes() []string {
+	types := slices.Collect(maps.Values(mediaMIMETypes))
+	slices.Sort(types)
+	return slices.Compact(types)
 }
 
 // ServeDirectPlay serves a media file with HTTP byte-range support.
