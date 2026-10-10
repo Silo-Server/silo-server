@@ -531,21 +531,7 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
 	}
 
-	client, err := cache.NewRedisClientForRole(cfg.Redis, "checks")
-	if err != nil {
-		return connectionCheckResponse{
-			Success: false,
-			Message: fmt.Sprintf("Redis connection check failed: %v", err),
-		}
-	}
-	if client == nil {
-		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
-	}
-	defer func() { _ = cache.CloseRedisClient(client) }()
-
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := client.Ping(checkCtx).Err(); err != nil {
+	if err := pingRedis(ctx, cfg.Redis); err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Redis connection check failed: %v", err),
@@ -556,6 +542,25 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 		Success: true,
 		Message: "Redis connection successful.",
 	}
+}
+
+// pingRedis connects to the Redis cfg names with the client Silo's services
+// use and sends a PING. Connecting selects the database number, so a number
+// the server does not have fails as well. The Redis connection check and a
+// save that changes the connection both run it.
+var pingRedis = func(ctx context.Context, cfg config.RedisConfig) error {
+	client, err := cache.NewRedisClientForRole(cfg, "checks")
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return errors.New("redis URL is required")
+	}
+	defer func() { _ = cache.CloseRedisClient(client) }()
+
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return client.Ping(checkCtx).Err()
 }
 
 func checkRecommendationsEmbeddingConnection(

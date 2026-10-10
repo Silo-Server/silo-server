@@ -120,6 +120,30 @@ single-server URL and for a Sentinel URL. A change needs a restart.
   database. That includes a cleared URL, so a URL emptied and typed again keeps
   the number; a save that leaves no URL stores no number.
 
+### Saving the Redis connection
+
+A server that cannot connect to the Redis its stored settings name stops at its
+next start, and a stored value can then no longer be corrected in the admin UI.
+So a write that changes that connection connects to it first, with the client
+`POST /api/v2/admin/settings/check/redis` uses, and stores nothing when the
+connection fails.
+
+- The connection changes when the write leaves a different `redis.url`, or a
+  `redis.db` row that names a different number, than the stored ones. Both
+  writes and both API versions apply the check. A write that leaves the
+  connection as it is, clears `redis.url`, or runs in a process started with
+  `REDIS_URL` connects to nothing.
+- Connecting selects the database number, so a number the Redis server does
+  not have (16 or more on a Redis with the default 16 databases) fails the
+  same way an unreachable host does.
+- A failed connection answers a `422` validation problem on `/api/v2` and
+  `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
+  the connection or could not be reached. It does not quote the client error,
+  which can name hosts and addresses; the server logs that error.
+- The connection is made before the settings transaction. If another write
+  changes the stored Redis settings in the meantime, the write is refused the
+  same way and can be sent again.
+
 ### HEVC encoding
 
 `playback.allow_hevc_encoding` is a boolean setting, default `false`. When
