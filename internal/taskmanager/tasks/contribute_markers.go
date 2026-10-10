@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -146,6 +147,9 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 				outcomes, err := t.service.ContributeFile(ctx, file, markers.ContributeOptions{Auto: true})
 				if err != nil {
 					counts.failed++
+					counts.lastErr = err
+					slog.WarnContext(ctx, "contribute markers: resolve failed", "component", "taskmanager",
+						"file_id", file.ID, "error", err)
 					break
 				}
 				retryAfter, limited := counts.add(outcomes, tallied)
@@ -172,11 +176,22 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 
 	counts.write(progress, 0)
 	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, invalid %d, failed %d", counts.submitted, counts.skipped, counts.invalid, counts.failed))
+	// A run where every attempt failed must not read as a success. Skipped
+	// (already submitted) and invalid outcomes are answers from the provider,
+	// so a run that saw any is not a total failure.
+	if counts.submitted == 0 && counts.skipped == 0 && counts.invalid == 0 && counts.failed > 0 {
+		if counts.lastErr != nil {
+			return fmt.Errorf("all %d contribution attempts failed, e.g. %w", counts.failed, counts.lastErr)
+		}
+		return fmt.Errorf("all %d contribution attempts failed", counts.failed)
+	}
 	return nil
 }
 
 type contributionCounts struct {
 	submitted, skipped, invalid, failed int
+	// lastErr is the most recent failure, reported when every attempt failed.
+	lastErr error
 }
 
 // add tallies one file's outcomes, once per provider and segment across the
@@ -204,6 +219,7 @@ func (c *contributionCounts) add(outcomes []markers.ContributionOutcome, tallied
 			c.invalid++
 		case markers.OutcomeStatusError:
 			c.failed++
+			c.lastErr = fmt.Errorf("provider %s: %s", o.Provider, o.Reason)
 		default:
 			c.submitted++
 		}
