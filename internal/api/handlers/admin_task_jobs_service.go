@@ -107,7 +107,16 @@ func (h *AdminJobsHandler) RequestAdminTaskJobCancellation(ctx context.Context, 
 	if !ok {
 		return nil, fmt.Errorf("admin job cancellation unavailable")
 	}
-	return repo.RequestCancellation(ctx, id)
+	job, err := repo.RequestCancellation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// The flag reaches a cleanup running on any node at its next cancel poll.
+	// When it runs in this process, stop it now instead of one poll later.
+	if job.JobType == adminjob.JobTypeImageCacheCleanup && job.Status == adminjob.StatusRunning && h.CancelRegistry != nil {
+		h.CancelRegistry.Cancel(job.ID)
+	}
+	return job, nil
 }
 func (h *AdminJobsHandler) AdminTaskJobDownload(ctx context.Context, job *models.AdminJob) (string, *time.Time) {
 	if h.store == nil || job.Status != adminjob.StatusCompleted || job.ArtifactBucket == "" || job.ArtifactKey == "" {

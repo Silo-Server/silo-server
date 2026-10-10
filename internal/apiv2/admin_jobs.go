@@ -78,7 +78,7 @@ func adminJobOf(job *models.AdminJob) AdminJob {
 	if job.CancelRequested && !out.Terminal {
 		out.State = "canceling"
 	}
-	out.Cancelable = (job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeStorageTransition) && !out.Terminal
+	out.Cancelable = (job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeStorageTransition || job.JobType == adminjob.JobTypeImageCacheCleanup) && !out.Terminal
 	if job.JobType == adminjob.JobTypeLibraryRefresh && job.ProgressTotal > 0 && job.ProgressCurrent >= 0 && job.ProgressCurrent <= job.ProgressTotal {
 		out.Progress = &JobProgress{Current: job.ProgressCurrent, Total: job.ProgressTotal, Unit: "items"}
 	}

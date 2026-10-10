@@ -127,11 +127,16 @@ documents for this job type.
 
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for storage-transition jobs. Library refresh cancellation uses its separate
-library-job endpoint above. Cancellation retains completed effects and verified
-storage-copy checkpoints. An accepted cancellation returns `202`; an already
-canceled job returns `200`; a succeeded or failed job returns
-`409 job_not_cancelable`. A queued storage-transition cancellation also releases
-its staged target so a later transition can choose a different destination. The
-administrator task section does not add a generic durable scheduler or change
+for storage-transition and image cache cleanup jobs. Library refresh
+cancellation uses its separate library-job endpoint above. Cancellation retains
+completed effects and verified storage-copy checkpoints. An accepted
+cancellation returns `202`; an already canceled job returns `200`; a succeeded
+or failed job returns `409 job_not_cancelable`. A queued storage-transition
+cancellation also releases its staged target so a later transition can choose a
+different destination. An image cache cleanup stops before its next prefix, so
+the cancel can take partial effect: cached images already deleted stay deleted
+and any not yet deleted remain in storage. The canceled job reports the totals
+it reached in `library_result` (`deleted_prefixes`, `deleted_s3_objects`); a
+cleanup canceled before it deleted any prefix reports zeros. The administrator
+task section does not add a generic durable scheduler or change
 the retention and dispatch guarantees of existing job owners.
