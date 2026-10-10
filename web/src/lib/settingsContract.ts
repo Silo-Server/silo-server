@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 16;
+export const SETTINGS_REVISION = 17;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -377,9 +377,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 16,
+    introducedIn: 17,
     scopes: ["profile"],
-    scopeIntroducedIn: [16],
+    scopeIntroducedIn: [17],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
     label: "Blur unwatched episode images",
@@ -394,9 +394,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 16,
+    introducedIn: 17,
     scopes: ["profile"],
-    scopeIntroducedIn: [16],
+    scopeIntroducedIn: [17],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
     label: "Hide unwatched episode descriptions",

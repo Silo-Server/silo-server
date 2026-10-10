@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 16,
+  "revision": 17,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -662,7 +662,7 @@
     },
     {
       "key": "catalog.hide_unwatched_episode_images",
-      "introduced_in": 16,
+      "introduced_in": 17,
       "persistence": "remote",
       "allowed_scopes": ["profile"],
       "resolution_order": ["profile", "default"],
@@ -677,7 +677,7 @@
     },
     {
       "key": "catalog.hide_unwatched_episode_overviews",
-      "introduced_in": 16,
+      "introduced_in": 17,
       "persistence": "remote",
       "allowed_scopes": ["profile"],
       "resolution_order": ["profile", "default"],
