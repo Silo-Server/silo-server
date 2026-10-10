@@ -168,7 +168,7 @@ function legacySettingsRestartPending(status: AdminServerStatus): boolean {
  * without the list falls back to the coarse last-reason heuristic, which warns
  * for any settings save rather than missing a real one.
  */
-function settingsRestartPending(
+export function settingsRestartPending(
   status: AdminServerStatus | undefined,
   prefixes: readonly string[],
 ): boolean {

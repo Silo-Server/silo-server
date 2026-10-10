@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useSettingsFormMock = vi.fn();
 const brandingState = { storageAvailable: true };
+const serverStatusState: { data: unknown } = { data: undefined };
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -12,6 +13,10 @@ vi.mock("@/hooks/useSettingsForm", () => ({
 
 vi.mock("@/hooks/useRestartKeys", () => ({
   useRestartKeys: () => new Set<string>(),
+}));
+
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminServerStatus: () => serverStatusState,
 }));
 
 vi.mock("@/hooks/useBranding", () => ({
@@ -96,6 +101,7 @@ describe("AppearanceSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     brandingState.storageAvailable = true;
+    serverStatusState.data = undefined;
     form = makeForm();
     useSettingsFormMock.mockReset();
     useSettingsFormMock.mockImplementation(() => form);
@@ -117,6 +123,33 @@ describe("AppearanceSettings", () => {
       screen.getByText(/Image uploads need artwork storage \(local disk or S3\)/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/public S3 bucket/)).not.toBeInTheDocument();
+  });
+
+  it("asks for a restart once a saved artwork-storage change is waiting for one", () => {
+    brandingState.storageAvailable = false;
+    serverStatusState.data = {
+      restart_required: true,
+      restart_required_reasons: ["setting:artwork.local_path"],
+      restart_requested: false,
+    };
+    render(<AppearanceSettings />);
+
+    expect(
+      screen.getByText("Restart the server to finish enabling image uploads."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Image uploads need artwork storage/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the setup message when the pending restart is for an unrelated setting", () => {
+    brandingState.storageAvailable = false;
+    serverStatusState.data = {
+      restart_required: true,
+      restart_required_reasons: ["setting:playback.hw_accel"],
+      restart_requested: false,
+    };
+    render(<AppearanceSettings />);
+
+    expect(screen.getByText(/Image uploads need artwork storage/)).toBeInTheDocument();
   });
 
   it("renders the tab title and nothing else in the header", () => {
