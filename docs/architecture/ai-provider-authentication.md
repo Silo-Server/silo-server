@@ -175,7 +175,9 @@ selectable for a check, and credentials needing login can be renewed first.
 Eligibility and disconnect checks still apply to explicit checks. Ordinary
 request success cannot resume a pause. Each provider limit rejection rotates an
 internal pause identifier; a delayed successful check cannot clear a newer pause
-on the same access token. API-key and speech requests do not read
+on the same access token. Local pause admission uses a separate error from a
+fresh provider limit, so blocked retries cannot replace the pause being checked.
+API-key and speech requests do not read
 or change this state.
 The account model catalog preserves provider order and includes only entries
 with `visibility:list`, excluding the non-streaming `o1-pro` and `o3-pro` families.

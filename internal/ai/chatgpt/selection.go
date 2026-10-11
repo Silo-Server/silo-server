@@ -25,7 +25,9 @@ const (
 var ErrModelUnavailable = errors.New("choose a model available to the selected ChatGPT account")
 var ErrAccountChanged = errors.New("ChatGPT account changed; refresh settings and try again")
 var ErrPlanIneligible = llm.ErrPlanIneligible
-var ErrUsageLimited = llm.ErrQuotaExhausted
+
+// ErrUsageLimited is local admission state, not a fresh provider quota response.
+var ErrUsageLimited = errors.New("ChatGPT plan usage is paused; use Test text model to recheck usage")
 
 var selectionKeys = []string{CredentialsKey, authModeSetting, chatModelSetting, legacyChatModelSetting, reasoningEffortSetting, "ai.base_url", "subtitle_ai.base_url", "ai.api_key", "subtitle_ai.api_key"}
 

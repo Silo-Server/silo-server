@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"testing/synctest"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 )
@@ -246,4 +247,48 @@ func TestDelayedUsageCheckCannotClearNewerPause(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPausedRetryDoesNotReplaceProviderPause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "gpt-6-luna"})
+		cfg, err := s.TextConfig(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous := http.DefaultTransport
+		t.Cleanup(func() { http.DefaultTransport = previous })
+		calls := 0
+		var check llm.Config
+		var pauseID string
+		http.DefaultTransport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if calls != 1 || r.Header.Get("Authorization") != "Bearer a-token" {
+				t.Fatal("paused retry contacted provider")
+			}
+			// Another request receives a real provider limit before this request's retry.
+			if err := s.RejectUsageToken(t.Context(), "a-token"); err != nil {
+				t.Fatal(err)
+			}
+			pauseID = stored(t, store).Accounts[0].UsagePauseID
+			check, err = s.CheckTextConfig(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response(http.StatusServiceUnavailable, map[string]any{"error": "temporary failure"}), nil
+		})
+		out, err := llm.NewClient(cfg).Chat(t.Context(), []llm.Message{{Role: "user", Content: "check"}}, false)
+		if out != "" || !errors.Is(err, ErrUsageLimited) || errors.Is(err, llm.ErrQuotaExhausted) || calls != 1 {
+			t.Fatalf("local admission: output=%q, err=%v, calls=%d", out, err, calls)
+		}
+		if stored(t, store).Accounts[0].UsagePauseID != pauseID {
+			t.Fatal("local admission rotated provider pause")
+		}
+		if err := check.ChatGPTUsageVerified(t.Context(), "a-token"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.TextConfig(t.Context()); err != nil {
+			t.Fatalf("local admission invalidated successful explicit check: %v", err)
+		}
+	})
 }
