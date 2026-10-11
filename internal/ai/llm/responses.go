@@ -14,6 +14,34 @@ import (
 
 const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceeded"
 
+// SSE accepts CR, LF, and CRLF. Remember CR across reads so a following LF
+// belongs to the same ending, without delaying a completed frame for lookahead.
+func splitEventLines() bufio.SplitFunc {
+	afterCR := false
+	return func(data []byte, atEOF bool) (int, []byte, error) {
+		start := 0
+		if afterCR && len(data) > 0 {
+			afterCR = false
+			if data[0] == '\n' {
+				start = 1
+			}
+		}
+		for i := start; i < len(data); i++ {
+			switch data[i] {
+			case '\r':
+				afterCR = true
+				return i + 1, data[start:i], nil
+			case '\n':
+				return i + 1, data[start:i], nil
+			}
+		}
+		if atEOF && len(data) > start {
+			return len(data), data[start:], nil
+		}
+		return start, nil, nil
+	}
+}
+
 type responseReasoning struct {
 	Effort string `json:"effort"`
 }
@@ -105,6 +133,7 @@ func readResponseStream(data io.Reader) (string, error) {
 	completed := false
 	scanner := bufio.NewScanner(io.LimitReader(data, 32<<20))
 	scanner.Buffer(make([]byte, 4096), 8<<20)
+	scanner.Split(splitEventLines())
 	var eventData []string
 	consume := func() error {
 		if len(eventData) == 0 {

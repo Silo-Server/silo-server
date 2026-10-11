@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -66,37 +67,60 @@ func TestSubscriptionRejectsPartialAndFailedStreams(t *testing.T) {
 	}
 }
 
-func TestSubscriptionCRLFStream(t *testing.T) {
-	stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\r\n\r\ndata: {\"type\":\"response.completed\"}\r\n\r\n"
-	out, err := readResponseStream(strings.NewReader(stream))
-	if err != nil || out != "complete" {
-		t.Fatalf("CRLF response = %q, %v", out, err)
+func TestSubscriptionStreamLineEndings(t *testing.T) {
+	for _, test := range []struct{ name, ending string }{
+		{"LF", "\n"}, {"CRLF", "\r\n"}, {"CR", "\r"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stream := strings.Join([]string{
+				`: ignored`,
+				`data: {"type":`,
+				`data: "response.output_text.delta","delta":"complete"}`,
+				"", `data: {"type":"response.completed"}`, "", "",
+			}, test.ending)
+			for _, chunked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("chunked=%t", chunked), func(t *testing.T) {
+					var reader io.Reader = strings.NewReader(stream)
+					if chunked {
+						reader = iotest.OneByteReader(reader)
+					}
+					out, err := readResponseStream(reader)
+					if err != nil || out != "complete" {
+						t.Fatalf("response = %q, %v", out, err)
+					}
+				})
+			}
+		})
 	}
 }
 
 func TestSubscriptionCompletionDoesNotWaitForStreamEOF(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer func() { _ = reader.Close() }()
-	defer func() { _ = writer.Close() }()
-	result := make(chan error, 1)
-	go func() {
-		out, err := readResponseStream(reader)
-		if err == nil && out != "complete" {
-			err = errors.New("incorrect completed output")
-		}
-		result <- err
-	}()
-	_, err := io.WriteString(writer, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-result:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("completed stream waited for EOF")
+	for _, ending := range []string{"\n", "\r\n", "\r"} {
+		t.Run(fmt.Sprintf("ending=%q", ending), func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer func() { _ = reader.Close() }()
+			defer func() { _ = writer.Close() }()
+			result := make(chan error, 1)
+			go func() {
+				out, err := readResponseStream(reader)
+				if err == nil && out != "complete" {
+					err = errors.New("incorrect completed output")
+				}
+				result <- err
+			}()
+			stream := strings.Join([]string{`data: {"type":"response.output_text.delta","delta":"complete"}`, "", `data: {"type":"response.completed"}`, "", ""}, ending)
+			if _, err := io.WriteString(writer, stream); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("completed stream waited for EOF")
+			}
+		})
 	}
 }
 

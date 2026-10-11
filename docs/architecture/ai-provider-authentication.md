@@ -44,6 +44,8 @@ again. A newer sign-in, account selection, or disconnect supersedes an older
 completion even while it waits for the provider. Silo validates the ID token's
 RS256 signature, OpenAI issuer, audience, expiration, nonce, and subject, and
 requires the granted `chatgpt.tokens.use.direct` scope before activating a grant.
+When the initial token response omits scopes, Silo uses the requested scopes
+under RFC 6749 section 5.1. The resulting plan grant still requires a refresh token.
 
 A verified sign-in without plan permission retains a disabled registration and
 identity hints, without access or refresh tokens. Reconnect reuses the issued
@@ -140,7 +142,8 @@ to developer messages, and sets `store:false` and `stream:true`. It omits
 temperature. Explicit effort uses `reasoning.effort`; API-key Chat Completions
 requests use `reasoning_effort`.
 
-The stream reader buffers output until `response.completed`. Failed, incomplete,
+The stream reader accepts LF, CRLF, and CR line endings across transport reads,
+and buffers output until `response.completed`. Failed, incomplete,
 or truncated streams cannot publish partial translations. Account usage-limit
 errors terminate retries; temporary usage-check failures and streamed
 `server_error` failures use bounded backoff

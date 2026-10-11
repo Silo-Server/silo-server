@@ -21,12 +21,13 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, clientID, authMode string
-		status                   int
-		empty, timeout           bool
-		wantActive, wantModel    string
+		name, clientID, authMode  string
+		status                    int
+		empty, timeout, omitScope bool
+		wantActive, wantModel     string
 	}{
 		{name: "new account", clientID: "b", authMode: "chatgpt", status: 200, wantActive: "b", wantModel: "gpt-4o-mini"},
+		{name: "omitted scope activates the requested plan grant", clientID: "b", authMode: "chatgpt", status: 200, omitScope: true, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "failed new account catalog", clientID: "b", authMode: "chatgpt", status: 503, wantActive: "a", wantModel: "a-model"},
 		{name: "catalog timeout preserves accepted tokens", clientID: "b", authMode: "chatgpt", status: 503, timeout: true, wantActive: "a", wantModel: "a-model"},
 		{name: "failed returning account catalog", clientID: "a", authMode: "chatgpt", status: 503, wantModel: "a-model"},
@@ -55,6 +56,9 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 				s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
 					switch r.URL.Path {
 					case "/api/accounts/oauth/token":
+						if test.omitScope {
+							return response(200, map[string]any{"access_token": "accepted-access", "refresh_token": "accepted-refresh", "id_token": signed, "token_type": "Bearer", "expires_in": 3600}), nil
+						}
 						return response(200, tokenResponse{AccessToken: "accepted-access", RefreshToken: "accepted-refresh", IDToken: signed, Scope: planScope, TokenType: "Bearer", ExpiresIn: 3600}), nil
 					case "/.well-known/openid-configuration":
 						return response(200, map[string]string{"jwks_uri": "https://auth.openai.com/jwks", "revocation_endpoint": "https://auth.openai.com/revoke"}), nil
@@ -102,6 +106,9 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 				}
 				if test.authMode == "api_key" && modelsCalls != 0 {
 					t.Fatal("API key login required a subscription catalog")
+				}
+				if test.omitScope && modelsCalls != 1 {
+					t.Fatal("omitted scope bypassed plan catalog reconciliation")
 				}
 				if failed && test.clientID == "a" {
 					if _, err := s.TextConfig(t.Context()); !errors.Is(err, ErrSignInRequired) {

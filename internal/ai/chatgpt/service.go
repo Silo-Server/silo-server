@@ -26,23 +26,25 @@ const CredentialsKey = "ai.chatgpt.credentials"
 const issuer = "https://auth.openai.com"
 const resource = "https://api.openai.com/v1"
 const planScope = "chatgpt.tokens.use.direct"
+const authorizationScope = "openid profile email offline_access resource.invoke " + planScope
 const browserCallbackURI = "http://127.0.0.1:51121/auth/callback"
 
 const (
-	loginIdle         = "idle"
-	loginPending      = "pending"
-	loginConnected    = "connected"
-	loginFailed       = "failed"
-	loginExpired      = "expired"
-	dynamicClientID   = "dynamic_agent_client"
-	oauthClientID     = "client_id"
-	oauthCode         = "code"
-	oauthState        = "state"
-	oauthResource     = "resource"
-	oauthRefreshToken = "refresh_token"
-	oauthInvalidGrant = "invalid_grant"
-	visibilityListed  = "list"
-	jwkKeyTypeRSA     = "RSA"
+	loginIdle              = "idle"
+	loginPending           = "pending"
+	loginConnected         = "connected"
+	loginFailed            = "failed"
+	loginExpired           = "expired"
+	dynamicClientID        = "dynamic_agent_client"
+	oauthClientID          = "client_id"
+	oauthCode              = "code"
+	oauthAuthorizationCode = "authorization_code"
+	oauthState             = "state"
+	oauthResource          = "resource"
+	oauthRefreshToken      = "refresh_token"
+	oauthInvalidGrant      = "invalid_grant"
+	visibilityListed       = "list"
+	jwkKeyTypeRSA          = "RSA"
 )
 
 var ErrSignInRequired = errors.New("sign in with ChatGPT again")
@@ -243,7 +245,7 @@ func (s *Service) authorizationURL(c *credentials, p *pendingLogin) string {
 		clientID = dynamicClientID
 	}
 	q := url.Values{oauthClientID: {clientID}, "ext_agent_host_id": {c.HostID}, "response_type": {oauthCode},
-		"redirect_uri": {p.RedirectURI}, "scope": {"openid profile email offline_access resource.invoke " + planScope},
+		"redirect_uri": {p.RedirectURI}, "scope": {authorizationScope},
 		oauthResource: {resource}, oauthState: {p.State}, "nonce": {p.Nonce}, "code_challenge_method": {"S256"}, "code_challenge": {hash(p.Verifier)}}
 	if p.ClientID == "" {
 		q.Set("agent_name_hint", "Silo")
@@ -332,7 +334,7 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 				return tokens, ErrProvider
 			}
 		}
-		if form.Get("grant_type") == "authorization_code" && decodeErr == nil && problem.Error == oauthInvalidGrant {
+		if form.Get("grant_type") == oauthAuthorizationCode && decodeErr == nil && problem.Error == oauthInvalidGrant {
 			return tokens, errors.Join(ErrSignInRequired, errInvalidAuthorizationGrant)
 		}
 		return tokens, ErrSignInRequired
@@ -340,8 +342,15 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 	if resp.StatusCode != http.StatusOK {
 		return tokens, ErrProvider
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&tokens) != nil ||
-		tokens.AccessToken == "" || (tokens.RefreshToken == "" && form.Get("grant_type") != oauthRefreshToken && hasPlanScope(tokens.Scope)) || tokens.ExpiresIn <= 0 || !strings.EqualFold(tokens.TokenType, "Bearer") {
+	if json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&tokens) != nil {
+		return tokens, ErrIdentity
+	}
+	// RFC 6749 section 5.1: omitted scopes retain the requested grant.
+	// Normalize before validating that an initial plan grant is renewable.
+	if tokens.Scope == "" && form.Get("grant_type") == oauthAuthorizationCode {
+		tokens.Scope = authorizationScope
+	}
+	if tokens.AccessToken == "" || (tokens.RefreshToken == "" && form.Get("grant_type") != oauthRefreshToken && hasPlanScope(tokens.Scope)) || tokens.ExpiresIn <= 0 || !strings.EqualFold(tokens.TokenType, "Bearer") {
 		return tokens, ErrIdentity
 	}
 	return tokens, nil
@@ -392,7 +401,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 	if callback.Error != "" || callback.Code == "" || clientID == "" || clientID == dynamicClientID || (callback.ClientID != "" && callback.ClientID != clientID) {
 		completionErr = ErrIdentity
 	} else {
-		tokens, completionErr = s.exchange(completionCtx, url.Values{"grant_type": {"authorization_code"}, oauthClientID: {clientID},
+		tokens, completionErr = s.exchange(completionCtx, url.Values{"grant_type": {oauthAuthorizationCode}, oauthClientID: {clientID},
 			oauthCode: {callback.Code}, "code_verifier": {pending.Verifier}, "redirect_uri": {pending.RedirectURI}, oauthResource: {resource}})
 		if completionErr == nil {
 			claims, completionErr = s.verifyIDToken(completionCtx, tokens.IDToken, clientID, pending.Nonce)

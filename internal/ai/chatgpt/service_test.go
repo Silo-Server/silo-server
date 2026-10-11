@@ -92,11 +92,15 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 		nonce, audience, subject, scope, clientID                   string
 		expired                                                     bool
 		omitClientID                                                bool
+		omitScope                                                   bool
 		superseded, interrupted, expiryCrossed, omitRefresh         bool
 		retainRegistration, preserveActive, reconsent, invalidGrant bool
 		want                                                        bool
 	}{
 		{name: "copied browser callback", scope: planScope, want: true},
+		{name: "omitted initial scope uses requested grant", omitScope: true, want: true},
+		{name: "omitted reconnect scope uses requested grant", omitScope: true, clientID: "oaiapp_registered", want: true},
+		{name: "omitted initial scope still requires refresh token", omitScope: true, omitRefresh: true},
 		{name: "accepted callback crosses expiry", scope: planScope, expiryCrossed: true, want: true},
 		{name: "initial grant requires refresh token", scope: planScope, omitRefresh: true},
 		{name: "returning browser callback without client ID", scope: planScope, omitClientID: true, clientID: "oaiapp_registered", want: true},
@@ -198,7 +202,11 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					if test.omitRefresh {
 						refreshToken = ""
 					}
-					return response(200, tokenResponse{AccessToken: "access", RefreshToken: refreshToken, IDToken: signed, TokenType: "Bearer", ExpiresIn: 3600, Scope: grantScope}), nil
+					body := map[string]any{"access_token": "access", "refresh_token": refreshToken, "id_token": signed, "token_type": "Bearer", "expires_in": 3600}
+					if !test.omitScope {
+						body["scope"] = grantScope
+					}
+					return response(200, body), nil
 				case "/.well-known/openid-configuration":
 					return response(200, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
 				case "/keys":
@@ -228,6 +236,12 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 				t.Fatal(err)
 			}
 			if test.want {
+				if test.omitScope {
+					a := stored(t, store).Accounts[0]
+					if a.Scopes != u.Query().Get("scope") || a.AccessToken != "access" || a.RefreshToken != "refresh" || a.IDToken != signed || a.NeedsLogin {
+						t.Fatal("omitted scope lost the requested grant or accepted credentials")
+					}
+				}
 				if state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != "connected" {
 					t.Fatalf("status: %+v", state)
 				}
