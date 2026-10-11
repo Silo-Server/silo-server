@@ -1568,6 +1568,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		effectiveHints := selectionHints
+		// Every identity's results, primary first, for the alias check below.
+		type aliasAttempt struct {
+			hints      *MatchHints
+			candidates []MatchCandidate
+		}
+		aliasAttempts := []aliasAttempt{{selectionHints, candidates}}
 		winner, matched := trySelection(selectionHints, candidates)
 		// Structured IDs remain decisive and never fall back to a title search.
 		// For title/year identities, try independently parsed path hypotheses only
@@ -1594,6 +1600,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				if len(alternateCandidates) == 0 {
 					continue
 				}
+				aliasAttempts = append(aliasAttempts, aliasAttempt{&alternateHints, alternateCandidates})
 				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates)
 				if len(candidates) == 0 || alternateMatched || bestCandidateScore(&alternateHints, alternateCandidates) > bestCandidateScore(effectiveHints, candidates) {
 					candidates = alternateCandidates
@@ -1605,6 +1612,28 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					break
 				}
 			}
+		}
+		// Last: a search may still hold the right result under a title it didn't
+		// return, such as a regional release title, and the provider's details
+		// can confirm it. Check each identity's results in the order searched.
+		if !matched {
+			aliasCtx, cancelAlias := context.WithTimeout(ctx, titleAliasValidationTimeout)
+			aliasBudget := maxTitleAliasValidationCandidates
+			for _, attempt := range aliasAttempts {
+				aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
+					aliasCtx, attempt.hints, attempt.candidates, itemChain, searchQuery.Language, &aliasBudget,
+				)
+				providerMatchErrors = append(providerMatchErrors, aliasErrors...)
+				if aliasWinner != nil {
+					winner, matched = aliasWinner, true
+					effectiveHints, candidates = attempt.hints, attempt.candidates
+					break
+				}
+				if len(aliasErrors) > 0 {
+					break
+				}
+			}
+			cancelAlias()
 		}
 		trustedIDTypeMismatch := false
 		if !matched && len(candidates) == 0 && trustedHintIDsPresent(selectionHints) {

@@ -277,6 +277,26 @@ export function carouselCardWidthClasses(size: PosterSize): string {
   }
 }
 
+/** Width classes of wide (16:9) carousel cards such as Continue Watching episodes. */
+export const WIDE_CAROUSEL_CARD_WIDTH_CLASSES = "w-[260px] shrink-0 sm:w-[315px]";
+
+/**
+ * The width in pixels that carouselCardWidthClasses (or, for "wide",
+ * WIDE_CAROUSEL_CARD_WIDTH_CLASSES) resolves to at a viewport width. Keep the
+ * two in step: carousel windowing sizes its first commit from this.
+ */
+export function carouselCardWidthPx(size: PosterSize | "wide", viewportWidth: number): number {
+  const [base, sm, lg] =
+    size === "wide"
+      ? [260, 315, 315]
+      : size === "compact"
+        ? [120, 140, 160]
+        : size === "large"
+          ? [170, 195, 220]
+          : [140, 160, 185];
+  return viewportWidth >= 1024 ? lg : viewportWidth >= 640 ? sm : base;
+}
+
 /**
  * Placeholder height for an off-screen carousel row rendered under
  * content-visibility: the row header plus a 2:3 poster at this size's card
