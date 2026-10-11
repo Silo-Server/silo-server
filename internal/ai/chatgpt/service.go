@@ -106,8 +106,8 @@ type Status struct {
 type Login struct {
 	AttemptID        string    `json:"attempt_id"`
 	ExpiresAt        time.Time `json:"expires_at"`
-	AuthorizationURL string    `json:"authorization_url,omitempty"`
-	CallbackURI      string    `json:"callback_uri,omitempty"`
+	AuthorizationURL string    `json:"authorization_url"`
+	CallbackURI      string    `json:"callback_uri"`
 }
 
 type Callback struct {

@@ -20722,8 +20722,8 @@ export interface components {
     };
     ChatGPTLogin: {
       attempt_id: string;
-      authorization_url?: string;
-      callback_uri?: string;
+      authorization_url: string;
+      callback_uri: string;
       /** Format: date-time */
       expires_at: string;
     };

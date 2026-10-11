@@ -745,6 +745,9 @@ export default function AISettings() {
     if (
       requiresTextConnection &&
       effort &&
+      capabilityModel === currentModel &&
+      !capabilities.isFetching &&
+      capabilities.isSuccess &&
       capabilities.data &&
       !capabilities.data.reasoning_levels.includes(effort)
     ) {

@@ -23214,7 +23214,9 @@
         },
         "required": [
           "attempt_id",
-          "expires_at"
+          "expires_at",
+          "authorization_url",
+          "callback_uri"
         ],
         "type": "object"
       },

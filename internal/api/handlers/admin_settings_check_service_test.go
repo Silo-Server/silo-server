@@ -28,6 +28,27 @@ func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
 	}
 }
 
+func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer private-test-key" {
+			t.Error("saved text key was not sent")
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"desc = api_key=private-test-key endpoint=https://private.example"}}`))
+	}))
+	defer server.Close()
+	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
+		"ai.base_url":   server.URL,
+		"ai.chat_model": "test-model",
+		"ai.api_key":    "private-test-key",
+	}}}
+	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+	const want = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
+	if err != nil || result.Success || result.Message != want {
+		t.Fatalf("result = %+v, err = %v; want %q", result, err, want)
+	}
+}
+
 func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 	for _, tc := range []struct {
 		status int

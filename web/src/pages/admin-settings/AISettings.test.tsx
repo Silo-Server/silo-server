@@ -1,7 +1,7 @@
-import { render as renderDOM, screen, within } from "@testing-library/react";
+import { act, fireEvent, render as renderDOM, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AISettings from "./AISettings";
 
@@ -50,6 +50,8 @@ let dirtyCount = 0;
 let dirtyKeys: string[] = [];
 const DEFAULT_SENSITIVE_CONFIGURED = ["subtitle_ai.api_key"];
 let sensitiveConfigured: string[] = DEFAULT_SENSITIVE_CONFIGURED;
+let capabilitiesFetching = false;
+let modelReasoningLevels: Record<string, string[]> = {};
 let reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
 let chatGPTStatus = {
   accounts: [] as { client_id: string; connected: boolean }[],
@@ -95,8 +97,13 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/chatgpt", () => ({
-  useAdminAICapabilities: () => ({
-    data: { reasoning_levels: reasoningLevels, chatgpt_sign_in: true },
+  useAdminAICapabilities: (model: string) => ({
+    data: {
+      reasoning_levels: modelReasoningLevels[model] ?? reasoningLevels,
+      chatgpt_sign_in: true,
+    },
+    isFetching: capabilitiesFetching,
+    isSuccess: true,
   }),
   useChatGPTStatus: () => ({
     data: chatGPTStatus,
@@ -122,11 +129,14 @@ async function openTile(user: ReturnType<typeof userEvent.setup>, name: string) 
 }
 
 describe("AISettings", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     localStorage.clear();
     dirtyCount = 0;
     dirtyKeys = [];
     sensitiveConfigured = DEFAULT_SENSITIVE_CONFIGURED;
+    capabilitiesFetching = false;
+    modelReasoningLevels = {};
     reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
     chatGPTStatus = {
       accounts: [],
@@ -169,6 +179,39 @@ describe("AISettings", () => {
     expect(mocks.toastError).toHaveBeenCalledWith(
       "Choose a reasoning level supported by the selected model.",
     );
+  });
+
+  it("saves against backend validation while capabilities still describe the previous model", async () => {
+    vi.useFakeTimers();
+    values["ai.chat_model"] = "gpt-4o-mini";
+    values["ai.reasoning_effort"] = "high";
+    modelReasoningLevels = { "gpt-4o-mini": [], "gpt-6-luna": ["high"] };
+    dirtyKeys = ["ai.chat_model"];
+    dirtyCount = 1;
+    const view = render(<AISettings />);
+    values["ai.chat_model"] = "gpt-6-luna";
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("defers reasoning validation to the backend while the capabilities request is fetching", async () => {
+    values["ai.reasoning_effort"] = "high";
+    dirtyKeys = ["ai.reasoning_effort"];
+    dirtyCount = 1;
+    reasoningLevels = [];
+    capabilitiesFetching = true;
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
   it("stages ChatGPT authentication from the provider selector", async () => {

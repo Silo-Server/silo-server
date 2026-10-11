@@ -49,19 +49,21 @@ export function ChatGPTConnection({
     const next = status.data;
     const attempt = start.data;
     if (!loginOpen || !next || !attempt) return;
+    if (next.attempt_id === attempt.attempt_id && next.login_result === "connected") {
+      clearLogin();
+      toast.success("ChatGPT connected. Choose a text model and save your settings.");
+      if (firstConnection) setWelcomeOpen(true);
+      return;
+    }
+    if (complete.isPending || status.isFetching) return;
     const expired = Date.now() >= Date.parse(attempt.expires_at);
     if (!expired && (next.attempt_id !== attempt.attempt_id || next.login_pending)) return;
     clearLogin();
-    if (!expired && next.login_result === "connected") {
-      toast.success("ChatGPT connected. Choose a text model and save your settings.");
-      if (firstConnection) setWelcomeOpen(true);
-    } else {
-      toast.error("Sign-in did not complete. Continue with ChatGPT to try again.");
-    }
+    toast.error("Sign-in did not complete. Continue with ChatGPT to try again.");
   });
   useEffect(() => {
     observeLogin();
-  }, [status.dataUpdatedAt, loginOpen]);
+  }, [status.dataUpdatedAt, status.isFetching, loginOpen, complete.isPending]);
   const select = useSelectChatGPTAccount();
   const disconnect = useDisconnectChatGPTAccount();
   const active = status.data?.accounts.find(

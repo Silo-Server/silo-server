@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,54 @@ import (
 )
 
 const serverSettingsMutationLock = config.ServerSettingsMutationLock
+
+// Local waiters share one admission slot per pool and key before acquiring a
+// connection. PostgreSQL's advisory lock still serializes different processes.
+// Entries exist only while a holder or waiter uses them.
+type settingsValueSlotKey struct {
+	pool *pgxpool.Pool
+	key  string
+}
+
+type settingsValueSlot struct {
+	token chan struct{}
+	users int
+}
+
+var settingsValueSlots = struct {
+	sync.Mutex
+	active map[settingsValueSlotKey]*settingsValueSlot
+}{active: make(map[settingsValueSlotKey]*settingsValueSlot)}
+
+func acquireSettingsValueSlot(ctx context.Context, pool *pgxpool.Pool, key string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	id := settingsValueSlotKey{pool, key}
+	settingsValueSlots.Lock()
+	slot := settingsValueSlots.active[id]
+	if slot == nil {
+		slot = &settingsValueSlot{token: make(chan struct{}, 1)}
+		settingsValueSlots.active[id] = slot
+	}
+	slot.users++
+	settingsValueSlots.Unlock()
+	forget := func() {
+		settingsValueSlots.Lock()
+		defer settingsValueSlots.Unlock()
+		slot.users--
+		if slot.users == 0 {
+			delete(settingsValueSlots.active, id)
+		}
+	}
+	select {
+	case slot.token <- struct{}{}:
+		return func() { <-slot.token; forget() }, nil
+	case <-ctx.Done():
+		forget()
+		return nil, ctx.Err()
+	}
+}
 
 // ServerSettingsRepo provides CRUD access to the server_settings table.
 type ServerSettingsRepo struct {
@@ -99,6 +148,14 @@ func (r *ServerSettingsRepo) UpdateAtomic(
 // general settings mutations remain independent. The key must not also be
 // changed through the general read/validate/write settings surface.
 func (r *ServerSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	release, err := acquireSettingsValueSlot(ctx, r.pool, key)
+	if err != nil {
+		return fmt.Errorf("server_settings wait for value admission: %w", err)
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("server_settings begin value mutation: %w", err)
@@ -111,6 +168,9 @@ func (r *ServerSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, 
 	err = tx.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&current)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("server_settings read value: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	value, err := update(current)
 	if err != nil {

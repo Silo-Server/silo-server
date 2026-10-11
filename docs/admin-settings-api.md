@@ -34,7 +34,7 @@ Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
-### AI reasoning and ChatGPT accounts
+## AI reasoning and ChatGPT accounts
 
 `ai.auth_mode` selects `api_key` (default) or `chatgpt` for text translation.
 `ai.reasoning_effort` defaults to an empty string, which omits the parameter and
