@@ -42,8 +42,12 @@ type copySegmentPlan struct {
 	inputStart float64
 }
 
-// loadKeyframeIndex reads a source's keyframe index; tests replace it.
-var loadKeyframeIndex = keyframes.Load
+// loadKeyframeIndex reads a source's keyframe index, and
+// loadVerifiedKeyframeIndex waits for its full check; tests replace both.
+var (
+	loadKeyframeIndex         = keyframes.Load
+	loadVerifiedKeyframeIndex = keyframes.LoadVerified
+)
 
 // probeInputStart returns the start time FFmpeg reads for a source; tests
 // replace it. ffprobe opens the file with the same demuxer as FFmpeg, so its
@@ -76,7 +80,17 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan 
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return nil
 	}
-	idx, err := loadKeyframeIndex(opts.InputPath)
+	load := loadKeyframeIndex
+	if opts.Reconstructed {
+		// A rebuilt session that lost its plan record (a clean shutdown
+		// removes the output directory) may already have served the planned
+		// playlist. The plan follows from the verified index alone, so wait
+		// for the check here rather than fall back to FFmpeg's playlist,
+		// which a player holding the planned one can't follow. Once the
+		// check has run, the index is cached.
+		load = loadVerifiedKeyframeIndex
+	}
+	idx, err := load(opts.InputPath)
 	if err != nil {
 		if !errors.Is(err, keyframes.ErrNoIndex) {
 			log.Printf("playback: read keyframe index for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
@@ -129,6 +143,13 @@ type copyPlanRecord struct {
 // and records the decision; a rebuilt session follows the record, so it
 // serves the playlist its player already has. Deciding afresh could differ:
 // a file's index that was still being checked may be verified by then.
+//
+// The record lives in the output directory, which a clean shutdown removes.
+// A rebuilt session without one plans again from the verified index (see
+// planCopySegments), which gives the same plan as the first start. If that
+// start had fallen back to FFmpeg's playlist, the rebuilt session now plans:
+// its planned segments are the ones FFmpeg cuts from the beginning, so the
+// segments the player already fetched still match.
 func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
 		return planCopySegments(ctx, opts)
