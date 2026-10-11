@@ -377,6 +377,13 @@ func TestLocalizationRefreshKeepsProviderSeasonPoster(t *testing.T) {
 		}
 	}
 
+	// No provider poster at all: the local poster must not land on the
+	// localization row (it belongs to the base row).
+	refresh("fr", "")
+	if loc := localizations.localizations[seasonLocalizationKey(seasonID, "fr")]; loc != nil && (loc.PosterPath != "" || loc.PosterSourcePath != "") {
+		t.Fatalf("fr season localization took local art: path %q source %q", loc.PosterPath, loc.PosterSourcePath)
+	}
+
 	refresh("fr", "tvdb://fr-season-1.jpg")
 	loc := localizations.localizations[seasonLocalizationKey(seasonID, "fr")]
 	if loc == nil || loc.PosterSourcePath != "tvdb://fr-season-1.jpg" {
