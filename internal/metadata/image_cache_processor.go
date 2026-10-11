@@ -181,6 +181,9 @@ type ImageCacheProcessor struct {
 	libraryRoots  LibraryRootResolver
 	prefixDeleter ImagePrefixDeleter
 	localCopies   localArtworkCopies
+	// workBudget bounds artwork jobs across the drain, manual refreshes and
+	// discovery copies (SetWorkerBudget).
+	workBudget imageWorkBudget
 
 	// enabled mirrors metadata.cache_images. It governs remote artwork only:
 	// local sidecar art is copied whatever its value.
@@ -476,6 +479,11 @@ func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID s
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var unstarted []int64
+	leaveFrom := func(i int) {
+		for _, rem := range jobs[i:] {
+			unstarted = append(unstarted, rem.ID)
+		}
+	}
 loop:
 	for i, job := range jobs {
 		// Disabling caching mid-run stops remote jobs from starting; local
@@ -488,15 +496,22 @@ loop:
 		// rather than inside a goroutine that already holds a claimed job. Jobs we
 		// never start are requeued below instead of being left locked until the
 		// lease expires.
+		// The process-wide budget is shared with discovery copies (see
+		// imageWorkBudget).
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			for _, rem := range jobs[i:] {
-				unstarted = append(unstarted, rem.ID)
-			}
+			leaveFrom(i)
+			break loop
+		}
+		release, err := p.workBudget.acquire(ctx)
+		if err != nil {
+			<-sem
+			leaveFrom(i)
 			break loop
 		}
 		if !p.mayProcess(job) {
+			release()
 			<-sem
 			unstarted = append(unstarted, job.ID)
 			continue
@@ -505,6 +520,7 @@ loop:
 		go func(job *models.MetadataImageCacheJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer release()
 			jobCtx, cancelJob := context.WithTimeout(ctx, ImageCacheJobTimeout)
 			result := p.processOne(jobCtx, job)
 			cancelJob()

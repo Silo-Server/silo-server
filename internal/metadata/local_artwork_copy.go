@@ -21,8 +21,8 @@ import (
 const (
 	// localArtworkCopyWorkers bounds the copies one process runs at once.
 	// Each decodes an image of up to MaxArtworkSourceBytes and encodes its
-	// variant ladder, alongside the image-cache drain's own workers, so the
-	// pool stays small; refreshes never wait for it.
+	// variant ladder, and takes a slot of the same budget as the image-cache
+	// drain (SetWorkerBudget); refreshes never wait for it.
 	localArtworkCopyWorkers = 2
 
 	// localArtworkCopyBacklog bounds the discovered slots waiting for a copy
@@ -116,6 +116,13 @@ func (p *ImageCacheProcessor) runLocalArtworkCopies(store localArtworkJobStore) 
 // it. Nothing is left to do when the job is gone, running elsewhere, or now
 // carries another source.
 func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobStore, in EnqueueImageCacheJobInput) {
+	// Take a slot of the process's artwork budget before claiming, so a
+	// claimed job never waits on it.
+	release, err := p.workBudget.acquire(context.Background())
+	if err != nil {
+		return
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), ImageCacheJobTimeout)
 	defer cancel()
 	// A token per claim: when a refresh replaces the slot's source while an

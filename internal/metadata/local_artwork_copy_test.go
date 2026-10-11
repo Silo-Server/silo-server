@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,5 +256,74 @@ func TestDiscoveryClaimsUseDistinctLeaseTokens(t *testing.T) {
 	p.copyDiscoveredLocalArtwork(store, in)
 	if len(store.tokens) != 2 || store.tokens[0] == store.tokens[1] {
 		t.Fatalf("claim tokens = %q, want two distinct tokens", store.tokens)
+	}
+}
+
+// The artwork budget bounds jobs across callers: with one slot, a second job
+// waits until the first releases it.
+func TestImageWorkBudgetBoundsConcurrentJobs(t *testing.T) {
+	var budget imageWorkBudget
+	release, err := budget.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire without a limit: %v", err)
+	}
+	release()
+
+	budget.set(1)
+	release, err = budget.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := budget.acquire(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second acquire with the slot taken = %v, want it to wait", err)
+	}
+	release()
+	second, err := budget.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire after release: %v", err)
+	}
+	second()
+}
+
+// countingByteImageCacher records how many byte caches run at once.
+type countingByteImageCacher struct {
+	fakeImageCacher
+	mu         sync.Mutex
+	running    int
+	maxRunning int
+}
+
+func (c *countingByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req CacheImageRequest) (*CacheImageResult, error) {
+	c.mu.Lock()
+	c.running++
+	c.maxRunning = max(c.maxRunning, c.running)
+	c.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	c.mu.Lock()
+	c.running--
+	c.mu.Unlock()
+	return &CacheImageResult{BasePath: "local/movies/" + req.ContentID + "/poster", Ext: ".webp"}, nil
+}
+
+// A drain asking for more concurrency than the process budget still runs
+// within the budget.
+func TestImageCacheProcessorHonorsWorkerBudget(t *testing.T) {
+	root := t.TempDir()
+	source := "file://" + writeLocalPoster(t, root)
+	var claimed []*models.MetadataImageCacheJob
+	for i := int64(1); i <= 4; i++ {
+		job := localArtworkJob(source)
+		job.ID = i
+		claimed = append(claimed, job)
+	}
+	cacher := &countingByteImageCacher{}
+	p := NewImageCacheProcessorWithTargets(&fakeLocalImageCacheJobs{}, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
+	p.SetWorkerBudget(1)
+	p.processClaimedJobs(context.Background(), "w1", claimed, 4)
+	if cacher.maxRunning != 1 {
+		t.Fatalf("concurrent jobs = %d, want 1 within the budget", cacher.maxRunning)
 	}
 }
