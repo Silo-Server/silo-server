@@ -20713,6 +20713,7 @@ export interface components {
       connected: boolean;
       email: string;
       needs_login: boolean;
+      plan_ineligible?: boolean;
     };
     ChatGPTCompleteInputBody: {
       callback_url: string;

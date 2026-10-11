@@ -131,7 +131,7 @@ func (h *AdminHandler) runAdminSettingsConnectionCheck(ctx context.Context, kind
 			if h.ChatGPT == nil {
 				return connectionCheckResponse{Message: adminChatGPTSignInRequiredMessage, safeMessage: adminChatGPTSignInRequiredMessage}, nil
 			}
-			response = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT.TokenSource, h.ChatGPT.RejectToken)
+			response = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT.TokenSource, h.ChatGPT.RejectToken, h.ChatGPT.RejectPlanToken)
 		} else {
 			response = checkAIChatConnection(ctx, cfg)
 		}
@@ -174,10 +174,10 @@ func aiClientConfig(cfg *config.Config) llm.Config {
 }
 
 func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
-	return checkAIChatConnectionWithToken(ctx, cfg, nil, nil)
+	return checkAIChatConnectionWithToken(ctx, cfg, nil, nil, nil)
 }
 
-func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tokenSource func(context.Context) (func(context.Context) (string, error), error), rejected func(context.Context, string, bool) error) connectionCheckResponse {
+func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tokenSource func(context.Context) (func(context.Context) (string, error), error), rejected func(context.Context, string, bool) error, planRejected func(context.Context, string) error) connectionCheckResponse {
 	if cfg.AI.AuthMode != llm.AuthModeChatGPT && strings.TrimSpace(cfg.AI.BaseURL) == "" {
 		return connectionCheckResponse{Success: false, Message: "Text AI base URL is required."}
 	}
@@ -188,6 +188,7 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tok
 	clientCfg := aiClientConfig(cfg)
 	clientCfg.ChatGPTTokenSource = tokenSource
 	clientCfg.ChatGPTTokenRejected = rejected
+	clientCfg.ChatGPTPlanRejected = planRejected
 	client := newAdminAISettingsCheckClient(clientCfg)
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

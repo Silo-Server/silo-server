@@ -119,6 +119,8 @@ func chatGPTProblem(err error) error {
 		return NewProblem(TypeValidationFailed, chatgpt.ErrIdentity.Error())
 	case errors.Is(err, chatgpt.ErrSignInRequired):
 		return NewProblem(TypeCapabilityNotConfigured, "Sign in with ChatGPT in AI Services settings.")
+	case errors.Is(err, chatgpt.ErrPlanIneligible):
+		return NewProblem(TypeCapabilityNotConfigured, chatgpt.ErrPlanIneligible.Error())
 	default:
 		return unavailable("ChatGPT plan connection")
 	}

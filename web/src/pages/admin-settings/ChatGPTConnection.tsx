@@ -158,10 +158,10 @@ function ChatGPTConnectionPanel({
     }
   }
 
-  async function signOut() {
-    if (!active) return;
+  async function signOut(clientID: string) {
+    if (!authorityActive()) return;
     try {
-      const result = await disconnect.mutateAsync(active.client_id);
+      const result = await disconnect.mutateAsync(clientID);
       if (!authorityActive()) return;
       if (result.revocation_confirmed) toast.success("ChatGPT disconnected.");
       else
@@ -205,7 +205,7 @@ function ChatGPTConnectionPanel({
             { value: "disconnected", label: "Choose a connected account", disabled: true },
             ...savedAccounts.map((account, index) => ({
               value: account.client_id,
-              label: `${account.email || "ChatGPT account"} · ${index + 1}${account.connected ? "" : " (sign-in required)"}`,
+              label: `${account.email || "ChatGPT account"} · ${index + 1}${account.plan_ineligible ? " (plan sharing unavailable)" : account.connected ? "" : " (sign-in required)"}`,
               disabled: !account.connected,
             })),
           ]}
@@ -252,22 +252,40 @@ function ChatGPTConnectionPanel({
           Continue with ChatGPT
         </Button>
         {savedAccounts.map((account, index) => (
-          <Button
-            key={account.client_id}
-            size="sm"
-            variant="outline"
-            disabled={start.isPending}
-            onClick={() => void begin(account.client_id)}
-          >
-            Reconnect {account.email || `account ${index + 1}`}
-          </Button>
+          <div key={account.client_id} className="flex flex-wrap items-center gap-2">
+            {!account.plan_ineligible ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={start.isPending}
+                onClick={() => void begin(account.client_id)}
+              >
+                Reconnect {account.email || `account ${index + 1}`}
+              </Button>
+            ) : null}
+            {account.client_id !== active?.client_id ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disconnect.isPending}
+                onClick={() => void signOut(account.client_id)}
+              >
+                Disconnect {account.email || `account ${index + 1}`}
+              </Button>
+            ) : null}
+            {account.plan_ineligible ? (
+              <SettingFieldStatus tone="warn">
+                This account cannot share ChatGPT plan usage. Check ChatGPT usage settings.
+              </SettingFieldStatus>
+            ) : null}
+          </div>
         ))}
         {active ? (
           <Button
             size="sm"
             variant="outline"
             disabled={disconnect.isPending}
-            onClick={() => void signOut()}
+            onClick={() => void signOut(active.client_id)}
           >
             Disconnect
           </Button>

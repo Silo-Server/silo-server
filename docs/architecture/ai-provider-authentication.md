@@ -114,6 +114,10 @@ tokens are not used. Only the documented unusable-token errors (`invalid_grant`,
 `invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
 `refresh_token_invalidated`, and `refresh_token_reused`) mark the account as
 needing login. Other, empty, and malformed OAuth errors leave it retryable.
+Refresh makes up to three attempts for transport failures, HTTP 429 or 5xx, and
+documented temporary OAuth failures inside the serialized rotation operation.
+Backoff honors `Retry-After` within the independent deadline. Exhaustion preserves
+the saved credentials; authorization-code exchanges remain single attempts.
 Sign-in expiry is checked before
 consuming the attempt; an accepted exchange may finish after that deadline.
 A provider-side rotation followed by a lost database commit may require login
@@ -130,6 +134,8 @@ failed cleanup commit leaves the account disabled with its retry token.
 The provider deadline
 leaves time for local cleanup, and caller cancellation does not interrupt it.
 Registration and host identity remain available for later authorization.
+The browser offers Disconnect for every saved registration, including inactive
+accounts that cannot supply inference credentials.
 The response distinguishes confirmed provider revocation from local credential
 removal. Credential requests reject redirects, and OIDC
 discovery URLs must remain on `https://auth.openai.com`.
@@ -151,6 +157,13 @@ and retain credentials. An inference or model-catalog HTTP 401 invalidates only
 the rejected access token, then retries once with serialized token refresh. A
 second rejection marks that account as needing login. Comparing the rejected
 token protects credentials replaced concurrently by another node.
+A `subscription_sharing_user_not_eligible` HTTP or stream failure persists a
+separate plan-eligibility restriction for the request's registration and exact
+access token. It stops retries and later token, catalog, selection, and translation
+readiness reads. The account remains available for disconnect, and the web explains
+the restriction without offering reconnect. A late response cannot disable a
+replacement token or a different active account. API-key requests and speech
+transcription do not use this restriction.
 The account model catalog preserves provider order and includes only entries
 with `visibility:list`, excluding the non-streaming `o1-pro` and `o3-pro` families.
 

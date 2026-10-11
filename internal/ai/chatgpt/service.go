@@ -30,21 +30,22 @@ const authorizationScope = "openid profile email offline_access resource.invoke 
 const browserCallbackURI = "http://127.0.0.1:51121/auth/callback"
 
 const (
-	loginIdle              = "idle"
-	loginPending           = "pending"
-	loginConnected         = "connected"
-	loginFailed            = "failed"
-	loginExpired           = "expired"
-	dynamicClientID        = "dynamic_agent_client"
-	oauthClientID          = "client_id"
-	oauthCode              = "code"
-	oauthAuthorizationCode = "authorization_code"
-	oauthState             = "state"
-	oauthResource          = "resource"
-	oauthRefreshToken      = "refresh_token"
-	oauthInvalidGrant      = "invalid_grant"
-	visibilityListed       = "list"
-	jwkKeyTypeRSA          = "RSA"
+	loginIdle                   = "idle"
+	loginPending                = "pending"
+	loginConnected              = "connected"
+	loginFailed                 = "failed"
+	loginExpired                = "expired"
+	dynamicClientID             = "dynamic_agent_client"
+	oauthClientID               = "client_id"
+	oauthCode                   = "code"
+	oauthAuthorizationCode      = "authorization_code"
+	oauthState                  = "state"
+	oauthResource               = "resource"
+	oauthRefreshToken           = "refresh_token"
+	oauthInvalidGrant           = "invalid_grant"
+	oauthTemporarilyUnavailable = "temporarily_unavailable"
+	visibilityListed            = "list"
+	jwkKeyTypeRSA               = "RSA"
 )
 
 var ErrSignInRequired = errors.New("sign in with ChatGPT again")
@@ -62,16 +63,17 @@ type Store interface {
 }
 
 type account struct {
-	ClientID     string    `json:"client_id"`
-	Subject      string    `json:"subject"`
-	Email        string    `json:"email"`
-	AccessToken  string    `json:"access_token,omitempty"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	IDToken      string    `json:"id_token,omitempty"`
-	Scopes       string    `json:"scopes,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	NeedsLogin   bool      `json:"needs_login,omitzero"`
-	DisconnectID string    `json:"disconnect_id,omitempty"`
+	ClientID       string    `json:"client_id"`
+	Subject        string    `json:"subject"`
+	Email          string    `json:"email"`
+	AccessToken    string    `json:"access_token,omitempty"`
+	RefreshToken   string    `json:"refresh_token,omitempty"`
+	IDToken        string    `json:"id_token,omitempty"`
+	Scopes         string    `json:"scopes,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	NeedsLogin     bool      `json:"needs_login,omitzero"`
+	PlanIneligible bool      `json:"plan_ineligible,omitzero"`
+	DisconnectID   string    `json:"disconnect_id,omitempty"`
 }
 
 type pendingLogin struct {
@@ -95,10 +97,11 @@ type credentials struct {
 }
 
 type AccountStatus struct {
-	ClientID   string `json:"client_id"`
-	Email      string `json:"email"`
-	Connected  bool   `json:"connected"`
-	NeedsLogin bool   `json:"needs_login"`
+	ClientID       string `json:"client_id"`
+	Email          string `json:"email"`
+	Connected      bool   `json:"connected"`
+	NeedsLogin     bool   `json:"needs_login"`
+	PlanIneligible bool   `json:"plan_ineligible,omitzero"`
 }
 
 type Status struct {
@@ -181,7 +184,7 @@ func status(c credentials) Status {
 	}
 	for _, a := range c.Accounts {
 		out.Accounts = append(out.Accounts, AccountStatus{ClientID: a.ClientID, Email: a.Email,
-			Connected: a.RefreshToken != "" && !a.NeedsLogin, NeedsLogin: a.NeedsLogin})
+			Connected: a.RefreshToken != "" && !a.NeedsLogin && !a.PlanIneligible, NeedsLogin: a.NeedsLogin, PlanIneligible: a.PlanIneligible})
 	}
 	return out
 }
@@ -217,6 +220,9 @@ func (s *Service) StartLogin(ctx context.Context, clientID string) (Login, error
 			i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
 			if i < 0 {
 				return ErrIdentity
+			}
+			if c.Accounts[i].PlanIneligible {
+				return ErrPlanIneligible
 			}
 			p.ClientID, p.Subject = c.Accounts[i].ClientID, c.Accounts[i].Subject
 		}
@@ -313,9 +319,12 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return tokens, ErrProvider
+		return tokens, &transientTokenError{}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode < 600) {
+		return tokens, &transientTokenError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode == 400 || resp.StatusCode == 401 {
 		var problem struct {
 			Error string `json:"error"`
@@ -330,6 +339,8 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 			switch problem.Error {
 			case oauthInvalidGrant, "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused":
 				return tokens, ErrSignInRequired
+			case oauthTemporarilyUnavailable, "server_error":
+				return tokens, &transientTokenError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
 			default:
 				return tokens, ErrProvider
 			}
@@ -499,6 +510,9 @@ func (s *Service) TokenSource(ctx context.Context) (func(context.Context) (strin
 		return nil, err
 	}
 	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	if i >= 0 && c.Accounts[i].PlanIneligible {
+		return nil, ErrPlanIneligible
+	}
 	if i < 0 || c.Accounts[i].NeedsLogin || c.Accounts[i].RefreshToken == "" {
 		return nil, ErrSignInRequired
 	}
@@ -525,6 +539,9 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 		return "", err
 	}
 	for _, a := range current.Accounts {
+		if a.ClientID == clientID && a.PlanIneligible {
+			return "", ErrPlanIneligible
+		}
 		if a.ClientID == clientID && !a.NeedsLogin && a.AccessToken != "" && a.RefreshToken != "" && time.Until(a.ExpiresAt) > 2*time.Minute {
 			return a.AccessToken, nil
 		}
@@ -538,6 +555,9 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 	defer cancel()
 	err = s.mutate(refreshCtx, func(c *credentials) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
+		if i >= 0 && c.Accounts[i].PlanIneligible {
+			return ErrPlanIneligible
+		}
 		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 			return ErrSignInRequired
 		}
@@ -546,7 +566,7 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 			token = a.AccessToken
 			return nil
 		}
-		tokens, err := s.exchange(refreshCtx, url.Values{"grant_type": {oauthRefreshToken}, oauthClientID: {a.ClientID}, oauthRefreshToken: {a.RefreshToken}, oauthResource: {resource}})
+		tokens, err := s.refreshExchange(refreshCtx, url.Values{"grant_type": {oauthRefreshToken}, oauthClientID: {a.ClientID}, oauthRefreshToken: {a.RefreshToken}, oauthResource: {resource}})
 		if err != nil {
 			if errors.Is(err, ErrSignInRequired) {
 				a.NeedsLogin = true

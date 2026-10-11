@@ -46,16 +46,17 @@ func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 	for _, test := range []struct {
 		name, body string
 		status     int
+		failures   int
 	}{
-		{"temporary400", `{"error":"temporarily_unavailable"}`, 400},
-		{"temporary401", `{"error":"temporarily_unavailable"}`, 401},
-		{"server error", `{"error":"server_error"}`, 400},
-		{"invalid client", `{"error":"invalid_client"}`, 401},
-		{"unknown error", `{"error":"future_provider_error"}`, 400},
-		{"malformed", `{"error":`, 400},
-		{"empty", "", 401},
-		{"wrong error type", `{"error":{"code":"invalid_grant"}}`, 400},
-		{"bounded body", strings.Repeat(" ", 128<<10) + `{"error":"invalid_grant"}`, 400},
+		{"temporary400", `{"error":"temporarily_unavailable"}`, 400, 3},
+		{"temporary401", `{"error":"temporarily_unavailable"}`, 401, 3},
+		{"server error", `{"error":"server_error"}`, 400, 3},
+		{"invalid client", `{"error":"invalid_client"}`, 401, 1},
+		{"unknown error", `{"error":"future_provider_error"}`, 400, 1},
+		{"malformed", `{"error":`, 400, 1},
+		{"empty", "", 401, 1},
+		{"wrong error type", `{"error":{"code":"invalid_grant"}}`, 400, 1},
+		{"bounded body", strings.Repeat(" ", 128<<10) + `{"error":"invalid_grant"}`, 400, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &memoryStore{values: map[string]string{}}
@@ -69,13 +70,13 @@ func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 				if r.Form.Get("client_id") != "app" || r.Form.Get("refresh_token") != "old-refresh" {
 					t.Fatal("retry changed renewable credentials")
 				}
-				if calls == 1 {
+				if calls <= test.failures {
 					return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(test.body))}, nil
 				}
 				return response(200, tokenResponse{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer", ExpiresIn: 3600}), nil
 			})
 			token, err := service.BearerToken(t.Context())
-			if token != "" || !errors.Is(err, ErrProvider) || errors.Is(err, ErrSignInRequired) {
+			if token != "" || !errors.Is(err, ErrProvider) || errors.Is(err, ErrSignInRequired) || calls != test.failures {
 				t.Fatalf("nonterminal classification: %q, %v", token, err)
 			}
 			after := stored(t, store)
@@ -83,7 +84,7 @@ func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 				t.Fatal("nonterminal refresh modified saved credentials")
 			}
 			token, err = service.BearerToken(t.Context())
-			if err != nil || token != "new-access" || calls != 2 {
+			if err != nil || token != "new-access" || calls != test.failures+1 {
 				t.Fatalf("retry did not recover: %q, %v, calls=%d", token, err, calls)
 			}
 			a := stored(t, store).Accounts[0]

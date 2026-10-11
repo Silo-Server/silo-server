@@ -13,6 +13,9 @@ import (
 )
 
 const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceeded"
+const subscriptionUserNotEligible = "subscription_sharing_user_not_eligible"
+
+var ErrPlanIneligible = errors.New("this account cannot share ChatGPT plan usage; check ChatGPT usage settings")
 
 // SSE accepts CR, LF, and CRLF. Remember CR across reads so a following LF
 // belongs to the same ending, without delaying a completed frame for lookahead.
@@ -113,6 +116,14 @@ func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, js
 				return parseErr
 			})
 		unauthorized, _ := errors.AsType[*HTTPError](err)
+		if errors.Is(err, ErrPlanIneligible) || (unauthorized != nil && unauthorized.StatusCode == http.StatusForbidden && unauthorized.Code == subscriptionUserNotEligible) {
+			if cfg.ChatGPTPlanRejected != nil {
+				if rejectErr := cfg.ChatGPTPlanRejected(ctx, requestToken); rejectErr != nil {
+					return "", rejectErr
+				}
+			}
+			return "", ErrPlanIneligible
+		}
 		if unauthorized == nil || unauthorized.StatusCode != http.StatusUnauthorized || cfg.ChatGPTTokenRejected == nil {
 			break
 		}
@@ -175,6 +186,9 @@ func readResponseStream(data io.Reader) (string, error) {
 			}
 			if code == subscriptionUsageLimitExceeded {
 				return &permanentError{ErrQuotaExhausted}
+			}
+			if code == subscriptionUserNotEligible {
+				return &permanentError{ErrPlanIneligible}
 			}
 			return &permanentError{errors.New("ChatGPT request failed; check the account and ChatGPT usage settings")}
 		case "response.incomplete":

@@ -24,6 +24,7 @@ const (
 
 var ErrModelUnavailable = errors.New("choose a model available to the selected ChatGPT account")
 var ErrAccountChanged = errors.New("ChatGPT account changed; refresh settings and try again")
+var ErrPlanIneligible = llm.ErrPlanIneligible
 
 var selectionKeys = []string{CredentialsKey, authModeSetting, chatModelSetting, legacyChatModelSetting, reasoningEffortSetting, "ai.base_url", "subtitle_ai.base_url", "ai.api_key", "subtitle_ai.api_key"}
 
@@ -144,6 +145,9 @@ func (s *Service) SelectAccountWithSettings(ctx context.Context, clientID string
 	}
 	return s.mutateSettingsWithSnapshot(ctx, func(c *credentials, values map[string]string) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
+		if i >= 0 && c.Accounts[i].PlanIneligible {
+			return ErrPlanIneligible
+		}
 		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 			return ErrSignInRequired
 		}
@@ -177,6 +181,9 @@ func (s *Service) TextConfig(ctx context.Context) (llm.Config, error) {
 		return llm.Config{}, err
 	}
 	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	if i >= 0 && c.Accounts[i].PlanIneligible {
+		return llm.Config{}, ErrPlanIneligible
+	}
 	if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 		return llm.Config{}, ErrSignInRequired
 	}
@@ -185,6 +192,7 @@ func (s *Service) TextConfig(ctx context.Context) (llm.Config, error) {
 		return func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) }, nil
 	}
 	cfg.ChatGPTTokenRejected = s.RejectToken
+	cfg.ChatGPTPlanRejected = func(ctx context.Context, token string) error { return s.rejectPlan(ctx, clientID, token) }
 	return cfg, nil
 }
 
@@ -228,6 +236,9 @@ func (v *ModelValidation) Check(stored, prospective map[string]string) error {
 		return ErrAccountChanged
 	}
 	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	if i >= 0 && c.Accounts[i].PlanIneligible {
+		return ErrPlanIneligible
+	}
 	if i < 0 || c.Accounts[i].NeedsLogin || c.Accounts[i].RefreshToken == "" {
 		return ErrSignInRequired
 	}

@@ -139,7 +139,7 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 	service := chatgpt.NewService(settingsCheckChatGPTStore{store})
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 		return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
-			if cfg.ChatGPTTokenSource == nil || cfg.ChatGPTTokenRejected == nil {
+			if cfg.ChatGPTTokenSource == nil || cfg.ChatGPTTokenRejected == nil || cfg.ChatGPTPlanRejected == nil {
 				t.Fatal("admin check omitted credential source or rejection callback")
 			}
 			source, err := cfg.ChatGPTTokenSource(ctx)

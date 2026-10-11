@@ -31,6 +31,7 @@ type Config struct {
 	ReasoningEffort      string
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
+	ChatGPTPlanRejected  func(context.Context, string) error
 	// Production text requests resolve provider settings and the registration
 	// together. Draft checks and transcription retain their supplied config.
 	TextConfigSource func(context.Context) (Config, error)
@@ -226,6 +227,7 @@ func (e *permanentError) Unwrap() error { return e.err }
 // Error includes provider-controlled details and must not be sent to clients.
 type HTTPError struct {
 	StatusCode int
+	Code       string
 	message    string
 }
 
@@ -313,7 +315,7 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 			continue
 		case resp.StatusCode != http.StatusOK:
 			// 4xx other than 429: not retryable.
-			return &HTTPError{StatusCode: resp.StatusCode, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
+			return &HTTPError{StatusCode: resp.StatusCode, Code: responseErrorCode(respBody), message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 		}
 	}
 
@@ -321,6 +323,16 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 		lastErr = fmt.Errorf("%s: retries exhausted", label)
 	}
 	return lastErr
+}
+
+func responseErrorCode(body []byte) string {
+	var response struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &response)
+	return response.Error.Code
 }
 
 func isExhaustedQuota(body []byte) bool {

@@ -51,6 +51,9 @@ The following operations require an acting administrator:
 - `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
   connection status, and the latest login outcome without credentials.
   `attempt_id` identifies the attempt that produced that outcome.
+  A registration with `plan_ineligible: true` has a terminal plan-sharing
+  restriction: `connected` is false, and clients explain the restriction without
+  prompting repeated authorization. The optional field is absent when false.
 - `POST /api/v2/admin/ai/chatgpt/login` starts a ten-minute browser sign-in.
   Optional `client_id` reuses a saved account registration. The response includes
   `authorization_url`, `callback_uri`, `expires_at`, and `attempt_id`.

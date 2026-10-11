@@ -19,7 +19,12 @@ const mocks = vi.hoisted(() => ({
 }));
 type Status = {
   active_client_id: string;
-  accounts: { client_id: string; email: string; connected: boolean }[];
+  accounts: {
+    client_id: string;
+    email: string;
+    connected: boolean;
+    plan_ineligible?: boolean;
+  }[];
   login_pending: boolean;
   login_result: string;
   attempt_id: string;
@@ -388,6 +393,104 @@ describe("ChatGPTConnection", () => {
     expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining("Disconnected locally"));
     expect(mocks.success).not.toHaveBeenCalled();
   });
+
+  it("disconnects an inactive account needing sign-in while keeping the active account and model", async () => {
+    status = {
+      ...status,
+      active_client_id: "active-app",
+      accounts: [
+        { client_id: "active-app", email: "active@example.test", connected: true },
+        { client_id: "inactive-app", email: "inactive@example.test", connected: false },
+      ],
+    };
+    mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
+    const onModelChange = vi.fn();
+    const onSettingsTransitionStarted = vi.fn();
+    render(
+      <ChatGPTConnection
+        model="gpt-6.1-sol"
+        onModelChange={onModelChange}
+        onSettingsTransitionStarted={onSettingsTransitionStarted}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect inactive@example.test" }));
+
+    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("inactive-app");
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(onSettingsTransitionStarted).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
+      "active@example.test",
+    );
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent("GPT-6.1 Sol");
+    expect(screen.getByText("Using ChatGPT plan · active@example.test")).toBeInTheDocument();
+    expect(mocks.success).toHaveBeenCalledWith("ChatGPT disconnected.");
+  });
+
+  it("ignores an inactive disconnect completion after the initiating profile changes", async () => {
+    status = {
+      ...status,
+      active_client_id: "active-app",
+      accounts: [
+        { client_id: "active-app", email: "active@example.test", connected: true },
+        { client_id: "inactive-app", email: "inactive@example.test", connected: false },
+      ],
+    };
+    let resolveDisconnect!: (result: { revocation_confirmed: boolean }) => void;
+    mocks.disconnect.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDisconnect = resolve;
+        }),
+    );
+    const view = render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect inactive@example.test" }));
+    setProfileId("profile-b");
+    view.rerender(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+    await act(async () => resolveDisconnect({ revocation_confirmed: true }));
+    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("inactive-app");
+    expect(mocks.success).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it("explains unavailable plan sharing and offers disconnect instead of reconnecting", async () => {
+    status = {
+      ...status,
+      active_client_id: "blocked-app",
+      accounts: [
+        {
+          client_id: "blocked-app",
+          email: "blocked@example.test",
+          connected: false,
+          plan_ineligible: true,
+        },
+      ],
+    };
+    mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
+    render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+
+    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
+      "blocked@example.test · 1 (plan sharing unavailable)",
+    );
+    expect(
+      screen.getByText(
+        "This account cannot share ChatGPT plan usage. Check ChatGPT usage settings.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reconnect blocked@example.test" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue with ChatGPT" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "Manage usage" })).toHaveAttribute(
+      "href",
+      "https://chatgpt.com/settings/usage",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("blocked-app");
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
   it("ignores another attempt's terminal status and doesn't toast after closing", async () => {
     status = { ...status, login_result: "connected" };
     const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);

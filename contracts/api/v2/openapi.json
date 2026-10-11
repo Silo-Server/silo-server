@@ -23159,6 +23159,9 @@
           },
           "needs_login": {
             "type": "boolean"
+          },
+          "plan_ineligible": {
+            "type": "boolean"
           }
         },
         "required": [
