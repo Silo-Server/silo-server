@@ -219,6 +219,14 @@ omit both; clients then show the output as unknown rather than inferring it
 from `play_method`, the source container, or the video codec. The frozen
 `/api/v1` bridge does not carry these fields.
 
+`source_video_height: true` advertises an optional `source_video_height` on v2
+session rows: the pixel height of the source's primary video track.
+`source_video_resolution` names the file's size class, so a 3840x1600 file is
+`2160p`, while a transcode's `target_resolution` names its output height
+(`1600p`). A client compares the target height with `source_video_height` to
+tell a full-resolution transcode from a downscale. The frozen `/api/v1` bridge
+does not carry the field.
+
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
 labels observations with playback-session or node identity.

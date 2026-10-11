@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -488,13 +487,6 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 	if row.VideoDecision == "transcode" && strings.TrimSpace(row.TargetResolution) == "" {
 		row.TargetResolution = row.SourceVideoResolution
 	}
-	// The catalog labels a file by its size class, so a 3840x1600 file is
-	// 2160p, while a transcode target names its output height. A transcode
-	// that keeps the source height reports the source's label so a
-	// full-resolution output doesn't read as a downscale.
-	if row.VideoDecision == "transcode" && row.SourceVideoHeight > 0 && resolutionLabelHeight(row.TargetResolution) == row.SourceVideoHeight {
-		row.TargetResolution = row.SourceVideoResolution
-	}
 	if strings.TrimSpace(row.NodeDisplayName) == "" {
 		if strings.TrimSpace(row.TranscodeNodeURL) != "" {
 			row.NodeDisplayName = "Remote transcode"
@@ -922,18 +914,4 @@ func (h *AdminHandler) ReadAdminPlaybackSummary(ctx context.Context, query Playb
 		return nil, 0, err
 	}
 	return loader.LoadSummary(ctx, query, limit)
-}
-
-// resolutionLabelHeight parses a height label such as "1600p", returning 0
-// for anything else.
-func resolutionLabelHeight(label string) int {
-	digits, ok := strings.CutSuffix(strings.ToLower(strings.TrimSpace(label)), "p")
-	if !ok {
-		return 0
-	}
-	height, err := strconv.Atoi(digits)
-	if err != nil {
-		return 0
-	}
-	return height
 }

@@ -233,3 +233,21 @@ func TestAdminSessionOutputFormatProjection(t *testing.T) {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 }
+
+func TestAdminSessionSourceVideoHeightProjection(t *testing.T) {
+	view := handlers.AdminPlaybackSessionView{
+		VideoDecision: "transcode", SourceVideoResolution: "2160p", SourceVideoHeight: 1600, TargetResolution: "1600p",
+		StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	row := adminPlaybackSessionOf(view)
+	if row.SourceVideoHeight != 1600 || row.SourceVideoResolution != "2160p" || row.TargetResolution != "1600p" {
+		t.Fatalf("admin projection = source %q height %d target %q, want 2160p, 1600, 1600p", row.SourceVideoResolution, row.SourceVideoHeight, row.TargetResolution)
+	}
+	legacy, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacy), "source_video_height") || !strings.Contains(string(legacy), `"target_resolution":"1600p"`) {
+		t.Fatalf("bridge payload changed: %s", legacy)
+	}
+}
