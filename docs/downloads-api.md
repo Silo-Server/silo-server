@@ -2053,8 +2053,10 @@ time and retained balances keep API or proxy restarts from granting new
 budget. Capped downloads stay on the API egress path rather than being routed to
 proxies. API delivery of worker artifacts is charged once at egress.
 
-Each serving process reads the two bandwidth settings at most every 5 seconds,
-so saved edits reach capped transfers within about 5 seconds. An edit does not
+With Redis, each serving process reads the two bandwidth settings at most every
+5 seconds, so saved edits reach capped transfers within about 5 seconds. Without
+Redis, the download service reloads them at most every 30 seconds when a
+download request arrives. An edit does not
 refill a bucket. A transfer that starts with both limits at zero is served
 without the limiter and stays unlimited; later edits apply to new transfers. A
 failed settings read keeps the last known limits. A failed budget operation is

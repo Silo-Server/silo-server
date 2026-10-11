@@ -208,3 +208,17 @@ func TestSharedBudgetFailsClosedAfterGrace(t *testing.T) {
 		t.Fatalf("capped read with Redis down exposed %d bytes, error %v", n, err)
 	}
 }
+
+func TestInProcessLimitSurvivesALoweredBurst(t *testing.T) {
+	bm := NewBandwidthManager(0, 50*1024*1024)
+	limiter := bm.getUserLimiter(2)
+	bm.Reload(0, 512*1024)
+	if limiter.Burst() >= 1024*1024 {
+		t.Fatalf("burst %d was not lowered", limiter.Burst())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := bm.wait(ctx, 2, 1024*1024); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("charge above the lowered burst failed: %v", err)
+	}
+}

@@ -224,10 +224,17 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 		bm.mu.RUnlock()
 		userLim := bm.getUserLimiter(userID)
 		for _, limiter := range []*rate.Limiter{serverLim, userLim} {
-			if limiter != nil {
-				if err := limiter.WaitN(ctx, bytes); err != nil {
+			if limiter == nil {
+				continue
+			}
+			// Reload can shrink the burst after this chunk was sized, and
+			// WaitN refuses a request above the burst; pay it in pieces.
+			for remaining := bytes; remaining > 0; {
+				piece := min(remaining, max(limiter.Burst(), 1))
+				if err := limiter.WaitN(ctx, piece); err != nil {
 					return err
 				}
+				remaining -= piece
 			}
 		}
 		return nil
