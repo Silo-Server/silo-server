@@ -155,24 +155,33 @@ func checkMDBListConnection(ctx context.Context, cfg *config.Config) connectionC
 
 func aiClientConfig(cfg *config.Config) llm.Config {
 	return llm.Config{
-		BaseURL:    strings.TrimSpace(cfg.AI.BaseURL),
-		APIKey:     cfg.AI.APIKey,
-		ChatModel:  strings.TrimSpace(cfg.AI.ChatModel),
-		ASRBaseURL: strings.TrimSpace(cfg.AI.ASRBaseURL),
-		ASRAPIKey:  cfg.AI.ASRAPIKey,
-		ASRModel:   strings.TrimSpace(cfg.AI.ASRModel),
+		AuthMode:        cfg.AI.AuthMode,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		BaseURL:         strings.TrimSpace(cfg.AI.BaseURL),
+		APIKey:          cfg.AI.APIKey,
+		ChatModel:       strings.TrimSpace(cfg.AI.ChatModel),
+		ASRBaseURL:      strings.TrimSpace(cfg.AI.ASRBaseURL),
+		ASRAPIKey:       cfg.AI.ASRAPIKey,
+		ASRModel:        strings.TrimSpace(cfg.AI.ASRModel),
 	}
 }
 
 func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
-	if strings.TrimSpace(cfg.AI.BaseURL) == "" {
+	return checkAIChatConnectionWithToken(ctx, cfg, nil, nil)
+}
+
+func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, token func(context.Context) (string, error), rejected func(context.Context, string, bool) error) connectionCheckResponse {
+	if cfg.AI.AuthMode != "chatgpt" && strings.TrimSpace(cfg.AI.BaseURL) == "" {
 		return connectionCheckResponse{Success: false, Message: "Text AI base URL is required."}
 	}
 	if strings.TrimSpace(cfg.AI.ChatModel) == "" {
 		return connectionCheckResponse{Success: false, Message: "Chat model is required."}
 	}
 
-	client := newAdminAISettingsCheckClient(aiClientConfig(cfg))
+	clientCfg := aiClientConfig(cfg)
+	clientCfg.ChatGPTToken = token
+	clientCfg.ChatGPTTokenRejected = rejected
+	client := newAdminAISettingsCheckClient(clientCfg)
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if _, err := client.Chat(checkCtx, []llm.Message{
@@ -180,8 +189,9 @@ func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCh
 		{Role: "user", Content: "Check this Silo text translation connection."},
 	}, true); err != nil {
 		return connectionCheckResponse{
-			Success: false,
-			Message: fmt.Sprintf("Text AI connection check failed: %v", err),
+			Success:     false,
+			Message:     fmt.Sprintf("Text AI connection check failed: %v", err),
+			safeMessage: "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits.",
 		}
 	}
 

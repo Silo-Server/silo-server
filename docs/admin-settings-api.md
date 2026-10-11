@@ -34,6 +34,56 @@ Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
+### AI reasoning and ChatGPT accounts
+
+`ai.auth_mode` selects `api_key` (default) or `chatgpt` for text translation.
+`ai.reasoning_effort` defaults to an empty string, which omits the parameter and
+uses the model's default. Explicit values come from the model's capability
+response. The server validates known model families against their supported
+levels; an unknown custom model is validated by the provider connection check.
+Both settings apply to subsequent AI requests after a settings reload.
+
+The following operations require an acting administrator:
+
+- `GET /api/v2/admin/ai/capabilities?model=...` discovers supported reasoning
+  levels and whether the ChatGPT connection service is available.
+- `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
+  connection status, and the latest login outcome without credentials.
+  `attempt_id` identifies the attempt that produced that outcome.
+- `POST /api/v2/admin/ai/chatgpt/login` starts a ten-minute browser sign-in.
+  Optional `client_id` reuses a saved account registration. The response includes
+  `authorization_url`, `callback_uri`, `expires_at`, and `attempt_id`.
+- `POST /api/v2/admin/ai/chatgpt/login/complete` accepts `callback_url` with the
+  full pasted browser address. A pasted URL must match the exact prepared
+  callback URI and contain unique query parameters. Invalid URLs leave the
+  attempt available for a corrected paste. A valid callback is consumed once;
+  clients reconcile an uncertain exchange through connection status before
+  starting a new attempt. Status must match the initiating `attempt_id` before
+  a client treats a terminal outcome as its own. Responses carrying connection
+  state or authorization URLs use `Cache-Control: no-store`.
+- `GET /api/v2/admin/ai/chatgpt/models` returns the active account's visible
+  models in provider order with display names. The capability endpoint supplies
+  reasoning levels for the selected model.
+- `POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select` selects a connected
+  registration for subsequent requests.
+- `DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}` clears credentials while
+  retaining the registration. `revocation_confirmed` reports whether OpenAI
+  confirmed revocation; a local disconnect succeeds even if revocation fails.
+
+`ai.chatgpt.credentials` is encrypted internal state. Generic settings reads,
+secret-status lists, writes, and settings revision validators exclude it. The
+account operations are the only administrative credential boundary. See
+[AI provider authentication](architecture/ai-provider-authentication.md) for
+identity, refresh, and inference invariants.
+
+ChatGPT plan credentials authorize text translation. Speech-to-text continues to
+use the configured Whisper-compatible URL and API key. These operations belong
+to the web administrator UI; Apple, Android, and Jellyfin clients continue to
+consume the existing translated subtitle and metadata contracts and require no
+account or settings changes.
+
+### Managed storage transitions
+
 `GET /api/v2/admin/storage-transitions/capabilities`
 (`getAdminStorageTransitionCapabilities`) is the acting-administrator discovery
 document for managed storage transitions. Its typed fields report support for

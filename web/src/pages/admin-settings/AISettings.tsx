@@ -13,6 +13,7 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { QUOTA_PERIODS, QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
@@ -21,12 +22,24 @@ import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+import {
+  useAdminAICapabilities,
+  useChatGPTStatus,
+  useChatGPTModels,
+} from "@/hooks/queries/admin/chatgpt";
+import { ChatGPTConnection } from "./ChatGPTConnection";
 
 // ---------------------------------------------------------------------------
 // Setting keys
 // ---------------------------------------------------------------------------
 
-const TEXT_AI_KEYS = ["ai.base_url", "ai.chat_model", "ai.api_key"] as const;
+const TEXT_AI_KEYS = [
+  "ai.base_url",
+  "ai.chat_model",
+  "ai.api_key",
+  "ai.auth_mode",
+  "ai.reasoning_effort",
+] as const;
 /**
  * What the transcription connection check has to send: the speech endpoint
  * plus the text endpoint it falls back to when no ASR base URL is set.
@@ -257,6 +270,10 @@ function PendingSaveNote({ dirty }: { dirty: boolean }) {
 // ---------------------------------------------------------------------------
 
 function TextModelTile({
+  authMode,
+  reasoningEffort,
+  reasoningLevels,
+  chatGPTSupported,
   baseURL,
   chatModel,
   apiKeyValue,
@@ -275,6 +292,10 @@ function TextModelTile({
   onExpand,
   onCollapse,
 }: {
+  authMode: string;
+  reasoningEffort: string;
+  reasoningLevels: string[];
+  chatGPTSupported: boolean;
   baseURL: string;
   chatModel: string;
   apiKeyValue: string;
@@ -315,43 +336,92 @@ function TextModelTile({
           : failed
             ? test.message
             : ready
-              ? `${chatModel} · ${hostLabel(baseURL)}`
-              : "Base URL and model required"
+              ? `${chatModel} · ${authMode === "chatgpt" ? "ChatGPT plan" : hostLabel(baseURL)}`
+              : authMode === "chatgpt"
+                ? "Connect an account and choose a model"
+                : "Base URL and model required"
       }
       expanded={expanded}
       primaryAction={{ label: ready ? "Manage" : "Connect", onClick: onExpand }}
     >
-      <p className="text-muted-foreground mb-1 text-xs">
-        Any chat endpoint that speaks the OpenAI API.
-      </p>
       <SettingField
-        label="Base URL"
-        value={baseURL}
-        onChange={(next) => onChange("ai.base_url", next)}
-        hint="https://api.openai.com"
-        restartRequired={restartKeys.has("ai.base_url")}
+        label="Authentication"
+        type="select"
+        value={authMode}
+        onChange={(next) => onChange("ai.auth_mode", next)}
+        options={[
+          { value: "api_key", label: "API key or local provider" },
+          { value: "chatgpt", label: "ChatGPT plan", disabled: !chatGPTSupported },
+        ]}
       />
+      {authMode === "chatgpt" ? (
+        <ChatGPTConnection
+          model={chatModel}
+          onModelChange={(next) => onChange("ai.chat_model", next)}
+        />
+      ) : (
+        <>
+          <p className="text-muted-foreground mb-1 text-xs">
+            Any chat endpoint that speaks the OpenAI API.
+          </p>
+          <SettingField
+            label="Base URL"
+            value={baseURL}
+            onChange={(next) => onChange("ai.base_url", next)}
+            hint="https://api.openai.com"
+            restartRequired={restartKeys.has("ai.base_url")}
+          />
+          <SettingField
+            label="Model"
+            value={chatModel}
+            onChange={(next) => onChange("ai.chat_model", next)}
+            hint="gpt-4o-mini, gemini-flash-latest, llama3.1"
+            restartRequired={restartKeys.has("ai.chat_model")}
+          />
+          <SecretField
+            label="API key"
+            value={apiKeyValue}
+            configured={apiKeyConfigured}
+            onChange={(next) => onChange("ai.api_key", next)}
+            // Without this, "Keep saved value" would stage an empty string and the
+            // next save would erase the stored key.
+            onKeep={() => onReset("ai.api_key")}
+            // A local endpoint that needs no key has to be able to get back to
+            // having none, and nothing else on this page erases one.
+            onClear={onClearApiKey}
+            cleared={apiKeyCleared}
+            hint="Empty for a local endpoint that needs none."
+            restartRequired={restartKeys.has("ai.api_key")}
+          />
+        </>
+      )}
       <SettingField
-        label="Model"
-        value={chatModel}
-        onChange={(next) => onChange("ai.chat_model", next)}
-        hint="gpt-4o-mini, gemini-flash-latest, llama3.1"
-        restartRequired={restartKeys.has("ai.chat_model")}
-      />
-      <SecretField
-        label="API key"
-        value={apiKeyValue}
-        configured={apiKeyConfigured}
-        onChange={(next) => onChange("ai.api_key", next)}
-        // Without this, "Keep saved value" would stage an empty string and the
-        // next save would erase the stored key.
-        onKeep={() => onReset("ai.api_key")}
-        // A local endpoint that needs no key has to be able to get back to
-        // having none, and nothing else on this page erases one.
-        onClear={onClearApiKey}
-        cleared={apiKeyCleared}
-        hint="Empty for a local endpoint that needs none."
-        restartRequired={restartKeys.has("ai.api_key")}
+        label="Reasoning level"
+        type="select"
+        value={reasoningEffort || "default"}
+        description="Higher effort can improve complex translations and use more time and tokens."
+        onChange={(next) => onChange("ai.reasoning_effort", next === "default" ? "" : next)}
+        options={[
+          { value: "default", label: "Provider default" },
+          ...reasoningLevels.map((level) => ({
+            value: level,
+            label:
+              level === "none"
+                ? "None"
+                : level === "xhigh"
+                  ? "Extra high"
+                  : level.charAt(0).toUpperCase() + level.slice(1),
+          })),
+          ...(reasoningEffort && !reasoningLevels.includes(reasoningEffort)
+            ? [
+                {
+                  value: reasoningEffort,
+                  label: `${reasoningEffort} (unsupported by this model)`,
+                  disabled: true,
+                },
+              ]
+            : []),
+        ]}
       />
       <ModelPanelActions
         testLabel="Test text model"
@@ -369,6 +439,7 @@ function TextModelTile({
 }
 
 function SpeechModelTile({
+  chatGPTPlan,
   asrBaseURL,
   asrModel,
   apiKeyValue,
@@ -388,6 +459,7 @@ function SpeechModelTile({
   onExpand,
   onCollapse,
 }: {
+  chatGPTPlan: boolean;
   asrBaseURL: string;
   asrModel: string;
   apiKeyValue: string;
@@ -411,7 +483,9 @@ function SpeechModelTile({
   const statePill = test?.ok
     ? "Verified"
     : usesTextEndpoint
-      ? "Shared endpoint"
+      ? chatGPTPlan
+        ? "API endpoint"
+        : "Shared endpoint"
       : ready
         ? "Configured"
         : undefined;
@@ -479,7 +553,9 @@ function SpeechModelTile({
         <div className="my-2 flex gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed">
           <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
           <span>
-            Empty sends audio to the text endpoint, which may not transcribe. Test it first.
+            {chatGPTPlan
+              ? "Empty uses the saved API provider URL. ChatGPT plan access does not include transcription."
+              : "Empty sends audio to the text endpoint, which may not transcribe. Test it first."}
           </span>
         </div>
       )}
@@ -500,7 +576,7 @@ function SpeechModelTile({
         // speech endpoint goes back to borrowing the text model's key.
         onClear={onClearApiKey}
         cleared={apiKeyCleared}
-        hint="Empty reuses the text model key."
+        hint={chatGPTPlan ? "Empty reuses the saved API key." : "Empty reuses the text model key."}
         restartRequired={restartKeys.has("ai.asr_api_key")}
       />
       <ModelPanelActions
@@ -535,6 +611,19 @@ export default function AISettings() {
   const [speechResult, setSpeechResult] = useState<AITestState | undefined>(undefined);
   const [expandedTile, setExpandedTile] = useState<string | null>(null);
 
+  const authMode = form.getValue("ai.auth_mode") || "api_key";
+  const currentModel =
+    form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model") || "gpt-4o-mini";
+  const capabilityModel = useDebounce(currentModel, 300);
+  const capabilities = useAdminAICapabilities(capabilityModel);
+  const connection = useChatGPTStatus(false, authMode === "chatgpt");
+  const connectedAccount = connection.data?.accounts.find(
+    (account) => account.client_id === connection.data?.active_client_id && account.connected,
+  );
+  const chatGPTModels = useChatGPTModels(
+    connectedAccount?.client_id ?? "",
+    authMode === "chatgpt" && !!connectedAccount,
+  );
   if (form.isLoading) {
     return (
       <div className="max-w-5xl space-y-6" role="status" aria-label="Loading AI Services settings">
@@ -561,7 +650,10 @@ export default function AISettings() {
   const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-4o-mini");
   const asrBaseURL = value("ai.asr_base_url");
   const asrModel = value("ai.asr_model", "whisper-1");
-  const textReady = textBaseURL.trim() !== "" && chatModel.trim() !== "";
+  const textReady =
+    authMode === "chatgpt"
+      ? !!connectedAccount && !!chatGPTModels.data?.models.some((model) => model.id === chatModel)
+      : textBaseURL.trim() !== "" && chatModel.trim() !== "";
   const speechUsesTextEndpoint = asrBaseURL.trim() === "";
   const speechReady =
     (asrBaseURL.trim() !== "" || textBaseURL.trim() !== "") && asrModel.trim() !== "";
@@ -637,8 +729,26 @@ export default function AISettings() {
       effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
     );
 
-    if (!textReady) {
-      toast.error("Text AI base URL and chat model are required.");
+    const requiresTextConnection =
+      textDirty ||
+      (form.isDirty("subtitle_ai.enabled") && subtitleTranslateEnabled) ||
+      (form.isDirty("metadata_ai.enabled") && descriptionEnabled);
+    if (requiresTextConnection && !textReady) {
+      toast.error(
+        authMode === "chatgpt"
+          ? "Connect a ChatGPT account and choose an available text model."
+          : "Text AI base URL and chat model are required.",
+      );
+      return;
+    }
+    const effort = value("ai.reasoning_effort");
+    if (
+      requiresTextConnection &&
+      effort &&
+      capabilities.data &&
+      !capabilities.data.reasoning_levels.includes(effort)
+    ) {
+      toast.error("Choose a reasoning level supported by the selected model.");
       return;
     }
     if (maxConcurrent === null || maxConcurrent < 1) {
@@ -674,10 +784,20 @@ export default function AISettings() {
     <div className="flex h-full max-w-5xl flex-col gap-7">
       <SettingsPageHeader title="AI Services" />
 
+      {authMode === "chatgpt" ? (
+        <p className="text-muted-foreground text-xs">
+          Your ChatGPT plan covers text translation. Speech-to-text uses the speech provider’s API
+          key or local endpoint.
+        </p>
+      ) : null}
       <FieldGroup label="Models">
         <div className="py-3.5">
           <ProviderTileGrid>
             <TextModelTile
+              authMode={authMode}
+              reasoningEffort={value("ai.reasoning_effort")}
+              reasoningLevels={capabilities.data?.reasoning_levels ?? []}
+              chatGPTSupported={capabilities.data?.chatgpt_sign_in === true}
               baseURL={textBaseURL}
               chatModel={chatModel}
               apiKeyValue={value("ai.api_key")}
@@ -708,6 +828,7 @@ export default function AISettings() {
               onCollapse={() => setExpandedTile(null)}
             />
             <SpeechModelTile
+              chatGPTPlan={authMode === "chatgpt"}
               asrBaseURL={asrBaseURL}
               asrModel={asrModel}
               apiKeyValue={value("ai.asr_api_key")}

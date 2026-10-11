@@ -2,8 +2,10 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -90,6 +92,41 @@ func (r *ServerSettingsRepo) UpdateAtomic(
 	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
 		return update(current)
 	})
+}
+
+// UpdateValueAtomic serializes an exclusively machine-managed value, such as
+// a rotating OAuth credential bundle. Its callback holds a key-specific lock;
+// general settings mutations remain independent. The key must not also be
+// changed through the general read/validate/write settings surface.
+func (r *ServerSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("server_settings begin value mutation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, serverSettingsMutationLock+":"+key); err != nil {
+		return fmt.Errorf("server_settings acquire value lock: %w", err)
+	}
+	var current string
+	err = tx.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&current)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("server_settings read value: %w", err)
+	}
+	value, err := update(current)
+	if err != nil {
+		return err
+	}
+	// A completed token rotation must commit even if the caller cancels after
+	// the callback returns. Keep this final database phase bounded.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := upsertServerSettings(commitCtx, tx, map[string]string{key: value}); err != nil {
+		return err
+	}
+	if err := tx.Commit(commitCtx); err != nil {
+		return fmt.Errorf("server_settings commit value mutation: %w", err)
+	}
+	return nil
 }
 
 // UpdateAtomicInTransaction also supplies the held transaction for validation

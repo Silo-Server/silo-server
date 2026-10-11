@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AISettings from "./AISettings";
 
+// JSDOM omits the browser methods used by Radix Select.
+if (!HTMLElement.prototype.hasPointerCapture) HTMLElement.prototype.hasPointerCapture = () => false;
+if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {};
+
 // The page links to Recommendations with a router <Link>, so it needs a router.
 function render(ui: React.ReactElement) {
   return renderDOM(<MemoryRouter>{ui}</MemoryRouter>);
@@ -46,6 +50,14 @@ let dirtyCount = 0;
 let dirtyKeys: string[] = [];
 const DEFAULT_SENSITIVE_CONFIGURED = ["subtitle_ai.api_key"];
 let sensitiveConfigured: string[] = DEFAULT_SENSITIVE_CONFIGURED;
+let reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
+let chatGPTStatus = {
+  accounts: [] as { client_id: string; connected: boolean }[],
+  active_client_id: "",
+  login_pending: false,
+  login_result: "idle",
+};
+let chatGPTModels: { id: string }[] = [];
 
 const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) => ({
   isLoading: false,
@@ -82,6 +94,19 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/admin/chatgpt", () => ({
+  useAdminAICapabilities: () => ({
+    data: { reasoning_levels: reasoningLevels, chatgpt_sign_in: true },
+  }),
+  useChatGPTStatus: () => ({
+    data: chatGPTStatus,
+  }),
+  useChatGPTModels: () => ({ data: { models: chatGPTModels } }),
+}));
+vi.mock("./ChatGPTConnection", () => ({
+  ChatGPTConnection: () => <div>ChatGPT connection controls</div>,
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
@@ -102,9 +127,105 @@ describe("AISettings", () => {
     dirtyCount = 0;
     dirtyKeys = [];
     sensitiveConfigured = DEFAULT_SENSITIVE_CONFIGURED;
+    reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
+    chatGPTStatus = {
+      accounts: [],
+      active_client_id: "",
+      login_pending: false,
+      login_result: "idle",
+    };
+    chatGPTModels = [];
     for (const mock of Object.values(mocks)) mock.mockReset();
     for (const key of Object.keys(values)) delete values[key];
     Object.assign(values, DEFAULT_VALUES);
+  });
+
+  it("stages reasoning effort and clears it for the model default", async () => {
+    const user = userEvent.setup();
+    const view = render(<AISettings />);
+    await openTile(user, "Text model");
+    await user.click(screen.getByRole("combobox", { name: "Reasoning level" }));
+    await user.click(screen.getByRole("option", { name: "High" }));
+    expect(mocks.setValue).toHaveBeenCalledWith("ai.reasoning_effort", "high");
+    values["ai.reasoning_effort"] = "high";
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Reasoning level" }));
+    await user.click(screen.getByRole("option", { name: "Provider default" }));
+    expect(mocks.setValue).toHaveBeenCalledWith("ai.reasoning_effort", "");
+  });
+
+  it("rejects a saved reasoning effort after choosing a model without reasoning", async () => {
+    values["ai.reasoning_effort"] = "high";
+    dirtyKeys = ["ai.chat_model"];
+    reasoningLevels = [];
+    dirtyCount = 1;
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Choose a reasoning level supported by the selected model.",
+    );
+  });
+
+  it("stages ChatGPT authentication from the provider selector", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />);
+    await openTile(user, "Text model");
+    await user.click(screen.getByRole("combobox", { name: "Authentication" }));
+    await user.click(screen.getByRole("option", { name: "ChatGPT plan" }));
+    expect(mocks.setValue).toHaveBeenCalledWith("ai.auth_mode", "chatgpt");
+  });
+
+  it("requires a connected account and a model from that account before saving ChatGPT", async () => {
+    values["ai.auth_mode"] = "chatgpt";
+    dirtyCount = 1;
+    dirtyKeys = ["ai.auth_mode"];
+    const view = render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).not.toHaveBeenCalled();
+    chatGPTStatus = {
+      ...chatGPTStatus,
+      active_client_id: "app",
+      accounts: [{ client_id: "app", connected: true }],
+    };
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).not.toHaveBeenCalled();
+    chatGPTModels = [{ id: values["ai.chat_model"]! }];
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["subtitle_ai.enabled", "false"],
+    ["metadata_ai.enabled", "false"],
+    ["ai.asr_model", "updated-speech-model"],
+    ["subtitle_ai.transcribe_quota_jobs", "5"],
+    ["ai.max_concurrent_jobs", "3"],
+  ])("saves %s while ChatGPT is disconnected", async (key, value) => {
+    values["ai.auth_mode"] = "chatgpt";
+    values["ai.reasoning_effort"] = "high";
+    reasoningLevels = [];
+    values[key] = value;
+    dirtyCount = 1;
+    dirtyKeys = [key];
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
   it("keeps the save callback rejection at the Save button boundary", async () => {

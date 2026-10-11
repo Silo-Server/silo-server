@@ -295,6 +295,8 @@ type RecommendationsConfig struct {
 // transcription (operators often run a dedicated Whisper server). Settings
 // load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
 type AIConfig struct {
+	AuthMode          string `yaml:"-"`
+	ReasoningEffort   string `yaml:"-"`
 	BaseURL           string `yaml:"-"`
 	APIKey            string `yaml:"-"`
 	ChatModel         string `yaml:"-"`
