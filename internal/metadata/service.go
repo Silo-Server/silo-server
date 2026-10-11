@@ -1568,7 +1568,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		effectiveHints := selectionHints
-		primaryCandidates := candidates
+		// Every identity's results, primary first, for the alias check below.
+		type aliasAttempt struct {
+			hints      *MatchHints
+			candidates []MatchCandidate
+		}
+		aliasAttempts := []aliasAttempt{{selectionHints, candidates}}
 		winner, matched := trySelection(selectionHints, candidates)
 		// Structured IDs remain decisive and never fall back to a title search.
 		// For title/year identities, try independently parsed path hypotheses only
@@ -1595,6 +1600,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				if len(alternateCandidates) == 0 {
 					continue
 				}
+				aliasAttempts = append(aliasAttempts, aliasAttempt{&alternateHints, alternateCandidates})
 				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates)
 				if len(candidates) == 0 || alternateMatched || bestCandidateScore(&alternateHints, alternateCandidates) > bestCandidateScore(effectiveHints, candidates) {
 					candidates = alternateCandidates
@@ -1609,17 +1615,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		// Last: a search may still hold the right result under a title it didn't
 		// return, such as a regional release title, and the provider's details
-		// can confirm it. Check the primary identity's results, then the
-		// alternate set kept above when one replaced them.
+		// can confirm it. Check each identity's results in the order searched.
 		if !matched {
-			type aliasAttempt struct {
-				hints      *MatchHints
-				candidates []MatchCandidate
-			}
-			aliasAttempts := []aliasAttempt{{selectionHints, primaryCandidates}}
-			if effectiveHints != selectionHints {
-				aliasAttempts = append(aliasAttempts, aliasAttempt{effectiveHints, candidates})
-			}
 			for _, attempt := range aliasAttempts {
 				aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
 					ctx, attempt.hints, attempt.candidates, itemChain, searchQuery.Language,

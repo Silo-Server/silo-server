@@ -19,6 +19,8 @@ type aliasProvider struct {
 	idErrs    map[string]error
 	// partial marks IDs whose detail response has an incomplete title list.
 	partial map[string]bool
+	// noMetadata marks IDs whose detail response has HasMetadata false.
+	noMetadata map[string]bool
 
 	mu          sync.Mutex
 	detailCalls []string
@@ -42,7 +44,7 @@ func (p *aliasProvider) GetMetadata(_ context.Context, req MetadataRequest) (*Me
 		return nil, err
 	}
 	result := &MetadataResult{
-		HasMetadata:          true,
+		HasMetadata:          !p.noMetadata[req.ProviderIDs["tmdb"]],
 		Title:                "12.12: The Day",
 		OriginalTitle:        "서울의 봄",
 		Year:                 2023,
@@ -433,5 +435,67 @@ func TestValidateMatchByProviderTitleAliasesNeedsEverySourceToRuleOutRival(t *te
 		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tmdb, tvdb}, "en")
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match while one source's list for the rival is partial", winner.ProviderIDs)
+	}
+}
+
+func TestValidateMatchByProviderTitleAliasesIgnoresMetadataNegativeResponses(t *testing.T) {
+	t.Parallel()
+	hints := &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}
+
+	// A response without metadata can't confirm a candidate, even with the title.
+	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, noMetadata: map[string]bool{"919207": true}}
+	winner, _ := validateMatchByProviderTitleAliases(context.Background(), hints,
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en")
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match from a response without metadata", winner.ProviderIDs)
+	}
+
+	// Nor can it rule out a rival.
+	provider = &aliasProvider{slug: "tmdb", aliases: map[string][]string{"222": {"首尔之春"}}, noMetadata: map[string]bool{"111": true}}
+	winner, _ = validateMatchByProviderTitleAliases(context.Background(), hints,
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023)}, "movie"),
+		[]Provider{provider}, "en")
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match while a rival's response has no metadata", winner.ProviderIDs)
+	}
+}
+
+func TestInitialMatchChecksEveryAlternateIdentityForAliases(t *testing.T) {
+	t.Parallel()
+	harness := newTestHarness()
+	// The primary search finds nothing. The first alternate finds the film
+	// under its English title; the second finds a higher-scoring exact-title
+	// result from 2010 that selection rejects and keeps. The first alternate's
+	// result must still get the alias check.
+	provider := &queryAliasProvider{
+		aliasProvider: aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}},
+		byTitle: map[string][]SearchResult{
+			"首尔之春":         {seoulSpringSearchResult("919207", 2023)},
+			"Seoul Spring": {{Name: "Seoul Spring", Year: 2010, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "444"}}},
+		},
+	}
+
+	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		Hints: &MatchHints{
+			Title: "Spring 2023 Remux", Year: 2023, Type: "movie",
+			AlternateIdentities: []MatchIdentityHint{
+				{Title: "首尔之春", Year: 2023, Source: "folder"},
+				{Title: "Seoul Spring", Year: 2023, Source: "filename"},
+			},
+		},
+		Mode: ModeInitialMatch,
+	}, []Provider{provider})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders() error = %v", err)
+	}
+	if result == nil || result.Decision == nil || result.Decision.Outcome != "matched" {
+		t.Fatalf("result = %#v, want the first alternate's result confirmed by its alternative titles", result)
+	}
+	item, err := harness.itemRepo.GetByID(context.Background(), result.ContentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.TmdbID != "919207" {
+		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
 	}
 }

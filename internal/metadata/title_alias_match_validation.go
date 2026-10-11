@@ -129,7 +129,8 @@ func providerTitleAliasMatch(
 		if fetchErr != nil {
 			return "", false, fmt.Errorf("title alias validation via %s: %w", p.Slug(), fetchErr)
 		}
-		if result == nil {
+		// A response without metadata is no answer, whatever fields it carries.
+		if result == nil || !result.HasMetadata {
 			unresolved = true
 			continue
 		}
