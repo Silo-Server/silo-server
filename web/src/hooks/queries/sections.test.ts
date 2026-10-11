@@ -30,6 +30,7 @@ import {
   fetchLibrarySectionItems,
   homeLayoutQueryOptions,
   HOME_LAYOUT_INCLUDED_ROWS,
+  HOME_SECTION_GC_TIME,
   profileSectionOverridesFromV2,
 } from "./sections";
 import { sectionKeys } from "./keys";
@@ -84,6 +85,22 @@ describe("sections query helpers", () => {
     );
     expect(cached?.section.id).toBe(included.id);
     expect(cached?.section.items).toHaveLength(included.items.length);
+  });
+
+  it("keeps seeded rows for the home section gcTime, not the client default", async () => {
+    mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutWithItemsOk));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 10 * 60_000 } } });
+
+    const options = homeLayoutQueryOptions(queryClient) as unknown as QueryOptions;
+    await options.queryFn({});
+
+    for (const included of getHomeLayoutWithItemsOk.included_sections) {
+      const query = queryClient.getQueryCache().find({
+        queryKey: sectionKeys.homeItems(included.id),
+        exact: true,
+      });
+      expect(query?.gcTime).toBe(HOME_SECTION_GC_TIME);
+    }
   });
 
   it("fetches home section items from the v2 home section and keeps the { section } shape", async () => {

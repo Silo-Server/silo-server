@@ -96,7 +96,11 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
         signal,
       });
       for (const section of layout.included_sections) {
-        queryClient.setQueryData<HomeSectionItemsResponse>(sectionKeys.homeItems(section.id), {
+        const queryKey = sectionKeys.homeItems(section.id);
+        // setQueryData alone would create the entry with the client's default
+        // gcTime, and Home never fetches a fresh row to raise it.
+        queryClient.getQueryCache().build(queryClient, { queryKey, gcTime: HOME_SECTION_GC_TIME });
+        queryClient.setQueryData<HomeSectionItemsResponse>(queryKey, {
           section: sectionFromV2(section),
         });
       }
