@@ -8,6 +8,7 @@ import {
   SPEAKER,
   speakersFromMask,
   unpackPCM,
+  vorbisSpeakers,
 } from "./audioMix";
 
 const S = SPEAKER;
@@ -30,6 +31,23 @@ describe("outputChannelCount", () => {
     expect(outputChannelCount(8, 6)).toBe(6);
     expect(outputChannelCount(6, 2)).toBe(2);
     expect(outputChannelCount(1, 8)).toBe(2);
+  });
+});
+
+describe("vorbisSpeakers", () => {
+  it("reads 5.1 Opus as FL, FC, FR, BL, BR, LFE and drops only the LFE in a stereo downmix", () => {
+    const speakers = vorbisSpeakers(6);
+    expect(speakers).toEqual([S.FL, S.FC, S.FR, S.BL, S.BR, S.LFE]);
+    const matrix = mixMatrix(speakers, 2);
+    // The rear-left input (index 3) reaches the left output; the LFE (index 5) reaches nothing.
+    expect(matrix[3]).toBeGreaterThan(0);
+    expect(matrix[5]).toBe(0);
+    expect(matrix[6 + 5]).toBe(0);
+  });
+
+  it("matches WAVE order where Opus does", () => {
+    expect(vorbisSpeakers(2)).toEqual(defaultSpeakers(2));
+    expect(vorbisSpeakers(4)).toEqual(defaultSpeakers(4));
   });
 });
 
