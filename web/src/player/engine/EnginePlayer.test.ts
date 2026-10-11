@@ -277,6 +277,20 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("reports when a picture arrives but its audio never does", async () => {
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker, true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    expect(player.readyState).toBe(2);
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_startup_timeout" }),
+    );
+    player.destroy();
+  });
+
   it("waits for the worker's audio before reporting the position playable", async () => {
     audioOutput.resumes = true;
     audioOutput.state = "suspended";

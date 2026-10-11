@@ -340,10 +340,16 @@ export class EnginePlayer {
     worker.onmessage = (event: MessageEvent<WorkerToPageMessage>) => this.onWorker(event.data);
     worker.onerror = (event) =>
       this.fail(ENGINE_PAGE_FAILURES.worker, event.message || "The decode worker failed.");
+    // Runs until the position is playable, not just until the first picture:
+    // audio that never arrives would otherwise hold playback with no failure.
     this.startupTimer = setTimeout(() => {
-      if (this.ready < 2) {
-        this.fail(ENGINE_PAGE_FAILURES.startup, "The browser engine showed no picture in time.");
-      }
+      if (this.ready >= 4) return;
+      this.fail(
+        ENGINE_PAGE_FAILURES.startup,
+        this.ready < 2
+          ? "The browser engine showed no picture in time."
+          : "The browser engine had no audio to play in time.",
+      );
     }, STARTUP_TIMEOUT_MS);
     this.post({ type: "open", source: this.source });
   }
@@ -716,10 +722,6 @@ export class EnginePlayer {
     if (this.shown.generation !== this.generation && !nothingNewToShow) return;
     if (this.ready < 2) {
       this.ready = 2;
-      if (this.startupTimer !== null) {
-        clearTimeout(this.startupTimer);
-        this.startupTimer = null;
-      }
       if (!this.loadedData) {
         this.loadedData = true;
         this.dispatch("loadeddata");
@@ -729,6 +731,10 @@ export class EnginePlayer {
     const audioReady = !this.audio || this.audioBuffered || this.audioEnded || this.videoEnded;
     if (!audioReady) return;
     this.ready = 4;
+    if (this.startupTimer !== null) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
     if (this.seekingValue) {
       this.seekingValue = false;
       this.dispatch("timeupdate");
