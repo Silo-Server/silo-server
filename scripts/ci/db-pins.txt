@@ -166,6 +166,11 @@
 ./internal/scanner TestEbookScanBatchesSkipQueries
 ./internal/scanner TestEbookSkipPreloadPreservesEligibility
 
+# Variant finalization: one narrow scope load, one owner lookup, and one
+# batched write of the variant columns alone.
+./internal/scanner TestFinalizeVariantsBatchesQueriesDB
+./internal/scanner TestFinalizeVariantsLoadsMovieDiscsOutsideTheScopeDB
+
 # ID-less direct ranges reuse full session payloads while checking identities.
 ./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots
 

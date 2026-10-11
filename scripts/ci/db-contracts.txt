@@ -18,6 +18,9 @@
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
+./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
+./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
 # Series air-date sort keys advance when a known episode airs.
