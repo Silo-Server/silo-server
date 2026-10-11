@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +80,7 @@ type playbackSessionRow struct {
 	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
 	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
 	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int     `json:"-"`
 	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
 	SourceAudioChannels      *int    `json:"source_audio_channels"`
 	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
@@ -310,6 +312,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			mf.bitrate,
 			COALESCE(mf.codec_video, ''),
 			COALESCE(mf.resolution, ''),
+			CASE WHEN mf.video_tracks->0->>'height' ~ '^[0-9]{1,5}$' THEN (mf.video_tracks->0->>'height')::int ELSE 0 END,
 			COALESCE(mf.codec_audio, ''),
 			mf.audio_channels,
 			COALESCE(mf.audio_tracks::text, '[]'),
@@ -394,7 +397,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec,
 			&targetAudioChannels, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.ToneMapMode, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
-			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
+			&s.SourceVideoHeight, &s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
@@ -483,6 +486,13 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 		row.TargetVideoCodec = "h264"
 	}
 	if row.VideoDecision == "transcode" && strings.TrimSpace(row.TargetResolution) == "" {
+		row.TargetResolution = row.SourceVideoResolution
+	}
+	// The catalog labels a file by its size class, so a 3840x1600 file is
+	// 2160p, while a transcode target names its output height. A transcode
+	// that keeps the source height reports the source's label so a
+	// full-resolution output doesn't read as a downscale.
+	if row.VideoDecision == "transcode" && row.SourceVideoHeight > 0 && resolutionLabelHeight(row.TargetResolution) == row.SourceVideoHeight {
 		row.TargetResolution = row.SourceVideoResolution
 	}
 	if strings.TrimSpace(row.NodeDisplayName) == "" {
@@ -912,4 +922,18 @@ func (h *AdminHandler) ReadAdminPlaybackSummary(ctx context.Context, query Playb
 		return nil, 0, err
 	}
 	return loader.LoadSummary(ctx, query, limit)
+}
+
+// resolutionLabelHeight parses a height label such as "1600p", returning 0
+// for anything else.
+func resolutionLabelHeight(label string) int {
+	digits, ok := strings.CutSuffix(strings.ToLower(strings.TrimSpace(label)), "p")
+	if !ok {
+		return 0
+	}
+	height, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0
+	}
+	return height
 }

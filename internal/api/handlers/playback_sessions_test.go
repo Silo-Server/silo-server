@@ -575,3 +575,35 @@ func TestEnrichPlaybackSessionRowUsesCompatOrigin(t *testing.T) {
 		t.Fatal("compat-origin session must be marked as a Jellyfin client")
 	}
 }
+
+func TestActivityReportsFullResolutionTranscodeWithTheSourceLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{name: "same height as a scope 4K source", target: "1600p", want: "2160p"},
+		{name: "downscaled rung keeps its label", target: "720p", want: "720p"},
+		{name: "unparseable target is unchanged", target: "original", want: "original"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			row := playbackSessionRow{
+				PlayMethod: "transcode", TargetVideoCodec: "hevc", TargetResolution: tt.target,
+				SourceVideoCodec: "hevc", SourceVideoResolution: "2160p", SourceVideoHeight: 1600,
+			}
+			enrichPlaybackSessionRow(&row, nil)
+			if row.TargetResolution != tt.want {
+				t.Fatalf("TargetResolution = %q, want %q", row.TargetResolution, tt.want)
+			}
+		})
+	}
+}
+
+func TestActivityKeepsTargetLabelWithoutSourceHeight(t *testing.T) {
+	row := playbackSessionRow{PlayMethod: "transcode", TargetVideoCodec: "h264", TargetResolution: "1600p", SourceVideoResolution: "2160p"}
+	enrichPlaybackSessionRow(&row, nil)
+	if row.TargetResolution != "1600p" {
+		t.Fatalf("TargetResolution = %q, want 1600p when the source height is unknown", row.TargetResolution)
+	}
+}
