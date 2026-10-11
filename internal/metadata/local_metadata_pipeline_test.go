@@ -566,15 +566,19 @@ func TestIdentify_FailedWriteRecordsNoChoice(t *testing.T) {
 // a stored one, while remote crew still refreshes; a manual refresh replaces
 // the stored cast with the NFO's.
 func TestRefresh_NFOCreditsFillOnlyEmptyGroupsUntilManualRefresh(t *testing.T) {
+	remoteCredits := []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Remote Director", models.PersonKindDirector)}
 	cases := []struct {
 		name   string
 		stored []models.ItemPerson
+		remote []models.ItemPerson
 		mode   RefreshMode
 		want   []string
 	}{
-		{"scheduled, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, ModeScheduledRefresh, []string{"TMDB Actor", "Remote Director"}},
-		{"scheduled, no stored cast", nil, ModeScheduledRefresh, []string{"Local Actor", "Remote Director"}},
-		{"manual, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, ModeManualRefresh, []string{"Local Actor", "Remote Director"}},
+		{"scheduled, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, remoteCredits, ModeScheduledRefresh, []string{"TMDB Actor", "Remote Director"}},
+		{"scheduled, no stored cast", nil, remoteCredits, ModeScheduledRefresh, []string{"Local Actor", "Remote Director"}},
+		{"manual, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, remoteCredits, ModeManualRefresh, []string{"Local Actor", "Remote Director"}},
+		// No provider sent crew, so the stored crew stays.
+		{"scheduled, no remote credits", []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Stored Director", models.PersonKindDirector)}, nil, ModeScheduledRefresh, []string{"TMDB Actor", "Stored Director"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -587,7 +591,7 @@ func TestRefresh_NFOCreditsFillOnlyEmptyGroupsUntilManualRefresh(t *testing.T) {
 			nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "100"}, metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{actor("Local Actor", "Lead")}}}
 			remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{
 				HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"},
-				People: []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Remote Director", models.PersonKindDirector)},
+				People: tc.remote,
 			}}
 			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: tc.mode}, []Provider{nfo, remote}); err != nil {
 				t.Fatalf("ProcessWithProviders: %v", err)

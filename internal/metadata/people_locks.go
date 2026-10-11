@@ -60,9 +60,10 @@ func (s *MetadataService) peopleLocksForMerge(ctx context.Context, contentID str
 // keepStoredLocalCredits prepares a fill-empty write (scheduled refresh,
 // initial match of a stored item): the cast or crew the local provider
 // supplied fills an empty stored group but does not replace a stored one, as
-// keepStoredLists does for the other lists; a manual refresh replaces it. The
-// item row carries no credits, so the stored ones are read. When they cannot
-// be read, the credits stay as stored.
+// keepStoredLists does for the other lists; a manual refresh replaces it. A
+// stored group that no provider sent anything for is kept too, since the write
+// replaces credits wholesale. The item row carries no credits, so the stored
+// ones are read. When they cannot be read, the credits stay as stored.
 func (s *MetadataService) keepStoredLocalCredits(ctx context.Context, contentID string, accumulator *MetadataResult) {
 	l := accumulator.localLists
 	if !l.cast && !l.crew {
@@ -81,10 +82,10 @@ func (s *MetadataService) keepStoredLocalCredits(ctx context.Context, contentID 
 	}
 	storedCast, storedCrew := splitPeopleByRole(stored)
 	cast, crew := splitPeopleByRole(accumulator.People)
-	if l.cast && len(storedCast) > 0 {
+	if len(storedCast) > 0 && (l.cast || len(cast) == 0) {
 		cast = storedCast
 	}
-	if l.crew && len(storedCrew) > 0 {
+	if len(storedCrew) > 0 && (l.crew || len(crew) == 0) {
 		crew = storedCrew
 	}
 	accumulator.People = append(cast, crew...)
