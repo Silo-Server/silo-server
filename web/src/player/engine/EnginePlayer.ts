@@ -414,8 +414,13 @@ export class EnginePlayer {
     if (!this.disposed) this.element.dispatchEvent(new Event(type));
   }
 
+  /** Destroyed, or failed: either way nothing new may start. */
+  private get stopped(): boolean {
+    return this.disposed || this.failed;
+  }
+
   private fail(classification: string, message: string): void {
-    if (this.failed || this.disposed) return;
+    if (this.stopped) return;
     this.failed = true;
     this.audio?.setPlaying(false);
     this.clock?.setRunning(false);
@@ -433,7 +438,7 @@ export class EnginePlayer {
   }
 
   private onWorker(message: WorkerToPageMessage): void {
-    if (this.disposed) {
+    if (this.stopped) {
       if (message.type === "frame") message.frame.close();
       return;
     }
@@ -498,7 +503,7 @@ export class EnginePlayer {
           : await WebGPURenderer.create(this.canvas, transfer, (reason) =>
               this.fail(ENGINE_PAGE_FAILURES.presentation, reason),
             );
-      if (this.disposed) {
+      if (this.stopped) {
         renderer.destroy();
         return;
       }
@@ -510,7 +515,7 @@ export class EnginePlayer {
       );
       return;
     }
-    if (this.disposed) return;
+    if (this.stopped) return;
 
     if (info.audio) {
       try {
@@ -526,8 +531,9 @@ export class EnginePlayer {
         );
         return;
       }
-      if (this.disposed) {
+      if (this.stopped) {
         this.audio.close();
+        this.audio = null;
         return;
       }
       this.audio.setVolume(this.volumeValue, this.mutedValue);
@@ -821,7 +827,7 @@ export class EnginePlayer {
    * stays awake and hardware media keys reach it.
    */
   private updatePresence(): void {
-    const playing = !this.pausedValue && !this.disposed && !this.failed;
+    const playing = !this.pausedValue && !this.stopped;
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     }
@@ -831,7 +837,7 @@ export class EnginePlayer {
       wakeLock
         .request("screen")
         .then((lock) => {
-          if (this.pausedValue || this.disposed || this.failed) {
+          if (this.pausedValue || this.stopped) {
             void lock.release();
             this.wakeLock = null;
             return;

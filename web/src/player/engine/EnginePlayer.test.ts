@@ -417,6 +417,34 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("starts nothing new when it fails while the renderer is still being created", async () => {
+    const gpu = { draw: vi.fn(), destroy: vi.fn() };
+    let resolveRenderer!: (renderer: WebGPURenderer) => void;
+    vi.spyOn(WebGPURenderer, "create").mockReturnValue(
+      new Promise((resolve) => (resolveRenderer = resolve)),
+    );
+    const onFailure = vi.fn();
+    const player = new EnginePlayer({
+      source: { ...source, video: { ...source.video, transfer: "pq" } },
+      surface: document.createElement("div"),
+      element,
+      volume: 1,
+      muted: false,
+      onFailure,
+    });
+    player.load();
+    const worker = FakeWorker.last!;
+    await open(worker);
+    worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
+    expect(onFailure).toHaveBeenCalledTimes(1);
+
+    resolveRenderer(gpu as unknown as WebGPURenderer);
+    await settle();
+    expect(gpu.destroy).toHaveBeenCalled();
+    expect(worker.posted.some((m) => m.type === "start")).toBe(false);
+    player.destroy();
+  });
+
   it("presents hardware HDR frames that kept their PQ tag through the 2D canvas", async () => {
     const gpu = { draw: vi.fn(), destroy: vi.fn() };
     vi.spyOn(WebGPURenderer, "create").mockResolvedValue(gpu as unknown as WebGPURenderer);
