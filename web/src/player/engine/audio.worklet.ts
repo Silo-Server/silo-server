@@ -166,8 +166,12 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     }
     for (let c = 0; c < output.length; c++) output[c]!.fill(0, rendered);
 
-    const advancing = rendered > 0;
-    if (this.playing && this.queue.length === 0 && !this.ended && !this.underrunReported) {
+    const ranDry = this.playing && this.queue.length === 0 && !this.ended && !this.underrunReported;
+    // When the queue ran dry inside this quantum, the underrun is the report:
+    // an advancing clock for the samples before it would carry the clock on
+    // through the silence that follows.
+    const advancing = rendered > 0 && !ranDry;
+    if (ranDry) {
       this.underrunReported = true;
       this.postPage({
         type: "underrun",
@@ -183,6 +187,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
 
     this.quanta += 1;
     if (
+      !ranDry &&
       mediaTime !== null &&
       (advancing !== this.lastAdvancing || this.quanta % CLOCK_REPORT_QUANTA === 0)
     ) {

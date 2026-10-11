@@ -5,6 +5,7 @@ import { WebGPURenderer } from "./renderers";
 const audioOutput = vi.hoisted(() => ({
   resumes: true,
   state: "suspended" as AudioContextState,
+  contextTime: 0,
 }));
 
 vi.mock("./audioOutput", () => ({
@@ -26,7 +27,7 @@ vi.mock("./audioOutput", () => ({
         if (audioOutput.resumes) audioOutput.state = "running";
         return audioOutput.resumes;
       }),
-      audibleContextTime: () => 0,
+      audibleContextTime: () => audioOutput.contextTime,
       close: vi.fn(),
     })),
   },
@@ -325,6 +326,39 @@ describe("EnginePlayer", () => {
     expect(onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ classification: "browser_engine_read_failed" }),
     );
+    player.destroy();
+  });
+
+  it("fails over when video falls far behind audio that is still playing", async () => {
+    audioOutput.resumes = true;
+    audioOutput.state = "suspended";
+    audioOutput.contextTime = 0;
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker, true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "audio-buffered", generation: worker.generation });
+    await settle();
+    await player.play();
+    const worklet = player as unknown as { onWorklet(message: unknown): void };
+    worklet.onWorklet({
+      type: "clock",
+      generation: worker.generation,
+      contextTime: 0,
+      mediaTime: 0,
+      advancing: true,
+    });
+    // Audio plays on for 10 s with no new video: still within the limit.
+    audioOutput.contextTime = 10;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onFailure).not.toHaveBeenCalled();
+    // 25 s behind the audio clock, the video reads have stopped.
+    audioOutput.contextTime = 25;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_read_failed" }),
+    );
+    audioOutput.contextTime = 0;
     player.destroy();
   });
 

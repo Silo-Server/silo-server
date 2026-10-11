@@ -398,6 +398,11 @@ export class EnginePlayer {
 
   // -- Internals ---------------------------------------------------------------
 
+  /** Media time at which the picture on screen stops being current. */
+  private shownUntil(): number {
+    return this.shown ? this.shown.timestamp + Math.max(0, this.shown.duration) : 0;
+  }
+
   private stopWorker(): void {
     const worker = this.worker;
     this.worker = null;
@@ -742,20 +747,29 @@ export class EnginePlayer {
           now > this.shown.timestamp + Math.max(this.shown.duration, 0.04) + VIDEO_STALL_SECONDS;
         clock.setRunning(!overdue);
         this.setWaiting(overdue);
+      } else if (
+        this.shown &&
+        this.queue.length === 0 &&
+        !this.videoEnded &&
+        now - this.shownUntil() > STALL_TIMEOUT_MS / 1000
+      ) {
+        // Live audio keeps the clock going when video stops arriving, so the
+        // stall shows as a picture that has fallen this far behind it.
+        this.fail(ENGINE_READ_FAILED, "The browser engine stopped receiving video.");
+        return;
       }
     }
 
     this.settleReadiness();
 
     // The last picture stays up for its own duration before the media ends.
-    const shownUntil = this.shown ? this.shown.timestamp + Math.max(0, this.shown.duration) : 0;
     if (
       !this.pausedValue &&
       !this.seekingValue &&
       this.videoEnded &&
       this.queue.length === 0 &&
       (!this.audio || this.audioDrained) &&
-      clock.now() >= shownUntil
+      clock.now() >= this.shownUntil()
     ) {
       this.finish();
       return;

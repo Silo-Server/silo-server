@@ -64,4 +64,27 @@ describe("EngineAudioProcessor", () => {
     for (let i = 0; i < 38; i++) quantum(processor);
     expect(quantum(processor)[127]).toBe(0.5);
   });
+
+  it("reports running dry as a stop, without an advancing clock after it", () => {
+    const processor = new Processor({ processorOptions: { channels: 1 } });
+    const page = (data: PageToWorkletMessage) => processor.port.onmessage!({ data });
+    page({ type: "generation", generation: 1, position: 0 });
+    page({ type: "playing", playing: true });
+    const onWorker = (processor as unknown as { onWorker(message: WorkerToWorkletMessage): void })
+      .onWorker;
+    // Four quanta so the periodic clock report falls on the quantum that runs dry.
+    onWorker.call(processor, {
+      type: "pcm",
+      generation: 1,
+      timestamp: 0,
+      samples: new Float32Array(128 * 3 + 64).fill(0.5),
+    });
+    for (let i = 0; i < 4; i++) quantum(processor);
+    const messages = processor.port.posted as Array<{ type: string; advancing?: boolean }>;
+    const underrun = messages.findIndex((message) => message.type === "underrun");
+    expect(underrun).toBeGreaterThanOrEqual(0);
+    expect(
+      messages.slice(underrun).some((message) => message.type === "clock" && message.advancing),
+    ).toBe(false);
+  });
 });
