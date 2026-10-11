@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { queryOptions, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
@@ -68,15 +74,42 @@ export function profileSectionOverridesFromV2(
   }));
 }
 
-export function useHomeLayout(enabled = true) {
-  return useQuery({
+/**
+ * Rows whose items ride along with the home layout. They cover what the first
+ * screen shows, so the first rows paint without waiting on a second round
+ * trip; the server leaves out any row that is not ready in time and Home
+ * fetches those, and every later row, on its own.
+ */
+export const HOME_LAYOUT_INCLUDED_ROWS = 3;
+
+/**
+ * The home layout query. Rows the server included are written into their own
+ * item caches before the layout resolves, so Home finds them already loaded
+ * and does not request them again.
+ */
+export function homeLayoutQueryOptions(queryClient: QueryClient) {
+  return queryOptions({
     queryKey: sectionKeys.homeLayout(),
-    queryFn: ({ signal }): Promise<HomeLayoutResponse> =>
-      v2("GET /api/v2/home/layout", { signal }).then((layout) => ({ sections: layout.sections })),
+    queryFn: async ({ signal }): Promise<HomeLayoutResponse> => {
+      const layout = await v2("GET /api/v2/home/layout", {
+        query: { include_items: HOME_LAYOUT_INCLUDED_ROWS },
+        signal,
+      });
+      for (const section of layout.included_sections) {
+        queryClient.setQueryData<HomeSectionItemsResponse>(sectionKeys.homeItems(section.id), {
+          section: sectionFromV2(section),
+        });
+      }
+      return { sections: layout.sections };
+    },
     staleTime: HOME_SECTION_STALE_TIME,
     gcTime: HOME_SECTION_GC_TIME,
-    enabled,
   });
+}
+
+export function useHomeLayout(enabled = true) {
+  const queryClient = useQueryClient();
+  return useQuery({ ...homeLayoutQueryOptions(queryClient), enabled });
 }
 
 /**

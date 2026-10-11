@@ -1,6 +1,8 @@
+import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
+import getHomeLayoutWithItemsOk from "../../../../contracts/api/v2/fixtures/get_home_layout_with_items_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
 import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
 import listProfileSectionOverridesOk from "../../../../contracts/api/v2/fixtures/list_profile_section_overrides_ok.json";
@@ -26,9 +28,11 @@ vi.mock("@/api/client", () => ({
 import {
   fetchHomeSectionItems,
   fetchLibrarySectionItems,
-  useHomeLayout,
+  homeLayoutQueryOptions,
+  HOME_LAYOUT_INCLUDED_ROWS,
   profileSectionOverridesFromV2,
 } from "./sections";
+import { sectionKeys } from "./keys";
 
 type QueryOptions = {
   queryKey: unknown;
@@ -57,12 +61,29 @@ describe("sections query helpers", () => {
   it("fetches the home layout from v2 and keeps the { sections } shape", async () => {
     mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutOk));
 
-    const options = useHomeLayout() as unknown as QueryOptions;
+    const options = homeLayoutQueryOptions(new QueryClient()) as unknown as QueryOptions;
     const response = await options.queryFn({});
 
     expect(options.queryKey).toEqual(["sections", "home", "layout"]);
-    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe("/api/v2/home/layout");
+    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
+      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
+    );
     expect(response).toEqual({ sections: getHomeLayoutOk.sections });
+  });
+
+  it("seeds each included row's item cache before the layout resolves", async () => {
+    mocks.fetchWithSession.mockResolvedValue(jsonResponse(getHomeLayoutWithItemsOk));
+    const queryClient = new QueryClient();
+
+    const options = homeLayoutQueryOptions(queryClient) as unknown as QueryOptions;
+    await options.queryFn({});
+
+    const included = getHomeLayoutWithItemsOk.included_sections[0]!;
+    const cached = queryClient.getQueryData<{ section: { id: string; items: unknown[] } }>(
+      sectionKeys.homeItems(included.id),
+    );
+    expect(cached?.section.id).toBe(included.id);
+    expect(cached?.section.items).toHaveLength(included.items.length);
   });
 
   it("fetches home section items from the v2 home section and keeps the { section } shape", async () => {

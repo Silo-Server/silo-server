@@ -29,6 +29,7 @@ import {
   prefersReducedMotion,
 } from "@/hooks/useImmediateSidebarCollapse";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
+import { markCriticalContentLoaded } from "@/lib/startupPriority";
 
 const MAX_CONCURRENT_SECTION_REQUESTS = 5;
 const SKELETON_CARD_COUNT = 7;
@@ -207,6 +208,13 @@ export default function Home() {
         });
     });
   }, [completedIds, inFlightIds, layout, queryClient]);
+
+  // Background widgets in the shell wait for this (see startupPriority).
+  const hasFirstContent =
+    completedIds.size > 0 || isError || (data !== undefined && layout.length === 0);
+  useEffect(() => {
+    if (hasFirstContent) markCriticalContentLoaded();
+  }, [hasFirstContent]);
 
   const viewModel = buildHomeSectionViewModel({
     layout,

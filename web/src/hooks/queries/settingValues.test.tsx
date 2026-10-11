@@ -13,6 +13,7 @@ import {
   useSetNavigationShortcutPresence,
   useSetSettingValue,
   useSettingsCapabilities,
+  useSettingValue,
   useStoredSettingValues,
 } from "./settingValues";
 
@@ -305,5 +306,102 @@ describe("settings capability gates", () => {
         supports_atomic_shortcuts: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("keyed effective reads", () => {
+  const effectiveCalls = () =>
+    v2Mock.mock.calls.filter(
+      ([operation]) => operation === "GET /api/v2/settings/values/effective",
+    );
+
+  afterEach(() => {
+    cleanup();
+    v2Mock.mockReset();
+    v2Mock.mockResolvedValue(undefined);
+  });
+
+  it("shares one request between single-key reads started together", async () => {
+    v2Mock.mockImplementation((operation: string) =>
+      Promise.resolve(
+        operation === "GET /api/v2/settings/values/effective" ? effectiveBody : undefined,
+      ),
+    );
+    const effectiveBody = {
+      items: [
+        { key: SETTING_KEYS.UI_TITLE_ART, source: "profile", scope: "profile", value: false },
+        { key: SETTING_KEYS.PLAYER_HDR_ENABLED, source: "default", value: true },
+      ],
+    };
+
+    const { result } = renderHook(
+      () => ({
+        titleArt: useSettingValue<boolean>(SETTING_KEYS.UI_TITLE_ART),
+        hdr: useSettingValue<boolean>(SETTING_KEYS.PLAYER_HDR_ENABLED),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(result.current.titleArt.isSuccess && result.current.hdr.isSuccess).toBe(true),
+    );
+    expect(result.current.titleArt.value).toBe(false);
+    expect(result.current.titleArt.source).toBe("profile");
+    expect(result.current.hdr.source).toBe("default");
+    expect(effectiveCalls()).toHaveLength(1);
+    expect(v2Mock).toHaveBeenCalledWith("GET /api/v2/settings/values/effective", {
+      query: expect.objectContaining({
+        keys: expect.arrayContaining([SETTING_KEYS.UI_TITLE_ART, SETTING_KEYS.PLAYER_HDR_ENABLED]),
+      }),
+    });
+  });
+
+  it("fails every read that shared a failed request", async () => {
+    v2Mock.mockImplementation((operation: string) =>
+      operation === "GET /api/v2/settings/values/effective"
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve(undefined),
+    );
+
+    const { result } = renderHook(
+      () => ({
+        titleArt: useSettingValue(SETTING_KEYS.UI_TITLE_ART),
+        hdr: useSettingValue(SETTING_KEYS.PLAYER_HDR_ENABLED),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(result.current.titleArt.isError && result.current.hdr.isError).toBe(true),
+    );
+    expect(v2Mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an unknown key's 404 with the read that asked for it", async () => {
+    v2Mock.mockImplementation((operation: string, options?: { query?: { keys?: string[] } }) => {
+      if (operation !== "GET /api/v2/settings/values/effective") return Promise.resolve(undefined);
+      if (options?.query?.keys?.includes(SETTING_KEYS.PLAYER_HDR_ENABLED)) {
+        return Promise.reject(v2Problem(404, "setting_unknown", "No setting named that"));
+      }
+      return Promise.resolve({
+        items: [
+          { key: SETTING_KEYS.UI_TITLE_ART, source: "profile", scope: "profile", value: false },
+        ],
+      });
+    });
+
+    const { result } = renderHook(
+      () => ({
+        titleArt: useSettingValue<boolean>(SETTING_KEYS.UI_TITLE_ART),
+        hdr: useSettingValue<boolean>(SETTING_KEYS.PLAYER_HDR_ENABLED),
+      }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(result.current.titleArt.isSuccess && result.current.hdr.isError).toBe(true),
+    );
+    expect(result.current.titleArt.value).toBe(false);
+    expect(effectiveCalls()).toHaveLength(3);
   });
 });
