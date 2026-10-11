@@ -2342,11 +2342,6 @@ func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catal
 	// the rows it reads.
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	if len(filter.ExcludedMediaTypes) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mi.type = ANY($%d))", argIdx))
-		args = append(args, filter.ExcludedMediaTypes)
-	}
-
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id
 		FROM   media_items mi
