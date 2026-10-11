@@ -280,3 +280,21 @@ func TestLocalArtworkRetentionReadsNearestFolderUpToLibraryRoot(t *testing.T) {
 		t.Fatal("an unmounted disk under a shared root must keep its local copy")
 	}
 }
+
+// A sidecar folder that cannot be read proves nothing, so the local copy stays.
+func TestLocalArtworkRetentionKeepsArtInUnreadableFolder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any folder")
+	}
+	dir := filepath.Join(t.TempDir(), "Film")
+	writeTestBytes(t, filepath.Join(dir, "Film.mkv"))
+	if err := os.Chmod(dir, 0o311); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	retention := (&MetadataService{}).newLocalArtworkRetention(context.Background(), "movie-1")
+	if retention.sidecarGone("file://" + filepath.Join(dir, "poster.jpg") + "?v=1-1") {
+		t.Fatal("an unreadable folder must keep the cached local copy")
+	}
+}

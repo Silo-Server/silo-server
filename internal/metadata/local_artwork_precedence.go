@@ -50,13 +50,13 @@ type localArtworkRetention struct {
 
 	rootsLoaded bool
 	roots       []string
-	// mounted memoizes, per sidecar folder, whether the nearest existing
-	// folder at or above it lists entries.
-	mounted map[string]bool
+	// probes memoizes folder probes, so the episodes of one season folder
+	// cost one probe.
+	probes map[string]rootcheck.Result
 }
 
 func (s *MetadataService) newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
-	return &localArtworkRetention{ctx: ctx, service: s, contentID: contentID, mounted: make(map[string]bool)}
+	return &localArtworkRetention{ctx: ctx, service: s, contentID: contentID, probes: make(map[string]rootcheck.Result)}
 }
 
 // keep reports whether a slot serving a cached copy of a local sidecar should
@@ -108,40 +108,54 @@ func (s *MetadataService) keepUnconfirmedLocalItemArtwork(ctx context.Context, i
 //     and the file or its folder was removed.
 //
 // An unmounted share leaves its mount point empty or missing, so a missing file
-// under an empty or missing folder keeps the local copy. Stopping at the
-// library root means a parent of several mounts cannot vouch for one of them.
-// Without a known library root only the file's own folder counts.
+// under an empty or missing folder keeps the local copy, as does a folder that
+// cannot be read or does not answer in time. Stopping at the library root
+// means a parent of several mounts cannot vouch for one of them. Without a
+// known library root only the file's own folder counts. Folders are probed
+// through rootcheck, with its timeout, before the file itself is looked up.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true
 	}
-	_, err := os.Lstat(path)
-	if err == nil {
-		return true
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
+	folder := r.probeFolder(filepath.Dir(path))
+	switch {
+	case folder.Reachable:
+		_, err := os.Lstat(path)
+		if err == nil {
+			return true
+		}
+		return errors.Is(err, fs.ErrNotExist) && !folder.Empty
+	case folder.ErrorCode == rootcheck.ErrCodeNotFound:
+		return r.nearestFolderListsEntries(filepath.Dir(filepath.Dir(path)), r.rootsContaining(path))
+	default:
 		return false
 	}
-	dir := filepath.Dir(path)
-	if mounted, ok := r.mounted[dir]; ok {
-		return mounted
+}
+
+// probeFolder probes dir once per retention.
+func (r *localArtworkRetention) probeFolder(dir string) rootcheck.Result {
+	if probe, ok := r.probes[dir]; ok {
+		return probe
 	}
-	mounted := r.nearestFolderListsEntries(dir, r.rootsContaining(path))
-	r.mounted[dir] = mounted
-	return mounted
+	probe := rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
+	r.probes[dir] = probe
+	return probe
 }
 
 // nearestFolderListsEntries walks up from dir to the first folder that exists,
 // going no higher than the library roots, and reports whether it lists
 // entries.
 func (r *localArtworkRetention) nearestFolderListsEntries(dir string, roots []string) bool {
+	if len(roots) == 0 {
+		return false
+	}
 	for {
-		probe := rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
+		probe := r.probeFolder(dir)
 		if probe.Reachable {
 			return !probe.Empty
 		}
-		if probe.ErrorCode != rootcheck.ErrCodeNotFound || len(roots) == 0 || slices.Contains(roots, dir) {
+		if probe.ErrorCode != rootcheck.ErrCodeNotFound || slices.Contains(roots, dir) {
 			return false
 		}
 		parent := filepath.Dir(dir)

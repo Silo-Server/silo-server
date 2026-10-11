@@ -71,10 +71,13 @@ access to libraries.
 
 Discovery lists each folder once per request and matches names ignoring case,
 so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems; an entry
-spelled exactly as listed below wins over other spellings. Listings of folders
-with 256 or more entries (a flat folder of many movies) are shared across
-requests for up to a minute while the folder's mtime is unchanged, so such a
-folder is not listed again for every movie in it. Names in
+spelled exactly as listed below wins over other spellings. A folder that can
+be searched but not listed (execute-only permission) still serves names looked
+up exactly. Listings of folders with 256 or more entries (a flat folder of many
+movies) are shared across requests for up to a minute while the folder's mtime
+is unchanged, and only once that mtime is a few seconds old (coarse filesystem
+timestamps), so such a folder is not listed again for every movie in it. Names
+in
 precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 `.gif` (the formats libvips decodes; `.tbn` is a JPEG):
 
@@ -143,8 +146,10 @@ sits in the chain.
   is missing and the nearest existing folder above it, searching no higher
   than the library root, lists entries. An unmounted share leaves its mount
   point empty or missing, so the local copy stays; stopping at the library
-  root keeps a parent of several mounts from vouching for one of them.
-  Folder probes go through `internal/rootcheck` with its timeout.
+  root keeps a parent of several mounts from vouching for one of them. A
+  folder that cannot be read or does not answer in time also keeps the copy.
+  Folder probes go through `internal/rootcheck` with its timeout, and the
+  sidecar itself is looked up only after its folder answered.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in

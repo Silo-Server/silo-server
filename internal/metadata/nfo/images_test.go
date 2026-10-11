@@ -460,6 +460,11 @@ func TestGetImagesLargeFolderSeesNewSidecars(t *testing.T) {
 	for i := range sharedListingMinEntries {
 		writeImageFile(t, filepath.Join(dir, fmt.Sprintf("Movie %03d.mkv", i)))
 	}
+	// Only a folder that has not changed in the last few seconds is shared.
+	settled := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(dir, settled, settled); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
 	moviePath := filepath.Join(dir, "Movie 007.mkv")
 	p := NewProvider()
 	req := metadata.ImageRequest{ContentType: "movie", RepresentativeFilePath: moviePath}
@@ -470,13 +475,9 @@ func TestGetImagesLargeFolderSeesNewSidecars(t *testing.T) {
 
 	// The listing is shared while the folder's mtime is unchanged, so a file
 	// added without changing it is not seen yet.
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
 	poster := filepath.Join(dir, "MOVIE 007-poster.png")
 	writeImageFile(t, poster)
-	if err := os.Chtimes(dir, info.ModTime(), info.ModTime()); err != nil {
+	if err := os.Chtimes(dir, settled, settled); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 	images, err = p.GetImages(context.Background(), req)
@@ -494,5 +495,34 @@ func TestGetImagesLargeFolderSeesNewSidecars(t *testing.T) {
 	}
 	if got := sidecarPath(t, imagesByType(images)[metadata.ImagePoster].URL); got != poster {
 		t.Fatalf("poster = %q, want the sidecar added after the first listing", got)
+	}
+}
+
+// A folder that can be searched but not listed still serves exactly named
+// sidecars, as it did before names matched ignoring case.
+func TestGetImagesExecuteOnlyFolderUsesExactNames(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any folder")
+	}
+	dir := t.TempDir()
+	moviePath := filepath.Join(dir, "Film.mkv")
+	writeImageFile(t, moviePath)
+	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
+	if err := os.Chmod(dir, 0o311); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	p := NewProvider()
+	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
+		ContentType:               "movie",
+		RepresentativeFilePath:    moviePath,
+		PrimarySidecarSearchPaths: []string{dir},
+	})
+	if err != nil {
+		t.Fatalf("GetImages: %v", err)
+	}
+	if got := sidecarPath(t, imagesByType(images)[metadata.ImagePoster].URL); got != filepath.Join(dir, "poster.jpg") {
+		t.Fatalf("poster = %q, want poster.jpg found by exact name", got)
 	}
 }

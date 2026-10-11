@@ -115,7 +115,8 @@ func mediaBasename(mediaFile string) string {
 type sidecarFinder struct {
 	ctx context.Context
 	// listings maps a directory to its entries keyed by lower-cased name. A
-	// name can map to several entries that differ only in case.
+	// name can map to several entries that differ only in case. A directory
+	// that exists but cannot be listed maps to nil.
 	listings map[string]map[string][]string
 }
 
@@ -128,9 +129,14 @@ func (f *sidecarFinder) listing(dir string) map[string][]string {
 		return listing
 	}
 	listing, err := listDirectory(dir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		slog.WarnContext(f.ctx, "nfo: cannot list folder for sidecar artwork", "component", "metadata",
+	switch {
+	case err == nil:
+	case errors.Is(err, fs.ErrNotExist):
+		listing = map[string][]string{}
+	default:
+		slog.DebugContext(f.ctx, "nfo: cannot list folder for sidecar artwork; looking up exact names", "component", "metadata",
 			"dir", dir, "error", err)
+		listing = nil
 	}
 	f.listings[dir] = listing
 	return listing
@@ -141,7 +147,18 @@ func (f *sidecarFinder) listing(dir string) map[string][]string {
 // as asked wins over other spellings of the same name.
 func (f *sidecarFinder) find(dir, name string) string {
 	listing := f.listing(dir)
-	if len(listing) == 0 {
+	if listing == nil {
+		// A folder that can be searched but not listed (execute-only
+		// permission) still serves names looked up exactly.
+		for _, ext := range localArtworkExtensions {
+			path := filepath.Join(dir, name+ext)
+			if _, err := os.Lstat(path); err != nil {
+				continue
+			}
+			if source := f.usableSource(path); source != "" {
+				return source
+			}
+		}
 		return ""
 	}
 	for _, ext := range localArtworkExtensions {
@@ -168,11 +185,15 @@ func (f *sidecarFinder) find(dir, name string) string {
 // title is cheap to list for each request, but a flat folder of many movies
 // would otherwise be listed again for every movie in it. A shared listing is
 // used only while the folder's mtime is unchanged (adding, removing or
-// renaming an entry changes it) and for at most sharedListingTTL.
+// renaming an entry changes it) and for at most sharedListingTTL. A folder
+// changed within sharedListingSettle is not shared: on a filesystem with
+// coarse timestamps, an entry added in the same tick as the listing would
+// leave the mtime unchanged.
 const (
 	sharedListingMinEntries = 256
 	sharedListingMaxDirs    = 8
 	sharedListingTTL        = time.Minute
+	sharedListingSettle     = 5 * time.Second
 )
 
 type sharedListing struct {
@@ -220,7 +241,7 @@ func listDirectory(dir string) (map[string][]string, error) {
 			slices.Sort(spellings)
 		}
 	}
-	if len(entries) >= sharedListingMinEntries {
+	if len(entries) >= sharedListingMinEntries && now.Sub(info.ModTime()) > sharedListingSettle {
 		sharedListings.Lock()
 		if _, ok := sharedListings.dirs[dir]; !ok && len(sharedListings.dirs) >= sharedListingMaxDirs {
 			for key := range sharedListings.dirs {
