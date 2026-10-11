@@ -320,13 +320,31 @@ async function copyPlanes(frame: VideoFrame): Promise<EnginePlaneFrame> {
   };
 }
 
+/**
+ * Finds where a run starts. The lookup reads the file, so its failure is a
+ * read failure like any other, not a decoder one.
+ */
+async function findStartPacket(
+  kind: "video" | "audio",
+  lookup: () => Promise<EncodedPacket | null>,
+): Promise<EncodedPacket | null> {
+  try {
+    return await lookup();
+  } catch (error) {
+    throw new EngineFailure(ENGINE_FAILURES.read, `Reading ${kind} failed: ${String(error)}`);
+  }
+}
+
 async function runVideo(run: number, position: number): Promise<void> {
   const track = videoTrack!;
   const config = videoConfig!;
   const sink = new EncodedPacketSink(track);
-  const startPacket =
-    (await sink.getKeyPacket(position, { verifyKeyPackets: true })) ??
-    (await sink.getFirstKeyPacket({ verifyKeyPackets: true }));
+  const startPacket = await findStartPacket(
+    "video",
+    async () =>
+      (await sink.getKeyPacket(position, { verifyKeyPackets: true })) ??
+      (await sink.getFirstKeyPacket({ verifyKeyPackets: true })),
+  );
   if (run !== generation) return;
   if (!startPacket) {
     post({ type: "video-ended", generation: run });
@@ -539,8 +557,11 @@ async function runAudio(run: number, position: number): Promise<void> {
   const codec = source!.audio!.codec;
   const sink = new EncodedPacketSink(track);
   const preroll = isFFmpegAudioCodec(codec) ? FFMPEG_PREROLL_SECONDS : 0;
-  const startPacket =
-    (await sink.getPacket(Math.max(0, position - preroll))) ?? (await sink.getFirstPacket());
+  const startPacket = await findStartPacket(
+    "audio",
+    async () =>
+      (await sink.getPacket(Math.max(0, position - preroll))) ?? (await sink.getFirstPacket()),
+  );
   if (run !== generation) return;
   const send = (message: WorkerToWorkletMessage, transfer: Transferable[] = []) =>
     output.port.postMessage(message, transfer);
