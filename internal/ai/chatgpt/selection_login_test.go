@@ -21,11 +21,12 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, clientID, authMode  string
-		status                    int
-		empty, timeout, omitScope bool
-		wantActive, wantModel     string
+		name, clientID, authMode               string
+		status                                 int
+		empty, timeout, omitScope, usagePaused bool
+		wantActive, wantModel                  string
 	}{
+		{name: "renewed credentials preserve usage pause", clientID: "a", authMode: "chatgpt", status: 200, usagePaused: true, wantActive: "a", wantModel: "gpt-4o-mini"},
 		{name: "new account", clientID: "b", authMode: "chatgpt", status: 200, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "omitted scope activates the requested plan grant", clientID: "b", authMode: "chatgpt", status: 200, omitScope: true, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "failed new account catalog", clientID: "b", authMode: "chatgpt", status: 503, wantActive: "a", wantModel: "a-model"},
@@ -37,6 +38,13 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s, store := selectionFixture(t, map[string]string{"ai.auth_mode": test.authMode, "ai.chat_model": "a-model", "ai.reasoning_effort": "high"})
+				if test.usagePaused {
+					c := stored(t, store)
+					c.Accounts[0].UsageLimited = true
+					c.Accounts[0].UsagePauseID = "original-pause"
+					c.Accounts[0].NeedsLogin = true
+					save(t, store, c)
+				}
 				if test.timeout {
 					s.http.Timeout = 0
 				}
@@ -102,6 +110,17 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 				for _, a := range c.Accounts {
 					if a.ClientID == test.clientID && (a.RefreshToken != "accepted-refresh" || a.NeedsLogin) {
 						t.Fatal("accepted credentials were lost after catalog reconciliation")
+					}
+				}
+				if test.usagePaused {
+					if !c.Accounts[0].UsageLimited || c.Accounts[0].UsagePauseID != "original-pause" {
+						t.Fatal("credential renewal cleared usage pause")
+					}
+					if _, err := s.TextConfig(t.Context()); !errors.Is(err, ErrUsageLimited) {
+						t.Fatalf("renewal resumed inference: %v", err)
+					}
+					if _, err := s.CheckTextConfig(t.Context()); err != nil {
+						t.Fatalf("renewed account cannot recheck usage: %v", err)
 					}
 				}
 				if test.authMode == "api_key" && modelsCalls != 0 {

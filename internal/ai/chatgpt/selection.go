@@ -25,6 +25,7 @@ const (
 var ErrModelUnavailable = errors.New("choose a model available to the selected ChatGPT account")
 var ErrAccountChanged = errors.New("ChatGPT account changed; refresh settings and try again")
 var ErrPlanIneligible = llm.ErrPlanIneligible
+var ErrUsageLimited = llm.ErrQuotaExhausted
 
 var selectionKeys = []string{CredentialsKey, authModeSetting, chatModelSetting, legacyChatModelSetting, reasoningEffortSetting, "ai.base_url", "subtitle_ai.base_url", "ai.api_key", "subtitle_ai.api_key"}
 
@@ -138,7 +139,7 @@ func (s *Service) SelectAccountWithSettings(ctx context.Context, clientID string
 	}
 	var models []Model
 	if config.EffectiveAdminSettings(values)[authModeSetting] == authModeChatGPT {
-		models, err = s.modelsForSource(ctx, func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) })
+		models, err = s.modelsForSource(ctx, func(ctx context.Context) (string, error) { return s.bearerToken(ctx, clientID, true) })
 		if err != nil {
 			return nil, err
 		}
@@ -163,6 +164,16 @@ func (s *Service) SelectAccountWithSettings(ctx context.Context, clientID string
 // independently of config watcher delays. Subscription credentials remain pinned
 // to this registration and are never installed in an API-key configuration.
 func (s *Service) TextConfig(ctx context.Context) (llm.Config, error) {
+	return s.textConfig(ctx, false)
+}
+
+// CheckTextConfig binds an explicit usage check to the registration and pause
+// present at its start, including a draft switch from API-key authentication.
+func (s *Service) CheckTextConfig(ctx context.Context) (llm.Config, error) {
+	return s.textConfig(ctx, true)
+}
+
+func (s *Service) textConfig(ctx context.Context, recheckUsage bool) (llm.Config, error) {
 	store, ok := s.store.(selectionReader)
 	if !ok {
 		return llm.Config{}, errors.New("text provider settings require atomic reads")
@@ -173,6 +184,9 @@ func (s *Service) TextConfig(ctx context.Context) (llm.Config, error) {
 	}
 	effective := config.EffectiveAdminSettings(values)
 	cfg := llm.Config{AuthMode: effective[authModeSetting], BaseURL: effective["ai.base_url"], APIKey: effective["ai.api_key"], ChatModel: effective[chatModelSetting], ReasoningEffort: effective[reasoningEffortSetting]}
+	if recheckUsage {
+		cfg.AuthMode = authModeChatGPT
+	}
 	if cfg.AuthMode != authModeChatGPT {
 		return cfg, nil
 	}
@@ -184,15 +198,25 @@ func (s *Service) TextConfig(ctx context.Context) (llm.Config, error) {
 	if i >= 0 && c.Accounts[i].PlanIneligible {
 		return llm.Config{}, ErrPlanIneligible
 	}
+	if i >= 0 && c.Accounts[i].UsageLimited && !recheckUsage {
+		return llm.Config{}, ErrUsageLimited
+	}
 	if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 		return llm.Config{}, ErrSignInRequired
 	}
 	clientID := c.Active
 	cfg.ChatGPTTokenSource = func(context.Context) (func(context.Context) (string, error), error) {
-		return func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) }, nil
+		return func(ctx context.Context) (string, error) { return s.bearerToken(ctx, clientID, recheckUsage) }, nil
 	}
 	cfg.ChatGPTTokenRejected = s.RejectToken
 	cfg.ChatGPTPlanRejected = func(ctx context.Context, token string) error { return s.rejectPlan(ctx, clientID, token) }
+	cfg.ChatGPTUsageLimited = func(ctx context.Context, token string) error { return s.pauseUsage(ctx, clientID, token) }
+	if recheckUsage {
+		pauseID := c.Accounts[i].UsagePauseID
+		cfg.ChatGPTUsageVerified = func(ctx context.Context, token string) error {
+			return s.verifyUsageToken(ctx, clientID, token, pauseID)
+		}
+	}
 	return cfg, nil
 }
 
@@ -219,7 +243,7 @@ func (s *Service) PrepareModelValidation(ctx context.Context, changes map[string
 		return nil, err
 	}
 	validation.clientID = c.Active
-	validation.models, err = s.modelsForSource(ctx, func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, c.Active) })
+	validation.models, err = s.modelsForSource(ctx, func(ctx context.Context) (string, error) { return s.bearerToken(ctx, c.Active, true) })
 	return validation, err
 }
 

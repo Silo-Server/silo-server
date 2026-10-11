@@ -6,6 +6,10 @@ import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ChatGPTConnection } from "./ChatGPTConnection";
 
+// JSDOM omits the browser methods used by Radix Select.
+if (!HTMLElement.prototype.hasPointerCapture) HTMLElement.prototype.hasPointerCapture = () => false;
+if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = () => {};
+
 const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   reset: vi.fn(),
@@ -23,7 +27,9 @@ type Status = {
     client_id: string;
     email: string;
     connected: boolean;
+    needs_login?: boolean;
     plan_ineligible?: boolean;
+    usage_limited?: boolean;
   }[];
   login_pending: boolean;
   login_result: string;
@@ -464,6 +470,7 @@ describe("ChatGPTConnection", () => {
           email: "blocked@example.test",
           connected: false,
           plan_ineligible: true,
+          usage_limited: true,
         },
       ],
     };
@@ -489,6 +496,139 @@ describe("ChatGPTConnection", () => {
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("blocked-app");
     expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("shows paused usage guidance while keeping disconnect available without reconnect", async () => {
+    status = {
+      ...status,
+      active_client_id: "paused-app",
+      accounts: [
+        {
+          client_id: "paused-app",
+          email: "paused@example.test",
+          connected: false,
+          usage_limited: true,
+        },
+      ],
+    };
+    mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
+    render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+
+    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
+      "paused@example.test · 1 (usage paused)",
+    );
+    expect(
+      screen.getByText(
+        "ChatGPT plan usage is paused. Check ChatGPT usage settings, then choose Test text model to resume.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reconnect paused@example.test" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent("GPT-6.1 Sol");
+    expect(screen.getByRole("button", { name: "Continue with ChatGPT" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(mocks.disconnect).toHaveBeenCalledExactlyOnceWith("paused-app");
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("selects an inactive paused account without restarting sign-in", async () => {
+    status = {
+      ...status,
+      active_client_id: "active-app",
+      accounts: [
+        { client_id: "active-app", email: "active@example.test", connected: true },
+        {
+          client_id: "paused-app",
+          email: "paused@example.test",
+          connected: false,
+          usage_limited: true,
+        },
+        {
+          client_id: "expired-app",
+          email: "expired@example.test",
+          connected: false,
+          usage_limited: true,
+          needs_login: true,
+        },
+        {
+          client_id: "blocked-app",
+          email: "blocked@example.test",
+          connected: false,
+          usage_limited: true,
+          plan_ineligible: true,
+        },
+      ],
+    };
+    const change = { beforeETag: "before", afterETag: "after" };
+    const acceptTransition = vi.fn();
+    const onSettingsTransitionStarted = vi.fn(() => acceptTransition);
+    mocks.select.mockResolvedValue(change);
+    render(
+      <ChatGPTConnection
+        model="gpt-6.1-sol"
+        onModelChange={vi.fn()}
+        onSettingsTransitionStarted={onSettingsTransitionStarted}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "ChatGPT account" }));
+    const pausedOption = screen.getByRole("option", {
+      name: "paused@example.test · 2 (usage paused)",
+    });
+    expect(pausedOption).not.toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getByRole("option", { name: "expired@example.test · 3 (sign-in required)" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getByRole("option", { name: "blocked@example.test · 4 (plan sharing unavailable)" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(pausedOption);
+    expect(mocks.select).toHaveBeenCalledExactlyOnceWith("paused-app");
+    expect(acceptTransition).toHaveBeenCalledExactlyOnceWith(change);
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("offers credential renewal for a paused account that needs sign-in and keeps its pause", async () => {
+    status = {
+      ...status,
+      active_client_id: "paused-app",
+      accounts: [
+        {
+          client_id: "paused-app",
+          email: "paused@example.test",
+          connected: false,
+          needs_login: true,
+          usage_limited: true,
+        },
+      ],
+    };
+    const view = render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
+      "paused@example.test · 1 (sign-in required)",
+    );
+    expect(screen.queryByRole("combobox", { name: "Model" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Reconnect paused@example.test" }));
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith("paused-app");
+    act(() => {
+      status = {
+        ...status,
+        attempt_id: "fixture-state",
+        login_result: "connected",
+        accounts: [{ ...status.accounts[0]!, needs_login: false }],
+      };
+      statusVersion++;
+      view.rerender(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "ChatGPT account" })).toHaveTextContent(
+      "paused@example.test · 1 (usage paused)",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Reconnect paused@example.test" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeEnabled();
+    expect(screen.queryByText("Using ChatGPT plan · paused@example.test")).not.toBeInTheDocument();
   });
 
   it("ignores another attempt's terminal status and doesn't toast after closing", async () => {

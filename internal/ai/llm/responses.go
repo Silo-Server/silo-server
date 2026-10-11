@@ -115,6 +115,11 @@ func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, js
 				content, parseErr = readResponseStream(data)
 				return parseErr
 			})
+		if errors.Is(err, ErrQuotaExhausted) && cfg.ChatGPTUsageLimited != nil {
+			if pauseErr := cfg.ChatGPTUsageLimited(ctx, requestToken); pauseErr != nil {
+				return "", pauseErr
+			}
+		}
 		unauthorized, _ := errors.AsType[*HTTPError](err)
 		if errors.Is(err, ErrPlanIneligible) || (unauthorized != nil && unauthorized.StatusCode == http.StatusForbidden && unauthorized.Code == subscriptionUserNotEligible) {
 			if cfg.ChatGPTPlanRejected != nil {
@@ -132,6 +137,11 @@ func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, js
 		}
 		if attempt == 1 {
 			break
+		}
+	}
+	if err == nil && cfg.ChatGPTUsageVerified != nil {
+		if verifyErr := cfg.ChatGPTUsageVerified(ctx, requestToken); verifyErr != nil {
+			return "", verifyErr
 		}
 	}
 	return content, err

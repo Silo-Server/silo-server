@@ -116,6 +116,14 @@ func TestTranscriptionCheckRetryFailureMessages(t *testing.T) {
 // This store exercises the real credential service without a provider call.
 type settingsCheckChatGPTStore struct{ *fakeServerSettingsStore }
 
+func (s settingsCheckChatGPTStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = s.values[key]
+	}
+	return values, nil
+}
+
 func (s settingsCheckChatGPTStore) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
 	value, err := update(s.values[key])
 	if err != nil {
@@ -139,7 +147,7 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 	service := chatgpt.NewService(settingsCheckChatGPTStore{store})
 	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 		return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
-			if cfg.ChatGPTTokenSource == nil || cfg.ChatGPTTokenRejected == nil || cfg.ChatGPTPlanRejected == nil {
+			if cfg.ChatGPTTokenSource == nil || cfg.ChatGPTTokenRejected == nil || cfg.ChatGPTPlanRejected == nil || cfg.ChatGPTUsageLimited == nil || cfg.ChatGPTUsageVerified == nil {
 				t.Fatal("admin check omitted credential source or rejection callback")
 			}
 			source, err := cfg.ChatGPTTokenSource(ctx)
@@ -168,7 +176,11 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 			if _, err := source(ctx); !errors.Is(err, chatgpt.ErrSignInRequired) {
 				t.Fatalf("admin source ignored final rejection: %v", err)
 			}
-			next, err := cfg.ChatGPTTokenSource(ctx)
+			nextConfig, err := service.CheckTextConfig(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := nextConfig.ChatGPTTokenSource(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,5 +202,70 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 	var legacy connectionCheckResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &legacy); err != nil || recorder.Code != http.StatusOK || !legacy.Success {
 		t.Fatalf("legacy check=%d %s, %v", recorder.Code, recorder.Body.String(), err)
+	}
+}
+
+func TestChatGPTSettingsCheckDeliberatelyRechecksPausedUsage(t *testing.T) {
+	original := newAdminAISettingsCheckClient
+	t.Cleanup(func() { newAdminAISettingsCheckClient = original })
+	for _, legacy := range []bool{false, true} {
+		for _, success := range []bool{false, true} {
+			t.Run(fmt.Sprintf("legacy=%t success=%t", legacy, success), func(t *testing.T) {
+				credentials, err := json.Marshal(map[string]any{"active": "a", "accounts": []map[string]any{
+					{"client_id": "a", "access_token": "a-token", "refresh_token": "a-refresh", "expires_at": time.Now().Add(time.Hour), "usage_limited": true},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := &fakeServerSettingsStore{values: map[string]string{"ai.auth_mode": llm.AuthModeChatGPT, "ai.chat_model": "gpt-6-luna", chatgpt.CredentialsKey: string(credentials)}}
+				service := chatgpt.NewService(settingsCheckChatGPTStore{store})
+				newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+					return &fakeAISettingsCheckClient{chat: func(ctx context.Context, _ []llm.Message, _ bool) (string, error) {
+						if cfg.ChatGPTUsageLimited == nil || cfg.ChatGPTUsageVerified == nil {
+							t.Fatal("usage callbacks missing")
+						}
+						source, err := cfg.ChatGPTTokenSource(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						token, err := source(ctx)
+						if err != nil || token != "a-token" {
+							t.Fatalf("check cannot bypass usage pause: %q, %v", token, err)
+						}
+						if !success {
+							if err := cfg.ChatGPTUsageLimited(ctx, token); err != nil {
+								t.Fatal(err)
+							}
+							return "", llm.ErrQuotaExhausted
+						}
+						if err := cfg.ChatGPTUsageVerified(ctx, token); err != nil {
+							t.Fatal(err)
+						}
+						return `{"status":"ok"}`, nil
+					}}
+				}
+				h := &AdminHandler{SettingsRepo: store, ChatGPT: service}
+				var result connectionCheckResponse
+				if legacy {
+					router := chi.NewRouter()
+					router.Post("/api/v1/admin/settings/check/{kind}", h.HandleCheckSettingsConnection)
+					recorder := httptest.NewRecorder()
+					router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/check/ai_chat", strings.NewReader(`{}`)))
+					if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil || recorder.Code != http.StatusOK {
+						t.Fatalf("legacy check: %s, %v", recorder.Body.String(), err)
+					}
+				} else {
+					checked, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					result.Success = checked.Success
+				}
+				state, err := service.Status(t.Context())
+				if err != nil || result.Success != success || state.Accounts[0].Connected != success || state.Accounts[0].UsageLimited == success {
+					t.Fatalf("check=%+v, state=%+v, err=%v", result, state, err)
+				}
+			})
+		}
 	}
 }

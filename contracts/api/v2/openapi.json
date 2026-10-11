@@ -23162,6 +23162,9 @@
           },
           "plan_ineligible": {
             "type": "boolean"
+          },
+          "usage_limited": {
+            "type": "boolean"
           }
         },
         "required": [

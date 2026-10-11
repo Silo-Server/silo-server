@@ -32,6 +32,8 @@ type Config struct {
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
 	ChatGPTPlanRejected  func(context.Context, string) error
+	ChatGPTUsageLimited  func(context.Context, string) error
+	ChatGPTUsageVerified func(context.Context, string) error
 	// Production text requests resolve provider settings and the registration
 	// together. Draft checks and transcription retain their supplied config.
 	TextConfigSource func(context.Context) (Config, error)

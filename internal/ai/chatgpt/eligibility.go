@@ -13,6 +13,31 @@ func (s *Service) RejectPlanToken(ctx context.Context, token string) error {
 }
 
 func (s *Service) rejectPlan(ctx context.Context, clientID, token string) error {
+	return s.updateTokenAccount(ctx, clientID, token, func(a *account) { a.PlanIneligible = true })
+}
+
+// RejectUsageToken pauses new text requests without assuming a reset time.
+func (s *Service) RejectUsageToken(ctx context.Context, token string) error {
+	return s.pauseUsage(ctx, "", token)
+}
+
+func (s *Service) pauseUsage(ctx context.Context, clientID, token string) error {
+	return s.updateTokenAccount(ctx, clientID, token, func(a *account) {
+		a.UsageLimited = true
+		a.UsagePauseID = randomValue()
+	})
+}
+
+func (s *Service) verifyUsageToken(ctx context.Context, clientID, token, pauseID string) error {
+	return s.updateTokenAccount(ctx, clientID, token, func(a *account) {
+		if a.UsagePauseID == pauseID {
+			a.UsageLimited = false
+			a.UsagePauseID = ""
+		}
+	})
+}
+
+func (s *Service) updateTokenAccount(ctx context.Context, clientID, token string, update func(*account)) error {
 	if token == "" {
 		return nil
 	}
@@ -23,7 +48,7 @@ func (s *Service) rejectPlan(ctx context.Context, clientID, token string) error 
 			return (clientID == "" || a.ClientID == clientID) && a.AccessToken == token
 		})
 		if i >= 0 {
-			c.Accounts[i].PlanIneligible = true
+			update(&c.Accounts[i])
 		}
 		return nil
 	})

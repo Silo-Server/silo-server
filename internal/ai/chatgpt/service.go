@@ -73,6 +73,8 @@ type account struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 	NeedsLogin     bool      `json:"needs_login,omitzero"`
 	PlanIneligible bool      `json:"plan_ineligible,omitzero"`
+	UsageLimited   bool      `json:"usage_limited,omitzero"`
+	UsagePauseID   string    `json:"usage_pause_id,omitempty"`
 	DisconnectID   string    `json:"disconnect_id,omitempty"`
 }
 
@@ -102,6 +104,7 @@ type AccountStatus struct {
 	Connected      bool   `json:"connected"`
 	NeedsLogin     bool   `json:"needs_login"`
 	PlanIneligible bool   `json:"plan_ineligible,omitzero"`
+	UsageLimited   bool   `json:"usage_limited,omitzero"`
 }
 
 type Status struct {
@@ -184,7 +187,7 @@ func status(c credentials) Status {
 	}
 	for _, a := range c.Accounts {
 		out.Accounts = append(out.Accounts, AccountStatus{ClientID: a.ClientID, Email: a.Email,
-			Connected: a.RefreshToken != "" && !a.NeedsLogin && !a.PlanIneligible, NeedsLogin: a.NeedsLogin, PlanIneligible: a.PlanIneligible})
+			Connected: a.RefreshToken != "" && !a.NeedsLogin && !a.PlanIneligible && !a.UsageLimited, NeedsLogin: a.NeedsLogin, PlanIneligible: a.PlanIneligible, UsageLimited: a.UsageLimited})
 	}
 	return out
 }
@@ -466,6 +469,10 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			if a.NeedsLogin && c.Accounts[i].RefreshToken != "" && !c.Accounts[i].NeedsLogin {
 				return nil // Preserve an existing usable account after declined re-consent.
 			}
+			// Renewing credentials does not prove that plan usage is available.
+			a.UsageLimited = c.Accounts[i].UsageLimited
+			a.UsagePauseID = c.Accounts[i].UsagePauseID
+			a.PlanIneligible = c.Accounts[i].PlanIneligible
 			c.Accounts[i] = a
 		} else {
 			c.Accounts = append(c.Accounts, a)
@@ -501,6 +508,10 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 // TokenSource pins a logical request to its initial registration. Each use reads
 // current credentials for that registration, including rotations on other nodes.
 func (s *Service) TokenSource(ctx context.Context) (func(context.Context) (string, error), error) {
+	return s.tokenSource(ctx, false)
+}
+
+func (s *Service) tokenSource(ctx context.Context, recheckUsage bool) (func(context.Context) (string, error), error) {
 	raw, err := s.store.Get(ctx, CredentialsKey)
 	if err != nil {
 		return nil, err
@@ -513,11 +524,14 @@ func (s *Service) TokenSource(ctx context.Context) (func(context.Context) (strin
 	if i >= 0 && c.Accounts[i].PlanIneligible {
 		return nil, ErrPlanIneligible
 	}
+	if i >= 0 && c.Accounts[i].UsageLimited && !recheckUsage {
+		return nil, ErrUsageLimited
+	}
 	if i < 0 || c.Accounts[i].NeedsLogin || c.Accounts[i].RefreshToken == "" {
 		return nil, ErrSignInRequired
 	}
 	clientID := c.Accounts[i].ClientID
-	return func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) }, nil
+	return func(ctx context.Context) (string, error) { return s.bearerToken(ctx, clientID, recheckUsage) }, nil
 }
 
 // BearerToken reads the active registration once, then serializes its refresh.
@@ -529,7 +543,7 @@ func (s *Service) BearerToken(ctx context.Context) (string, error) {
 	return source(ctx)
 }
 
-func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (string, error) {
+func (s *Service) bearerToken(ctx context.Context, clientID string, recheckUsage bool) (string, error) {
 	raw, err := s.store.Get(ctx, CredentialsKey)
 	if err != nil {
 		return "", err
@@ -541,6 +555,9 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 	for _, a := range current.Accounts {
 		if a.ClientID == clientID && a.PlanIneligible {
 			return "", ErrPlanIneligible
+		}
+		if a.ClientID == clientID && a.UsageLimited && !recheckUsage {
+			return "", ErrUsageLimited
 		}
 		if a.ClientID == clientID && !a.NeedsLogin && a.AccessToken != "" && a.RefreshToken != "" && time.Until(a.ExpiresAt) > 2*time.Minute {
 			return a.AccessToken, nil
@@ -557,6 +574,9 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
 		if i >= 0 && c.Accounts[i].PlanIneligible {
 			return ErrPlanIneligible
+		}
+		if i >= 0 && c.Accounts[i].UsageLimited && !recheckUsage {
+			return ErrUsageLimited
 		}
 		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 			return ErrSignInRequired
@@ -709,10 +729,11 @@ func (s *Service) getJSON(ctx context.Context, endpoint, token string, out any) 
 func (s *Service) Models(ctx context.Context, clientID string) ([]Model, error) {
 	if clientID != "" {
 		return s.modelsForSource(ctx, func(ctx context.Context) (string, error) {
-			return s.bearerTokenForAccount(ctx, clientID)
+			return s.bearerToken(ctx, clientID, true)
 		})
 	}
-	source, err := s.TokenSource(ctx)
+	// Catalog reads do not consume inference usage or clear a usage pause.
+	source, err := s.tokenSource(ctx, true)
 	if err != nil {
 		return nil, err
 	}

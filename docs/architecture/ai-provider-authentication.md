@@ -164,6 +164,19 @@ readiness reads. The account remains available for disconnect, and the web expla
 the restriction without offering reconnect. A late response cannot disable a
 replacement token or a different active account. API-key requests and speech
 transcription do not use this restriction.
+A `subscription_sharing_usage_limit_exceeded` HTTP or stream failure persists
+`usage_limited` for the exact registration and access token. Fresh and pinned
+inference sources and translation admission reject the pause. Silo assumes no
+reset time. The administrator can deliberately recheck usage through Test text
+model; only a completed successful check clears the matching token's pause.
+Failed checks preserve it. Catalog reads, model-setting writes, selection,
+refresh, and credential renewal do not clear it. Paused accounts remain
+selectable for a check, and credentials needing login can be renewed first.
+Eligibility and disconnect checks still apply to explicit checks. Ordinary
+request success cannot resume a pause. Each provider limit rejection rotates an
+internal pause identifier; a delayed successful check cannot clear a newer pause
+on the same access token. API-key and speech requests do not read
+or change this state.
 The account model catalog preserves provider order and includes only entries
 with `visibility:list`, excluding the non-streaming `o1-pro` and `o3-pro` families.
 

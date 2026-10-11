@@ -20714,6 +20714,7 @@ export interface components {
       email: string;
       needs_login: boolean;
       plan_ineligible?: boolean;
+      usage_limited?: boolean;
     };
     ChatGPTCompleteInputBody: {
       callback_url: string;

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,6 +23,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
+
+const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
 type adminSettingsConnectionCheckRequest struct {
 	Values    map[string]string `json:"values"`
@@ -131,7 +134,7 @@ func (h *AdminHandler) runAdminSettingsConnectionCheck(ctx context.Context, kind
 			if h.ChatGPT == nil {
 				return connectionCheckResponse{Message: adminChatGPTSignInRequiredMessage, safeMessage: adminChatGPTSignInRequiredMessage}, nil
 			}
-			response = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT.TokenSource, h.ChatGPT.RejectToken, h.ChatGPT.RejectPlanToken)
+			response = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT)
 		} else {
 			response = checkAIChatConnection(ctx, cfg)
 		}
@@ -174,10 +177,10 @@ func aiClientConfig(cfg *config.Config) llm.Config {
 }
 
 func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
-	return checkAIChatConnectionWithToken(ctx, cfg, nil, nil, nil)
+	return checkAIChatConnectionWithToken(ctx, cfg, nil)
 }
 
-func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tokenSource func(context.Context) (func(context.Context) (string, error), error), rejected func(context.Context, string, bool) error, planRejected func(context.Context, string) error) connectionCheckResponse {
+func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, connection *chatgpt.Service) connectionCheckResponse {
 	if cfg.AI.AuthMode != llm.AuthModeChatGPT && strings.TrimSpace(cfg.AI.BaseURL) == "" {
 		return connectionCheckResponse{Success: false, Message: "Text AI base URL is required."}
 	}
@@ -186,9 +189,15 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tok
 	}
 
 	clientCfg := aiClientConfig(cfg)
-	clientCfg.ChatGPTTokenSource = tokenSource
-	clientCfg.ChatGPTTokenRejected = rejected
-	clientCfg.ChatGPTPlanRejected = planRejected
+	if connection != nil {
+		checkConfig, err := connection.CheckTextConfig(ctx)
+		if err != nil {
+			return connectionCheckResponse{Message: adminTextAIConnectionFailureMessage, safeMessage: adminTextAIConnectionFailureMessage}
+		}
+		checkConfig.ChatModel = clientCfg.ChatModel
+		checkConfig.ReasoningEffort = clientCfg.ReasoningEffort
+		clientCfg = checkConfig
+	}
 	client := newAdminAISettingsCheckClient(clientCfg)
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -199,7 +208,7 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tok
 		return connectionCheckResponse{
 			Success:     false,
 			Message:     fmt.Sprintf("Text AI connection check failed: %v", err),
-			safeMessage: "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits.",
+			safeMessage: adminTextAIConnectionFailureMessage,
 		}
 	}
 

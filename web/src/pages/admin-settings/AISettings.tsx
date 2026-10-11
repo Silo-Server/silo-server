@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { AudioLines, CircleAlert, Languages } from "lucide-react";
 import { toast } from "sonner";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { LimitField } from "@/components/settings/LimitField";
@@ -280,6 +281,7 @@ function TextModelTile({
   apiKeyConfigured,
   apiKeyCleared,
   ready,
+  canTest,
   dirty,
   restartKeys,
   onChange,
@@ -304,6 +306,7 @@ function TextModelTile({
   apiKeyConfigured: boolean;
   apiKeyCleared: boolean;
   ready: boolean;
+  canTest: boolean;
   dirty: boolean;
   restartKeys: RestartKeyMatcher;
   onChange: (key: string, value: string) => void;
@@ -434,7 +437,7 @@ function TextModelTile({
         pendingLabel="Testing text model..."
         onTest={onTest}
         isTesting={isTesting}
-        testDisabled={!ready}
+        testDisabled={!canTest}
         onCollapse={onCollapse}
         canCollapse={!dirty}
         test={test}
@@ -618,17 +621,22 @@ export default function AISettings() {
   const [expandedTile, setExpandedTile] = useState<string | null>(null);
 
   const authMode = form.getValue("ai.auth_mode") || "api_key";
-  const currentModel =
-    form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model") || "gpt-4o-mini";
+  const configuredChatModel =
+    form.getValue("ai.chat_model") || form.getValue("subtitle_ai.chat_model");
+  const currentModel = configuredChatModel || "gpt-4o-mini";
   const capabilityModel = useDebounce(currentModel, 300);
   const capabilities = useAdminAICapabilities(capabilityModel);
   const connection = useChatGPTStatus(false, authMode === "chatgpt");
-  const connectedAccount = connection.data?.accounts.find(
-    (account) => account.client_id === connection.data?.active_client_id && account.connected,
+  const authenticatedAccount = connection.data?.accounts.find(
+    (account) =>
+      account.client_id === connection.data?.active_client_id &&
+      !account.plan_ineligible &&
+      !account.needs_login &&
+      (account.connected || account.usage_limited === true),
   );
   const chatGPTModels = useChatGPTModels(
-    connectedAccount?.client_id ?? "",
-    authMode === "chatgpt" && !!connectedAccount,
+    authenticatedAccount?.client_id ?? "",
+    authMode === "chatgpt" && !!authenticatedAccount,
   );
   if (form.isLoading) {
     return (
@@ -658,8 +666,14 @@ export default function AISettings() {
   const asrModel = value("ai.asr_model", "whisper-1");
   const textReady =
     authMode === "chatgpt"
-      ? !!connectedAccount && !!chatGPTModels.data?.models.some((model) => model.id === chatModel)
+      ? authenticatedAccount?.connected === true &&
+        !!chatGPTModels.data?.models.some((model) => model.id === chatModel)
       : textBaseURL.trim() !== "" && chatModel.trim() !== "";
+  const textCanTest =
+    textReady ||
+    (authMode === "chatgpt" &&
+      authenticatedAccount?.usage_limited === true &&
+      configuredChatModel.trim() !== "");
   const speechUsesTextEndpoint = asrBaseURL.trim() === "";
   const speechReady =
     (asrBaseURL.trim() !== "" || textBaseURL.trim() !== "") && asrModel.trim() !== "";
@@ -681,12 +695,15 @@ export default function AISettings() {
   }
 
   async function checkTextConnection() {
+    const authority = captureProfileRequestContext();
+    if (!authority || !isCapturedProfileAuthorityActive(authority)) return;
     const started = Date.now();
     try {
       const result = await textCheck.mutateAsync({
         kind: "ai_chat",
         body: form.buildConnectionCheckRequest([...TEXT_AI_KEYS]),
       });
+      if (!isCapturedProfileAuthorityActive(authority)) return;
       setTextResult({
         ok: result.success,
         message: result.message,
@@ -694,12 +711,17 @@ export default function AISettings() {
         durationMs: Date.now() - started,
       });
     } catch (error) {
+      if (!isCapturedProfileAuthorityActive(authority)) return;
       setTextResult({
         ok: false,
         message: error instanceof Error ? error.message : "Text model connection check failed.",
         at: Date.now(),
         durationMs: Date.now() - started,
       });
+    } finally {
+      if (authMode === "chatgpt" && isCapturedProfileAuthorityActive(authority)) {
+        await Promise.all([connection.refetch(), chatGPTModels.refetch()]);
+      }
     }
   }
 
@@ -816,6 +838,7 @@ export default function AISettings() {
               }
               apiKeyCleared={form.isClearStaged("ai.api_key")}
               ready={textReady}
+              canTest={textCanTest}
               dirty={textDirty}
               restartKeys={restartKeys}
               onChange={setValue}

@@ -97,7 +97,12 @@ function ChatGPTConnectionPanel({
     (account) => account.client_id === status.data.active_client_id,
   );
   const connected = active?.connected === true;
-  const models = useChatGPTModels(active?.client_id ?? "", connected);
+  const authenticated =
+    !!active &&
+    !active.plan_ineligible &&
+    !active.needs_login &&
+    (active.connected || active.usage_limited === true);
+  const models = useChatGPTModels(active?.client_id ?? "", authenticated);
 
   async function begin(clientID?: string) {
     setFirstConnection((status.data?.accounts.length ?? 0) === 0);
@@ -203,19 +208,31 @@ function ChatGPTConnectionPanel({
           value={active?.client_id ?? "disconnected"}
           options={[
             { value: "disconnected", label: "Choose a connected account", disabled: true },
-            ...savedAccounts.map((account, index) => ({
-              value: account.client_id,
-              label: `${account.email || "ChatGPT account"} · ${index + 1}${account.plan_ineligible ? " (plan sharing unavailable)" : account.connected ? "" : " (sign-in required)"}`,
-              disabled: !account.connected,
-            })),
+            ...savedAccounts.map((account, index) => {
+              let stateLabel = "";
+              if (account.plan_ineligible) stateLabel = " (plan sharing unavailable)";
+              else if (account.needs_login) stateLabel = " (sign-in required)";
+              else if (account.usage_limited) stateLabel = " (usage paused)";
+              else if (!account.connected) stateLabel = " (sign-in required)";
+              return {
+                value: account.client_id,
+                label: `${account.email || "ChatGPT account"} · ${index + 1}${stateLabel}`,
+                disabled:
+                  account.plan_ineligible === true ||
+                  account.needs_login ||
+                  (!account.connected && !account.usage_limited),
+              };
+            }),
           ]}
           disabled={select.isPending || disconnect.isPending}
           onChange={(value) => void choose(value)}
         />
       ) : null}
-      {connected ? (
+      {authenticated ? (
         <>
-          <SettingFieldStatus>Using ChatGPT plan · {active.email}</SettingFieldStatus>
+          {connected ? (
+            <SettingFieldStatus>Using ChatGPT plan · {active.email}</SettingFieldStatus>
+          ) : null}
           <SettingField
             label="Model"
             type="select"
@@ -253,7 +270,7 @@ function ChatGPTConnectionPanel({
         </Button>
         {savedAccounts.map((account, index) => (
           <div key={account.client_id} className="flex flex-wrap items-center gap-2">
-            {!account.plan_ineligible ? (
+            {!account.plan_ineligible && (!account.usage_limited || account.needs_login) ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -276,6 +293,11 @@ function ChatGPTConnectionPanel({
             {account.plan_ineligible ? (
               <SettingFieldStatus tone="warn">
                 This account cannot share ChatGPT plan usage. Check ChatGPT usage settings.
+              </SettingFieldStatus>
+            ) : account.usage_limited ? (
+              <SettingFieldStatus tone="warn">
+                ChatGPT plan usage is paused. Check ChatGPT usage settings, then choose Test text
+                model to resume.
               </SettingFieldStatus>
             ) : null}
           </div>

@@ -1,9 +1,17 @@
-import { act, fireEvent, render as renderDOM, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render as renderDOM,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AISettings from "./AISettings";
+import { setAccessToken, setProfileId } from "@/api/client";
 
 // JSDOM omits the browser methods used by Radix Select.
 if (!HTMLElement.prototype.hasPointerCapture) HTMLElement.prototype.hasPointerCapture = () => false;
@@ -22,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   resetValue: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  refetchChatGPTStatus: vi.fn(),
+  refetchChatGPTModels: vi.fn(),
 }));
 
 const values: Record<string, string> = {};
@@ -54,7 +64,13 @@ let capabilitiesFetching = false;
 let modelReasoningLevels: Record<string, string[]> = {};
 let reasoningLevels = ["low", "medium", "high", "xhigh", "max"];
 let chatGPTStatus = {
-  accounts: [] as { client_id: string; connected: boolean }[],
+  accounts: [] as {
+    client_id: string;
+    connected: boolean;
+    needs_login?: boolean;
+    usage_limited?: boolean;
+    plan_ineligible?: boolean;
+  }[],
   active_client_id: "",
   login_pending: false,
   login_result: "idle",
@@ -107,8 +123,12 @@ vi.mock("@/hooks/queries/admin/chatgpt", () => ({
   }),
   useChatGPTStatus: () => ({
     data: chatGPTStatus,
+    refetch: mocks.refetchChatGPTStatus,
   }),
-  useChatGPTModels: () => ({ data: { models: chatGPTModels } }),
+  useChatGPTModels: () => ({
+    data: { models: chatGPTModels },
+    refetch: mocks.refetchChatGPTModels,
+  }),
 }));
 vi.mock("./ChatGPTConnection", () => ({
   ChatGPTConnection: () => <div>ChatGPT connection controls</div>,
@@ -132,6 +152,8 @@ describe("AISettings", () => {
   afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     localStorage.clear();
+    setAccessToken("ai-settings-test");
+    setProfileId("profile-a");
     dirtyCount = 0;
     dirtyKeys = [];
     sensitiveConfigured = DEFAULT_SENSITIVE_CONFIGURED;
@@ -408,6 +430,120 @@ describe("AISettings", () => {
     expect(mocks.checkConnection).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "ai_chat" }),
     );
+  });
+
+  it.each([true, false])(
+    "refreshes paused usage after a text check returns success=%s",
+    async (success) => {
+      values["ai.auth_mode"] = "chatgpt";
+      chatGPTStatus = {
+        ...chatGPTStatus,
+        active_client_id: "paused-app",
+        accounts: [{ client_id: "paused-app", connected: false, usage_limited: true }],
+      };
+      chatGPTModels = [{ id: values["ai.chat_model"]! }];
+      mocks.checkConnection.mockResolvedValue({
+        success,
+        message: success ? "Text connection verified." : "ChatGPT usage is still limited.",
+      });
+      mocks.refetchChatGPTStatus.mockImplementation(async () => {
+        chatGPTStatus = {
+          ...chatGPTStatus,
+          accounts: [{ client_id: "paused-app", connected: success, usage_limited: !success }],
+        };
+      });
+      const view = render(<AISettings />);
+      await openTile(userEvent.setup(), "Text model");
+      expect(screen.getByRole("button", { name: "Test text model" })).toBeEnabled();
+      expect(screen.getByRole("switch", { name: "Translate descriptions" })).toBeDisabled();
+
+      await userEvent.click(screen.getByRole("button", { name: "Test text model" }));
+      await waitFor(() => expect(mocks.refetchChatGPTStatus).toHaveBeenCalledOnce());
+      expect(mocks.refetchChatGPTModels).toHaveBeenCalledOnce();
+      expect(mocks.checkConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "ai_chat" }),
+      );
+      view.rerender(
+        <MemoryRouter>
+          <AISettings />
+        </MemoryRouter>,
+      );
+      const descriptions = screen.getByRole("switch", { name: "Translate descriptions" });
+      if (success) expect(descriptions).toBeEnabled();
+      else expect(descriptions).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Test text model" })).toBeEnabled();
+    },
+  );
+
+  it("can test a paused saved model without a loaded catalog and refreshes after a request failure", async () => {
+    values["ai.auth_mode"] = "chatgpt";
+    chatGPTStatus = {
+      ...chatGPTStatus,
+      active_client_id: "paused-app",
+      accounts: [{ client_id: "paused-app", connected: false, usage_limited: true }],
+    };
+    mocks.checkConnection.mockRejectedValue(new Error("Connection interrupted."));
+    render(<AISettings />);
+    await openTile(userEvent.setup(), "Text model");
+    await userEvent.click(screen.getByRole("button", { name: "Test text model" }));
+    expect(await screen.findByText("Connection interrupted.")).toBeInTheDocument();
+    expect(mocks.refetchChatGPTStatus).toHaveBeenCalledOnce();
+    expect(mocks.refetchChatGPTModels).toHaveBeenCalledOnce();
+    expect(screen.getByRole("switch", { name: "Translate descriptions" })).toBeDisabled();
+  });
+
+  it("keeps paused tests disabled until missing credentials and model configuration are restored", async () => {
+    values["ai.auth_mode"] = "chatgpt";
+    chatGPTStatus = {
+      ...chatGPTStatus,
+      active_client_id: "paused-app",
+      accounts: [
+        { client_id: "paused-app", connected: false, usage_limited: true, needs_login: true },
+      ],
+    };
+    const view = render(<AISettings />);
+    await openTile(userEvent.setup(), "Text model");
+    expect(screen.getByRole("button", { name: "Test text model" })).toBeDisabled();
+    chatGPTStatus.accounts[0]!.needs_login = false;
+    values["ai.chat_model"] = "";
+    values["subtitle_ai.chat_model"] = "";
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "Test text model" })).toBeDisabled();
+    values["ai.chat_model"] = "chat-model";
+    view.rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "Test text model" })).toBeEnabled();
+  });
+
+  it("ignores a paused test result and cache refresh after the initiating profile changes", async () => {
+    values["ai.auth_mode"] = "chatgpt";
+    chatGPTStatus = {
+      ...chatGPTStatus,
+      active_client_id: "paused-app",
+      accounts: [{ client_id: "paused-app", connected: false, usage_limited: true }],
+    };
+    let resolveCheck!: (value: { success: boolean; message: string }) => void;
+    mocks.checkConnection.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCheck = resolve;
+        }),
+    );
+    render(<AISettings />);
+    await openTile(userEvent.setup(), "Text model");
+    await userEvent.click(screen.getByRole("button", { name: "Test text model" }));
+    setProfileId("profile-b");
+    await act(async () => resolveCheck({ success: true, message: "Old profile verified." }));
+    expect(mocks.refetchChatGPTStatus).not.toHaveBeenCalled();
+    expect(mocks.refetchChatGPTModels).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Old profile verified/)).not.toBeInTheDocument();
   });
 
   it("emptying a saved AI key reverts the draft instead of staging an empty value", async () => {

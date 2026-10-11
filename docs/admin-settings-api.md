@@ -54,6 +54,10 @@ The following operations require an acting administrator:
   A registration with `plan_ineligible: true` has a terminal plan-sharing
   restriction: `connected` is false, and clients explain the restriction without
   prompting repeated authorization. The optional field is absent when false.
+  A registration with `usage_limited: true` is paused after a provider usage-limit
+  response. `connected` is false until an explicit successful text model check.
+  Catalog reads and selection remain available for recovery; neither clears the
+  pause. Credential renewal also preserves it. The field is absent when false.
 - `POST /api/v2/admin/ai/chatgpt/login` starts a ten-minute browser sign-in.
   Optional `client_id` reuses a saved account registration. The response includes
   `authorization_url`, `callback_uri`, `expires_at`, and `attempt_id`.
