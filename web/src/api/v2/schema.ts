@@ -15311,29 +15311,47 @@ export interface components {
       mode: "quick" | "complete";
     };
     AdminItemMetadataUpdate: {
+      /** @description Season or episode air date; null clears it */
       air_date?: string | null;
+      /** @description Null clears the stored time */
       air_time?: string | null;
+      /** @description IANA time zone; null clears it */
       air_timezone?: string | null;
       content_rating?: string | null;
       countries?: string[] | null;
       /** Format: int64 */
       episode_number?: number | null;
+      /** @description Null clears the stored date */
       first_air_date?: string | null;
       genres?: string[] | null;
       imdb_id?: string | null;
+      /** @description Null clears the stored date */
       last_air_date?: string | null;
       locked_fields?: number[] | null;
       networks?: string[] | null;
       original_title?: string | null;
       overview?: string | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any IMDb score a metadata plugin stored
+       */
       rating_imdb?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored
+       */
       rating_rt_audience?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored
+       */
       rating_rt_critic?: number | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any TMDB score a metadata plugin stored
+       */
       rating_tmdb?: number | null;
+      /** @description Null clears the stored date */
       release_date?: string | null;
       /** Format: int64 */
       runtime?: number | null;

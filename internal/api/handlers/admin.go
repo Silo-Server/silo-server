@@ -1668,7 +1668,8 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req)
+	// The frozen v1 contract treats null like omission, so v1 clears nothing.
+	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req, nil)
 	if err != nil {
 		writeAPIError(w, err)
 		return

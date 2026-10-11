@@ -2216,7 +2216,8 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 }
 
 // UpdateMetadata builds a dynamic UPDATE query for the media_items table,
-// setting only the non-nil fields in upd. Always bumps updated_at.
+// setting only the non-nil fields in upd and NULLing the ones it clears. A
+// cleared rating also loses its per-source row. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
 	tx, err := r.pool.Begin(ctx)
@@ -2343,6 +2344,7 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 		setClauses = append(setClauses, "logo_source_path = ''")
 	}
 	addString("logo_source_path", upd.LogoSourcePath)
+	setClauses = append(setClauses, upd.nullClauses(itemClearableColumns...)...)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
@@ -2356,6 +2358,16 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
+	}
+	// The UPDATE above locked the item row before its rating sources, the
+	// order every rating source writer follows (see lockRatingSourceItem).
+	if sources := upd.clearedRatingSources(); len(sources) > 0 {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_item_rating_sources
+			WHERE content_id = $1 AND source = ANY($2::text[])`,
+			contentID, sources); err != nil {
+			return fmt.Errorf("deleting cleared rating sources: %w", err)
+		}
 	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)

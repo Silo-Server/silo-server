@@ -169,6 +169,10 @@
 ./internal/catalog TestRatingSourceRepositoryUpsertPostgres
 ./internal/catalog TestRatingSourceRepositorySyncsTMDBVotesPostgres
 
+# An admin metadata edit that clears a field stores NULL, takes a cleared
+# rating's per-source row with it, and recomputes series air dates.
+./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
