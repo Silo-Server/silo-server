@@ -3,7 +3,7 @@ package recommendations
 import (
 	"cmp"
 	"context"
-	"log/slog"
+	"fmt"
 	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -173,9 +173,10 @@ func interleaveAnchors(lists [][]ScoredItem, slots []int, limit int) []ScoredIte
 // anchoredRow composes a main row of up to limit items from anchors. Each
 // anchor fetches anchorPoolFactor candidates per slot with no genre filter,
 // MMR ranks them, and interleaveAnchors merges the anchors' rankings. It
-// returns the row and every candidate fetched. An anchor whose query fails is
-// logged and left out.
-func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem) {
+// returns the row and every candidate fetched. An anchor whose candidates or
+// embeddings cannot be read fails the row: the others would take its slots,
+// and a row missing an interest would be cached as if it were whole.
+func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem, err error) {
 	weights := make([]float64, len(anchors))
 	for i, a := range anchors {
 		weights[i] = a.weight
@@ -185,18 +186,20 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 	for i, a := range anchors {
 		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, a.embedding, excludeIDs, nil, anchorPoolFactor*slots[i], filter)
 		if err != nil {
-			slog.WarnContext(ctx, "main row anchor candidates failed", "component", "recommendations", "anchor", i, "error", err)
-			continue
+			return nil, nil, fmt.Errorf("main row anchor %d candidates: %w", i, err)
 		}
 		if len(candidates) == 0 {
 			continue
 		}
 		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, 0))
-		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
+		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
+		if err != nil {
+			return nil, nil, fmt.Errorf("main row anchor %d embeddings: %w", i, err)
+		}
 		// MMR's ranking is greedy, so its first slots[i] items are the
 		// anchor's picks; the rest stand in when another anchor runs out.
 		lists[i] = applyMMR(candidates, embMap, b.lambda, len(candidates))
 		pool = mergeScoredCandidates(pool, candidates)
 	}
-	return interleaveAnchors(lists, slots, limit), pool
+	return interleaveAnchors(lists, slots, limit), pool, nil
 }

@@ -606,8 +606,10 @@ func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
 		}
 	}
 
-	// The main row is composed from the clusters, so it fails with them.
-	build(2)
+	// The main row is composed from the clusters, so it fails; the cluster
+	// rows, which leave out the main row's titles, keep their cached
+	// versions with it rather than being built against no main row.
+	build(1)
 	if cached(becauseKey) {
 		t.Fatal("the Because You Watched row survived an empty rebuild")
 	}

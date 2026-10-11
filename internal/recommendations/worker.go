@@ -1032,32 +1032,36 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	excludeIDs := scoredItemIDsFromSet(excluded)
 
 	builder := w.engine.rowBuilder()
-	var mainItems []ScoredItem
 	aggregatedRow, err := builder.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
+		// The cluster rows leave out the main row's titles, so they keep
+		// their cached versions too: rebuilt against no main row, they would
+		// repeat the cached one's titles.
 		fail("main_row", err)
 	} else {
+		var mainItems []ScoredItem
 		if aggregatedRow != nil {
 			mainItems = aggregatedRow.Items
 		}
 		putOrDrop(RecTypeForYouMain, "", mainItems)
-	}
 
-	// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
-	// candidate query failed and returns no row for it, so its cached row
-	// stays. A row that rebuilds empty, or that the main row's titles empty,
-	// is cached empty: it replaces the old row, and reads know it was built.
-	clusterRows, failedClusters, err := builder.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
-	res.failed += failedClusters
-	if err != nil {
-		fail("cluster_rows", err)
-	}
-	for _, row := range withoutMainRowItems(clusterRows, mainItems) {
-		items := row.Items
-		if items == nil {
-			items = []ScoredItem{}
+		// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
+		// candidates failed and returns no row for it, so its cached row
+		// stays. A row that rebuilds empty, or that the main row's titles
+		// empty, is cached empty: it replaces the old row, and reads know it
+		// was built.
+		clusterRows, failedClusters, err := builder.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+		res.failed += failedClusters
+		if err != nil {
+			fail("cluster_rows", err)
 		}
-		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", items)
+		for _, row := range withoutMainRowItems(clusterRows, mainItems) {
+			items := row.Items
+			if items == nil {
+				items = []ScoredItem{}
+			}
+			put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", items)
+		}
 	}
 
 	// An empty Similar Users row is cached too: it records that the row was

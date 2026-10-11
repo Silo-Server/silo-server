@@ -3,6 +3,7 @@ package recommendations
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -214,6 +215,11 @@ type toyStore struct {
 	noTypeQueries bool
 	// noRatings hides every title's quality rating.
 	noRatings bool
+	// candidateErrAt fails the candidateErrAt-th FindTasteProfileCandidates
+	// call (1-based; 0 never), and embeddingsErr every GetBatchEmbeddings.
+	candidateErrAt int
+	candidateCalls int
+	embeddingsErr  error
 }
 
 func (s *toyStore) GetItemQualityRatings(_ context.Context, ids []string) (map[string]float64, error) {
@@ -238,6 +244,10 @@ func (s *toyStore) GetTasteClusters(context.Context, int, string) ([]TasteCluste
 }
 
 func (s *toyStore) FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, map[string][]string, error) {
+	s.candidateCalls++
+	if s.candidateCalls == s.candidateErrAt {
+		return nil, nil, errors.New("candidate query failed")
+	}
 	return s.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, genres, limit, filter, "")
 }
 
@@ -311,6 +321,9 @@ func (s *toyStore) FindTasteProfileCandidatesByMediaType(_ context.Context, embe
 }
 
 func (s *toyStore) GetBatchEmbeddings(_ context.Context, ids []string) (map[string][]float32, error) {
+	if s.embeddingsErr != nil {
+		return nil, s.embeddingsErr
+	}
 	out := make(map[string][]float32, len(ids))
 	for _, id := range ids {
 		if item, ok := s.catalog.byID[id]; ok {
@@ -450,6 +463,28 @@ func buildPersonaRows(t *testing.T, c *toyCatalog, p persona) personaRows {
 // before the rows are built.
 func buildPersonaRowsWith(t *testing.T, c *toyCatalog, p persona, tweak func(*toyStore)) personaRows {
 	t.Helper()
+	b, store, exclude := personaBuilder(t, c, p, tweak)
+	ctx := t.Context()
+	main, err := b.mainRow(ctx, 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("%s: main row: %v", p.name, err)
+	}
+	if main == nil {
+		t.Fatalf("%s: no main row", p.name)
+	}
+	clusters, _, err := b.clusterRows(ctx, 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("%s: cluster rows: %v", p.name, err)
+	}
+	rawTop, _, _ := store.FindTasteProfileCandidates(ctx, store.taste, exclude, nil, ServedRowSize, catalog.AccessFilter{})
+	return personaRows{persona: p, catalog: c, store: store, exclude: exclude, main: main.Items, clusters: clusters, rawTop: rawTop}
+}
+
+// personaBuilder returns a row builder over a store holding the persona's
+// taste profile and clusters, built the way RefreshTasteProfile builds them,
+// with tweak applied, and the persona's titles, which every row leaves out.
+func personaBuilder(t *testing.T, c *toyCatalog, p persona, tweak func(*toyStore)) (rowBuilder, *toyStore, []string) {
+	t.Helper()
 	vecs := make([][]float32, 0, len(p.history))
 	weights := make([]float64, 0, len(p.history))
 	items := make([]clusterItem, 0, len(p.history))
@@ -466,21 +501,7 @@ func buildPersonaRowsWith(t *testing.T, c *toyCatalog, p persona, tweak func(*to
 	}
 	store := &toyStore{catalog: c, taste: weightedAverage(vecs, weights), clusters: buildTasteClusters(items), allowed: p.allowed}
 	tweak(store)
-	b := rowBuilder{store: store, lambda: defaultMMRLambda, now: relevanceNow}
-	ctx := t.Context()
-	main, err := b.mainRow(ctx, 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatalf("%s: main row: %v", p.name, err)
-	}
-	if main == nil {
-		t.Fatalf("%s: no main row", p.name)
-	}
-	clusters, _, err := b.clusterRows(ctx, 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatalf("%s: cluster rows: %v", p.name, err)
-	}
-	rawTop, _, _ := store.FindTasteProfileCandidates(ctx, store.taste, exclude, nil, ServedRowSize, catalog.AccessFilter{})
-	return personaRows{persona: p, catalog: c, store: store, exclude: exclude, main: main.Items, clusters: clusters, rawTop: rawTop}
+	return rowBuilder{store: store, lambda: defaultMMRLambda, now: relevanceNow}, store, exclude
 }
 
 // served is the part of a cached row a public read serves.
@@ -1165,5 +1186,34 @@ func TestRelevanceNewInterestJoinsTheMainRow(t *testing.T) {
 		if got[i] < want[i]/2 {
 			t.Fatalf("after: anchor %d is nearest %d served items, want at least half its %d slots (want %v, got %v)", i, got[i], want[i], want, got)
 		}
+	}
+}
+
+// A main row missing an interest is not built: a failed anchor query or
+// embeddings read fails the row rather than letting the other interests take
+// its slots, and a cluster whose embeddings cannot be read counts as failed
+// and gets no row, so the cached rows stay.
+func TestPersonalRowsFailRatherThanThin(t *testing.T) {
+	c := newToyCatalog()
+	p := relevancePersonas(c)["E"]
+	b, store, exclude := personaBuilder(t, c, p, func(s *toyStore) { s.candidateErrAt = 2 })
+	if anchors := mainRowAnchors(store.clusters); len(anchors) < 2 {
+		t.Fatalf("persona E has %d anchors, want a composed row", len(anchors))
+	}
+	// The second anchor's query fails.
+	if row, err := b.mainRow(t.Context(), 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{}); err == nil {
+		t.Fatalf("main row = %d items, want an error for the failed anchor", len(row.Items))
+	}
+
+	b, store, exclude = personaBuilder(t, c, p, func(s *toyStore) { s.embeddingsErr = errors.New("embeddings down") })
+	if _, err := b.mainRow(t.Context(), 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{}); err == nil {
+		t.Fatal("main row built without embeddings, want an error")
+	}
+	rows, failed, err := b.clusterRows(t.Context(), 1, "p", CacheCandidateLimit, exclude, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 || failed != len(store.clusters) {
+		t.Fatalf("cluster rows = %d, failed = %d; want none built and all %d failed", len(rows), failed, len(store.clusters))
 	}
 }

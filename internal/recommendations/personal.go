@@ -38,7 +38,8 @@ func (e *Engine) rowBuilder() rowBuilder {
 }
 
 // clusterRows generates per-cluster recommendation rows. A cluster whose
-// candidate query fails is logged and skipped; failed counts them. A cluster
+// candidates or their embeddings cannot be read is logged and skipped;
+// failed counts them. A cluster
 // with no candidates gets a row without items, so its cached row is dropped.
 func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
 	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
@@ -87,7 +88,14 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 			continue
 		}
 		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, qualityMinSmallPool))
-		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
+		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
+		if err != nil {
+			// Ranked without embeddings, MMR could not spread the row.
+			failed++
+			slog.WarnContext(ctx, "cluster recommendation embeddings failed", "component", "recommendations",
+				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
+			continue
+		}
 		reranked := applyMMR(candidates, embMap, b.lambda, clusterLimit)
 
 		// Every item carries the row title, so a reader can title the cached
@@ -179,7 +187,9 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 
 	var row, pool []ScoredItem
 	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
-		row, pool = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter)
+		if row, pool, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
+			return nil, err
+		}
 	}
 	if len(row) == 0 {
 		var genreMap map[string][]string
@@ -188,7 +198,10 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 			return nil, fmt.Errorf("find similar for aggregated: %w", err)
 		}
 		pool = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, pool, 0))
-		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
+		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
+		if err != nil {
+			return nil, fmt.Errorf("main row embeddings: %w", err)
+		}
 		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), genreMap)
 	}
 	if len(row) == 0 {
