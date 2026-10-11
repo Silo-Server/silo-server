@@ -128,6 +128,8 @@ type Model struct {
 type Service struct {
 	store Store
 	http  *http.Client
+	// OnSettingUpdated notifies config consumers after automatic model changes commit.
+	OnSettingUpdated func(context.Context, string, string)
 	// Endpoints are fixed in production. Package tests replace them with local servers.
 	authURL, tokenURL, discoveryURL, modelsURL string
 }

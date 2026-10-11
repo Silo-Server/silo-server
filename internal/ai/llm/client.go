@@ -140,13 +140,9 @@ type chatCompletionResponse struct {
 // When jsonObject is true it requests response_format=json_object; providers
 // that ignore the field still work because the prompt itself demands JSON.
 func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) (string, error) {
-	cfg := c.Config()
-	if cfg.TextConfigSource != nil {
-		var err error
-		cfg, err = cfg.TextConfigSource(ctx)
-		if err != nil {
-			return "", err
-		}
+	cfg, err := c.TextConfig(ctx)
+	if err != nil {
+		return "", err
 	}
 	if err := reasoning.Validate(cfg.ChatModel, cfg.ReasoningEffort); err != nil {
 		return "", err

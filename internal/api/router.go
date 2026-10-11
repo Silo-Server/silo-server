@@ -1804,6 +1804,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var chatGPT *chatgpt.Service
 	if store, ok := settingsRepo.(chatgpt.Store); ok && deps.SecretCipher != nil {
 		chatGPT = chatgpt.NewService(store)
+		chatGPT.OnSettingUpdated = func(ctx context.Context, key, value string) {
+			if deps.OnServerSettingUpdated != nil {
+				deps.OnServerSettingUpdated(ctx, key, value)
+			}
+			if deps.EventBus != nil {
+				_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+		}
 	}
 	aiConfig := func(cfg *config.Config) llm.Config {
 		c := llmConfigFromServer(cfg)
@@ -1829,6 +1837,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiCfg := effectiveSubtitleAIConfig(deps.Config)
+		aiCfg.TextConfigSource = aiClient.TextConfig
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -1854,6 +1863,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
 				newCfg := effectiveSubtitleAIConfig(updated)
+				newCfg.TextConfigSource = aiClient.TextConfig
 				aiService.UpdateConfig(newCfg)
 				aiTranslator.SetBatching(updated.SubtitleAI.BatchSize, updated.SubtitleAI.ContextNeighbors)
 				aiTranscriber.SetExtraction(updated.Playback.FFmpegPath, updated.SubtitleAI.ASRChunkSeconds)
@@ -1868,9 +1878,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataAIHandler *handlers.MetadataAIHandler
 	if deps.DB != nil && deps.Config != nil && aiClient != nil {
 		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
+		mtConfig := func(cfg *config.Config) metadatatranslation.Config {
+			c := metadataAIConfigFromServer(cfg)
+			c.TextConfigSource = aiClient.TextConfig
+			return c
+		}
 		mtService := metadatatranslation.NewService(
 			deps.AppContext,
-			metadataAIConfigFromServer(deps.Config),
+			mtConfig(deps.Config),
 			mtRepo,
 			mtRepo,
 			&metadatatranslation.CatalogLocalizationStore{
@@ -1885,7 +1900,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mtService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				mtService.UpdateConfig(metadataAIConfigFromServer(updated))
+				mtService.UpdateConfig(mtConfig(updated))
 			})
 		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)

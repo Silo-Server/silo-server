@@ -77,7 +77,16 @@ dispatch uses that snapshot, avoiding stale authentication modes or models
 during asynchronous configuration reload.
 Draft connection checks retain the submitted model and effort.
 
-Each text request selects the active ChatGPT registration once. Its retries and
+Subtitle and metadata translation check the live text configuration before
+inserting jobs. Disconnected accounts and registrations needing login reject
+new work, including automatic and viewer-triggered translation. A job records
+the resolved model in its provenance and deduplication key, then keeps the same
+provider snapshot in memory for queued work, batches, and retries. Plain
+transcription does not consult text connection state. Automatic model and
+effort changes notify the local config watcher and other nodes after commit.
+
+Standalone text requests and translation jobs select the active ChatGPT
+registration once. Their retries and
 token refreshes retain that registration even if an administrator switches the
 active account. Disconnecting that registration stops recovery; retries never
 fall back to another account. Model-catalog requests follow the same rule.

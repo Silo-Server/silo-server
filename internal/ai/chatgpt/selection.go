@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
@@ -63,7 +64,8 @@ func (s *Service) mutateSettings(ctx context.Context, fn func(*credentials, map[
 		}
 		return s.mutate(ctx, func(c *credentials) error { return fn(c, values) })
 	}
-	return store.UpdateValueAndSettingsAtomic(ctx, CredentialsKey, func(values map[string]string) (map[string]string, error) {
+	changed := make(map[string]string)
+	err := store.UpdateValueAndSettingsAtomic(ctx, CredentialsKey, func(values map[string]string) (map[string]string, error) {
 		c, err := decode(values[CredentialsKey])
 		if err != nil {
 			return nil, err
@@ -80,10 +82,21 @@ func (s *Service) mutateSettings(ctx context.Context, fn func(*credentials, map[
 		for _, key := range []string{chatModelSetting, reasoningEffortSetting} {
 			if values[key] != before[key] {
 				writes[key] = values[key]
+				changed[key] = values[key]
 			}
 		}
 		return writes, nil
 	})
+	if err == nil && s.OnSettingUpdated != nil && len(changed) > 0 {
+		notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		for _, key := range []string{chatModelSetting, reasoningEffortSetting} {
+			if value, ok := changed[key]; ok {
+				s.OnSettingUpdated(notifyCtx, key, value)
+			}
+		}
+	}
+	return err
 }
 
 func reconcileModel(values map[string]string, models []Model) error {
