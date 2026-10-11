@@ -36,7 +36,11 @@ func (s *Service) refreshExchange(ctx context.Context, form url.Values) (tokenRe
 		if !retry || attempt == 2 {
 			return tokens, err
 		}
-		timer := time.NewTimer(max(time.Second<<attempt, temporary.retryAfter))
+		delay := max(time.Second<<attempt, temporary.retryAfter)
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+			return tokens, err
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

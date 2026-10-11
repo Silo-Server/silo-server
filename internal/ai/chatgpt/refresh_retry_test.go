@@ -117,7 +117,7 @@ func TestRefreshRetryStopsOnTerminalError(t *testing.T) {
 }
 
 func TestRefreshRetryHonorsRetryAfter(t *testing.T) {
-	for _, format := range []string{"seconds", "date", "beyond deadline"} {
+	for _, format := range []string{"seconds", "date", "at deadline", "beyond deadline"} {
 		t.Run(format, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				store := &memoryStore{values: map[string]string{}}
@@ -134,6 +134,8 @@ func TestRefreshRetryHonorsRetryAfter(t *testing.T) {
 						switch format {
 						case "date":
 							r.Header.Set("Retry-After", time.Now().Add(2*time.Second).UTC().Format(http.TimeFormat))
+						case "at deadline":
+							r.Header.Set("Retry-After", "60")
 						case "beyond deadline":
 							r.Header.Set("Retry-After", "120")
 						}
@@ -142,9 +144,9 @@ func TestRefreshRetryHonorsRetryAfter(t *testing.T) {
 					return response(http.StatusOK, tokenResponse{AccessToken: "renewed-access", RefreshToken: "rotated-refresh", TokenType: "Bearer", ExpiresIn: 3600}), nil
 				})
 				token, err := service.BearerToken(t.Context())
-				if format == "beyond deadline" {
-					if token != "" || (!errors.Is(err, ErrProvider) && !errors.Is(err, context.DeadlineExceeded)) || len(requests) != 1 || time.Since(start) > time.Minute || stored(t, store).Accounts[0] != before {
-						t.Fatalf("Retry-After exceeded refresh budget or retried too early: token=%q error=%v calls=%d elapsed=%v", token, err, len(requests), time.Since(start))
+				if format == "at deadline" || format == "beyond deadline" {
+					if token != "" || !errors.Is(err, ErrProvider) || errors.Is(err, context.DeadlineExceeded) || len(requests) != 1 || time.Since(start) != 0 || stored(t, store).Accounts[0] != before {
+						t.Fatalf("unusable Retry-After did not release refresh immediately: token=%q error=%v calls=%d elapsed=%v", token, err, len(requests), time.Since(start))
 					}
 					return
 				}
