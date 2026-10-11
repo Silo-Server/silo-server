@@ -81,6 +81,23 @@ it("shows the unmapped path and why it did not resolve", () => {
   expect(table.queryByText(/Rewritten to/)).toBeNull();
 });
 
+// TableCell is whitespace-nowrap, and an inherited nowrap stops overflow-wrap
+// from breaking anything, so a long error ran on one line past the cell.
+const longPollError =
+  "poll: GET http://sonarr.example.com:8989/api/v3/history/since?date=2026-09-01T00%3A00%3A00Z&eventType=downloadFolderImported: context deadline exceeded; source changed during the poll; its error was not stored on the source";
+
+it("wraps a long poll error inside its cell", () => {
+  render(
+    <PollEventTable
+      events={[{ ...baseEvent, status: "error", error_message: longPollError }]}
+      lookups={lookups}
+      librariesByID={librariesByID}
+    />,
+  );
+  const error = within(desktopTable()).getByText(longPollError);
+  expect(error).toHaveClass("whitespace-normal", "max-w-md");
+});
+
 it("shows rewritten paths, joined scans, and suppressed changes", () => {
   render(
     <PollEventTable
@@ -278,4 +295,20 @@ it("distinguishes skipped, productive, and pending scans in the scan history", (
   expect(table.getAllByText(/^No changes/)).toHaveLength(1);
   const runningRow = table.getByText("01RUNNING").closest("tr");
   expect(runningRow && within(runningRow).getAllByText("-").length).toBeGreaterThan(0);
+});
+
+it("wraps a long scan error and path inside the scope cell", () => {
+  const path =
+    "/mnt/tv/A Very Long Series Name (2024)/Season 01/A.Very.Long.Series.Name.S01E01.mkv";
+  const errorMessage = `scan: open ${path}: input/output error`;
+  render(
+    <ScanHistoryTable
+      scans={[{ ...baseScan, status: "failed", path, error_message: errorMessage }]}
+      librariesByID={librariesByID}
+      lookups={lookups}
+    />,
+  );
+  const table = within(desktopTable());
+  expect(table.getByText(errorMessage)).toHaveClass("whitespace-normal", "max-w-xl");
+  expect(table.getByText(path)).toHaveClass("whitespace-normal", "max-w-xl");
 });
