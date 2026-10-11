@@ -37,6 +37,7 @@ func newIdentityRetryFixture(t *testing.T, key *rsa.PrivateKey) *identityRetryFi
 		calls: make(map[string][]time.Time),
 	}
 	save(t, f.store, credentials{Active: f.prior.ClientID, Accounts: []account{f.prior}})
+	f.prior = stored(t, f.store).Accounts[0]
 	f.service = NewService(f.store)
 	login, err := f.service.StartLogin(t.Context(), "")
 	if err != nil {
