@@ -1,6 +1,12 @@
 import type { EngineSourceSpec } from "./source";
 
 /**
+ * Classification of a read that failed after retries. Once the stream has
+ * played it means the connection went away, not that the route cannot work.
+ */
+export const ENGINE_READ_FAILED = "browser_engine_read_failed";
+
+/**
  * Messages between the page, the engine worker, and the audio worklet.
  *
  * Every decode run carries a generation. A seek starts a new one; anything

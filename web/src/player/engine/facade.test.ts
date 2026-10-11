@@ -20,6 +20,7 @@ function fakePlayer() {
     videoHeight: 800,
     play: vi.fn(async () => {}),
     pause: vi.fn(),
+    getVideoPlaybackQuality: vi.fn(() => ({ totalVideoFrames: 50, droppedVideoFrames: 3 })),
     requestVideoFrameCallback: vi.fn(() => 7),
     cancelVideoFrameCallback: vi.fn(),
     addTextTrack: vi.fn(() => "track"),
@@ -42,6 +43,8 @@ describe("attachEngineToElement", () => {
     await video.play();
     expect(player.play).toHaveBeenCalled();
     expect(video.requestVideoFrameCallback(() => {})).toBe(7);
+    // The overlay's dropped-frame count comes from the engine, not the idle element.
+    expect(video.getVideoPlaybackQuality().droppedVideoFrames).toBe(3);
     expect(video.addTextTrack("subtitles")).toBe("track");
     expect(video.error).toBeNull();
     await expect(video.requestPictureInPicture()).rejects.toMatchObject({

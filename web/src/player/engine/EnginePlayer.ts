@@ -107,6 +107,8 @@ export class EnginePlayer {
   private queue: QueuedPicture[] = [];
   private shown: QueuedPicture | null = null;
   private presentedFrames = 0;
+  /** Decoded frames skipped because a later one was already due. */
+  private droppedFrames = 0;
   private seekTarget: number;
   private videoEnded = false;
   private audioEnded = false;
@@ -302,6 +304,15 @@ export class EnginePlayer {
     this.dispatch("seeking");
     this.beginGeneration(target);
     this.dispatch("timeupdate");
+  }
+
+  getVideoPlaybackQuality(): VideoPlaybackQuality {
+    return {
+      creationTime: performance.now(),
+      totalVideoFrames: this.presentedFrames + this.droppedFrames,
+      droppedVideoFrames: this.droppedFrames,
+      corruptedVideoFrames: 0,
+    } as VideoPlaybackQuality;
   }
 
   requestVideoFrameCallback(callback: VideoFrameRequestCallback): number {
@@ -645,7 +656,10 @@ export class EnginePlayer {
       const now = clock.now();
       let due: QueuedPicture | null = null;
       while (this.queue.length > 0 && this.queue[0]!.timestamp <= now + PRESENT_AHEAD_SECONDS) {
-        if (due) this.release(due);
+        if (due) {
+          this.release(due);
+          this.droppedFrames += 1;
+        }
         due = this.queue.shift()!;
       }
       if (due) {

@@ -28,3 +28,11 @@ export interface EngineSourceSpec {
   /** The selected audio track, by ordinal among the file's audio tracks. */
   audio: { ordinal: number; codec: string; channels: number | null } | null;
 }
+
+/**
+ * Fetch errors quote the stream URL, whose path carries the stream token. A
+ * failure message goes to the server and its logs, so the URL is left out.
+ */
+export function redactStreamUrls(message: string): string {
+  return message.replace(/https?:\/\/\S+?(?=:?(?:\s|$))/g, "<stream URL>");
+}

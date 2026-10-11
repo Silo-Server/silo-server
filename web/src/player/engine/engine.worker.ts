@@ -39,14 +39,15 @@ import {
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
 import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
-import type {
-  EnginePlaneFrame,
-  PageToWorkerMessage,
-  WorkerToPageMessage,
-  WorkerToWorkletMessage,
-  WorkletToWorkerMessage,
+import {
+  ENGINE_READ_FAILED,
+  type EnginePlaneFrame,
+  type PageToWorkerMessage,
+  type WorkerToPageMessage,
+  type WorkerToWorkletMessage,
+  type WorkletToWorkerMessage,
 } from "./protocol";
-import type { EngineSourceSpec } from "./source";
+import { redactStreamUrls, type EngineSourceSpec } from "./source";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -71,7 +72,7 @@ export const ENGINE_FAILURES = {
   videoDecode: "browser_engine_video_decode_failed",
   audioDecode: "browser_engine_audio_decode_failed",
   audioTrack: "browser_engine_audio_track_mismatch",
-  read: "browser_engine_read_failed",
+  read: ENGINE_READ_FAILED,
 } as const;
 
 class EngineFailure extends Error {
@@ -135,7 +136,7 @@ function post(message: WorkerToPageMessage, transfer: Transferable[] = []): void
 function fail(run: number | null, error: unknown, fallback: string): void {
   if (run !== null && run !== generation) return;
   const classification = error instanceof EngineFailure ? error.classification : fallback;
-  const message = error instanceof Error ? error.message : String(error);
+  const message = redactStreamUrls(error instanceof Error ? error.message : String(error));
   post({ type: "error", generation: run, classification, message });
 }
 

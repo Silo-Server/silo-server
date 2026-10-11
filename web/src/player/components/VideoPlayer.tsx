@@ -24,6 +24,7 @@ import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import type { EngineCapabilities } from "../engine/capabilities";
 import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
 import type { BrowserEngineSession } from "../engine";
+import { ENGINE_READ_FAILED } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
 import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
 import { syncKeyOf } from "../utils/subtitleSync";
@@ -441,6 +442,10 @@ export function VideoPlayer({
   // Box under the <video> that holds the browser decode engine's canvas.
   const engineSurfaceRef = useRef<HTMLDivElement>(null);
   const [browserEngineActive, setBrowserEngineActive] = useState(false);
+  // Bumped whenever an engine transport starts or stops. Frame callbacks
+  // registered on one engine end with it, so renderers that drive themselves
+  // from requestVideoFrameCallback (JASSUB) rebuild on it.
+  const [engineTransportRevision, setEngineTransportRevision] = useState(0);
   const fullscreenRootRef = usePlayerFullscreenRoot();
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
@@ -2246,12 +2251,21 @@ export function VideoPlayer({
               source: route.source,
               onFailure: (failure) => {
                 if (destroyed) return;
+                // Like MEDIA_ERR_NETWORK on the element: a read that fails
+                // after the stream played reconnects on the same route.
+                if (
+                  failure.classification === ENGINE_READ_FAILED &&
+                  reportConnectionLostRef.current()
+                ) {
+                  return;
+                }
                 if (!reportCurrentPlanFailure(failure)) {
                   setError(`Playback error: ${failure.message ?? failure.classification}`);
                 }
               },
             });
             setBrowserEngineActive(true);
+            setEngineTransportRevision((revision) => revision + 1);
             attemptAutoplayWhenReady();
           } catch (error) {
             if (
@@ -2288,6 +2302,7 @@ export function VideoPlayer({
         engineSession.destroy();
         engineSession = null;
         setBrowserEngineActive(false);
+        setEngineTransportRevision((revision) => revision + 1);
       }
       if (hls) {
         hls.destroy();
@@ -2846,6 +2861,7 @@ export function VideoPlayer({
     videoFit,
     coverCrop,
     activeSubtitleCueRevision,
+    engineTransportRevision,
   );
 
   // -- PGS rendering (client-side Blu-ray bitmaps) --
@@ -3463,7 +3479,9 @@ export function VideoPlayer({
     skipActions,
     toggleCaptions,
     handleToggleMuted,
-    handleTogglePiP,
+    // The engine draws on a canvas, which cannot float; the control is hidden
+    // too, so the shortcut does nothing rather than reject.
+    browserEngineActive ? undefined : handleTogglePiP,
     displayMode === "foreground",
   );
 

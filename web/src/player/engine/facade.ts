@@ -25,6 +25,7 @@ const DELEGATED_PROPERTIES = [
 const DELEGATED_METHODS = [
   "play",
   "pause",
+  "getVideoPlaybackQuality",
   "requestVideoFrameCallback",
   "cancelVideoFrameCallback",
   "addTextTrack",

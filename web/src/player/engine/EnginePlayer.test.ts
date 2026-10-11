@@ -191,6 +191,24 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("counts the frames it skips as dropped in the playback quality", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    await player.play();
+    await vi.advanceTimersByTimeAsync(200);
+    // Three frames arrive late together: only the newest is drawn.
+    for (const timestamp of [0.04, 0.08, 0.12]) {
+      worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(timestamp) });
+    }
+    await vi.advanceTimersByTimeAsync(50);
+    const quality = player.getVideoPlaybackQuality();
+    expect(quality.droppedVideoFrames).toBe(2);
+    expect(quality.totalVideoFrames).toBe(4);
+    player.destroy();
+  });
+
   it("drops frames from a superseded run and completes the seek on the new one", async () => {
     const { player, worker } = start();
     await open(worker);

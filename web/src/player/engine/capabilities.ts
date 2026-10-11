@@ -130,11 +130,20 @@ async function probe(): Promise<EngineCapabilities | null> {
   };
 }
 
+/**
+ * Playback start waits on the probe, so a GPU or decoder query that never
+ * answers must not hold it: past this, the page plays without the engine.
+ */
+export const PROBE_TIMEOUT_MS = 4_000;
+
 let probePromise: Promise<EngineCapabilities | null> | null = null;
 
 /** Probes once per page; the answers do not change while the page lives. */
 export function probeEngineCapabilities(): Promise<EngineCapabilities | null> {
-  probePromise ??= probe().catch(() => null);
+  probePromise ??= Promise.race([
+    probe().catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), PROBE_TIMEOUT_MS)),
+  ]);
   return probePromise;
 }
 
