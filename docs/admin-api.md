@@ -2743,7 +2743,9 @@ started from. Otherwise it skips the
 write without an error, leaves `last_run_at` and `last_error` as they were (so the next
 cycle polls the new upstream without waiting for the interval), records its starting
 marker as the event's `marker_after` with a note that the marker was not stored, and
-the next poll starts from the reset marker.
+the next poll starts from the reset marker. A poll that fails after such a reset
+likewise leaves `last_error` and `last_run_at` as the reset left them; its error is
+recorded only on the poll's event, with a note that it was not stored on the source.
 
 Configuration keys/values, connection and label are normalized as in the bridge.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider

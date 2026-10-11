@@ -30,7 +30,7 @@ type Store interface {
 	GetSource(ctx context.Context, id string) (Source, error)
 	GetConnection(ctx context.Context, id string) (Connection, error)
 	AdvanceMarker(ctx context.Context, adv MarkerAdvance) (bool, error)
-	RecordError(ctx context.Context, sourceID, msg string) error
+	RecordError(ctx context.Context, failure PollFailure) (bool, error)
 	CreateEvent(ctx context.Context, event EventCreate) (int64, error)
 	FinishEvent(ctx context.Context, event EventFinish) error
 	CreateWebhookDelivery(ctx context.Context, in ChangeIngest) (WebhookDelivery, error)
@@ -232,7 +232,7 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 				requirementsLoaded = true
 			}
 			if requirements[sourceIdentity{src.PluginID, src.CapabilityID}] == ConnectionRequired {
-				s.failPoll(ctx, src, eventID, marker, missingConnectionMessage)
+				s.failPoll(ctx, PollFailure{Source: src, Message: missingConnectionMessage}, eventID, marker)
 				continue
 			}
 		}
@@ -242,7 +242,12 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 			row, resolved, cerr := s.resolveConnection(ctx, *src.ConnectionID)
 			if cerr != nil {
 				slog.WarnContext(ctx, "autoscan: resolve connection failed", "component", "autoscan", "source_id", src.ID, "err", cerr)
-				s.failPoll(ctx, src, eventID, marker, cerr.Error())
+				failure := PollFailure{Source: src, Message: cerr.Error()}
+				if row.ID != "" {
+					// The row was read; only resolving its credentials failed.
+					failure.Connection = &row
+				}
+				s.failPoll(ctx, failure, eventID, marker)
 				continue
 			}
 			conn = resolved
@@ -251,7 +256,7 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 		changes, next, perr := s.provider.PollChanges(ctx, src.PluginID, src.CapabilityID, marker, conn, src.SourceConfig)
 		if perr != nil {
 			slog.WarnContext(ctx, "autoscan: poll changes failed", "component", "autoscan", "source_id", src.ID, "err", perr)
-			s.failPoll(ctx, src, eventID, marker, pollErrorMessage(perr))
+			s.failPoll(ctx, PollFailure{Source: src, Connection: connRow, Message: pollErrorMessage(perr)}, eventID, marker)
 			continue // do NOT advance marker
 		}
 
@@ -274,18 +279,40 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 // who sees it on the source row and in poll activity.
 const missingConnectionMessage = "No server selected. Edit the source and choose a server."
 
-// failPoll records a poll that ended before the provider returned changes: the
-// source's last_error and the event both carry msg, and the marker is held so
-// the next poll re-reads the same window.
-func (s *Service) failPoll(ctx context.Context, src Source, eventID int64, marker, msg string) {
-	if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-		slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
+// failPoll records a poll that ended before the provider returned changes. The
+// event carries the failure's message, and so does the source's last_error
+// unless an admin edit reset the source while the poll ran. The marker is held
+// so the next poll re-reads the same window.
+func (s *Service) failPoll(ctx context.Context, failure PollFailure, eventID int64, marker string) {
+	msg := failure.Message
+	if s.recordPollError(ctx, failure) {
+		msg += "; " + errorNotStoredMessage
 	}
 	s.finishEvent(ctx, eventID, EventFinish{
 		Status:       EventStatusError,
 		ErrorMessage: msg,
 		MarkerAfter:  marker,
 	})
+}
+
+// errorNotStoredMessage notes on a poll event that the source changed while
+// the poll ran, so its error was kept off the source.
+const errorNotStoredMessage = "source changed during the poll; its error was not stored on the source"
+
+// recordPollError stores a failed poll's error on its source, and reports
+// whether it skipped the write because an admin edit reset the source while
+// the poll ran. Such an error belongs to the old upstream, so only the poll's
+// event keeps it.
+func (s *Service) recordPollError(ctx context.Context, failure PollFailure) (sourceChanged bool) {
+	recorded, err := s.store.RecordError(ctx, failure)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", failure.Source.ID, "err", err)
+		return false
+	}
+	if !recorded {
+		slog.DebugContext(ctx, "autoscan: source changed during poll; not storing its error", "component", "autoscan", "source_id", failure.Source.ID)
+	}
+	return !recorded
 }
 
 // sourceIdentity is the (plugin, capability) pair a source is created against.
@@ -328,7 +355,8 @@ type consumeOptions struct {
 	NextMarker    string // poll: the provider's next marker
 	AdvanceMarker bool   // poll: true; webhook: false
 	// Connection is the connection row the poll read from (nil when the
-	// source has none); the marker advance is conditional on it.
+	// source has none); the marker advance, and recording an error on the
+	// source, are conditional on it.
 	Connection *Connection
 }
 
@@ -425,8 +453,8 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		if opts.AdvanceMarker {
 			msg += " — holding marker to retry"
 		}
-		if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-			slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
+		if s.recordPollError(ctx, PollFailure{Source: src, Connection: opts.Connection, Message: msg}) {
+			msg += "; " + errorNotStoredMessage
 		}
 		result.Status = EventStatusError
 		finish(EventFinish{
