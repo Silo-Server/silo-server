@@ -10,7 +10,8 @@ import (
 // moves them to the front, and keeps the other providers' order. Rolling back
 // puts each row's priority and on/off state back as they were, including an
 // NFO row an admin had turned on, keeps a field an admin edited after the
-// upgrade, and turns off NFO rows added since.
+// upgrade, turns off NFO rows added since, and renumbers each chain so a
+// restored priority never ties with one an admin set.
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -29,7 +30,9 @@ INSERT INTO plugin_capabilities VALUES
 -- 11: an upgraded series level with two remote providers.
 -- 12: a library created after NFO existed, NFO first but disabled.
 -- 13: an admin turned NFO on, still last.
+-- 15: two remote providers, NFO off and last.
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
+    (15, 2, 'tmdb', 'movie', 0, true), (15, 3, 'tvdb', 'movie', 1, true), (15, 1, 'nfo', 'movie', 2, false),
     (10, 2, 'tmdb', 'movie', 0, true), (10, 1, 'nfo', 'movie', 1, false),
     (11, 3, 'tvdb', 'series', 0, true), (11, 2, 'tmdb', 'series', 1, false), (11, 1, 'nfo', 'series', 2, false),
     (12, 1, 'nfo', 'movie', 0, false), (12, 2, 'tmdb', 'movie', 1, true),
@@ -77,6 +80,7 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		{11, "nfo", 0, true}, {11, "tvdb", 1, true}, {11, "tmdb", 2, false},
 		{12, "nfo", 0, true}, {12, "tmdb", 1, true},
 		{13, "nfo", 0, true}, {13, "tmdb", 1, true},
+		{15, "nfo", 0, true}, {15, "tmdb", 1, true}, {15, "tvdb", 2, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
@@ -87,7 +91,8 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 	migrationExec(t, tx, `INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
     (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true);
 UPDATE library_provider_chains SET enabled = true WHERE media_folder_id = 11 AND capability_id = 'tmdb';
-UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AND capability_id = 'nfo';`)
+UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AND capability_id = 'nfo';
+UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id = 15 AND capability_id IN ('tmdb', 'tvdb');`)
 
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	if defaultEnabled() {
@@ -99,6 +104,8 @@ UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AN
 		{12, "nfo", 0, false}, {12, "tmdb", 1, true},
 		{13, "tmdb", 0, true}, {13, "nfo", 1, false},
 		{14, "nfo", 0, false}, {14, "tmdb", 1, true},
+		// The admin's swap of the remote providers stays; NFO goes back last.
+		{15, "tvdb", 0, true}, {15, "tmdb", 1, true}, {15, "nfo", 2, false},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)

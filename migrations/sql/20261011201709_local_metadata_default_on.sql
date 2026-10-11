@@ -76,7 +76,8 @@ WHERE c.media_folder_id = b.media_folder_id
 -- state back to what it was before the upgrade, each only while it still has
 -- the value the Up gave it, so edits made after the upgrade stay. Builtin NFO
 -- rows added since (new libraries, the startup sync) go back to the old
--- default, off.
+-- default, off. Each chain is then renumbered so a restored priority and one
+-- an admin set since never tie; the admin's comes first.
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'false'::jsonb)
 FROM plugin_installations pi
@@ -108,5 +109,28 @@ WHERE c.plugin_installation_id = pi.id
         AND b.capability_id = c.capability_id
         AND b.content_level = c.content_level
   );
+
+UPDATE library_provider_chains c
+SET priority = ranked.position
+FROM (
+    SELECT c2.media_folder_id, c2.plugin_installation_id, c2.capability_id, c2.content_level,
+           ROW_NUMBER() OVER (
+               PARTITION BY c2.media_folder_id, c2.content_level
+               ORDER BY c2.priority,
+                        COALESCE(c2.priority = b.priority AND b.priority <> b.up_priority, false),
+                        c2.plugin_installation_id, c2.capability_id
+           ) - 1 AS position
+    FROM library_provider_chains c2
+    LEFT JOIN local_metadata_default_on_chain_backup b
+      ON b.media_folder_id = c2.media_folder_id
+     AND b.plugin_installation_id = c2.plugin_installation_id
+     AND b.capability_id = c2.capability_id
+     AND b.content_level = c2.content_level
+) ranked
+WHERE c.media_folder_id = ranked.media_folder_id
+  AND c.plugin_installation_id = ranked.plugin_installation_id
+  AND c.capability_id = ranked.capability_id
+  AND c.content_level = ranked.content_level
+  AND c.priority <> ranked.position;
 
 DROP TABLE local_metadata_default_on_chain_backup;
