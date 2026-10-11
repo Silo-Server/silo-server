@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -13,6 +14,8 @@ import (
 type metadataItemPeopleRepo interface {
 	GetPeople(ctx context.Context, contentID string) ([]models.ItemPerson, error)
 }
+
+var _ metadataItemPeopleRepo = (*catalog.ItemRepository)(nil)
 
 // peopleLocksForMerge prepares a stored item for the persist merge when
 // exactly one of its Cast and Crew locks is set. The item row carries no

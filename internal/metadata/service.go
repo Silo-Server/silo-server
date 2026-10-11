@@ -1753,11 +1753,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				protectedKeys[key] = true
 			}
 		}
-		// In every refresh mode an admin's Identify choice outranks a
-		// conflicting local identity (identify_sticky.go).
+		// Local metadata for a different title than the one kept is left
+		// out (identify_sticky.go).
 		stored := storedItemIdentity(existing, req.durableProviderIDs)
 		localHints := collectLocalIdentityHints(ctx, itemChain, searchQuery)
-		skipLocalProvider, err = s.identifyChoiceOverridesLocal(ctx, req.ContentID, localHints, stored)
+		skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, stored)
 		if err != nil {
 			return nil, err
 		}
@@ -2002,7 +2002,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			// Identify skips the local hint provider (NFO): a stale season.nfo
 			// must not overlay season names on the user's chosen identity.
 			_, isIdentityHinter := p.(IdentityHintProvider)
-			if isIdentityHinter && req.Mode == ModeIdentify {
+			if isIdentityHinter && skipLocalProvider {
 				continue
 			}
 			seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
@@ -2065,7 +2065,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					// Identify skips the local hint provider (NFO): stale episode
 					// NFOs/thumbs must not overlay the user's chosen identity.
 					_, isIdentityHinter := p.(IdentityHintProvider)
-					if isIdentityHinter && req.Mode == ModeIdentify {
+					if isIdentityHinter && skipLocalProvider {
 						continue
 					}
 					episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
@@ -2633,6 +2633,9 @@ func (s *MetadataService) mergeAndPersist(
 		if !req.enrichmentOnly {
 			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult)
 		}
+		if mergeMode == MergeFillEmpty {
+			accumulator.localLists.keepStoredLists(accumulator, existingResult)
+		}
 		if isCanonicalWrite {
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		} else {
@@ -2739,7 +2742,9 @@ func (s *MetadataService) mergeAndPersist(
 	contentID = persistedContentID
 	item.ContentID = contentID
 	if req.Mode == ModeIdentify {
-		s.recordIdentityChoice(ctx, contentID)
+		if err := s.recordIdentityChoice(ctx, contentID); err != nil {
+			return nil, err
+		}
 	}
 	unlockProviderDedup()
 	providerDedupReleased = true

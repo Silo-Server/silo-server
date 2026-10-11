@@ -34,7 +34,10 @@ builtin rows to the front of each chain.
   builtin capabilities to all existing chains (enabled, since `nfo` is
   `default_enabled`) and moves builtin rows to the front. New libraries pick
   the capability up enabled and first through normal chain seeding, and the
-  chain-less fallback includes it.
+  chain-less fallback includes it, except at a level where the library's
+  local row is switched off. A save that omits the local row gets it back,
+  enabled, at the next startup; turning local metadata off means saving the
+  row disabled.
 - Without `.nfo` files or sidecar art the provider returns nothing, so a
   library without local files behaves as before. Each refresh still looks for
   the candidate sidecar files.
@@ -59,7 +62,11 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
   the lists the NFO left empty. Remote cast and crew enrich the NFO's credits
   that match by provider ID or by name and kind (IDs, photos, roles) and never
   add people (`internal/metadata/local_precedence.go`). Lists from two remote
-  providers still accumulate.
+  providers still accumulate. In fill-empty writes (scheduled refresh,
+  initial match of a stored item) an NFO list fills an empty stored list but
+  is not added to a stored one; a manual refresh replaces it. The bulk
+  enrichment pass has no record of which stored lists came from the NFO, so
+  an enrichment-only provider can still add to them.
 - **Locks win in every mode.** The persist merge applies the item's locked
   fields in initial match, scheduled and manual refresh, and Identify. Cast and
   Crew are separate locks; with only one set, the stored credits are read so
@@ -87,12 +94,18 @@ search-by-title fails. Conflict policy by mode:
   different anchor is renamed to it, or merged onto the existing item already
   holding that id;
 - manual Identify: the user's choice wins; the NFO provider is skipped for the
-  whole operation. The choice is sticky: every Identify sets
-  `media_items.identity_chosen_at`, and a later refresh of any mode whose NFO
-  names a different identity keeps the chosen one, logs the conflict, and
-  leaves the NFO provider out of that refresh, since its text and art describe
-  the other title (`internal/metadata/identify_sticky.go`). NFO IDs that agree
-  with or only extend the chosen identity are not a conflict.
+  whole operation. The choice is sticky: every Identify (including the one a
+  split runs for its target) sets `media_items.identity_chosen_at`, and a
+  later manual refresh whose NFO names a different identity keeps the chosen
+  one. Running Identify again is how an admin changes it.
+
+Whenever a refresh keeps an identity the NFO's IDs contradict (a scheduled
+refresh, or a manual one after Identify), it logs the conflict and leaves the
+NFO provider out of every phase of that refresh, series, season and episode,
+since its text, lists and art describe the other title
+(`internal/metadata/identify_sticky.go`). NFO IDs that agree with or only
+extend the stored identity are not a conflict; a title-only NFO declares no
+identity and always applies.
 
 The NFO search candidate exists only for the title-only case and is defanged:
 ID-less candidates lose provider-priority tie-breaks to ID-bearing group

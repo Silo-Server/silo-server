@@ -72,9 +72,11 @@ func builtinInstallationIDs(ctx context.Context, q interface {
 	return ids, rows.Err()
 }
 
-// pinStoredLocalTier renumbers every stored chain so each (library, content
+// pinStoredLocalTierSQL renumbers every stored chain so each (library, content
 // level) lists its builtin rows first and keeps the rest in their order. Rows
 // already in place are not rewritten, so it is cheap to run at every startup.
+// Migration 20261011201709_local_metadata_default_on carries its own frozen
+// copy.
 const pinStoredLocalTierSQL = `
 UPDATE library_provider_chains c
 SET priority = ranked.position

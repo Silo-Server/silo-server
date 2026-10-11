@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// An admin's Identify choice outranks the identity a local .nfo declares
-// (<uniqueid>). Without a record of the choice, a manual refresh would let the
-// file's IDs re-match the item, which is the recovery path for a corrected
-// NFO but undoes an admin who chose a different title on purpose. Identify
-// therefore marks the item, and a refresh of a marked item whose local files
-// name a different identity keeps the chosen one, logs the conflict, and
-// leaves the local provider out of that refresh: its title, text and artwork
-// describe the other title.
+// Local metadata applies only to the title it describes. When the IDs a local
+// .nfo declares (<uniqueid>) name a different title than the one a refresh
+// keeps, the refresh logs the conflict and leaves the local provider out:
+// its text, lists and artwork belong to the other title.
+//
+// A scheduled refresh always keeps the stored identity. A manual refresh lets
+// the file's IDs re-match the item, the recovery path for a corrected NFO,
+// unless an admin chose the stored identity with Identify: Identify marks the
+// item, and the choice outranks the file.
 
 // metadataIdentityChoiceRepo records and reads an admin's Identify choice. It
 // is asserted on itemRepo; *catalog.ItemRepository satisfies it.
@@ -21,6 +24,8 @@ type metadataIdentityChoiceRepo interface {
 	MarkIdentityChosen(ctx context.Context, contentID string) error
 	IdentityChosen(ctx context.Context, contentID string) (bool, error)
 }
+
+var _ metadataIdentityChoiceRepo = (*catalog.ItemRepository)(nil)
 
 // localIdentityHint is the identity one local provider's files declare.
 type localIdentityHint struct {
@@ -42,24 +47,25 @@ func collectLocalIdentityHints(ctx context.Context, chain []Provider, query Sear
 	return out
 }
 
-// recordIdentityChoice marks the item as identified by an admin.
-func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID string) {
+// recordIdentityChoice marks the item as identified by an admin. The item is
+// already written; a failed mark fails the Identify so the admin retries it,
+// which is safe, instead of losing the choice silently.
+func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID string) error {
 	repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
 	if !ok || contentID == "" {
-		return
+		return nil
 	}
 	if err := repo.MarkIdentityChosen(ctx, contentID); err != nil {
-		slog.ErrorContext(ctx, "metadata: could not record the Identify choice; a manual refresh may follow a conflicting .nfo", "component", "metadata",
-			"content_id", contentID, "error", err)
+		return fmt.Errorf("recording the Identify choice: %w", err)
 	}
+	return nil
 }
 
-// identifyChoiceOverridesLocal reports whether a refresh must keep the item's
-// identity over the IDs its local files declare: they name a different
-// identity than the stored one, and an admin chose the stored one with
-// Identify. It logs the conflict when so. Local IDs that agree with or only
-// extend the stored identity are not a conflict.
-func (s *MetadataService) identifyChoiceOverridesLocal(ctx context.Context, contentID string, local []localIdentityHint, stored map[string]string) (bool, error) {
+// localIdentityConflict reports whether a refresh in mode must leave the
+// local provider out because the IDs its files declare name a different
+// title than the identity the refresh keeps, and logs the conflict. Local IDs
+// that agree with or only extend the stored identity are not a conflict.
+func (s *MetadataService) localIdentityConflict(ctx context.Context, mode RefreshMode, contentID string, local []localIdentityHint, stored map[string]string) (bool, error) {
 	declared := make(map[string]string, len(trustedSearchIDKeys))
 	for _, hint := range local {
 		for key, value := range canonicalIdentityProviderIDs(hint.ids) {
@@ -71,18 +77,22 @@ func (s *MetadataService) identifyChoiceOverridesLocal(ctx context.Context, cont
 	if len(declared) == 0 || !identityChoiceCorrects(declared, stored) {
 		return false, nil
 	}
-	repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
-	if !ok {
-		return false, nil
+	keptBy := "match"
+	if mode != ModeScheduledRefresh {
+		repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
+		if !ok {
+			return false, nil
+		}
+		chosen, err := repo.IdentityChosen(ctx, contentID)
+		if err != nil {
+			return false, fmt.Errorf("reading identity choice: %w", err)
+		}
+		if !chosen {
+			return false, nil
+		}
+		keptBy = "identify"
 	}
-	chosen, err := repo.IdentityChosen(ctx, contentID)
-	if err != nil {
-		return false, fmt.Errorf("reading identity choice: %w", err)
-	}
-	if !chosen {
-		return false, nil
-	}
-	slog.WarnContext(ctx, "metadata: local metadata names a different title than the admin's Identify choice; keeping the chosen identity and skipping local metadata", "component", "metadata",
-		"content_id", contentID, "chosen_ids", stored, "local_ids", declared)
+	slog.WarnContext(ctx, "metadata: local metadata names a different title than the item's identity; keeping the identity and skipping local metadata", "component", "metadata",
+		"content_id", contentID, "kept_by", keptBy, "stored_ids", stored, "local_ids", declared)
 	return true, nil
 }

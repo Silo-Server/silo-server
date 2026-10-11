@@ -305,3 +305,82 @@ func TestManualRefresh_IdentifiedItemStillReadsAgreeingNFO(t *testing.T) {
 		t.Errorf("Title = %q, want the agreeing NFO's title", item.Title)
 	}
 }
+
+// ChooseIdentity marks a seeded item as matched to ids by an admin's
+// Identify, for the external NFO integration tests.
+func (x *NFOSeriesHarness) ChooseIdentity(contentID string, ids map[string]string) {
+	repo, ok := x.h.service.itemRepo.(*localPipelineItemRepo)
+	if !ok {
+		repo = &localPipelineItemRepo{fakeItemRepo: x.h.itemRepo, people: map[string][]models.ItemPerson{}, chosen: map[string]bool{}}
+		x.h.service.itemRepo = repo
+	}
+	repo.chosen[contentID] = true
+	item := x.h.itemRepo.items[contentID]
+	item.Status = "matched"
+	item.TmdbID, item.TvdbID, item.ImdbID = ids["tmdb"], ids["tvdb"], ids["imdb"]
+}
+
+// A scheduled refresh keeps the stored match and leaves out an NFO that names
+// another title, rather than filling the item with that title's text.
+func TestScheduledRefresh_SkipsNFOForAnotherTitle(t *testing.T) {
+	h, _ := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
+	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "999"},
+		metadata: &MetadataResult{HasMetadata: true, Title: "Other Movie", Overview: "Other overview.", Studios: []string{"Other Studio"}},
+	}
+	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}}}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: ModeScheduledRefresh}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.TmdbID != "100" || item.Overview != "" || len(item.Studios) != 0 {
+		t.Errorf("item = tmdb %q overview %q studios %v, want the stored match without the other title's NFO", item.TmdbID, item.Overview, item.Studios)
+	}
+	if nfo.metadataCalls != 0 {
+		t.Errorf("NFO metadata read %d times, want 0", nfo.metadataCalls)
+	}
+}
+
+// A fill-empty write lets an NFO list fill an empty stored list but does not
+// add its entries to a stored one; a manual refresh replaces it.
+func TestScheduledRefresh_NFOListsFillButDoNotJoinStoredLists(t *testing.T) {
+	h, _ := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
+	stored := h.itemRepo.items["movie:tmdb:100"]
+	stored.TmdbID = "100"
+	stored.Studios = []string{"Warner Bros."}
+
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "100"},
+		metadata: &MetadataResult{HasMetadata: true, Studios: []string{"Local Studio"}, Countries: []string{"GB"}},
+	}
+	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}}}
+	run := func(mode RefreshMode) *models.MediaItem {
+		t.Helper()
+		if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: mode}, []Provider{nfo, remote}); err != nil {
+			t.Fatalf("ProcessWithProviders: %v", err)
+		}
+		item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+		if err != nil {
+			t.Fatalf("load item: %v", err)
+		}
+		return item
+	}
+
+	item := run(ModeScheduledRefresh)
+	if !reflect.DeepEqual(item.Studios, []string{"Warner Bros."}) || !reflect.DeepEqual(item.Countries, []string{"GB"}) {
+		t.Errorf("after scheduled refresh studios=%v countries=%v, want the stored studios kept and the empty countries filled", item.Studios, item.Countries)
+	}
+	item = run(ModeManualRefresh)
+	if !reflect.DeepEqual(item.Studios, []string{"Local Studio"}) {
+		t.Errorf("after manual refresh studios=%v, want the NFO list", item.Studios)
+	}
+}

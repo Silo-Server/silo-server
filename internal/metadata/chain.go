@@ -327,11 +327,16 @@ func ResolveChainWithChecker(
 		return nil, fmt.Errorf("getting chain for folder %d: %w", folderID, err)
 	}
 
-	// Filter to only enabled entries.
+	// Filter to only enabled entries. A local entry the admin switched off
+	// stays off in the fallback below, which would otherwise bring the
+	// default-enabled local tier back.
 	var enabledEntries []ChainEntry
+	localOff := make(map[capabilityKey]bool)
 	for _, e := range chainEntries {
 		if e.Enabled {
 			enabledEntries = append(enabledEntries, e)
+		} else if e.Local {
+			localOff[capabilityKey{e.PluginInstallationID, e.CapabilityID}] = true
 		}
 	}
 	chainEntries = enabledEntries
@@ -340,11 +345,17 @@ func ResolveChainWithChecker(
 		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool, checker), nil
 	}
 
-	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker)
+	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker, localOff)
 	if err != nil {
 		return nil, err
 	}
 	return providers, nil
+}
+
+// capabilityKey identifies one installation's metadata capability.
+type capabilityKey struct {
+	installationID int
+	capabilityID   string
 }
 
 // CapabilityInfo holds the fields needed to construct a provider from plugin tables.
@@ -398,12 +409,14 @@ func resolveEnabledProviders(
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
 // their plugin manifest default_priority for the given content level. Providers
 // without a declared priority are placed last (sorted by installation ID as a tiebreaker).
+// Capabilities in exclude are left out.
 func resolveEnabledProvidersByPriority(
 	ctx context.Context,
 	contentLevel string,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
 	checker InstallationEnabledChecker,
+	exclude map[capabilityKey]bool,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
@@ -421,6 +434,9 @@ func resolveEnabledProvidersByPriority(
 	// single-purpose provider is never invoked for content it does not handle.
 	items := make([]ranked, 0, len(caps))
 	for _, c := range caps {
+		if exclude[capabilityKey{c.PluginInstallationID, c.CapabilityID}] {
+			continue
+		}
 		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)
 		if !providerEligibleForFallback(metadataJSON, contentLevel) {
 			slog.DebugContext(ctx, "skipping metadata provider: not eligible for chain-less fallback", "component", "metadata",

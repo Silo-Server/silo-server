@@ -1,6 +1,10 @@
 package metadata
 
-import "github.com/Silo-Server/silo-server/internal/models"
+import (
+	"slices"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
 
 // localListFields records which list fields the local provider (NFO)
 // supplied while one pipeline run folds provider results together. Precedence
@@ -22,6 +26,24 @@ func (l *localListFields) record(result *MetadataResult) {
 	cast, crew := splitPeopleByRole(result.People)
 	l.cast = l.cast || len(cast) > 0
 	l.crew = l.crew || len(crew) > 0
+}
+
+// keepStoredLists prepares a fill-empty write (initial match of a stored
+// item, scheduled refresh): a list the local provider supplied fills a stored
+// list only when it is empty, like the NFO's scalar fields, instead of being
+// added to it. A manual refresh replaces it. Credits are left alone; the
+// write replaces them wholesale.
+func (l localListFields) keepStoredLists(accumulator, stored *MetadataResult) {
+	keep := func(supplied bool, local *[]string, storedList []string) {
+		if supplied && len(storedList) > 0 {
+			*local = nil
+		}
+	}
+	keep(l.genres, &accumulator.Genres, stored.Genres)
+	keep(l.studios, &accumulator.Studios, stored.Studios)
+	keep(l.networks, &accumulator.Networks, stored.Networks)
+	keep(l.countries, &accumulator.Countries, stored.Countries)
+	keep(l.keywords, &accumulator.Keywords, stored.Keywords)
 }
 
 // restrict returns a remote result with the lists the local provider supplied
@@ -50,6 +72,9 @@ func (l localListFields) restrict(accumulator, result *MetadataResult) *Metadata
 		out.Keywords = nil
 	}
 	if l.cast || l.crew {
+		// The accumulator's credits may share their array with the local
+		// result; enrich a copy.
+		accumulator.People = slices.Clone(accumulator.People)
 		remoteCast, remoteCrew := splitPeopleByRole(result.People)
 		var kept []models.ItemPerson
 		if l.cast {
