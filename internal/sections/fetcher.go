@@ -37,6 +37,8 @@ type SectionWithItems struct {
 
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
 type SectionItemMeta struct {
+	// Raw still path, before image sizing or signing; nil means unavailable metadata.
+	EpisodeStillPath  *string
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -1270,7 +1272,7 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 	case SectionReturningShows:
 		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionProfileActivityFeed:
-		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
+		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionWatchlist, SectionFavorites:
 		return f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	default:
@@ -2771,6 +2773,14 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 	return scanMediaItems(rows)
 }
 
+// markEpisodeStillProvenance records whether the artwork the episode query
+// picked is the episode's own still. It runs on the selected raw paths, before
+// sizing or signing, so the flags stay with the paths through the section cache.
+func markEpisodeStillProvenance(item *models.MediaItem, stillPath string) {
+	item.PosterIsEpisodeStill = new(stillPath != "" && item.PosterPath == stillPath)
+	item.BackdropIsEpisodeStill = new(stillPath != "" && item.BackdropPath == stillPath)
+}
+
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
@@ -2814,7 +2824,8 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
-			si.status
+			si.status,
+			COALESCE(e.still_path, '')
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -2835,6 +2846,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			episodeNumber int
 			seriesTitle   string
 			airDate       *time.Time
+			stillPath     string
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2856,17 +2868,20 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.BackdropThumbhash,
 			&item.LogoPath,
 			&item.Status,
+			&stillPath,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
+		markEpisodeStillProvenance(&item, stillPath)
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
-			SeriesID:      &seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
-			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			EpisodeStillPath: new(stillPath),
+			SeriesID:         &seriesID,
+			SeriesTitle:      seriesTitle,
+			SeasonNumber:     &seasonNumber,
+			EpisodeNumber:    &episodeNumber,
+			Badges:           recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -3229,6 +3244,12 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 	args = append(args, scope.interval)
 	argIdx++
 
+	if scope.userID > 0 {
+		conditions = append(conditions, fmt.Sprintf("uwh.user_id = $%d", argIdx))
+		args = append(args, scope.userID)
+		argIdx++
+	}
+
 	if scope.profileID != "" {
 		op := "="
 		if scope.excludeProfile {
@@ -3270,6 +3291,8 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 type watchActivityScope struct {
 	interval string // Postgres interval, e.g. "7 days"
 	rank     watchActivityRank
+	// userID, when set, keeps only that account's history.
+	userID int
 	// profileID, when set, keeps only that profile's history, or with
 	// excludeProfile every other profile's history.
 	profileID      string
@@ -3317,7 +3340,11 @@ func (f *Fetcher) queryWatchActivity(ctx context.Context, rail, query string, ar
 	return items, len(items), nil
 }
 
-func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+// fetchProfileActivityFeed lists recent watches by every other profile on the
+// server (household mode) or by one pinned profile. The pinned profile_id is
+// saved section config, so it resolves only to a profile on the caller's
+// account: pinning another account's profile lists nothing.
+func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.ProfileActivityFeedParams
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
@@ -3328,13 +3355,17 @@ func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSectio
 	if target == "" && profileID == "" {
 		return []*models.MediaItem{}, 0, nil
 	}
+	// A pinned profile needs an account to check it against.
+	if target != "" && userID <= 0 {
+		return []*models.MediaItem{}, 0, nil
+	}
 
 	// Household mode lists the last week of every other profile's plays; a
 	// named profile shows its last month. Each title appears once, ordered by
 	// its most recent play.
 	scope := watchActivityScope{interval: "7 days", rank: rankByLatest, profileID: profileID, excludeProfile: true}
 	if target != "" {
-		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, profileID: target}
+		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, userID: userID, profileID: target}
 	}
 	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, scope)
 	return f.queryWatchActivity(ctx, "profile activity feed", query, args)

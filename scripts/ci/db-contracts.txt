@@ -131,6 +131,7 @@
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestArtifactEnsureQueuedRoundTripsToneMapRecipe
 ./internal/downloads TestSubscriptionQualityPostgres
 ./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
 ./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
@@ -169,9 +170,25 @@
 ./internal/catalog TestRatingSourceRepositoryUpsertPostgres
 ./internal/catalog TestRatingSourceRepositorySyncsTMDBVotesPostgres
 
+# An admin metadata edit that clears a field stores NULL, takes a cleared
+# rating's per-source row with it, and recomputes series air dates.
+./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
+
+# ChatGPT credential rotations serialize independently of general settings.
+./internal/catalog TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
+./internal/catalog TestSettingsValueWaitersPreservePoolCapacityDB
+./internal/catalog TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
+
+# Marker thumbnails preserve current ranges and provider image inventories.
+./internal/chapterthumbs TestMarkerOnlyThumbnailsAndStaleEditsDB
+./internal/chapterthumbs TestOnDemandMarkerThumbnailsDB
+./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
+./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
+./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB

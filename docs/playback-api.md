@@ -366,3 +366,19 @@ code, the deny marker and the attempt row with v2. Apple and Android use this
 surface until they adopt v2; it is retired with the rest of `/api/v1` under the
 `410 client_upgrade_required` tombstone
 ([API contract](architecture/api-contract.md)).
+
+### Marker preview delivery
+
+Native v2 playback capabilities also advertise `marker_thumbnails_v1`. The web
+player opts into that feature at playback start to receive `marker_thumbnail_ready`
+updates; negotiation stays fixed for the attempt. Canonical watch reads return
+the same durable optional preview fields on `marker_segments`, so reconnects
+and clients without the realtime feature can refresh through the normal read.
+The frozen v1 listener does not advertise or negotiate this feature.
+
+A marker preview is captured at its start timestamp. It does not replace an
+embedded chapter, change seek boundaries, or enable timeline trickplay. Native
+clients can ignore the optional preview fields while keeping chapter navigation.
+Jellyfin chapter names, ticks and image mappings continue to represent embedded
+chapters; marker images are not projected as invented Jellyfin chapters. Offline
+marker inventories do not include these remotely served preview images.

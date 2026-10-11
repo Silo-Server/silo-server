@@ -49,6 +49,7 @@ const (
 	EventAdminStatsInvalidated       = "admin_stats_invalidated"
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
+	EventMarkerThumbnailReady        = "marker_thumbnail_ready"
 	EventSubtitleTimingChanged       = "subtitle_timing_changed"
 	EventSubtitleSyncUpdated         = "subtitle_sync_updated"
 	EventUserDisabled                = "user_disabled"

@@ -82,6 +82,9 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 		return
 	}
 	selected.SetMarkers(file)
+	if h.MarkerImageURLs != nil {
+		selected.MarkerPreviews = catalog.BuildMarkerPreviews(ctx, file, h.MarkerImageURLs.ResolveURLs)
+	}
 	detail.Intro, detail.Credits, detail.Recap, detail.Preview = selected.Intro, selected.Credits, selected.Recap, selected.Preview
 	for i := range detail.PlaybackVariants {
 		for j := range detail.PlaybackVariants[i].Parts {
@@ -89,6 +92,7 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 				version := &detail.PlaybackVariants[i].Parts[j].Versions[k]
 				if version.FileID == selectedFileID {
 					version.SetMarkers(file)
+					version.MarkerPreviews = selected.MarkerPreviews
 				}
 			}
 		}

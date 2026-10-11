@@ -390,29 +390,31 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge       *int                   `json:"-"`
-	AdvisorySource    string                 `json:"-"`
-	Status            string                 `json:"status"`
-	ShowStatus        string                 `json:"show_status,omitempty"`
-	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64               `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                   `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                   `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                 `json:"original_language,omitempty"`
-	Overview          string                 `json:"overview,omitempty"`
-	PositionSeconds   *float64               `json:"position_seconds,omitempty"`
-	DurationSeconds   *float64               `json:"duration_seconds,omitempty"`
-	ProgressUpdatedAt *string                `json:"progress_updated_at,omitempty"`
-	PosterURL         string                 `json:"poster_url,omitempty"`
-	PosterThumbhash   string                 `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                 `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                 `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                 `json:"logo_url,omitempty"`
-	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges            []string               `json:"badges,omitempty"`
-	ItemSource        string                 `json:"item_source,omitempty"`
-	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent     *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	AdvisoryAge            *int                   `json:"-"`
+	AdvisorySource         string                 `json:"-"`
+	Status                 string                 `json:"status"`
+	ShowStatus             string                 `json:"show_status,omitempty"`
+	RatingIMDB             *float64               `json:"rating_imdb,omitempty"`
+	RatingTMDB             *float64               `json:"rating_tmdb,omitempty"`
+	RatingRTCritic         *int                   `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience       *int                   `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage       string                 `json:"original_language,omitempty"`
+	Overview               string                 `json:"overview,omitempty"`
+	PositionSeconds        *float64               `json:"position_seconds,omitempty"`
+	DurationSeconds        *float64               `json:"duration_seconds,omitempty"`
+	ProgressUpdatedAt      *string                `json:"progress_updated_at,omitempty"`
+	PosterIsEpisodeStill   *bool                  `json:"-"`
+	BackdropIsEpisodeStill *bool                  `json:"-"`
+	PosterURL              string                 `json:"poster_url,omitempty"`
+	PosterThumbhash        string                 `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                 `json:"backdrop_url,omitempty"`
+	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                 `json:"logo_url,omitempty"`
+	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	Badges                 []string               `json:"badges,omitempty"`
+	ItemSource             string                 `json:"item_source,omitempty"`
+	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
 }
 
 type resolvedSectionResponse struct {
@@ -1707,32 +1709,41 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		ContentID: item.ContentID,
 		// The resolver validated the item's own hint against this profile, so
 		// its answer replaces the unvalidated one carried by the item.
-		PlayContentID:     resolvedPlayContentID,
-		Type:              item.Type,
-		Title:             item.Title,
-		Year:              item.Year,
-		Runtime:           item.Runtime,
-		Genres:            item.Genres,
-		Keywords:          item.Keywords,
-		Studios:           item.Studios,
-		Networks:          item.Networks,
-		ContentRating:     item.ContentRating,
-		AdvisoryAge:       item.AdvisoryAge,
-		AdvisorySource:    item.AdvisorySource,
-		Status:            item.Status,
-		ShowStatus:        item.ShowStatus,
-		RatingIMDB:        item.RatingIMDB,
-		RatingTMDB:        item.RatingTMDB,
-		RatingRTCritic:    item.RatingRTCritic,
-		RatingRTAudience:  item.RatingRTAudience,
-		OriginalLanguage:  item.OriginalLanguage,
-		Overview:          item.Overview,
-		PosterThumbhash:   item.PosterThumbhash,
-		BackdropThumbhash: item.BackdropThumbhash,
-		OverlaySummary:    overlaySummary,
-		UserState:         userState,
+		PlayContentID:          resolvedPlayContentID,
+		Type:                   item.Type,
+		Title:                  item.Title,
+		Year:                   item.Year,
+		Runtime:                item.Runtime,
+		Genres:                 item.Genres,
+		Keywords:               item.Keywords,
+		Studios:                item.Studios,
+		Networks:               item.Networks,
+		ContentRating:          item.ContentRating,
+		AdvisoryAge:            item.AdvisoryAge,
+		AdvisorySource:         item.AdvisorySource,
+		Status:                 item.Status,
+		ShowStatus:             item.ShowStatus,
+		RatingIMDB:             item.RatingIMDB,
+		RatingTMDB:             item.RatingTMDB,
+		RatingRTCritic:         item.RatingRTCritic,
+		RatingRTAudience:       item.RatingRTAudience,
+		OriginalLanguage:       item.OriginalLanguage,
+		Overview:               item.Overview,
+		PosterThumbhash:        item.PosterThumbhash,
+		BackdropThumbhash:      item.BackdropThumbhash,
+		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,
+		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
+		OverlaySummary:         overlaySummary,
+		UserState:              userState,
 	}
 	if meta != nil {
+		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
+			// Items from queries that don't mark provenance compare their
+			// artwork with the episode's still. The episode query marks it on
+			// the item, so a cached item keeps the provenance of its own paths.
+			resp.PosterIsEpisodeStill = new(*meta.EpisodeStillPath != "" && item.PosterPath == *meta.EpisodeStillPath)
+			resp.BackdropIsEpisodeStill = new(*meta.EpisodeStillPath != "" && item.BackdropPath == *meta.EpisodeStillPath)
+		}
 		if meta.SeriesID != nil {
 			resp.SeriesID = *meta.SeriesID
 		}
