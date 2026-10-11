@@ -101,6 +101,12 @@
 # Local sidecar change detection lists scanned items and stores fingerprints.
 ./internal/metadata TestLocalSidecarRepositoryDB
 
+# The process that discovers local artwork copies it, other drains wait out the
+# discovery hold, and a server without the library mount leaves local jobs to
+# one that has it without counting attempts.
+./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
+./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking

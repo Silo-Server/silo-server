@@ -191,6 +191,9 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		inputs[i].ProviderID = imageCacheLocalProviderID
 		inputs[i].ProviderContentID = seriesID
 	}
+	// A person's copy is keyed by the person, so two people credited on one
+	// title never share a local/ prefix.
+	inputs[3].ProviderContentID = personID
 
 	t.Run("held from other drains", func(t *testing.T) {
 		repo := NewImageCacheJobRepository(pool)
@@ -211,6 +214,30 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		}
 		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
 			t.Fatalf("requeue: %v", err)
+		}
+	})
+
+	t.Run("discovery does not skip a failure's backoff", func(t *testing.T) {
+		repo := NewImageCacheJobRepository(pool)
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs
+			SET attempt_count = 1, next_attempt_at = NOW() + interval '1 hour', last_error = 'local image read failed: io'
+			WHERE target_type = 'item' AND target_content_id = $1 AND image_type = 'poster'
+		`, seriesID); err != nil {
+			t.Fatalf("back off job: %v", err)
+		}
+		queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1])
+		if err != nil || len(queued) != 1 {
+			t.Fatalf("enqueueHeldLocalJobs = %d queued, %v; want the backed-off job reported", len(queued), err)
+		}
+		if job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server"); err != nil || job != nil {
+			t.Fatalf("discovering claim = %+v, %v; want none while the failure backs off", job, err)
+		}
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET attempt_count = 0, next_attempt_at = NOW(), last_error = ''
+			WHERE target_type = 'item' AND target_content_id = $1 AND image_type = 'poster'
+		`, seriesID); err != nil {
+			t.Fatalf("reset job: %v", err)
 		}
 	})
 
@@ -258,16 +285,13 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	ctx := context.Background()
 
-	run := func(t *testing.T, roots []string, source string) localArtworkJobRow {
+	repo := NewImageCacheJobRepository(pool)
+	claimAndProcess := func(t *testing.T, contentID string, roots []string) localArtworkJobRow {
 		t.Helper()
-		contentID := fmt.Sprintf("movie:local-root-%d", time.Now().UnixNano())
-		cleanupLocalArtworkJobs(t, pool, contentID)
-		repo := NewImageCacheJobRepository(pool)
-		if err := repo.Enqueue(ctx, EnqueueImageCacheJobInput{
-			TargetType: ImageCacheTargetItem, TargetContentID: contentID, SeriesID: contentID,
-			ContentType: "movie", ImageType: ImageCacheImagePoster, SourcePath: source,
-		}); err != nil {
-			t.Fatalf("enqueue: %v", err)
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET next_attempt_at = NOW() WHERE target_content_id = $1
+		`, contentID); err != nil {
+			t.Fatalf("make job due: %v", err)
 		}
 		jobs, err := repo.claimDueForTarget(ctx, "mountless-server", contentID, false, 1)
 		if err != nil || len(jobs) != 1 {
@@ -277,10 +301,26 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		p.processClaimedJobs(ctx, "mountless-server", jobs, 1)
 		return readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster)
 	}
+	enqueue := func(t *testing.T, source string) string {
+		t.Helper()
+		contentID := fmt.Sprintf("movie:local-root-%d", time.Now().UnixNano())
+		cleanupLocalArtworkJobs(t, pool, contentID)
+		if err := repo.Enqueue(ctx, EnqueueImageCacheJobInput{
+			TargetType: ImageCacheTargetItem, TargetContentID: contentID, SeriesID: contentID,
+			ContentType: "movie", ImageType: ImageCacheImagePoster, SourcePath: source,
+		}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		return contentID
+	}
+	run := func(t *testing.T, roots []string, source string) localArtworkJobRow {
+		t.Helper()
+		return claimAndProcess(t, enqueue(t, source), roots)
+	}
 	assertDeferred := func(t *testing.T, got localArtworkJobRow) {
 		t.Helper()
 		if got.status != ImageCacheStatusQueued || got.attempts != 0 ||
-			!strings.Contains(got.lastError, "library root not available on this server") ||
+			!strings.HasPrefix(got.lastError, localImageStorageUnavailable) ||
 			got.nextAttemptIn < imageCacheRootUnavailableRetry-time.Minute || got.nextAttemptIn > imageCacheRootUnavailableRetry+time.Minute {
 			t.Fatalf("job = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRetry)
 		}
@@ -295,7 +335,25 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 
 	t.Run("root absent on this server", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "unmounted")
-		assertDeferred(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"))
+		contentID := enqueue(t, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000")
+		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
+
+		// Deferred again for the same reason, it waits longer, still without
+		// counting an attempt.
+		got := claimAndProcess(t, contentID, []string{root})
+		if got.status != ImageCacheStatusQueued || got.attempts != 0 ||
+			got.nextAttemptIn < imageCacheRootUnavailableRepeatRetry-time.Minute {
+			t.Fatalf("repeat deferral = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRepeatRetry)
+		}
+	})
+
+	t.Run("share nested in a present root is not mounted", func(t *testing.T) {
+		root := t.TempDir()
+		writeSidecar(t, filepath.Join(root, "local-disk", "Other", "poster.jpg"))
+		if err := os.Mkdir(filepath.Join(root, "nas"), 0o755); err != nil {
+			t.Fatalf("mkdir mount point: %v", err)
+		}
+		assertDeferred(t, run(t, []string{root}, "file://"+filepath.Join(root, "nas", "Film", "poster.jpg")+"?v=12-1700000000"))
 	})
 
 	t.Run("root is an empty mount point", func(t *testing.T) {
@@ -318,4 +376,43 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		}
 		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"), "outside library roots")
 	})
+}
+
+// TestLocalImageCacheClaimUsesLocalDueIndexDB pins the plan of the drain's
+// local-only claim, which runs while metadata.cache_images is off. Remote jobs
+// queued before caching was turned off stay due and unclaimed; the partial
+// index keeps the claim from reading them on every drain.
+func TestLocalImageCacheClaimUsesLocalDueIndexDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := t.Context()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	prefix := fmt.Sprintf("local-due-plan-%d", time.Now().UnixNano())
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO metadata_image_cache_jobs (
+			target_type, target_content_id, target_language, series_id, source_path,
+			provider_id, provider_content_id, content_type, image_type, status,
+			attempt_count, next_attempt_at, locked_by, last_error, created_at, updated_at
+		)
+		SELECT 'item', $1 || '-' || g, '', $1 || '-' || g,
+			CASE WHEN g % 1000 = 0 THEN 'file:///media/' || g || '/poster.jpg' ELSE 'https://img.example/' || g || '.jpg' END,
+			'tmdb', g::text, 'movie', 'poster', 'queued', 0, NOW() - interval '1 minute', '', '', NOW(), NOW()
+		FROM generate_series(1, 20000) g
+	`, prefix); err != nil {
+		t.Fatalf("seed queue: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE metadata_image_cache_jobs`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	results, err := tx.Conn().PgConn().Exec(ctx, `EXPLAIN (GENERIC_PLAN, FORMAT JSON) `+claimDueQuery(false, true)).ReadAll()
+	if err != nil || len(results) != 1 || len(results[0].Rows) != 1 {
+		t.Fatalf("explain local claim: %v", err)
+	}
+	raw := string(results[0].Rows[0][0])
+	if !strings.Contains(raw, `"Index Name": "metadata_image_cache_jobs_local_due_idx"`) {
+		t.Fatalf("local claim does not use metadata_image_cache_jobs_local_due_idx: %s", raw)
+	}
 }

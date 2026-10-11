@@ -54,12 +54,13 @@ type localArtworkCopies struct {
 // CopyLocalArtwork queues the local sidecar inputs and copies them on this
 // process in the background, through the same claim, confinement, read and
 // write path as a queued job. It returns once the jobs are queued; it never
-// waits for a copy. Inputs that are not local are ignored.
+// waits for a copy. Inputs that are not local sidecar files are ignored.
 //
 // Inputs may target any slot the processor updates (items, seasons, episodes,
 // people). The processor confines the read to the library roots of SeriesID,
 // falling back to TargetContentID, so a person photo found in an item's
-// folder must carry that item's content ID as SeriesID.
+// folder carries that item's content ID as SeriesID (and the person's ID as
+// ProviderContentID, which keys its copy).
 func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []EnqueueImageCacheJobInput) error {
 	if p == nil || p.cacher == nil {
 		return errNoLocalArtworkQueue
@@ -72,13 +73,18 @@ func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []Enq
 	if len(local) == 0 {
 		return nil
 	}
+	// After a partial failure, the slots already queued behind the hold are
+	// still this process's to copy.
 	queued, err := store.enqueueHeldLocalJobs(ctx, local)
-	if err != nil {
-		return err
+	if len(queued) > 0 {
+		p.startLocalArtworkCopies(ctx, store, queued)
 	}
-	if len(queued) == 0 {
-		return nil
-	}
+	return err
+}
+
+// startLocalArtworkCopies hands queued slots to the copy workers, starting
+// them on first use. A slot that does not fit the backlog waits out its hold.
+func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store localArtworkJobStore, queued []EnqueueImageCacheJobInput) {
 	p.localCopies.start.Do(func() {
 		p.localCopies.workerID = "local-artwork:" + uuid.NewString()
 		p.localCopies.pending = make(chan EnqueueImageCacheJobInput, localArtworkCopyBacklog)
@@ -100,7 +106,6 @@ func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []Enq
 		slog.InfoContext(ctx, "metadata image cache: local artwork backlog full, leaving copies to the queue",
 			"component", "metadata", "count", dropped, "retry_after", localArtworkDiscoveryHold)
 	}
-	return nil
 }
 
 func (p *ImageCacheProcessor) runLocalArtworkCopies(store localArtworkJobStore) {
@@ -137,44 +142,42 @@ func (p *ImageCacheProcessor) waitLocalArtworkCopies() {
 	p.localCopies.inflight.Wait()
 }
 
-// deferLocalJobWithoutRoot releases a local job this server cannot serve
-// because none of the library roots holding its file is present here: each is
-// missing, unreadable, unresponsive, or empty (an unmounted share often leaves
-// an empty mount point). The job goes back to the queue without counting an
-// attempt, for a server that has the mount. When a root is present, the
-// failure is about the file and the caller records it as usual.
-func (p *ImageCacheProcessor) deferLocalJobWithoutRoot(ctx context.Context, job *models.MetadataImageCacheJob, path string, roots []string) bool {
+// deferLocalJobWithoutStorage releases a local job this server cannot serve
+// because the storage holding its file is not mounted here. It applies the
+// rule a refresh uses before dropping cached local art: the nearest existing
+// folder at or above the file's folder, searching no higher than the library
+// root, must list entries. An unmounted share leaves its mount point empty or
+// missing, also when it is nested inside a root that is present, and a folder
+// that cannot be read or does not answer in time counts as absent too. The
+// job goes back to the queue without counting an attempt, for a server that
+// has the mount. When the folder is there, the failure is about the file and
+// the caller records it as usual.
+func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, job *models.MetadataImageCacheJob, path string, roots []string) bool {
 	deferrer, ok := p.jobs.(imageCacheJobDeferrer)
 	if !ok {
 		return false
 	}
-	var missing []string
+	var containing []string
 	for _, root := range roots {
 		root = filepath.Clean(strings.TrimSpace(root))
-		if !localImagePathWithinRoots(path, []string{root}) {
-			continue
+		if localImagePathWithinRoots(path, []string{root}) {
+			containing = append(containing, root)
 		}
-		probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout)
-		if probe.Reachable && !probe.Empty {
-			return false
-		}
-		reason := probe.ErrorCode
-		if reason == "" {
-			reason = "empty mount point"
-		}
-		missing = append(missing, root+" ("+reason+")")
 	}
-	if len(missing) == 0 {
+	// A canceled job must not read as an unresponsive mount; each probe
+	// keeps its own timeout.
+	folders := &localArtworkRetention{ctx: context.WithoutCancel(ctx), probes: make(map[string]rootcheck.Result)}
+	if len(containing) == 0 || folders.nearestFolderListsEntries(filepath.Dir(path), containing) {
 		return false
 	}
-	errText := "library root not available on this server: " + strings.Join(missing, ", ")
+	errText := localImageStorageUnavailable + ": " + filepath.Dir(path)
 	writeCtx, cancel := terminalJobContext(ctx)
 	defer cancel()
-	if err := deferrer.DeferClaimed(writeCtx, job.ID, job.LockedBy, errText, imageCacheRootUnavailableRetry); err != nil {
+	if err := deferrer.DeferClaimed(writeCtx, job.ID, job.LockedBy, errText, imageCacheRootUnavailableRetry, imageCacheRootUnavailableRepeatRetry); err != nil {
 		p.logger.WarnContext(ctx, "metadata image cache: failed to defer local artwork job", "job_id", job.ID, "error", err)
 		return false
 	}
 	p.logger.DebugContext(ctx, "metadata image cache: left local artwork for a server with the library mounted",
-		"job_id", job.ID, "target_id", job.TargetContentID, "reason", errText, "retry_after", imageCacheRootUnavailableRetry)
+		"job_id", job.ID, "target_id", job.TargetContentID, "reason", errText)
 	return true
 }

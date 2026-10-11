@@ -14,8 +14,10 @@ import (
 // the library mount; the queue keeps the job for retries.
 
 const (
-	// localImageCacheSourceSQL matches jobs whose source is a local sidecar.
-	localImageCacheSourceSQL = "source_path ILIKE 'file://%'"
+	// localImageCacheSourceSQL matches jobs whose source is a local sidecar
+	// file (LocalImageSourceURL writes the scheme in lower case). It matches
+	// the predicate of metadata_image_cache_jobs_local_due_idx.
+	localImageCacheSourceSQL = "source_path LIKE 'file://%'"
 
 	// localArtworkDiscoveryHold is how long a job queued by the discovering
 	// process stays out of other drains' reach while that process copies it.
@@ -24,10 +26,16 @@ const (
 	localArtworkDiscoveryHold = 10 * time.Minute
 
 	// imageCacheRootUnavailableRetry is how long a local job waits after a
-	// claimer could not see the library root that holds the file. The attempt
-	// is not counted: a server without the mount says nothing about the file,
-	// and the job stays available to servers that have it.
-	imageCacheRootUnavailableRetry = 10 * time.Minute
+	// claimer could not see the storage that holds the file. The attempt is not
+	// counted: a server without the mount says nothing about the file, and the
+	// job stays available to servers that have it. A job deferred again for the
+	// same reason waits imageCacheRootUnavailableRepeatRetry, so storage that no
+	// server mounts any more costs a claim an hour per job, not six.
+	imageCacheRootUnavailableRetry       = 10 * time.Minute
+	imageCacheRootUnavailableRepeatRetry = time.Hour
+
+	// localImageStorageUnavailable starts the last_error of a deferred job.
+	localImageStorageUnavailable = "local image storage not mounted on this server"
 )
 
 // ClaimDueLocal claims due jobs with local file:// sources only. Draining uses
@@ -46,8 +54,9 @@ func (r *ImageCacheJobRepository) ClaimDueLocal(ctx context.Context, workerID st
 // enqueueHeldLocalJobs queues discovered local artwork behind
 // localArtworkDiscoveryHold, so background drains on other servers leave it to
 // the discovering process (claimQueuedLocalJob ignores the hold). It returns
-// the slots left queued; a slot whose job already succeeded for the same
-// source, or is running, needs no copy.
+// the slots left queued, including those of chunks committed before an error;
+// a slot whose job already succeeded for the same source, or is running, needs
+// no copy.
 func (r *ImageCacheJobRepository) enqueueHeldLocalJobs(ctx context.Context, inputs []EnqueueImageCacheJobInput) ([]EnqueueImageCacheJobInput, error) {
 	var queued []EnqueueImageCacheJobInput
 	_, err := r.upsertImageCacheJobs(ctx, inputs, false, localArtworkDiscoveryHold, &queued)
@@ -55,9 +64,11 @@ func (r *ImageCacheJobRepository) enqueueHeldLocalJobs(ctx context.Context, inpu
 }
 
 // claimQueuedLocalJob claims the queued job for one discovered slot when it
-// still carries the discovered source, whatever its next_attempt_at. It
-// returns nil when another worker holds the job, it already finished, or the
-// slot's source has changed since.
+// still carries the discovered source. It ignores the discovery hold and a
+// deferral for missing storage, which leave attempt_count alone, but not the
+// backoff of an attempt that failed. It returns nil when another worker holds
+// the job, it already finished or is backing off, or the slot's source has
+// changed since.
 func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in EnqueueImageCacheJobInput, workerID string) (*models.MetadataImageCacheJob, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil
@@ -78,6 +89,7 @@ func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in En
 		  AND j.target_language = $4
 		  AND j.source_path = $5
 		  AND j.status = 'queued'
+		  AND (j.attempt_count = 0 OR j.next_attempt_at <= NOW())
 		RETURNING `+imageCacheJobReturningColumns,
 		in.TargetType, in.TargetContentID, in.ImageType, in.TargetLanguage, in.SourcePath, workerID)
 	if err != nil {
@@ -90,16 +102,20 @@ func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in En
 	return jobs[0], nil
 }
 
-// DeferClaimed returns a claimed job to the queue after delay without counting
-// an attempt, recording why. The lease guard matches MarkFailed.
-func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay time.Duration) error {
+// DeferClaimed returns a claimed job to the queue without counting an attempt,
+// recording why. It waits delay, or repeatDelay when the job was last deferred
+// for the same reason. The lease guard matches MarkFailed.
+func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
-			next_attempt_at = NOW() + $3::interval,
+			next_attempt_at = NOW() + CASE
+				WHEN last_error = left($4, 2000) THEN $5::interval
+				ELSE $3::interval
+			END,
 			locked_at = NULL,
 			locked_by = '',
 			last_error = left($4, 2000),
@@ -107,7 +123,7 @@ func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lo
 		WHERE id = $1
 		  AND status = 'running'
 		  AND locked_by = $2
-	`, id, lockedBy, intervalLiteral(max(delay, 0)), errText)
+	`, id, lockedBy, intervalLiteral(max(delay, 0)), errText, intervalLiteral(max(repeatDelay, 0)))
 	if err != nil {
 		return fmt.Errorf("deferring metadata image cache job: %w", err)
 	}
@@ -128,7 +144,7 @@ type localArtworkJobStore interface {
 // imageCacheJobDeferrer is implemented by job stores that can release a
 // claimed job without counting an attempt.
 type imageCacheJobDeferrer interface {
-	DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay time.Duration) error
+	DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error
 }
 
 // localImageCacheJobClaimer is implemented by job stores that can claim only
@@ -137,10 +153,17 @@ type localImageCacheJobClaimer interface {
 	ClaimDueLocal(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error)
 }
 
-// splitLocalImageCacheInputs separates local sidecar inputs from the rest.
+// isLocalSidecarSource reports whether source names a sidecar file (file://):
+// the artwork copied on discovery, and whatever metadata.cache_images says.
+func isLocalSidecarSource(source string) bool {
+	_, ok := localImageSourceFilePath(source)
+	return ok
+}
+
+// splitLocalImageCacheInputs separates local sidecar file inputs from the rest.
 func splitLocalImageCacheInputs(inputs []EnqueueImageCacheJobInput) (local, remote []EnqueueImageCacheJobInput) {
 	for _, in := range inputs {
-		if isLocalImageSourcePath(in.SourcePath) {
+		if isLocalSidecarSource(in.SourcePath) {
 			local = append(local, in)
 		} else {
 			remote = append(remote, in)

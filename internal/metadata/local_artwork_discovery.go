@@ -11,6 +11,7 @@ import (
 // SetLocalArtworkCopier wires the copier that copies local sidecar artwork a
 // refresh discovers into the artwork store from this process. Without it,
 // local artwork is only queued, for whichever server drains the queue first.
+// Call it during setup, before refreshes run.
 func (s *MetadataService) SetLocalArtworkCopier(copier LocalArtworkCopier) {
 	s.localArtwork = copier
 }
@@ -34,15 +35,12 @@ func (s *MetadataService) copyLocalArtwork(ctx context.Context, targetKind, targ
 	return remote
 }
 
-// A slot whose local copy is not cached yet keeps serving the copy it already
-// has (preserveCachedArtwork). With nothing cached, it serves the best remote
-// image the refresh found until the local copy lands, so a new item does not
-// show an empty slot meanwhile. The copy replaces it through the
-// source-matched update, because the slot's source stays the local file.
-
 // applyLocalArtworkFallback fills each item slot waiting on its local copy,
-// with nothing cached to show, from the best remote candidate. Locked artwork
-// gets no stand-in the admin did not choose.
+// with nothing cached to show, from the best remote candidate. A slot with a
+// cached copy keeps serving it (preserveCachedArtwork); an empty one would
+// leave a new item without a poster until the copy lands. The copy replaces
+// the stand-in through the source-matched update, because the slot's source
+// stays local. Locked artwork gets no stand-in the admin did not choose.
 func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, preferredLang string) {
 	if artworkLocked(item) {
 		return

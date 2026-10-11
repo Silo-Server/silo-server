@@ -208,18 +208,18 @@ func (r *ImageCacheJobRepository) Enqueue(ctx context.Context, in EnqueueImageCa
 }
 
 func (r *ImageCacheJobRepository) EnqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error) {
-	return r.enqueueBatch(ctx, inputs, false, 0)
+	return r.enqueueBatch(ctx, inputs, false)
 }
 
-// enqueueBatch upserts jobs. A positive hold makes every row this call queues
+func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
+	return r.upsertImageCacheJobs(ctx, inputs, requeueSucceeded, 0, nil)
+}
+
+// upsertImageCacheJobs upserts jobs. A positive hold makes every row it queues
 // or re-queues due only after the hold, so background drains leave it alone
-// while the caller works through it (see enqueueHeldLocalJobs).
-func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool, hold time.Duration) (int, error) {
-	return r.upsertImageCacheJobs(ctx, inputs, requeueSucceeded, hold, nil)
-}
-
-// upsertImageCacheJobs is enqueueBatch that, when queued is non-nil, also
-// appends the target key and source of every row left queued by the upsert.
+// while the caller works through it (see enqueueHeldLocalJobs). When queued is
+// non-nil, it also receives the target key and source of every row left
+// queued.
 func (r *ImageCacheJobRepository) upsertImageCacheJobs(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool, hold time.Duration, queued *[]EnqueueImageCacheJobInput) (int, error) {
 	if r == nil || r.pool == nil {
 		return 0, nil
@@ -562,7 +562,7 @@ func (r *ImageCacheJobRepository) claimDueForTarget(ctx context.Context, workerI
 	return r.claimDue(ctx, workerID, targetContentID, localOnly, limit)
 }
 
-func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error) {
+func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string, localOnly bool) (bool, error) {
 	if r == nil || r.pool == nil {
 		return false, nil
 	}
@@ -570,15 +570,17 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 	if targetContentID == "" {
 		return false, nil
 	}
-	var running bool
-	if err := r.pool.QueryRow(ctx, `
+	query := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM metadata_image_cache_jobs
-			WHERE `+imageCacheTargetScope("$1")+`
-			  AND status = 'running'
-		)
-	`, targetContentID).Scan(&running); err != nil {
+			WHERE ` + imageCacheTargetScope("$1") + `
+			  AND status = 'running'`
+	if localOnly {
+		query += " AND " + localImageCacheSourceSQL
+	}
+	var running bool
+	if err := r.pool.QueryRow(ctx, query+")", targetContentID).Scan(&running); err != nil {
 		return false, fmt.Errorf("checking running metadata image cache jobs: %w", err)
 	}
 	return running, nil
@@ -590,6 +592,20 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 	if r == nil || r.pool == nil || limit <= 0 {
 		return nil, nil
 	}
+	args := []any{limit, workerID}
+	if targetContentID != "" {
+		args = append(args, targetContentID)
+	}
+	rows, err := r.pool.Query(ctx, claimDueQuery(targetContentID != "", localOnly), args...)
+	if err != nil {
+		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
+	}
+	return scanClaimedImageCacheJobs(rows, limit)
+}
+
+// claimDueQuery claims up to $1 due jobs for worker $2, within target scope
+// $3 when targeted.
+func claimDueQuery(targeted, localOnly bool) string {
 	query := `
 		WITH due AS (
 			SELECT id
@@ -597,15 +613,13 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 			WHERE status = 'queued'
 			  AND next_attempt_at <= NOW()
 	`
-	args := []any{limit, workerID}
-	if targetContentID != "" {
+	if targeted {
 		query += " AND " + imageCacheTargetScope("$3")
-		args = append(args, targetContentID)
 	}
 	if localOnly {
 		query += " AND " + localImageCacheSourceSQL
 	}
-	query += `
+	return query + `
 			ORDER BY next_attempt_at ASC, id ASC
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -618,11 +632,6 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 		FROM due
 		WHERE j.id = due.id
 		RETURNING ` + imageCacheJobReturningColumns
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
-	}
-	return scanClaimedImageCacheJobs(rows, limit)
 }
 
 const imageCacheJobReturningColumns = `
@@ -999,7 +1008,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 		return page, fmt.Errorf("iterating existing provider artwork surface %d: %w", cursor.Surface, err)
 	}
 
-	page.Enqueued, err = r.enqueueBatch(ctx, inputs, true, 0)
+	page.Enqueued, err = r.enqueueBatch(ctx, inputs, true)
 	if err != nil {
 		// Do not return the advanced cursor after a partial enqueue. Rows committed
 		// by an earlier chunk are durable, and retrying from the old key is safe.
@@ -1493,7 +1502,7 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterating artwork ladder backfill candidates: %w", err)
 	}
-	return r.enqueueBatch(ctx, inputs, true, 0)
+	return r.enqueueBatch(ctx, inputs, true)
 }
 
 // HasLadderBackfillRemaining reports whether any cached artwork still lacks the
@@ -1786,7 +1795,7 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterating existing provider artwork: %w", err)
 	}
-	return r.enqueueBatch(ctx, inputs, true, 0)
+	return r.enqueueBatch(ctx, inputs, true)
 }
 
 // imageCacheLocalProviderID is the synthetic provider slug for local sidecar

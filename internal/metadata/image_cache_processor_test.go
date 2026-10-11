@@ -52,7 +52,7 @@ func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, ta
 	return jobs, nil
 }
 
-func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string, _ bool) (bool, error) {
 	running := f.alwaysRunning
 	if f.runningCalls < len(f.runningResults) {
 		running = f.runningResults[f.runningCalls]

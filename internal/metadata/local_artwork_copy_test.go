@@ -104,7 +104,7 @@ type deferringImageCacheJobs struct {
 	deferredText string
 }
 
-func (f *deferringImageCacheJobs) DeferClaimed(_ context.Context, id int64, _ string, errText string, _ time.Duration) error {
+func (f *deferringImageCacheJobs) DeferClaimed(_ context.Context, id int64, _ string, errText string, _, _ time.Duration) error {
 	f.deferredID = id
 	f.deferredText = errText
 	return nil

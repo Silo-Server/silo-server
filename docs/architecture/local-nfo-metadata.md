@@ -385,7 +385,8 @@ Caching and refresh:
   a person photo carries the owning item's content ID as `series_id` for root
   confinement) to `ImageCacheProcessor.CopyLocalArtwork`, which queues the jobs
   behind a 10-minute discovery hold that other drains respect and copies them
-  on two background workers per process, claiming each job by slot. Refreshes
+  on two background workers per process, claiming each job by slot. That claim
+  ignores the hold but not the backoff of an attempt that failed. Refreshes
   never wait for a copy. A slot that does not fit the in-memory backlog waits
   out the hold, after which any drain copies it.
 - The queue keeps local jobs for retries, and any server may claim one. The
@@ -393,12 +394,17 @@ Caching and refresh:
   a lexical check on the logical path, then a symlink-resolving re-check (both
   path and roots are resolved, so a legitimately symlinked root stays valid
   while an intermediate directory symlink escaping a root is rejected). When
-  the re-check or the read fails, the processor probes the roots holding the
-  file through `internal/rootcheck`. If none is present on this server
-  (missing, unreadable, unresponsive, or an empty mount point), the job goes
-  back to the queue for 10 minutes without counting an attempt, for a server
-  that has the mount; a manual refresh on such a server reports its artwork as
-  still pending. Otherwise missing/unreadable/out-of-root and
+  the re-check or the read fails, the processor applies the retention rule
+  below to the file's folder, through `internal/rootcheck`: unless the nearest
+  existing folder at or above it, no higher than the library root, lists
+  entries, the storage is not mounted on this server (an empty mount point,
+  also one nested inside a present root, a missing or unreadable folder, or
+  one that does not answer in time). The job then goes back to the queue
+  without counting an attempt, for a server that has the mount: after 10
+  minutes, or an hour when it was last deferred for the same reason, so
+  storage no server mounts any more stays cheap. A manual refresh on such a
+  server reports its artwork as still pending. Otherwise
+  missing/unreadable/out-of-root and
   structurally-unusable (non-regular, over-cap) paths are stable failures with
   a long retry deferral; recovery is refresh-driven — the provider-artwork
   backfill sweep deliberately skips `file://` sources.
@@ -410,9 +416,10 @@ Caching and refresh:
   copy replaces the stand-in through the source-matched update. Locked artwork
   gets no stand-in.
 - `metadata.cache_images` governs remote artwork only. With it off, local art
-  is still selected, copied, and served: the drain claims local jobs only, a
-  manual refresh waits for local jobs only, and the provider-artwork backfill
-  stays off.
+  is still selected, copied, and served: the drain claims local jobs only
+  (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
+  remote jobs left queued are not read), a manual refresh waits for local jobs
+  only, and the provider-artwork backfill stays off.
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.

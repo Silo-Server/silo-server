@@ -99,7 +99,7 @@ type imageCacheLadderBackfiller interface {
 type targetImageCacheJobStore interface {
 	retryTargetNow(ctx context.Context, targetContentID string, localOnly bool) error
 	claimDueForTarget(ctx context.Context, workerID, targetContentID string, localOnly bool, limit int) ([]*models.MetadataImageCacheJob, error)
-	targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error)
+	targetHasRunningJobs(ctx context.Context, targetContentID string, localOnly bool) (bool, error)
 }
 
 // imageCacheTargetCachedPathReader is optionally implemented by the job store
@@ -356,9 +356,9 @@ func (p *ImageCacheProcessor) ArtworkCachingEnabled() bool {
 }
 
 // mayProcess reports whether a claimed job may start: remote artwork only
-// while caching is enabled, local artwork always.
+// while caching is enabled, local sidecar files always.
 func (p *ImageCacheProcessor) mayProcess(job *models.MetadataImageCacheJob) bool {
-	return p.enabled.Load() || (job != nil && isLocalImageSourcePath(job.SourcePath))
+	return p.enabled.Load() || (job != nil && isLocalSidecarSource(job.SourcePath))
 }
 
 // CacheTargetArtwork processes only the artwork queued for a manually
@@ -373,7 +373,6 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	if !p.ArtworkCachingEnabled() {
 		return nil
 	}
-	localOnly := !p.enabled.Load()
 	targetContentID = strings.TrimSpace(targetContentID)
 	if targetContentID == "" {
 		return fmt.Errorf("target content ID is required")
@@ -387,7 +386,7 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	// earlier failure becomes due now. Repeating it on every poll would clear
 	// backoff that background workers set on sibling jobs and would turn the
 	// wait below into a write-heavy hot loop.
-	if err := store.retryTargetNow(ctx, targetContentID, localOnly); err != nil {
+	if err := store.retryTargetNow(ctx, targetContentID, !p.enabled.Load()); err != nil {
 		return err
 	}
 
@@ -401,6 +400,9 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	failed := 0
 	deferred := 0
 	for {
+		// Re-read each round: once caching is turned off, remote jobs must not
+		// be claimed only to be handed straight back.
+		localOnly := !p.enabled.Load()
 		jobs, err := store.claimDueForTarget(ctx, workerID, targetContentID, localOnly, immediateImageCacheClaimLimit)
 		if err != nil {
 			return err
@@ -418,7 +420,7 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			continue
 		}
 
-		running, err := store.targetHasRunningJobs(ctx, targetContentID)
+		running, err := store.targetHasRunningJobs(ctx, targetContentID, localOnly)
 		if err != nil {
 			return err
 		}
@@ -1000,10 +1002,11 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	// below still uses the logical path so readLocalImageFile's Lstat keeps
 	// rejecting a symlinked leaf. A not-yet-existent path (ErrNotExist) falls
 	// through to the reader, which classifies it as the stable "missing" failure.
-	// Either failure first asks whether this server can see the library root at
-	// all; when it cannot, the job waits for one that can (deferLocalJobWithoutRoot).
+	// Either failure first asks whether this server has the file's storage
+	// mounted at all; when it does not, the job waits for one that does
+	// (deferLocalJobWithoutStorage).
 	if _, err := localImagePathResolvedWithinRoots(localPath, roots); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		if p.deferLocalJobWithoutRoot(ctx, job, localPath, roots) {
+		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
 			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
 		}
 		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
@@ -1012,7 +1015,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 
 	data, err := readLocalImageFile(localPath)
 	if err != nil {
-		if p.deferLocalJobWithoutRoot(ctx, job, localPath, roots) {
+		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
 			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
 		}
 		p.markFailed(ctx, job, err.Error())
