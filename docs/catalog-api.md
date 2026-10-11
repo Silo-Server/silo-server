@@ -615,6 +615,15 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Extended item artwork
+
+Movie and series detail can carry `banner_url`, `banner_thumbhash`, `thumb_url`,
+`thumb_thumbhash`, `clearart_url`, `disc_url` and `backdrop_urls` (every backdrop,
+`backdrop_url` first). `GET /api/v2/images/capabilities` reports
+`"extended_item_artwork": true` when the server returns them. Cards, seasons and
+episodes do not carry them. See [extended item artwork](images-api.md#extended-item-artwork)
+for each image and its widths.
+
 ## Play target season
 
 A v2 item detail whose `play_content_id` names an episode also carries

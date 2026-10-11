@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -241,6 +242,18 @@ type ItemDetail struct {
 	BackdropURL       string `json:"backdrop_url,omitempty"`
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
+
+	// Banner, thumb, clear art and disc art, and every backdrop in display
+	// order with the primary first, for movies and series. Kept out of this
+	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
+	// detail.
+	BannerURL       string   `json:"-"`
+	BannerThumbhash string   `json:"-"`
+	ThumbURL        string   `json:"-"`
+	ThumbThumbhash  string   `json:"-"`
+	ClearArtURL     string   `json:"-"`
+	DiscURL         string   `json:"-"`
+	BackdropURLs    []string `json:"-"`
 
 	// Literary work linkage. Present for linked ebook/audiobook items.
 	WorkID      string              `json:"work_id,omitempty"`
@@ -787,6 +800,7 @@ type DetailService struct {
 	videoRepo         *VideoRepository
 	ratingSourceRepo  *RatingSourceRepository
 	extraRepo         *ExtraRepository
+	backdropRepo      itemBackdropLister
 	rootClaimRepo     *RootClaimRepository
 	groupClaimRepo    *GroupClaimRepository
 	imageResolver     ImageResolver
@@ -823,6 +837,7 @@ func NewDetailService(
 		videoRepo:        NewVideoRepository(itemRepo.pool),
 		ratingSourceRepo: NewRatingSourceRepository(itemRepo.pool),
 		extraRepo:        NewExtraRepository(itemRepo.pool),
+		backdropRepo:     NewItemBackdropRepository(itemRepo.pool),
 		fileFetcher:      fileFetcher,
 	}
 }
@@ -1507,7 +1522,12 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	}
 	switch {
 	case target.item != nil:
-		return s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+		detail, err := s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+		if err != nil {
+			return nil, err
+		}
+		s.attachBackdropURLs(ctx, []*ItemDetail{detail}, string(filter.ImageSize))
+		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
 	case target.episode != nil:
@@ -2018,6 +2038,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 		result[id] = detail
 	}
+	s.attachBackdropURLs(ctx, slices.Collect(maps.Values(result)), string(filter.ImageSize))
 	return result, nil
 }
 
@@ -2232,6 +2253,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
+	s.presignExtraArtwork(ctx, detail, item, string(filter.ImageSize))
 
 	// File versions and subtitle aggregation only apply to movies.
 	// For series, each episode file shares the series content_id, so

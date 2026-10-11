@@ -20392,10 +20392,17 @@ export interface components {
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
+      /** @description Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none */
+      backdrop_urls?: string[];
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
+      banner_thumbhash?: string;
+      /** @description Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork */
+      banner_url?: string;
       /** @description Empty, never null */
       cast: components["schemas"]["CastCredit"][];
+      /** @description Presigned, short-lived. Transparent cut-out art. Movies and series only */
+      clearart_url?: string;
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -20407,6 +20414,8 @@ export interface components {
       credits?: components["schemas"]["Marker"];
       /** @description Empty, never null */
       crew: components["schemas"]["CrewCredit"][];
+      /** @description Presigned, short-lived. Transparent disc art. Movies only */
+      disc_url?: string;
       /** Format: double */
       duration_seconds?: number;
       ebook?: components["schemas"]["EbookDetailExtension"];
@@ -20535,6 +20544,9 @@ export interface components {
       subtitles: components["schemas"]["SubtitleInfo"][];
       tagline?: string;
       themes?: components["schemas"]["ThemeSongSet"];
+      thumb_thumbhash?: string;
+      /** @description Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only */
+      thumb_url?: string;
       /** @example Heat */
       title: string;
       tmdb_id?: string;
@@ -23797,6 +23809,8 @@ export interface components {
       delivery: "server" | "direct";
       /** @description Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown */
       episode_still_provenance: boolean;
+      /** @description Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc */
+      extended_item_artwork: boolean;
       /** Format: int64 */
       original_max_width_px: number;
       param: string;

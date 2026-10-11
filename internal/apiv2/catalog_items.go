@@ -374,6 +374,13 @@ type CatalogItemDetail struct {
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
 	TvdbID                          string                               `json:"tvdb_id,omitempty"`
+	BannerURL                       string                               `json:"banner_url,omitempty" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
+	BannerThumbhash                 string                               `json:"banner_thumbhash,omitempty"`
+	ThumbURL                        string                               `json:"thumb_url,omitempty" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
+	ThumbThumbhash                  string                               `json:"thumb_thumbhash,omitempty"`
+	ClearArtURL                     string                               `json:"clearart_url,omitempty" doc:"Presigned, short-lived. Transparent cut-out art. Movies and series only"`
+	DiscURL                         string                               `json:"disc_url,omitempty" doc:"Presigned, short-lived. Transparent disc art. Movies only"`
+	BackdropURLs                    []string                             `json:"backdrop_urls,omitempty" doc:"Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none"`
 	Cast                            []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
 	Crew                            []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
 	Countries                       []string                             `json:"countries,omitempty"`
@@ -1407,6 +1414,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
 		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
+		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
+		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
 		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,

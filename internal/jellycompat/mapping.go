@@ -162,6 +162,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 			item.LogoURL,
 		)
 	}
+	m.applyExtraImageTags(&dto, item)
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
 	}
@@ -264,6 +265,11 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		BackdropThumbhash: item.BackdropThumbhash,
 		LogoURL:           item.LogoURL,
 		LogoPath:          item.LogoPath,
+		BannerURL:         item.BannerURL,
+		ThumbURL:          item.ThumbURL,
+		ClearArtURL:       item.ClearArtURL,
+		DiscURL:           item.DiscURL,
+		ExtraBackdropURLs: detailExtraBackdropURLs(item),
 		UpdatedAt:         item.UpdatedAt,
 		SeasonCount:       item.SeasonCount,
 		SeriesID:          item.SeriesID,
@@ -988,4 +994,52 @@ func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[
 		}}
 	}
 	return out
+}
+
+// applyExtraImageTags advertises a movie's or series' banner, thumb, clear art
+// (Jellyfin's Art) and disc art in ImageTags, and its backdrops after the
+// primary in BackdropImageTags, so BackdropImageTags[i] names
+// /Items/{id}/Images/Backdrop/{i}. Jellyfin clients fall back to the backdrop
+// for a thumb they are not offered.
+func (m *mapper) applyExtraImageTags(dto *baseItemDTO, item upstreamListItem) {
+	if item.Type != "movie" && item.Type != "series" {
+		return
+	}
+	for _, art := range []struct{ imageType, path, url string }{
+		{compatImageBanner, item.BannerPath, item.BannerURL},
+		{compatImageThumb, item.ThumbPath, item.ThumbURL},
+		{compatImageArt, item.ClearArtPath, item.ClearArtURL},
+		{compatImageDisc, item.DiscPath, item.DiscURL},
+	} {
+		if art.path == "" && art.url == "" {
+			continue
+		}
+		dto.ImageTags[art.imageType] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, art.imageType, compatCardImageSize, art.path, "", item.UpdatedAt),
+			art.url,
+		)
+	}
+	// Without a primary there is no Backdrop/0, so the extra indexes would
+	// name the wrong images.
+	if len(dto.BackdropImageTags) == 0 {
+		return
+	}
+	for i, path := range item.ExtraBackdropPaths {
+		dto.BackdropImageTags = append(dto.BackdropImageTags, m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, compatBackdropImageType+"/"+strconv.Itoa(i+1), compatCardImageSize, path, "", item.UpdatedAt),
+			"",
+		))
+	}
+	for _, url := range item.ExtraBackdropURLs {
+		dto.BackdropImageTags = append(dto.BackdropImageTags, m.imageTagSigner.Tag("", url))
+	}
+}
+
+// detailExtraBackdropURLs returns a detail's backdrop URLs after the primary.
+// BackdropURLs starts with the primary only when there is one.
+func detailExtraBackdropURLs(item upstreamItemDetail) []string {
+	if item.BackdropURL == "" || len(item.BackdropURLs) < 2 {
+		return nil
+	}
+	return item.BackdropURLs[1:]
 }

@@ -22191,6 +22191,13 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "backdrop_urls": {
+            "description": "Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "badges": {
             "description": "Section-specific badges (new, returning, …)",
             "items": {
@@ -22198,12 +22205,23 @@
             },
             "type": "array"
           },
+          "banner_thumbhash": {
+            "type": "string"
+          },
+          "banner_url": {
+            "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
+            "type": "string"
+          },
           "cast": {
             "description": "Empty, never null",
             "items": {
               "$ref": "#/components/schemas/CastCredit"
             },
             "type": "array"
+          },
+          "clearart_url": {
+            "description": "Presigned, short-lived. Transparent cut-out art. Movies and series only",
+            "type": "string"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",
@@ -22233,6 +22251,10 @@
               "$ref": "#/components/schemas/CrewCredit"
             },
             "type": "array"
+          },
+          "disc_url": {
+            "description": "Presigned, short-lived. Transparent disc art. Movies only",
+            "type": "string"
           },
           "duration_seconds": {
             "format": "double",
@@ -22515,6 +22537,13 @@
           },
           "themes": {
             "$ref": "#/components/schemas/ThemeSongSet"
+          },
+          "thumb_thumbhash": {
+            "type": "string"
+          },
+          "thumb_url": {
+            "description": "Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only",
+            "type": "string"
           },
           "title": {
             "examples": [
@@ -30921,6 +30950,10 @@
             "description": "Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown",
             "type": "boolean"
           },
+          "extended_item_artwork": {
+            "description": "Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc",
+            "type": "boolean"
+          },
           "original_max_width_px": {
             "format": "int64",
             "type": "integer"
@@ -30968,6 +31001,7 @@
         },
         "required": [
           "episode_still_provenance",
+          "extended_item_artwork",
           "season_list_artwork_param",
           "param",
           "sizes",
