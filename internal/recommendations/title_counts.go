@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -26,6 +27,11 @@ const titleCountCacheMax = 1024
 // that request.
 const titleCountTimeout = 30 * time.Second
 
+// titleCountRetry is how long a scope whose count failed reuses its
+// fallback before counting again, so a count that keeps failing does not
+// hold up every read.
+const titleCountRetry = time.Minute
+
 // titleCountCache holds, per access scope, the title counts countTitlesByType
 // last read. Each server keeps its own.
 type titleCountCache struct {
@@ -45,55 +51,102 @@ func newTitleCountCache() *titleCountCache {
 	return &titleCountCache{entries: map[[sha256.Size]byte]titleCountEntry{}}
 }
 
-// get returns filter's title counts by type, counting them with repo when
-// the scope's counts are missing or expired. A nil cache always counts.
-func (c *titleCountCache) get(ctx context.Context, repo *Repo, filter catalog.AccessFilter) ([]int64, error) {
+// titleCounter counts the titles of each recommendableMediaTypes entry
+// filter admits, in that order.
+type titleCounter func(ctx context.Context, filter catalog.AccessFilter) ([]int64, error)
+
+// get returns filter's title counts by type. The counts only set how
+// Highly Rated interleaves the media types, so a read never fails or waits
+// on them for long:
+//   - fresh counts are returned as they are;
+//   - expired counts are returned at once while a count refreshes them in
+//     the background;
+//   - with no counts yet, the read waits for a count, or until its context
+//     ends;
+//   - a count that fails or is not waited for gives the scope's last counts,
+//     or equal weights when it has none, and a failed count is retried
+//     after titleCountRetry.
+//
+// A nil cache counts on every read.
+func (c *titleCountCache) get(ctx context.Context, filter catalog.AccessFilter, count titleCounter) []int64 {
 	if c == nil {
-		return repo.countTitlesByType(ctx, filter)
+		counts, err := count(ctx, filter)
+		if err != nil {
+			slog.WarnContext(ctx, "counting titles for Highly Rated failed; weighing media types equally", "component", "recommendations", "error", err)
+			return equalTitleCounts()
+		}
+		return counts
 	}
 	key := titleCountKey(filter)
-	if counts, ok := c.fresh(key); ok {
-		return counts, nil
+	counts, fresh, ok := c.lookup(key)
+	if fresh {
+		return counts
 	}
-	counted, err, _ := c.counting.Do(string(key[:]), func() (any, error) {
-		// A count that finished between the check above and this call
+	result := c.counting.DoChan(string(key[:]), func() (any, error) {
+		// A count that finished between the lookup above and this call
 		// already stored its result.
-		if counts, ok := c.fresh(key); ok {
+		if counts, fresh, _ := c.lookup(key); fresh {
 			return counts, nil
 		}
 		countCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), titleCountTimeout)
 		defer cancel()
-		counts, err := repo.countTitlesByType(countCtx, filter)
+		counts, err := count(countCtx, filter)
 		if err != nil {
+			slog.WarnContext(countCtx, "counting titles for Highly Rated failed; reusing the last counts", "component", "recommendations", "error", err)
+			c.store(key, c.fallback(key), titleCountRetry)
 			return nil, err
 		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if len(c.entries) >= titleCountCacheMax {
-			clear(c.entries)
-		}
-		c.entries[key] = titleCountEntry{counts: counts, expires: time.Now().Add(titleCountTTL)}
+		c.store(key, counts, titleCountTTL)
 		return counts, nil
 	})
-	if err != nil {
-		return nil, err
+	if ok {
+		// Expired counts serve this read; the count above refreshes them.
+		return counts
 	}
-	counts, ok := counted.([]int64)
-	if !ok {
-		return nil, fmt.Errorf("title counts: unexpected %T", counted)
+	select {
+	case res := <-result:
+		if counts, isCounts := res.Val.([]int64); res.Err == nil && isCounts {
+			return counts
+		}
+	case <-ctx.Done():
 	}
-	return counts, nil
+	return c.fallback(key)
 }
 
-// fresh returns key's counts while they have not expired.
-func (c *titleCountCache) fresh(key [sha256.Size]byte) ([]int64, bool) {
+// lookup returns key's counts, whether they are fresh, and whether there
+// are any.
+func (c *titleCountCache) lookup(key [sha256.Size]byte) (counts []int64, fresh, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
-	if !ok || !time.Now().Before(entry.expires) {
-		return nil, false
+	return entry.counts, ok && time.Now().Before(entry.expires), ok
+}
+
+// fallback returns key's last counts, or equal weights when it has none.
+func (c *titleCountCache) fallback(key [sha256.Size]byte) []int64 {
+	if counts, _, ok := c.lookup(key); ok {
+		return counts
 	}
-	return entry.counts, true
+	return equalTitleCounts()
+}
+
+// store keeps counts for key until ttl passes.
+func (c *titleCountCache) store(key [sha256.Size]byte, counts []int64, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries[key]; !ok && len(c.entries) >= titleCountCacheMax {
+		clear(c.entries)
+	}
+	c.entries[key] = titleCountEntry{counts: counts, expires: time.Now().Add(ttl)}
+}
+
+// equalTitleCounts weighs every recommendableMediaTypes entry alike.
+func equalTitleCounts() []int64 {
+	counts := make([]int64, len(recommendableMediaTypes))
+	for i := range counts {
+		counts[i] = 1
+	}
+	return counts
 }
 
 // titleCountKey identifies the titles filter admits: the fields

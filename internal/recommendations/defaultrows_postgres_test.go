@@ -631,11 +631,7 @@ func TestHighlyRatedReusesTitleCountsPostgres(t *testing.T) {
 	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{lib}}
 	counts := func(filter catalog.AccessFilter) []int64 {
 		t.Helper()
-		got, err := repo.titleCounts.get(t.Context(), repo, filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got
+		return repo.titleCounts.get(t.Context(), filter, repo.countTitlesByType)
 	}
 	if got := counts(scope); !slices.Equal(got, []int64{1, 1}) {
 		t.Fatalf("counts = %v, want one movie and one series", got)

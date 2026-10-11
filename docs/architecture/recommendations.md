@@ -249,7 +249,11 @@ catalog. The index expressions repeat `addedAtSQL` and
 `catalogRatingOrderSQL` and must change with them. Each read is planned for
 its own exclusion set rather than reusing a generic plan. The per-type
 title counts Highly Rated interleaves by are the one part that reads every
-title, so each server reuses an access scope's counts for 10 minutes.
+title, so each server reuses an access scope's counts for 10 minutes. The
+counts only set the mix, so they never fail or hold up a read: expired
+counts are served while a background count refreshes them, a read with no
+counts yet stops waiting when its request ends, and a failed count falls
+back to the scope's last counts, or equal weights, for a minute.
 Discover reads the profile's watched set once per request and shares it
 between its rows and the airings it blends in.
 

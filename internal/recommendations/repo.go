@@ -2010,10 +2010,7 @@ func (r *Repo) ListDefaultRowItems(ctx context.Context, filter catalog.AccessFil
 	}
 	var titles []int64
 	if kind == RecTypeTopRated {
-		var err error
-		if titles, err = r.titleCounts.get(ctx, r, filter); err != nil {
-			return nil, fmt.Errorf("list %s default row items: %w", kind, err)
-		}
+		titles = r.titleCounts.get(ctx, filter, r.countTitlesByType)
 	}
 	query, args := defaultRowQuery(filter, kind, exclude, titles, limit)
 	// An unnamed statement plans each read for its own exclusion list, which a
