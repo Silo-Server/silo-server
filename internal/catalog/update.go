@@ -10,9 +10,60 @@ import (
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
 
+// The nullable columns an edit can clear. Each name is also the API member.
+const (
+	columnRatingIMDB       = "rating_imdb"
+	columnRatingTMDB       = "rating_tmdb"
+	columnRatingRTCritic   = "rating_rt_critic"
+	columnRatingRTAudience = "rating_rt_audience"
+	columnReleaseDate      = "release_date"
+	columnFirstAirDate     = "first_air_date"
+	columnLastAirDate      = "last_air_date"
+	columnAirTime          = "air_time"
+	columnAirTimezone      = "air_timezone"
+	columnAirDate          = "air_date"
+)
+
+// The columns each table lets an edit clear.
+var (
+	itemClearableColumns = []string{
+		columnRatingIMDB, columnRatingTMDB, columnRatingRTCritic, columnRatingRTAudience,
+		columnReleaseDate, columnFirstAirDate, columnLastAirDate, columnAirTime, columnAirTimezone,
+	}
+	seasonClearableColumns  = []string{columnAirDate}
+	episodeClearableColumns = []string{columnAirDate, columnRatingIMDB, columnRatingTMDB}
+)
+
+// ClearableMetadataFields names the fields an edit can clear through
+// MetadataUpdate.Clear: every table's clearable columns. A table without the
+// column ignores it, as it ignores a field it doesn't store.
+var ClearableMetadataFields = func() []string {
+	var fields []string
+	for _, col := range slices.Concat(itemClearableColumns, seasonClearableColumns, episodeClearableColumns) {
+		if !slices.Contains(fields, col) {
+			fields = append(fields, col)
+		}
+	}
+	return fields
+}()
+
+// ratingColumnSources pairs each rating column with the per-source row that
+// reports the same rating. Clearing the column deletes that row too, since
+// the title page falls back to it when the column is empty.
+var ratingColumnSources = []struct{ column, source string }{
+	{columnRatingIMDB, models.RatingSourceIMDB},
+	{columnRatingTMDB, models.RatingSourceTMDB},
+	{columnRatingRTCritic, models.RatingSourceRTCritic},
+	{columnRatingRTAudience, models.RatingSourceRTAudience},
+}
+
 // MetadataUpdate contains the fields that can be updated on a media item,
 // season, or episode. Nil pointer fields are skipped (not updated).
 type MetadataUpdate struct {
+	// Clear lists fields from ClearableMetadataFields to set to NULL. A
+	// cleared field's pointer stays nil.
+	Clear []string
+
 	Title              *string
 	SortTitle          *string
 	OriginalTitle      *string
@@ -54,6 +105,36 @@ type MetadataUpdate struct {
 	StillPath          *string
 	StillSourcePath    *string
 	StillThumbhash     *string
+}
+
+// clears reports whether the update sets field to NULL.
+func (u *MetadataUpdate) clears(field string) bool {
+	return slices.Contains(u.Clear, field)
+}
+
+// nullClauses returns a "column = NULL" assignment for each of columns the
+// update clears. Callers pass their own table's clearable columns, so only
+// those names reach the SQL.
+func (u *MetadataUpdate) nullClauses(columns ...string) []string {
+	var clauses []string
+	for _, col := range columns {
+		if u.clears(col) {
+			clauses = append(clauses, col+" = NULL")
+		}
+	}
+	return clauses
+}
+
+// clearedRatingSources returns the per-source rows to delete for the rating
+// columns the update clears.
+func (u *MetadataUpdate) clearedRatingSources() []string {
+	var sources []string
+	for _, rating := range ratingColumnSources {
+		if u.clears(rating.column) {
+			sources = append(sources, rating.source)
+		}
+	}
+	return sources
 }
 
 // UpdateMediaItemMetadata updates specific metadata fields on a media_items row.

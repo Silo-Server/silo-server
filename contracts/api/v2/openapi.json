@@ -8578,18 +8578,21 @@
         "additionalProperties": false,
         "properties": {
           "air_date": {
+            "description": "Season or episode air date; null clears it",
             "type": [
               "string",
               "null"
             ]
           },
           "air_time": {
+            "description": "Null clears the stored time",
             "type": [
               "string",
               "null"
             ]
           },
           "air_timezone": {
+            "description": "IANA time zone; null clears it",
             "type": [
               "string",
               "null"
@@ -8618,6 +8621,7 @@
             ]
           },
           "first_air_date": {
+            "description": "Null clears the stored date",
             "type": [
               "string",
               "null"
@@ -8639,6 +8643,7 @@
             ]
           },
           "last_air_date": {
+            "description": "Null clears the stored date",
             "type": [
               "string",
               "null"
@@ -8676,6 +8681,7 @@
             ]
           },
           "rating_imdb": {
+            "description": "Null clears it, along with any IMDb score a metadata plugin stored",
             "format": "double",
             "type": [
               "number",
@@ -8683,6 +8689,7 @@
             ]
           },
           "rating_rt_audience": {
+            "description": "Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored",
             "format": "int64",
             "type": [
               "integer",
@@ -8690,6 +8697,7 @@
             ]
           },
           "rating_rt_critic": {
+            "description": "Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored",
             "format": "int64",
             "type": [
               "integer",
@@ -8697,6 +8705,7 @@
             ]
           },
           "rating_tmdb": {
+            "description": "Null clears it, along with any TMDB score a metadata plugin stored",
             "format": "double",
             "type": [
               "number",
@@ -8704,6 +8713,7 @@
             ]
           },
           "release_date": {
+            "description": "Null clears the stored date",
             "type": [
               "string",
               "null"
@@ -11493,6 +11503,11 @@
           "source_video_codec": {
             "type": "string"
           },
+          "source_video_height": {
+            "description": "Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown.",
+            "format": "int64",
+            "type": "integer"
+          },
           "source_video_resolution": {
             "type": "string"
           },
@@ -11641,6 +11656,10 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "source_video_height": {
+            "description": "Rows may carry source_video_height",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -11694,6 +11713,7 @@
           "stream_location",
           "node_routing",
           "output_format",
+          "source_video_height",
           "revision",
           "state",
           "allowed"

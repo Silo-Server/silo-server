@@ -870,7 +870,10 @@ sources the item lacks. Locking the rating field freezes all of them. A
 refresh never removes a source a provider stopped reporting. Identify is the
 exception: it matches the item to a different title, so the sources the new
 match reports replace the stored set, and a source it does not report is
-removed.
+removed. An administrator who clears `rating_imdb`, `rating_tmdb`,
+`rating_rt_critic` or `rating_rt_audience` in a metadata edit also removes the
+item's `imdb`, `tmdb`, `rt_critic` or `rt_audience` source, so the title page
+doesn't show the cleared rating from a plugin's score.
 
 Plugins send them under `ratings.sources` in a metadata item, as
 `{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`

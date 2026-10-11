@@ -15311,29 +15311,47 @@ export interface components {
       mode: "quick" | "complete";
     };
     AdminItemMetadataUpdate: {
+      /** @description Season or episode air date; null clears it */
       air_date?: string | null;
+      /** @description Null clears the stored time */
       air_time?: string | null;
+      /** @description IANA time zone; null clears it */
       air_timezone?: string | null;
       content_rating?: string | null;
       countries?: string[] | null;
       /** Format: int64 */
       episode_number?: number | null;
+      /** @description Null clears the stored date */
       first_air_date?: string | null;
       genres?: string[] | null;
       imdb_id?: string | null;
+      /** @description Null clears the stored date */
       last_air_date?: string | null;
       locked_fields?: number[] | null;
       networks?: string[] | null;
       original_title?: string | null;
       overview?: string | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any IMDb score a metadata plugin stored
+       */
       rating_imdb?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored
+       */
       rating_rt_audience?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored
+       */
       rating_rt_critic?: number | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any TMDB score a metadata plugin stored
+       */
       rating_tmdb?: number | null;
+      /** @description Null clears the stored date */
       release_date?: string | null;
       /** Format: int64 */
       runtime?: number | null;
@@ -16338,6 +16356,11 @@ export interface components {
       source_bitrate_kbps: number | null;
       source_container?: string;
       source_video_codec?: string;
+      /**
+       * Format: int64
+       * @description Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown.
+       */
+      source_video_height?: number;
       source_video_resolution?: string;
       /**
        * Format: date-time
@@ -16390,6 +16413,8 @@ export interface components {
       output_format: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Rows may carry source_video_height */
+      source_video_height: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}

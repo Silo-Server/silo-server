@@ -206,9 +206,17 @@ The web waits on that job; it does not equate submission with completion.
 
 `PATCH /api/v2/admin/items/{id}/metadata` retains the existing partial metadata
 fields, including descriptions, dates, ratings, provider IDs, numbering and
-locked fields. Omitted/null fields preserve values; explicit empty strings,
+locked fields. Omitted fields preserve values. Explicit `null` clears the
+nullable fields: `rating_imdb`, `rating_tmdb`, `rating_rt_critic`,
+`rating_rt_audience`, `release_date`, `first_air_date`, `last_air_date`,
+`air_time`, `air_timezone`, and `air_date`. A target without the field ignores
+it. Clearing a rating also deletes the item's stored score for that source
+(`imdb`, `tmdb`, `rt_critic`, `rt_audience`), which title pages would otherwise
+show in its place. Clearing an episode's air date recomputes the series air
+dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
-IANA timezone. The service tries item, season, then episode ownership and returns
+IANA timezone. Frozen v1 treats `null` like omission and clears nothing. The
+service tries item, season, then episode ownership and returns
 canonical catalog detail after the update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
