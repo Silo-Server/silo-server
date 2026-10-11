@@ -360,11 +360,12 @@ library sections, which scope the whole row to their libraries.
   that at least 40% of its titles carry, and carry at least 1.5 times as
   often as the profile's positive titles do, most distinctive first, with
   its most common genre (a tie goes to the genre of the heavier titles)
-  always among them, at most two in all. Genres are joined with ", ", since
-  TMDB genres such as "Sci-Fi & Fantasy" contain "&". A cluster with no such
-  genre, such as a profile's only cluster, is labeled by its most common
-  genre, and one whose titles carry no genres has an empty label, titled
-  "Picked from your history". The dominant genres that drive retrieval, the
+  among them when at least 40% of its titles carry it, at most two in all.
+  Genres are joined with ", ", since TMDB genres such as "Sci-Fi &
+  Fantasy" contain "&". A cluster with no such genre, such as a profile's
+  only cluster, is labeled by its most common genre, and one whose most
+  common genre is on fewer than 40% of its titles, or whose titles carry no
+  genres, has an empty label, titled "Picked from your history". The dominant genres that drive retrieval, the
   Discover genre exclusion and the taste-match section stay the top three
   by count. The thresholds were tuned on synthetic profiles.
 - **Repeated titles.** A read never shows two cluster rows under one title

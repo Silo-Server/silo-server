@@ -609,11 +609,13 @@ const (
 // profileTitles titles carry each genre profileGenres times. It names the
 // cluster's distinctive genres, those at least labelMinShare of the members
 // carry and carry at least labelMinLift times as often as the profile's
-// titles do, the most distinctive first, and always the cluster's most common
+// titles do, the most distinctive first, and the cluster's most common
 // genre, which its row's titles mostly carry, in at most labelMaxGenres
-// genres. A cluster with no distinctive genre, such as a profile's only
-// cluster, is labeled by its most common genre alone, and one whose members
-// carry no genres gets "".
+// genres. Every genre named is on at least labelMinShare of the members, so
+// the row largely carries it. A cluster with no distinctive genre,
+// such as a profile's only cluster, is labeled by its most common genre
+// alone, and one whose most common genre is on fewer members, or whose
+// members carry no genres, gets "".
 func clusterLabel(members []clusterItem, profileGenres map[string]int, profileTitles int) string {
 	counts := make(map[string]int)
 	weights := make(map[string]float64)
@@ -685,7 +687,7 @@ func clusterLabel(members []clusterItem, profileGenres map[string]int, profileTi
 			others++
 		}
 	}
-	if !slices.Contains(genres, common) {
+	if !slices.Contains(genres, common) && float64(counts[common])/float64(len(members)) >= labelMinShare {
 		genres = append(genres, common)
 	}
 	return strings.Join(genres, clusterLabelSeparator)

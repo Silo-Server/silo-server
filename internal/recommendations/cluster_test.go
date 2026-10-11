@@ -67,8 +67,8 @@ func TestKmeansSeedIgnoresWeights(t *testing.T) {
 }
 
 // A cluster's label names the genres that set it apart from the profile,
-// most distinctive first, with its most common genre always among them, at
-// most two, joined with ", ".
+// most distinctive first, with its most common genre among them when most of
+// the cluster carries it, at most two, joined with ", ".
 func TestClusterLabelNamesWhatSetsAClusterApart(t *testing.T) {
 	titles := func(n int, weight float64, genres ...string) []clusterItem {
 		out := make([]clusterItem, n)
@@ -125,6 +125,14 @@ func TestClusterLabelNamesWhatSetsAClusterApart(t *testing.T) {
 	profile, n = profileOf(join(western, titles(14, 1, "Drama")))
 	if got := clusterLabel(western, profile, n); got != "Horror" {
 		t.Fatalf("label = %q, want Horror", got)
+	}
+
+	// A cluster whose genres are each on under 40% of it is not named after
+	// one of them: the row would mostly not carry it.
+	scattered := join(titles(2, 1, "Comedy"), titles(2, 1, "Horror"), titles(2, 1, "Drama"), titles(2, 1, "Crime"), titles(2, 1, "Western"), titles(2, 1, "War"))
+	profile, n = profileOf(scattered)
+	if got := clusterLabel(scattered, profile, n); got != "" {
+		t.Fatalf("label = %q, want none for a cluster no genre describes", got)
 	}
 
 	// A tie for the most common genre goes to the heavier titles, which pull
