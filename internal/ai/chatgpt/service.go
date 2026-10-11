@@ -423,6 +423,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		clientID = callback.ClientID
 	}
 	var tokens tokenResponse
+	var expiresAt time.Time
 	var claims *identityClaims
 	var completionErr error
 	if callback.Error != "" || callback.Code == "" || clientID == "" || clientID == dynamicClientID || (callback.ClientID != "" && callback.ClientID != clientID) {
@@ -431,6 +432,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		tokens, completionErr = s.exchange(completionCtx, url.Values{"grant_type": {oauthAuthorizationCode}, oauthClientID: {clientID},
 			oauthCode: {callback.Code}, "code_verifier": {pending.Verifier}, "redirect_uri": {pending.RedirectURI}, oauthResource: {resource}})
 		if completionErr == nil {
+			expiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 			claims, completionErr = s.verifyIDToken(completionCtx, tokens.IDToken, clientID, pending.Nonce)
 			if completionErr == nil && pending.Subject != "" && claims.Subject != pending.Subject {
 				completionErr = ErrIdentity
@@ -474,7 +476,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			completionErr = ErrIdentity
 		} else {
 			a.AccessToken, a.RefreshToken = tokens.AccessToken, tokens.RefreshToken
-			a.ExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+			a.ExpiresAt = expiresAt
 		}
 		i := slices.IndexFunc(c.Accounts, func(existing account) bool { return existing.ClientID == clientID })
 		if i >= 0 {

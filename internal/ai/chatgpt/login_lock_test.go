@@ -59,12 +59,15 @@ func TestLoginPersistsAcceptedTokensAfterConcurrentRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, timeout := range []bool{false, true} {
-		name := "rotation commits"
-		if timeout {
-			name = "rotation deadline expires"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		timeout, slowCatalog bool
+	}{
+		{name: "rotation commits"},
+		{name: "rotation deadline expires", timeout: true},
+		{name: "catalog and rotation delay", slowCatalog: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := newIdentityRetryFixture(t, key)
 				c := stored(t, f.store)
@@ -78,7 +81,7 @@ func TestLoginPersistsAcceptedTokensAfterConcurrentRefresh(t *testing.T) {
 				refreshDone := make(chan error, 1)
 				refreshService.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
 					close(started)
-					if timeout {
+					if test.timeout {
 						<-r.Context().Done()
 						return nil, r.Context().Err()
 					}
@@ -93,8 +96,15 @@ func TestLoginPersistsAcceptedTokensAfterConcurrentRefresh(t *testing.T) {
 				loginTransport := f.service.http.Transport
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
+				catalogCalls := 0
 				f.service.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
 					if r.URL.Path == "/v1/models" {
+						catalogCalls++
+						if test.slowCatalog && catalogCalls == 1 {
+							resp := response(http.StatusTooManyRequests, nil)
+							resp.Header.Set("Retry-After", "59")
+							return resp, nil
+						}
 						go func() {
 							_, err := refreshService.BearerToken(t.Context())
 							refreshDone <- err
@@ -109,18 +119,21 @@ func TestLoginPersistsAcceptedTokensAfterConcurrentRefresh(t *testing.T) {
 				if loginErr != nil {
 					t.Fatalf("accepted login lost while waiting for refresh admission: %v", loginErr)
 				}
-				if (refreshErr != nil) != timeout {
-					t.Fatalf("refresh error=%v, want timeout=%t", refreshErr, timeout)
+				if (refreshErr != nil) != test.timeout {
+					t.Fatalf("refresh error=%v, want timeout=%t", refreshErr, test.timeout)
 				}
 				c = stored(t, f.store)
 				if c.Active != "issued-app" || c.LoginResult != loginConnected || c.Pending != nil || len(c.Accounts) != 2 || c.Accounts[1].RefreshToken != f.tokens.RefreshToken || c.Accounts[1].AccessToken != f.tokens.AccessToken {
 					t.Fatal("accepted login was not persisted after the concurrent refresh")
 				}
-				if !timeout && c.Accounts[0].RefreshToken != "rotated-refresh" {
+				if !test.timeout && c.Accounts[0].RefreshToken != "rotated-refresh" {
 					t.Fatal("login overwrote the other account's committed rotation")
 				}
 				if len(f.calls["/api/accounts/oauth/token"]) != 1 {
 					t.Fatal("login repeated its authorization-code exchange")
+				}
+				if !c.Accounts[1].ExpiresAt.Equal(f.calls["/api/accounts/oauth/token"][0].Add(time.Hour)) {
+					t.Fatal("catalog or lock wait extended the issued token's expiry")
 				}
 				if err := f.service.CompleteLogin(t.Context(), f.callback); !errors.Is(err, ErrInvalidLogin) {
 					t.Fatalf("accepted callback was reusable: %v", err)

@@ -116,6 +116,8 @@ replacement. The final database write has its own bounded context.
 Accepted login persistence gets an independent two-minute deadline so it can
 wait for an admitted one-minute refresh and its final database commit before
 acquiring the shared credential lock.
+Token expiry is measured from exchange completion, before identity, catalog,
+and persistence waits.
 Returned scopes and rotated refresh tokens are retained when a successful refresh
 drops plan access; inference stops and reconnect explicitly requests consent. The verified
 sign-in identity remains authoritative during refresh; optional refresh ID
