@@ -215,6 +215,18 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
 			t.Fatalf("requeue: %v", err)
 		}
+
+		// A job already waiting and due (another server deferred it for
+		// missing storage) is held again when this server rediscovers it.
+		if queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1]); err != nil || len(queued) != 1 {
+			t.Fatalf("re-enqueue = %d queued, %v; want 1", len(queued), err)
+		}
+		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, seriesID, ImageCacheImagePoster); got.nextAttemptIn < localArtworkDiscoveryHold-time.Minute {
+			t.Fatalf("rediscovered due job = %+v, want it held again", got)
+		}
+		if jobs, err := repo.claimDueForTarget(ctx, "other-server", seriesID, false, 10); err != nil || len(jobs) != 0 {
+			t.Fatalf("another drain claimed %d rediscovered jobs (%v), want none", len(jobs), err)
+		}
 	})
 
 	t.Run("discovery does not skip a failure's backoff", func(t *testing.T) {

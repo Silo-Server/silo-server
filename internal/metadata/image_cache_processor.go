@@ -662,7 +662,11 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	if discover && !p.enabled.Load() {
 		return total, ErrImageCachingDisabled
 	}
-	total.Backlog = p.sampleBacklog(ctx)
+	// The backlog counts every queued job; with caching off most of them are
+	// remote jobs this run will not touch, so it reports no denominator.
+	if p.enabled.Load() {
+		total.Backlog = p.sampleBacklog(ctx)
+	}
 	reportImageCacheRunProgress(reportProgress, total)
 
 	// A positive runtime bounds scheduled draining; zero or negative means the

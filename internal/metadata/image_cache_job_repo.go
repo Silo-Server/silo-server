@@ -353,6 +353,13 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN EXCLUDED.next_attempt_at
+				-- A held enqueue also holds a waiting job that has not failed
+				-- (fresh, or deferred for missing storage), so the caller can
+				-- claim it before other drains do.
+				WHEN $1::interval > interval '0'
+					AND metadata_image_cache_jobs.status = 'queued'
+					AND metadata_image_cache_jobs.attempt_count = 0
+					THEN GREATEST(metadata_image_cache_jobs.next_attempt_at, EXCLUDED.next_attempt_at)
 				ELSE metadata_image_cache_jobs.next_attempt_at
 			END,
 			locked_at = CASE
