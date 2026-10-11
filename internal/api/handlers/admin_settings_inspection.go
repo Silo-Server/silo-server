@@ -49,6 +49,9 @@ func (h *AdminHandler) InspectAdminSensitiveSettings(ctx context.Context) (Admin
 func (h *AdminHandler) adminSensitiveSettingsStatus(all map[string]string) AdminSensitiveSettingsStatus {
 	configured := map[string]struct{}{}
 	for key := range sensitiveSettingKeys {
+		if machineManagedSettingKeys[key] {
+			continue
+		}
 		if all[key] != "" || h.BootstrapSensitiveConfigured[key] || h.BootstrapSensitiveValues[key] != "" {
 			configured[key] = struct{}{}
 		}

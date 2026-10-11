@@ -1127,6 +1127,10 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
+	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",
+	"selectAdminChatGPTAccount":                "V2-only administrator ChatGPT account selection: it changes the active account and cancels a pending sign-in, so replaying it after intervening account activity must not happen automatically.",
+	"disconnectAdminChatGPTAccount":            "V2-only administrator ChatGPT disconnect: it revokes renewable credentials and cancels pending sign-in, so replaying it after a reconnect must not happen automatically.",
 	"createShuffle":                            "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
 	"advanceShuffle":                           "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
 	"skipShuffleItem":                          "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",

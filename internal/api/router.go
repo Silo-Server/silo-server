@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/animeids"
@@ -1800,14 +1801,26 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// OnConfigChange; only the semaphore size (ai.max_concurrent_jobs) is
 	// fixed at construction.
 	var aiClient *llm.Client
+	var chatGPT *chatgpt.Service
+	if store, ok := settingsRepo.(chatgpt.Store); ok && deps.SecretCipher != nil {
+		chatGPT = chatgpt.NewService(store)
+	}
+	aiConfig := func(cfg *config.Config) llm.Config {
+		c := llmConfigFromServer(cfg)
+		if chatGPT != nil {
+			c.ChatGPTTokenSource = chatGPT.TokenSource
+			c.ChatGPTTokenRejected = chatGPT.RejectToken
+		}
+		return c
+	}
 	var aiSem chan struct{}
 	if deps.Config != nil {
-		aiClient = llm.NewClient(llmConfigFromServer(deps.Config))
+		aiClient = llm.NewClient(aiConfig(deps.Config))
 		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		if deps.OnConfigChange != nil {
 			clientForReload := aiClient
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				clientForReload.UpdateConfig(llmConfigFromServer(updated))
+				clientForReload.UpdateConfig(aiConfig(updated))
 			})
 		}
 	}
@@ -2607,6 +2620,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
+		adminHandler.ChatGPT = chatGPT
+	}
+	if chatGPT != nil {
+		v2deps.ChatGPT = chatGPT
 	}
 	if watchTogetherHandler != nil {
 		v2deps.WatchTogetherSuggestions = watchTogetherHandler
@@ -5138,12 +5155,14 @@ func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list str
 // config. Used at construction and again on every config reload.
 func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
-		BaseURL:    cfg.AI.BaseURL,
-		APIKey:     cfg.AI.APIKey,
-		ChatModel:  cfg.AI.ChatModel,
-		ASRBaseURL: cfg.AI.ASRBaseURL,
-		ASRAPIKey:  cfg.AI.ASRAPIKey,
-		ASRModel:   cfg.AI.ASRModel,
+		AuthMode:        cfg.AI.AuthMode,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		ChatModel:       cfg.AI.ChatModel,
+		ASRBaseURL:      cfg.AI.ASRBaseURL,
+		ASRAPIKey:       cfg.AI.ASRAPIKey,
+		ASRModel:        cfg.AI.ASRModel,
 	}
 }
 

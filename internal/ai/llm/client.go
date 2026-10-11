@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
 )
 
 // Config holds the connection settings for the shared OpenAI-compatible
@@ -25,14 +27,21 @@ import (
 // separate Whisper-compatible server next to their chat endpoint; when empty,
 // transcription uses the chat endpoint's base URL and key.
 type Config struct {
-	BaseURL   string // e.g. "https://api.openai.com" (no trailing /v1)
-	APIKey    string // empty for keyless local servers
-	ChatModel string // chat-completions model used for translation
+	AuthMode             string
+	ReasoningEffort      string
+	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
+	ChatGPTTokenRejected func(context.Context, string, bool) error
+	BaseURL              string // e.g. "https://api.openai.com" (no trailing /v1)
+	APIKey               string // empty for keyless local servers
+	ChatModel            string // chat-completions model used for translation
 
 	ASRBaseURL string // optional; empty = BaseURL
 	ASRAPIKey  string // optional; empty = APIKey
 	ASRModel   string // audio-transcription model, e.g. "whisper-1"
 }
+
+const AuthModeChatGPT = "chatgpt"
+const chatJSONFormat = "json_object"
 
 // ErrQuotaExhausted means the provider requires a billing or quota change;
 // waiting and retrying the same request cannot recover it.
@@ -105,10 +114,11 @@ type chatResponseFormat struct {
 }
 
 type chatCompletionRequest struct {
-	Model          string              `json:"model"`
-	Messages       []Message           `json:"messages"`
-	Temperature    float32             `json:"temperature"`
-	ResponseFormat *chatResponseFormat `json:"response_format,omitempty"`
+	Model           string              `json:"model"`
+	Messages        []Message           `json:"messages"`
+	Temperature     *float32            `json:"temperature,omitempty"`
+	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
 }
 
 type chatCompletionResponse struct {
@@ -128,13 +138,22 @@ type chatCompletionResponse struct {
 // that ignore the field still work because the prompt itself demands JSON.
 func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) (string, error) {
 	cfg := c.Config()
+	if err := reasoning.Validate(cfg.ChatModel, cfg.ReasoningEffort); err != nil {
+		return "", err
+	}
+	if cfg.AuthMode == AuthModeChatGPT {
+		return c.chatGPT(ctx, cfg, messages, jsonObject)
+	}
 	reqBody := chatCompletionRequest{
-		Model:       cfg.ChatModel,
-		Messages:    messages,
-		Temperature: 0.2,
+		Model:           cfg.ChatModel,
+		Messages:        messages,
+		ReasoningEffort: cfg.ReasoningEffort,
+	}
+	if !reasoning.OmitTemperature(cfg.ChatModel, cfg.ReasoningEffort) {
+		reqBody.Temperature = new(float32(0.2))
 	}
 	if jsonObject {
-		reqBody.ResponseFormat = &chatResponseFormat{Type: "json_object"}
+		reqBody.ResponseFormat = &chatResponseFormat{Type: chatJSONFormat}
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -212,6 +231,17 @@ func (e *HTTPError) Error() string { return e.message }
 // off and retry; other 4xx and permanentError parse failures return at once.
 func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label string,
 	build func() (*http.Request, error), parse func(body []byte) error) error {
+	return c.doReaderWithRetry(ctx, httpClient, label, build, func(body io.Reader) error {
+		data, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read %s response: %w", label, err)
+		}
+		return parse(data)
+	})
+}
+
+func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client, label string,
+	build func() (*http.Request, error), parse func(io.Reader) error) error {
 	const maxAttempts = 6
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -229,7 +259,23 @@ func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label
 			continue
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusOK {
+			parseErr := parse(resp.Body)
+			_ = resp.Body.Close()
+			if parseErr == nil {
+				return nil
+			}
+			if perm, ok := errors.AsType[*permanentError](parseErr); ok {
+				return perm.err
+			}
+			lastErr = parseErr
+			if waitErr := sleepCtx(ctx, time.Duration(attempt+1)*time.Second); waitErr != nil {
+				return errors.Join(lastErr, waitErr)
+			}
+			continue
+		}
+
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 128<<10))
 		resp.Body.Close()
 		if readErr != nil {
 			// A truncated/failed read could otherwise be misparsed as a valid
@@ -263,18 +309,6 @@ func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label
 			// 4xx other than 429: not retryable.
 			return &HTTPError{StatusCode: resp.StatusCode, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 		}
-
-		parseErr := parse(respBody)
-		if parseErr == nil {
-			return nil
-		}
-		if perm, ok := errors.AsType[*permanentError](parseErr); ok {
-			return perm.err
-		}
-		lastErr = parseErr
-		if waitErr := sleepCtx(ctx, time.Duration(attempt+1)*time.Second); waitErr != nil {
-			return errors.Join(lastErr, waitErr)
-		}
 	}
 
 	if lastErr == nil {
@@ -299,7 +333,7 @@ func isExhaustedQuota(body []byte) bool {
 		return true
 	}
 	switch code {
-	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded", "billing_hard_limit_reached":
+	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded", "billing_hard_limit_reached", "subscription_sharing_usage_limit_exceeded":
 		return true
 	default:
 		return false
