@@ -2553,11 +2553,24 @@ func (h *PlaybackHandler) refreshPlaySession(current *PlaybackSession) *Playback
 	return current
 }
 
+// withNegotiatedClientInfo names the client from its PlaybackInfo request when
+// the stream request didn't send a MediaBrowser header, so the native session
+// isn't labeled from the User-Agent alone.
+func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession) context.Context {
+	info := playback.ClientInfoFromContext(ctx)
+	if info.Name != "" || playSession.ClientName == "" {
+		return ctx
+	}
+	info.Name, info.Version = playSession.ClientName, playSession.ClientVersion
+	return playback.WithClientInfo(ctx, info)
+}
+
 func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
 	playSession, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
+	ctx = withNegotiatedClientInfo(ctx, playSession)
 	// Captured before any mutation: the CAS attach below verifies no concurrent
 	// request replaced the upstream session this request observed.
 	observedUpstreamID := playSession.UpstreamSessionID

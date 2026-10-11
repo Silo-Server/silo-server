@@ -2410,10 +2410,18 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		newCaseInsensitiveQuery(r.URL.Query()).Get("DeviceId"),
 	)
 	clientDeviceID = stripCompatNUL(clientDeviceID)
+	// Cleaned and clamped like every other client identity, since the stream
+	// request that starts the native session may reuse these values.
+	negotiatedClient := playback.ClientInfo{
+		Name:    firstMediaBrowserAuthorizationValue(r, "Client"),
+		Version: firstMediaBrowserAuthorizationValue(r, "Version"),
+	}.Normalized()
 	h.playbackStore.PutNegotiated(PlaybackSession{
 		ID:                 playSessionID,
 		CompatToken:        session.Token,
 		ClientDeviceID:     clientDeviceID,
+		ClientName:         negotiatedClient.Name,
+		ClientVersion:      negotiatedClient.Version,
 		ClientIP:           clientip.FromContext(r.Context()),
 		ClientPeer:         requestPeerHost(r),
 		ItemID:             detail.ContentID,
