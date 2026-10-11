@@ -21,12 +21,19 @@ const (
 	ImageCacheTargetSeasonLocalization = "season_localization"
 	ImageCacheTargetEpisode            = "episode"
 	ImageCacheTargetPerson             = "person"
+	// ImageCacheTargetItemBackdrop is one media_item_backdrops row:
+	// target_content_id is the row ID and series_id the item's content ID.
+	ImageCacheTargetItemBackdrop = "item_backdrop"
 
 	ImageCacheImagePoster   = "poster"
 	ImageCacheImageBackdrop = "backdrop"
 	ImageCacheImageLogo     = "logo"
 	ImageCacheImageStill    = "still"
 	ImageCacheImageProfile  = "profile"
+	ImageCacheImageBanner   = "banner"
+	ImageCacheImageThumb    = "thumb"
+	ImageCacheImageClearArt = "clearart"
+	ImageCacheImageDisc     = "disc"
 
 	ImageCacheStatusQueued    = "queued"
 	ImageCacheStatusRunning   = "running"
@@ -702,11 +709,10 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	if r == nil || r.pool == nil || job == nil {
 		return "", nil
 	}
-	query, args, ok := currentTargetSourceQuery(job)
+	query, args, ok := currentTargetCachedPathQuery(job)
 	if !ok {
 		return "", nil
 	}
-	query = strings.Replace(query, "_source_path", "_path", 1)
 	var current string
 	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -718,14 +724,28 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	return current, nil
 }
 
+// currentTargetCachedPathQuery reads the served path column beside the source
+// column currentTargetSourceQuery reads ("poster_source_path" ->
+// "poster_path", "source_path" -> "path").
+func currentTargetCachedPathQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
+	query, args, ok := currentTargetSourceQuery(job)
+	return strings.Replace(query, "source_path", "path", 1), args, ok
+}
+
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
 		if !ok {
+			col, ok = itemOnlyArtworkSourceColumn(job.ImageType)
+		}
+		if !ok {
 			return "", nil, false
 		}
 		return fmt.Sprintf("SELECT %s FROM media_items WHERE content_id = $1", col),
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetItemBackdrop:
+		return "SELECT source_path FROM media_item_backdrops WHERE id = $1::bigint",
 			[]any{job.TargetContentID}, true
 	case ImageCacheTargetItemLocalization:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
@@ -759,6 +779,23 @@ func itemArtworkSourceColumn(imageType string) (string, bool) {
 		return "backdrop_source_path", true
 	case ImageCacheImageLogo:
 		return "logo_source_path", true
+	default:
+		return "", false
+	}
+}
+
+// itemOnlyArtworkSourceColumn names the source column of the item slots that
+// localizations do not carry.
+func itemOnlyArtworkSourceColumn(imageType string) (string, bool) {
+	switch imageType {
+	case ImageCacheImageBanner:
+		return "banner_source_path", true
+	case ImageCacheImageThumb:
+		return "thumb_source_path", true
+	case ImageCacheImageClearArt:
+		return "clearart_source_path", true
+	case ImageCacheImageDisc:
+		return "disc_source_path", true
 	default:
 		return "", false
 	}

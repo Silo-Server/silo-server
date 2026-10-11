@@ -45,7 +45,11 @@ bucket.
 
 Nothing walks a store root unbounded. The artwork sweep names its prefixes
 explicitly and refuses an empty one, because `parseArtworkObjectKey` accepts any
-`a.b.c` filename and would read a bundle name as a revisioned variant.
+`a.b.c` filename and would read a bundle name as a revisioned variant. Within
+those prefixes it keeps an object only while a column listed in
+`artworkSweepSurfaces()` (`internal/metadata/artwork_reconcile.go`) references
+it, as the revision GC does, so a new column or table that holds cached artwork
+must be listed there.
 Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 `diagnostics/<user id>/<report id>.tar.gz`, so artwork from a provider slugged
 `diagnostics` is never swept.

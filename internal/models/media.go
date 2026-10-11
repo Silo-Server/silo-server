@@ -662,24 +662,42 @@ type MediaItem struct {
 	Runtime        int // minutes
 	// AudiobookDurationSeconds is an exact transient duration overlay loaded
 	// from active audiobook file stats for protocol adapters that use seconds.
-	AudiobookDurationSeconds     int
-	Overview                     string
-	Tagline                      string
-	RatingIMDB                   *float64
-	RatingTMDB                   *float64
-	RatingRTCritic               *int
-	RatingRTAudience             *int
-	ImdbID                       string
-	TmdbID                       string
-	TvdbID                       string
-	PosterPath                   string // S3 path
-	PosterSourcePath             string // provider-origin path kept when caching rewrites PosterPath; feeds outbound embeds
-	PosterThumbhash              string
-	BackdropPath                 string
-	BackdropSourcePath           string
-	BackdropThumbhash            string
-	LogoPath                     string
-	LogoSourcePath               string
+	AudiobookDurationSeconds int
+	Overview                 string
+	Tagline                  string
+	RatingIMDB               *float64
+	RatingTMDB               *float64
+	RatingRTCritic           *int
+	RatingRTAudience         *int
+	ImdbID                   string
+	TmdbID                   string
+	TvdbID                   string
+	PosterPath               string // S3 path
+	PosterSourcePath         string // provider-origin path kept when caching rewrites PosterPath; feeds outbound embeds
+	PosterThumbhash          string
+	BackdropPath             string
+	BackdropSourcePath       string
+	BackdropThumbhash        string
+	LogoPath                 string
+	LogoSourcePath           string
+	// Banner, thumb (landscape), clear art and disc art follow the slots
+	// above. Clear art and disc art are cut-outs and, like the logo, carry no
+	// thumbhash. json:"-" because some frozen v1 responses serialize
+	// MediaItem directly.
+	BannerPath         string `json:"-"`
+	BannerSourcePath   string `json:"-"`
+	BannerThumbhash    string `json:"-"`
+	ThumbPath          string `json:"-"`
+	ThumbSourcePath    string `json:"-"`
+	ThumbThumbhash     string `json:"-"`
+	ClearArtPath       string `json:"-"`
+	ClearArtSourcePath string `json:"-"`
+	DiscPath           string `json:"-"`
+	DiscSourcePath     string `json:"-"`
+	// ExtraBackdrops are the backdrops after BackdropPath, in display order.
+	// They live in media_item_backdrops and are loaded only by readers that
+	// ask for them, so nil means "not loaded", not "none".
+	ExtraBackdrops               []ItemBackdrop `json:"-"`
 	MetadataS3Path               string
 	MetadataEtag                 string
 	SeasonCount                  *int // series only
@@ -719,6 +737,16 @@ type MediaItem struct {
 	// because some frozen v1 responses serialize MediaItem directly.
 	PosterIsEpisodeStill   *bool `json:"-"`
 	BackdropIsEpisodeStill *bool `json:"-"`
+}
+
+// ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops
+// row. Ordinal 1 is the second backdrop the item shows.
+type ItemBackdrop struct {
+	ID         int64
+	Ordinal    int
+	Path       string
+	SourcePath string
+	Thumbhash  string
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.

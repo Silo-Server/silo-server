@@ -405,6 +405,10 @@ const (
 	ImageLogo
 	ImageStill // Episode stills
 	ImageProfile
+	ImageBanner   // Wide banner strip (Kodi banner.jpg)
+	ImageThumb    // Landscape thumb (Kodi landscape.jpg)
+	ImageClearArt // Transparent cut-out art (clearart.png)
+	ImageDisc     // Disc art (disc.png, cdart.png, discart.png)
 )
 
 // CacheImageRequest describes an image to be cached. For season posters

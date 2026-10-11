@@ -152,8 +152,13 @@ type PersonPhotoUpdater interface {
 	UpdatePhotoIfSourceMatches(ctx context.Context, personID int64, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
+type ItemBackdropArtworkUpdater interface {
+	UpdateArtworkIfSourceMatches(ctx context.Context, id int64, sourcePath, cachedPath, thumbhash string) (bool, error)
+}
+
 type ImageCacheProcessorTargets struct {
 	Items               ItemArtworkUpdater
+	ItemBackdrops       ItemBackdropArtworkUpdater
 	Seasons             SeasonArtworkUpdater
 	Episodes            EpisodeStillUpdater
 	ItemLocalizations   ItemLocalizationArtworkUpdater
@@ -882,6 +887,15 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 			return false, errors.New("missing item updater")
 		}
 		return p.targets.Items.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
+	case ImageCacheTargetItemBackdrop:
+		if p.targets.ItemBackdrops == nil {
+			return false, errors.New("missing item backdrop updater")
+		}
+		rowID, parseErr := strconv.ParseInt(job.TargetContentID, 10, 64)
+		if parseErr != nil {
+			return false, fmt.Errorf("invalid item backdrop image cache target %q: %w", job.TargetContentID, parseErr)
+		}
+		return p.targets.ItemBackdrops.UpdateArtworkIfSourceMatches(ctx, rowID, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetItemLocalization:
 		if p.targets.ItemLocalizations == nil {
 			return false, errors.New("missing item localization updater")
@@ -979,6 +993,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	}
 
 	digest := sha256.Sum256(data)
+	discriminator := hex.EncodeToString(digest[:4])
+	if job.TargetType == ImageCacheTargetItemBackdrop {
+		// An item's backdrops share one key folder per file. The row ID keeps
+		// each backdrop's key apart from the primary's and the other rows', so
+		// the stale-prefix cleanup below never deletes art that another
+		// backdrop of the item now shows.
+		discriminator += "-" + job.TargetContentID
+	}
 	result, err := byteCacher.CacheImageBytes(ctx, data, CacheImageRequest{
 		SourceURL:        job.SourcePath,
 		ProviderID:       imageCacheLocalProviderID,
@@ -988,7 +1010,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		SeasonNumber:     job.SeasonNumber,
 		EpisodeNumber:    job.EpisodeNumber,
 		Language:         job.TargetLanguage,
-		KeyDiscriminator: hex.EncodeToString(digest[:4]),
+		KeyDiscriminator: discriminator,
 	})
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
@@ -1163,6 +1185,14 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 		return ImageStill, nil
 	case ImageCacheImageProfile:
 		return ImageProfile, nil
+	case ImageCacheImageBanner:
+		return ImageBanner, nil
+	case ImageCacheImageThumb:
+		return ImageThumb, nil
+	case ImageCacheImageClearArt:
+		return ImageClearArt, nil
+	case ImageCacheImageDisc:
+		return ImageDisc, nil
 	default:
 		return ImagePoster, fmt.Errorf("unknown metadata image cache image type %q", value)
 	}
