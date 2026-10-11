@@ -104,14 +104,15 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	if err := w.checkEmbeddingSettingsActive(ctx); err != nil {
 		return EmbeddingsReset{}, err
 	}
-	release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations)
+	// One connection holds every claim's cluster lock and the sweep's.
+	held, release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations)
 	if err != nil {
 		return EmbeddingsReset{}, err
 	}
 	defer release()
 
 	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
-	unlock, acquired, err := w.locker.TryLock(lockCtx, staleSweepLock)
+	unlock, acquired, err := held.TryAlso(lockCtx, staleSweepLock)
 	cancel()
 	if err != nil {
 		return EmbeddingsReset{}, fmt.Errorf("take stale sweep lock: %w", err)
@@ -130,27 +131,6 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	slog.InfoContext(ctx, "recommendation embeddings reset", "component", "recommendations",
 		"embeddings", res.Embeddings, "taste_profiles", res.TasteProfiles, "taste_clusters", res.TasteClusters, "cached_rows", res.CachedRows)
 	return res, nil
-}
-
-// claimJobs claims each named job in order, as runJob does, and returns one
-// function that releases them all. When a claim fails it releases the ones
-// it took.
-func (w *Worker) claimJobs(names ...JobName) (release func(), err error) {
-	releases := make([]func(), 0, len(names))
-	release = func() {
-		for i := len(releases) - 1; i >= 0; i-- {
-			releases[i]()
-		}
-	}
-	for _, name := range names {
-		r, err := w.claimJob(name)
-		if err != nil {
-			release()
-			return nil, err
-		}
-		releases = append(releases, r)
-	}
-	return release, nil
 }
 
 // ResetEmbeddings deletes the embedding lock, every item embedding, taste

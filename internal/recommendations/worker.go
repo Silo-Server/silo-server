@@ -194,13 +194,13 @@ func (w *Worker) tryStart(name JobName) bool {
 func (w *Worker) jobFor(name JobName) job {
 	switch name {
 	case JobEmbeddings:
-		return job{name: name, timeout: w.embeddingsJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doEmbeddings(ctx) }}
+		return job{name: name, timeout: w.embeddingsJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doEmbeddings(ctx) }}
 	case JobTasteProfiles:
-		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doTasteProfiles(ctx) }}
+		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doTasteProfiles(ctx, held) }}
 	case JobCowatch:
-		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doCowatch(ctx) }}
+		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doCowatch(ctx) }}
 	default:
-		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doRecommendations(ctx) }}
+		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doRecommendations(ctx, held) }}
 	}
 }
 
@@ -236,7 +236,7 @@ func (w *Worker) embedMissingJob() job {
 		name:          JobEmbeddings,
 		timeout:       w.embeddingsJobTimeout,
 		quietWhenIdle: true,
-		run:           func(ctx context.Context) (jobResult, error) { return w.doEmbedMissing(ctx) },
+		run:           func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doEmbedMissing(ctx) },
 	}
 }
 
@@ -472,7 +472,7 @@ type tasteProfilesResult struct {
 
 func (r tasteProfilesResult) failures() int { return r.Failed }
 
-func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, error) {
+func (w *Worker) doTasteProfiles(ctx context.Context, held clusterLock) (tasteProfilesResult, error) {
 	var res tasteProfilesResult
 	subjects, failed, err := w.tasteProfileSubjects(ctx)
 	res.Failed += failed
@@ -489,7 +489,7 @@ func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, erro
 		}
 		// A refresh that started reading after this job could otherwise be
 		// overwritten by it with older signals.
-		unlock, acquired, err := w.tryProfileLock(ctx, s.UserID, s.ProfileID)
+		unlock, acquired, err := w.tryProfileLock(ctx, held, s.UserID, s.ProfileID)
 		if err == nil && !acquired {
 			res.Busy++
 			w.markBusyProfileStale(ctx, s.UserID, s.ProfileID)
@@ -662,7 +662,7 @@ func (r cacheResult) failures() int {
 	return n
 }
 
-func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
+func (w *Worker) doRecommendations(ctx context.Context, held clusterLock) (cacheResult, error) {
 	var res cacheResult
 	expires := cacheExpiry(time.Now())
 	repo := w.engine.repo
@@ -690,7 +690,7 @@ func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
 			slog.WarnContext(ctx, "recommendation cache job ran out of time", "component", "recommendations", "processed", i, "remaining", res.Remaining)
 			return res, fmt.Errorf("cache refresh stopped after %d of %d profiles: %w", i, len(profiles), err)
 		}
-		unlock, acquired, err := w.tryProfileLock(ctx, p.UserID, p.ProfileID)
+		unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
 		if err != nil {
 			res.Processed++
 			res.FailedProfiles++
@@ -808,7 +808,7 @@ func (w *Worker) ensureGlobalRows(ctx context.Context, store globalRowCache) {
 		return
 	}
 	slog.InfoContext(ctx, "no global recommendation rows cached; building them now", "component", "recommendations")
-	err = w.runJob(job{name: JobRecommendations, timeout: globalRowsJobTimeout, run: func(ctx context.Context) (jobResult, error) {
+	err = w.runJob(job{name: JobRecommendations, timeout: globalRowsJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) {
 		res := cacheResult{GlobalOnly: true}
 		res.GlobalRows, res.GlobalFailures = w.cacheGlobalRows(ctx, store, cacheExpiry(time.Now()))
 		return res, nil
@@ -954,7 +954,7 @@ func (w *Worker) stalenessLoop(ctx context.Context) {
 // profiles.
 func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
-	unlock, acquired, err := w.locker.TryLock(lockCtx, staleSweepLock)
+	held, acquired, err := w.locker.TryLock(lockCtx, staleSweepLock)
 	cancel()
 	if err != nil {
 		slog.WarnContext(ctx, "stale profile sweep could not take its lock", "component", "recommendations", "error", err)
@@ -963,7 +963,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	if !acquired {
 		return
 	}
-	defer unlock()
+	defer held.Release()
 
 	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
 	if err != nil {
@@ -983,7 +983,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 		if !w.claimProfileRefresh(key) {
 			continue // already queued or refreshing on this server
 		}
-		w.runProfileRefresh(ctx, p.UserID, p.ProfileID)
+		w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID)
 	}
 }
 
@@ -993,16 +993,16 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			w.runProfileRefresh(ctx, req.userID, req.profileID)
+			w.runProfileRefresh(ctx, nil, req.userID, req.profileID)
 		}
 	}
 }
 
 // runProfileRefresh refreshes a profile whose pending key the caller claimed,
-// then releases the key.
-func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string) {
+// then releases the key. held is the caller's cluster lock, or nil.
+func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string) {
 	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
-	err := w.refreshProfile(ctx, userID, profileID)
+	err := w.refreshProfile(ctx, held, userID, profileID)
 	switch {
 	case errors.Is(err, errProfileRefreshElsewhere):
 		slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
@@ -1013,11 +1013,23 @@ func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID st
 
 // tryProfileLock takes the profile's cluster-wide refresh lock without
 // waiting. Every write of a profile's taste profile, clusters or cached rows
-// holds it: refreshes and the scheduled taste and cache jobs.
-func (w *Worker) tryProfileLock(ctx context.Context, userID int, profileID string) (unlock func(), acquired bool, err error) {
+// holds it: refreshes and the scheduled taste and cache jobs. Work that holds
+// a cluster lock (a job, the stale sweep) passes it as held, and the profile
+// lock shares its connection; otherwise held is nil and the profile lock
+// takes its own.
+func (w *Worker) tryProfileLock(ctx context.Context, held clusterLock, userID int, profileID string) (unlock func(), acquired bool, err error) {
 	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
 	defer cancel()
-	unlock, acquired, err = w.locker.TryLock(lockCtx, profileRefreshLock(userID, profileID))
+	key := profileRefreshLock(userID, profileID)
+	if held != nil {
+		unlock, acquired, err = held.TryAlso(lockCtx, key)
+	} else {
+		var lock clusterLock
+		lock, acquired, err = w.locker.TryLock(lockCtx, key)
+		if acquired {
+			unlock = lock.Release
+		}
+	}
 	if err != nil {
 		return nil, false, fmt.Errorf("take profile refresh lock: %w", err)
 	}
@@ -1057,7 +1069,7 @@ func profileRefreshLock(userID int, profileID string) int64 {
 // one cleared the stale mark. A refresh that finds the profile's lock held
 // returns errProfileRefreshElsewhere and marks the profile stale; the holder
 // clears only marks older than its own start, so the sweep runs it again.
-func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) (runErr error) {
+func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID int, profileID string) (runErr error) {
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
 	defer workmetrics.Profile(ctx)()
 	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
@@ -1074,7 +1086,7 @@ func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID strin
 	refreshCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
 	defer cancel()
 
-	unlock, acquired, err := w.tryProfileLock(refreshCtx, userID, profileID)
+	unlock, acquired, err := w.tryProfileLock(refreshCtx, held, userID, profileID)
 	if err != nil {
 		return err
 	}

@@ -49,7 +49,7 @@ func TestRecommendationJobRunsOnOneServerPostgres(t *testing.T) {
 	finish := make(chan struct{})
 	doneA := make(chan error, 1)
 	go func() {
-		doneA <- serverA.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+		doneA <- serverA.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 			close(started)
 			<-finish
 			return countsResult{Done: 1}, nil
@@ -64,7 +64,7 @@ func TestRecommendationJobRunsOnOneServerPostgres(t *testing.T) {
 	}
 
 	ranB := false
-	err = serverB.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	err = serverB.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		ranB = true
 		return countsResult{}, nil
 	}}, false)
@@ -72,7 +72,7 @@ func TestRecommendationJobRunsOnOneServerPostgres(t *testing.T) {
 		t.Fatalf("server B while A runs: err=%v ran=%v; want ErrJobRunningElsewhere", err, ranB)
 	}
 	// Other jobs are not blocked by this one.
-	if err := serverB.runJob(job{name: JobTasteProfiles, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := serverB.runJob(job{name: JobTasteProfiles, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		return countsResult{}, nil
 	}}, false); err != nil {
 		t.Fatalf("a different job on server B: %v", err)
@@ -83,7 +83,7 @@ func TestRecommendationJobRunsOnOneServerPostgres(t *testing.T) {
 		t.Fatalf("server A run: %v", err)
 	}
 	// A released the lock when its run returned, so B can take the job now.
-	if err := serverB.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := serverB.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		ranB = true
 		return countsResult{Done: 4, Failed: 2}, errors.New("co-watch upsert failed")
 	}}, false); err != nil || !ranB {
@@ -413,7 +413,7 @@ func TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres(t *testing.T) {
 	busy := newJobTestWorker(&keyedLocker{held: map[int64]bool{profileRefreshLock(userID, profile): true}}, nil)
 	busy.engine = engine
 	busy.staleMarker = engine.repo
-	res, err := busy.doTasteProfiles(ctx)
+	res, err := busy.doTasteProfiles(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres(t *testing.T) {
 
 	free := newJobTestWorker(&fakeLocker{}, nil)
 	free.engine = engine
-	if _, err := free.doTasteProfiles(ctx); err != nil {
+	if _, err := free.doTasteProfiles(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	if updatedAt().Equal(stored) {
@@ -682,5 +682,79 @@ func TestDeleteGlobalRecommendationCachePostgres(t *testing.T) {
 	}
 	if got := remaining(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("remaining rows = %v, want %v", got, want)
+	}
+}
+
+// advisoryLockHolders returns the backend pid holding each advisory key that
+// is held.
+func advisoryLockHolders(t *testing.T, pool *pgxpool.Pool, keys ...int64) map[int64]int {
+	t.Helper()
+	rows, err := pool.Query(t.Context(), `
+		SELECT ((classid::bigint << 32) | objid::bigint), pid
+		FROM   pg_locks
+		WHERE  locktype = 'advisory' AND granted AND ((classid::bigint << 32) | objid::bigint) = ANY($1)`, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holders := make(map[int64]int)
+	for rows.Next() {
+		var key int64
+		var pid int
+		if err := rows.Scan(&key, &pid); err != nil {
+			t.Fatal(err)
+		}
+		holders[key] = pid
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return holders
+}
+
+// A job's profile locks, and every lock an embeddings reset takes, share the
+// connection of the first lock, so long jobs pin one pooled connection each.
+func TestJobLocksShareOneConnectionPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	w := newJobTestWorker(pgJobLocker{pool: pool}, nil)
+
+	held, release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlockSweep, acquired, err := held.TryAlso(t.Context(), staleSweepLock)
+	if err != nil || !acquired {
+		t.Fatalf("stale sweep lock = (%v, %v)", acquired, err)
+	}
+	profileKey := profileRefreshLock(7, "p")
+	unlockProfile, acquired, err := w.tryProfileLock(t.Context(), held, 7, "p")
+	if err != nil || !acquired {
+		t.Fatalf("profile lock = (%v, %v)", acquired, err)
+	}
+	keys := []int64{embeddingsJobLock, tasteProfilesJobLock, cacheJobLock, staleSweepLock, profileKey}
+	holders := advisoryLockHolders(t, pool, keys...)
+	if len(holders) != len(keys) {
+		t.Fatalf("held keys = %v, want all of %#x", holders, keys)
+	}
+	for _, key := range keys {
+		if holders[key] != holders[embeddingsJobLock] {
+			t.Fatalf("lock %#x is held by backend %d, not the job's %d", key, holders[key], holders[embeddingsJobLock])
+		}
+	}
+
+	// A profile's lock is released alone, so the next profile can be taken
+	// while the job goes on.
+	unlockProfile()
+	if holders := advisoryLockHolders(t, pool, profileKey, cacheJobLock); len(holders) != 1 {
+		t.Fatalf("after the profile unlock, held = %v; want only the job lock", holders)
+	}
+	unlockSweep()
+	release()
+	if holders := advisoryLockHolders(t, pool, keys...); len(holders) != 0 {
+		t.Fatalf("after release, still held = %v", holders)
+	}
+	for _, name := range []JobName{JobEmbeddings, JobTasteProfiles, JobRecommendations} {
+		if w.IsRunning(name) {
+			t.Fatalf("%s still marked running", name)
+		}
 	}
 }

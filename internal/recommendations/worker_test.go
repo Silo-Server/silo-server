@@ -27,19 +27,36 @@ type fakeLocker struct {
 	released int
 }
 
-func (l *fakeLocker) TryLock(_ context.Context, key int64) (func(), bool, error) {
+func (l *fakeLocker) TryLock(_ context.Context, key int64) (clusterLock, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.keys = append(l.keys, key)
 	if l.err != nil || l.held {
 		return nil, false, l.err
 	}
-	return func() {
+	return fakeClusterLock{take: l.TryLock, release: func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		l.released++
-	}, true, nil
+	}}, true, nil
 }
+
+// fakeClusterLock is a test clusterLock. Its extra keys go through take, as
+// if each were a lock of its own.
+type fakeClusterLock struct {
+	take    func(ctx context.Context, key int64) (clusterLock, bool, error)
+	release func()
+}
+
+func (l fakeClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, error) {
+	other, acquired, err := l.take(ctx, key)
+	if err != nil || !acquired {
+		return nil, false, err
+	}
+	return other.Release, true, nil
+}
+
+func (l fakeClusterLock) Release() { l.release() }
 
 func (l *fakeLocker) snapshot() (keys []int64, released int) {
 	l.mu.Lock()
@@ -126,7 +143,7 @@ func TestRunJobRefusesASecondRunInThisProcess(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	blocking := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	blocking := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		close(started)
 		<-finish
 		return countsResult{Done: 1}, nil
@@ -145,7 +162,7 @@ func TestRunJobRefusesASecondRunInThisProcess(t *testing.T) {
 	}
 
 	ran := false
-	second := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	second := job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		ran = true
 		return countsResult{}, nil
 	}}
@@ -181,7 +198,7 @@ func TestRunJobSkipsWhenAnotherServerHoldsTheLock(t *testing.T) {
 	w := newJobTestWorker(locker, history)
 
 	ran := false
-	err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		ran = true
 		return cacheResult{}, nil
 	}}, true)
@@ -214,7 +231,7 @@ func TestRunJobRecordsOutcome(t *testing.T) {
 	history := newFakeHistory()
 	w := newJobTestWorker(&fakeLocker{}, history)
 
-	if err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := w.runJob(job{name: JobRecommendations, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		return countsResult{Done: 3, Failed: 1}, nil
 	}}, false); err != nil {
 		t.Fatal(err)
@@ -227,7 +244,7 @@ func TestRunJobRecordsOutcome(t *testing.T) {
 		t.Fatalf("completed run data = %s %+v", run.ResultData, run)
 	}
 
-	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		return countsResult{Done: 2}, errors.New("provider unavailable")
 	}}, false); err != nil {
 		t.Fatal(err)
@@ -238,7 +255,7 @@ func TestRunJobRecordsOutcome(t *testing.T) {
 	}
 
 	// A background run (a manual trigger) is recorded the same way.
-	if err := w.runJob(job{name: JobTasteProfiles, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := w.runJob(job{name: JobTasteProfiles, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		return countsResult{Done: 5}, nil
 	}}, true); err != nil {
 		t.Fatal(err)
@@ -251,7 +268,7 @@ func TestRunJobRecordsOutcome(t *testing.T) {
 	// Without history a run still completes.
 	bare := newJobTestWorker(&fakeLocker{}, nil)
 	ran := false
-	if err := bare.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := bare.runJob(job{name: JobCowatch, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		ran = true
 		return countsResult{}, nil
 	}}, false); err != nil || !ran {
@@ -262,7 +279,7 @@ func TestRunJobRecordsOutcome(t *testing.T) {
 func TestRunJobAppliesTheJobTimeout(t *testing.T) {
 	history := newFakeHistory()
 	w := newJobTestWorker(&fakeLocker{}, history)
-	if err := w.runJob(job{name: JobCowatch, timeout: time.Millisecond, run: func(ctx context.Context) (jobResult, error) {
+	if err := w.runJob(job{name: JobCowatch, timeout: time.Millisecond, run: func(ctx context.Context, _ clusterLock) (jobResult, error) {
 		<-ctx.Done()
 		return countsResult{}, ctx.Err()
 	}}, false); err != nil {
@@ -277,7 +294,7 @@ func TestLastRunsReadsEachJob(t *testing.T) {
 	history := newFakeHistory()
 	w := newJobTestWorker(&fakeLocker{}, history)
 	for _, name := range []JobName{JobCowatch, JobRecommendations, JobRecommendations} {
-		if err := w.runJob(job{name: name, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+		if err := w.runJob(job{name: name, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 			return countsResult{Done: history.count()}, nil
 		}}, false); err != nil {
 			t.Fatal(err)
@@ -520,7 +537,7 @@ func TestCacheUserRowsCountsFailedSteps(t *testing.T) {
 func TestTasteProfileJobFailsWhenSubjectsCannotBeListed(t *testing.T) {
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = closedPoolEngine(t)
-	res, err := w.doTasteProfiles(t.Context())
+	res, err := w.doTasteProfiles(t.Context(), nil)
 	if err == nil || res.Profiles != 0 {
 		t.Fatalf("taste job = %+v, %v; want a failure", res, err)
 	}
@@ -529,7 +546,7 @@ func TestTasteProfileJobFailsWhenSubjectsCannotBeListed(t *testing.T) {
 func TestCacheJobFailsWhenProfilesCannotBeListed(t *testing.T) {
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = closedPoolEngine(t)
-	res, err := w.doRecommendations(t.Context())
+	res, err := w.doRecommendations(t.Context(), nil)
 	if err == nil || !res.CleanFailed || res.GlobalFailures == 0 {
 		t.Fatalf("cache job = %+v, %v; want failures", res, err)
 	}
@@ -694,12 +711,12 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	w, marker := newRefreshTestWorker()
 	marker.w = nil
 	w.engine = closedPoolEngine(t)
-	if err := w.refreshProfile(t.Context(), 7, "p"); err == nil {
+	if err := w.refreshProfile(t.Context(), nil, 7, "p"); err == nil {
 		t.Fatal("refresh against a closed database succeeded")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := w.refreshProfile(ctx, 7, "p"); err == nil {
+	if err := w.refreshProfile(ctx, nil, 7, "p"); err == nil {
 		t.Fatal("refresh with an ended context succeeded")
 	}
 	if marker.calls != 2 || marker.ctxErrs[0] != nil || marker.ctxErrs[1] != nil {
@@ -718,7 +735,7 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 	w.locker = locker
 	// The engine has no repo, so a refresh that went ahead would panic.
 
-	if err := w.refreshProfile(t.Context(), 7, "p"); !errors.Is(err, errProfileRefreshElsewhere) {
+	if err := w.refreshProfile(t.Context(), nil, 7, "p"); !errors.Is(err, errProfileRefreshElsewhere) {
 		t.Fatalf("refresh while another server holds the lock = %v, want errProfileRefreshElsewhere", err)
 	}
 	if marker.calls != 1 {
@@ -732,7 +749,7 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("claim failed")
 	}
-	w.runProfileRefresh(t.Context(), 7, "p")
+	w.runProfileRefresh(t.Context(), nil, 7, "p")
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("a deferred refresh kept its pending key")
 	}
@@ -770,7 +787,7 @@ func TestQuietJobRecordsOnlyRunsThatDidSomething(t *testing.T) {
 	history := newFakeHistory()
 	w := newJobTestWorker(&fakeLocker{}, history)
 	quiet := func(res embeddingsResult, err error) job {
-		return job{name: JobEmbeddings, timeout: time.Minute, quietWhenIdle: true, run: func(context.Context) (jobResult, error) {
+		return job{name: JobEmbeddings, timeout: time.Minute, quietWhenIdle: true, run: func(context.Context, clusterLock) (jobResult, error) {
 			return res, err
 		}}
 	}

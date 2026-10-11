@@ -85,21 +85,53 @@ func cacheExpiry(start time.Time) string {
 // jobLocker takes a cluster-wide lock without waiting. acquired is false when
 // another server holds it.
 type jobLocker interface {
-	TryLock(ctx context.Context, key int64) (release func(), acquired bool, err error)
+	TryLock(ctx context.Context, key int64) (lock clusterLock, acquired bool, err error)
+}
+
+// clusterLock is a cluster-wide lock this server holds. Each lock pins one
+// database connection, so work guarded by a second lock while it holds one
+// (a job taking each profile's lock, an embeddings reset taking several jobs')
+// takes it with TryAlso, on the same connection.
+type clusterLock interface {
+	// TryAlso takes key on the lock's own session without waiting.
+	// acquired is false when another server holds key. release unlocks key
+	// alone; Release unlocks it too when release was not called.
+	TryAlso(ctx context.Context, key int64) (release func(), acquired bool, err error)
+	// Release unlocks every key the lock holds.
+	Release()
 }
 
 type pgJobLocker struct{ pool *pgxpool.Pool }
 
-func (l pgJobLocker) TryLock(ctx context.Context, key int64) (func(), bool, error) {
+func (l pgJobLocker) TryLock(ctx context.Context, key int64) (clusterLock, bool, error) {
 	lock, acquired, err := pglock.TryAcquire(ctx, l.pool, key)
 	if err != nil || !acquired {
 		return nil, false, err
 	}
+	return pgClusterLock{lock: lock, key: key}, true, nil
+}
+
+type pgClusterLock struct {
+	lock *pglock.Lock
+	key  int64
+}
+
+func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, error) {
+	acquired, err := l.lock.AcquireAlso(ctx, key, 0)
+	if err != nil || !acquired {
+		return nil, false, err
+	}
 	return func() {
-		if err := lock.Release(context.Background()); err != nil {
-			slog.WarnContext(ctx, "releasing recommendation job lock failed", "component", "recommendations", "lock", key, "error", err)
+		if err := l.lock.ReleaseAlso(context.Background(), key); err != nil {
+			slog.Warn("releasing recommendation lock failed", "component", "recommendations", "lock", key, "error", err)
 		}
 	}, true, nil
+}
+
+func (l pgClusterLock) Release() {
+	if err := l.lock.Release(context.Background()); err != nil {
+		slog.Warn("releasing recommendation job lock failed", "component", "recommendations", "lock", l.key, "error", err)
+	}
 }
 
 // JobHistory stores one row per finished job run. The task manager's
@@ -153,7 +185,9 @@ type idleResult interface {
 type job struct {
 	name    JobName
 	timeout time.Duration
-	run     func(ctx context.Context) (jobResult, error)
+	// run does the work. held is the job's cluster lock, through which
+	// the work takes any further lock.
+	run func(ctx context.Context, held clusterLock) (jobResult, error)
 	// quietWhenIdle logs the job at Debug and leaves a run out of history
 	// when it succeeds and its result reports nothing done. Frequent
 	// catch-up runs use it so history holds only runs that did something.
@@ -176,19 +210,19 @@ func jobLabel(name JobName) string {
 // way, so a caller learns about a busy job through ErrJobRunning or
 // ErrJobRunningElsewhere. Runs skipped that way are not recorded.
 func (w *Worker) runJob(j job, background bool) error {
-	release, err := w.claimJob(j.name)
+	held, release, err := w.claimJobs(j.name)
 	if err != nil {
 		return err
 	}
 	if background {
 		go func() {
 			defer release()
-			w.executeJob(j)
+			w.executeJob(j, held)
 		}()
 		return nil
 	}
 	defer release()
-	w.executeJob(j)
+	w.executeJob(j, held)
 	return nil
 }
 
@@ -206,28 +240,49 @@ func (w *Worker) runScheduled(name JobName) {
 	}
 }
 
-func (w *Worker) claimJob(name JobName) (release func(), err error) {
-	if !w.tryStart(name) {
-		return nil, fmt.Errorf("%s %w", jobLabel(name), ErrJobRunning)
+// claimJobs claims the named jobs for this process and for the cluster and
+// returns the first job's cluster lock, which holds the others' too, and one
+// function that releases them all. When a claim fails it releases the ones it
+// took.
+func (w *Worker) claimJobs(names ...JobName) (held clusterLock, release func(), err error) {
+	var releases []func()
+	release = func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), jobLockTimeout)
 	defer cancel()
-	unlock, acquired, err := w.locker.TryLock(ctx, jobLockKeys[name])
-	if err != nil {
-		w.setRunning(name, false)
-		return nil, fmt.Errorf("take %s job lock: %w", jobLabel(name), err)
+	for _, name := range names {
+		if !w.tryStart(name) {
+			release()
+			return nil, nil, fmt.Errorf("%s %w", jobLabel(name), ErrJobRunning)
+		}
+		releases = append(releases, func() { w.setRunning(name, false) })
+		var unlock func()
+		var acquired bool
+		if held == nil {
+			held, acquired, err = w.locker.TryLock(ctx, jobLockKeys[name])
+			if acquired {
+				unlock = held.Release
+			}
+		} else {
+			unlock, acquired, err = held.TryAlso(ctx, jobLockKeys[name])
+		}
+		if err != nil {
+			release()
+			return nil, nil, fmt.Errorf("take %s job lock: %w", jobLabel(name), err)
+		}
+		if !acquired {
+			release()
+			return nil, nil, fmt.Errorf("%s %w", jobLabel(name), ErrJobRunningElsewhere)
+		}
+		releases = append(releases, unlock)
 	}
-	if !acquired {
-		w.setRunning(name, false)
-		return nil, fmt.Errorf("%s %w", jobLabel(name), ErrJobRunningElsewhere)
-	}
-	return func() {
-		unlock()
-		w.setRunning(name, false)
-	}, nil
+	return held, release, nil
 }
 
-func (w *Worker) executeJob(j job) {
+func (w *Worker) executeJob(j job, held clusterLock) {
 	ctx, cancel := context.WithTimeout(context.Background(), j.timeout)
 	defer cancel()
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
@@ -239,7 +294,7 @@ func (w *Worker) executeJob(j job) {
 	}
 	slog.Log(ctx, startLevel, "recommendation job started", "component", "recommendations", "job", j.name, "timeout", j.timeout)
 	started := time.Now()
-	result, err := j.run(ctx)
+	result, err := j.run(ctx, held)
 	completed := time.Now()
 	observation.Finish(telemetry.Outcome(err))
 

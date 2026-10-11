@@ -210,7 +210,7 @@ func TestFailedRefreshLeavesTheProfilePendingPostgres(t *testing.T) {
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = engine
 	w.staleMarker = engine.repo
-	if err := w.refreshProfile(t.Context(), p.userID, p.profile); err == nil {
+	if err := w.refreshProfile(t.Context(), nil, p.userID, p.profile); err == nil {
 		t.Fatal("refresh with a failing user store succeeded")
 	}
 	if !p.pending() {

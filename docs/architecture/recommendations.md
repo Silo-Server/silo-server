@@ -27,6 +27,11 @@ a time across the cluster; a busy job is skipped by cron and answered with
 under `recommendations.embeddings`, `recommendations.taste_profiles`,
 `recommendations.cowatch` and `recommendations.cache`, with its counts as
 `result_data`. A run that hit partial failures is `completed` and counts them.
+An advisory lock pins the pooled connection that took it, so every further
+lock a lock holder takes goes on that same session: a job's or the stale
+sweep's per-profile locks (each released after its profile), and the
+embeddings reset's job claims and sweep lock. A running job holds one
+connection for its locks.
 
 | Job | When | What |
 | --- | --- | --- |

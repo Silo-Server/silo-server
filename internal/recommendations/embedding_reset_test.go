@@ -23,18 +23,18 @@ type keyedLocker struct {
 	released int
 }
 
-func (l *keyedLocker) TryLock(_ context.Context, key int64) (func(), bool, error) {
+func (l *keyedLocker) TryLock(_ context.Context, key int64) (clusterLock, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.keys = append(l.keys, key)
 	if l.held[key] {
 		return nil, false, nil
 	}
-	return func() {
+	return fakeClusterLock{take: l.TryLock, release: func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		l.released++
-	}, true, nil
+	}}, true, nil
 }
 
 func (l *keyedLocker) snapshot() (keys []int64, released int) {
@@ -148,7 +148,7 @@ func TestResetEmbeddingsHoldsEveryClaimWhileItRuns(t *testing.T) {
 	}
 	assertNothingRunning(t, w)
 	// A cron run of any of those jobs can start again afterwards.
-	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context) (jobResult, error) {
+	if err := w.runJob(job{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
 		return embeddingsResult{}, nil
 	}}, false); err != nil {
 		t.Fatalf("embeddings after the reset: %v", err)
