@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -21,6 +22,11 @@ func (r *EncryptedSettingsRepo) UpdateValueAndSettingsAtomic(ctx context.Context
 		for name, value := range current {
 			value, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(name))
 			if err != nil {
+				// Match GetAll: blocked storage recovery owns this receipt's
+				// error. Omit it from the snapshot and retain its raw row.
+				if name == config.StorageTransitionTargetKey {
+					continue
+				}
 				return nil, fmt.Errorf("decrypt setting %q: %w", name, err)
 			}
 			plain[name] = value

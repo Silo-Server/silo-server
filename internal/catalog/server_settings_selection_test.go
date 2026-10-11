@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,6 +36,50 @@ func TestEncryptedSelectionWritesCredentialsAndModelTogether(t *testing.T) {
 	}
 	if !secret.IsEncrypted(raw.m[chatgpt.CredentialsKey]) || raw.m["ai.chat_model"] != "new-model" {
 		t.Fatal("coordinated writes lost encryption or model")
+	}
+}
+
+func TestEncryptedSelectionUnreadableReceiptPreservesCredentialCommit(t *testing.T) {
+	for _, key := range []string{config.StorageTransitionTargetKey, "ai.api_key"} {
+		t.Run(key, func(t *testing.T) {
+			raw := newMemSettings()
+			store := NewEncryptedSettingsRepo(raw, newCipher(t))
+			for name, value := range map[string]string{chatgpt.CredentialsKey: "old", "ai.chat_model": "old-model"} {
+				if err := store.Set(t.Context(), name, value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const corrupt = "enc:v1:invalid-envelope"
+			raw.m[key] = corrupt
+			previousCredential := raw.m[chatgpt.CredentialsKey]
+			called := false
+			err := store.UpdateValueAndSettingsAtomic(t.Context(), chatgpt.CredentialsKey, func(values map[string]string) (map[string]string, error) {
+				called = true
+				if _, present := values[key]; present {
+					t.Fatal("unreadable receipt reached the selection callback")
+				}
+				return map[string]string{chatgpt.CredentialsKey: "accepted-replacement", "ai.chat_model": "selected-model"}, nil
+			})
+			if raw.m[key] != corrupt {
+				t.Fatal("coordinated update changed the unreadable row")
+			}
+			if key != config.StorageTransitionTargetKey {
+				if err == nil || called || raw.m[chatgpt.CredentialsKey] != previousCredential || raw.m["ai.chat_model"] != "old-model" {
+					t.Fatal("unreadable active setting did not prevent the entire update")
+				}
+				return
+			}
+			if err != nil || !called {
+				t.Fatalf("unreadable recovery receipt discarded accepted credentials: %v", err)
+			}
+			credentials, err := store.Get(t.Context(), chatgpt.CredentialsKey)
+			if err != nil || credentials != "accepted-replacement" || !secret.IsEncrypted(raw.m[chatgpt.CredentialsKey]) || raw.m["ai.chat_model"] != "selected-model" {
+				t.Fatal("accepted credentials and selected model were not committed")
+			}
+			if _, err := store.Get(t.Context(), key); err == nil {
+				t.Fatal("receipt owner lost its decryption error")
+			}
+		})
 	}
 }
 
