@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1483,26 +1484,67 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	if !ok || len(titleTokens) == 0 {
 		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
 	}
+	// Compare without spaces so "Live Stream From Hell" is an exact match for
+	// "Livestream from Hell" and "spiderman" for "Spider-Man".
+	compactTitle, compactQuery := strings.ReplaceAll(title, " ", ""), strings.ReplaceAll(query, " ", "")
 	score := fuzzyTitleScore{
-		exact:       title == query,
-		contiguous:  strings.Contains(title, query),
+		exact:       compactTitle == compactQuery,
+		contiguous:  strings.Contains(compactTitle, compactQuery),
 		extraTokens: absInt(len(titleTokens) - len(queryTokens)),
 	}
-	for _, queryToken := range queryTokens {
-		maxEdits := fuzzyAutoMaxEdits(len(queryToken))
-		best := maxEdits + 1
-		for _, titleToken := range titleTokens {
-			distance := boundedLevenshteinRunes(queryToken, titleToken, maxEdits)
-			if distance < best {
-				best = distance
+	// A query word may also match two adjacent title words joined, and two
+	// adjacent query words joined may match one title word.
+	titleTerms := slices.Concat(titleTokens, joinAdjacentFuzzyTokens(titleTokens))
+	matches := make([]fuzzyTokenMatch, len(queryTokens))
+	for i, token := range queryTokens {
+		matches[i] = bestFuzzyTokenMatch(token, titleTerms, fuzzyAutoMaxEdits(len(token)))
+	}
+	for i := 0; i < len(queryTokens); i++ {
+		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) {
+			// The pair's typo allowance never exceeds what its words allow
+			// separately, so "ed wood" cannot match "Wood" by dropping "ed".
+			joined := slices.Concat(queryTokens[i], queryTokens[i+1])
+			maxEdits := min(fuzzyAutoMaxEdits(len(joined)), fuzzyAutoMaxEdits(len(queryTokens[i]))+fuzzyAutoMaxEdits(len(queryTokens[i+1])))
+			pair := bestFuzzyTokenMatch(joined, titleTerms, maxEdits)
+			if pair.ok {
+				score.matchedTokens += 2
+				score.editDistance += pair.distance
+				i++
+				continue
 			}
 		}
-		if best <= maxEdits {
+		if matches[i].ok {
 			score.matchedTokens++
 		}
-		score.editDistance += best
+		score.editDistance += matches[i].distance
 	}
 	return score
+}
+
+type fuzzyTokenMatch struct {
+	distance int
+	ok       bool // distance is within the token's typo allowance
+}
+
+func bestFuzzyTokenMatch(token []rune, terms [][]rune, maxEdits int) fuzzyTokenMatch {
+	best := maxEdits + 1
+	for _, term := range terms {
+		if distance := boundedLevenshteinRunes(token, term, maxEdits); distance < best {
+			best = distance
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= maxEdits}
+}
+
+func joinAdjacentFuzzyTokens(tokens [][]rune) [][]rune {
+	if len(tokens) < 2 {
+		return nil
+	}
+	joined := make([][]rune, 0, len(tokens)-1)
+	for i := 0; i+1 < len(tokens); i++ {
+		joined = append(joined, slices.Concat(tokens[i], tokens[i+1]))
+	}
+	return joined
 }
 
 func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {
