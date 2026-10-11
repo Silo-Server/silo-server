@@ -7002,6 +7002,28 @@
       "body_file": "get_for_you_main_profile_header_required.json"
     },
     {
+      "name": "get_home_capabilities_ok",
+      "operation_id": "getHomeCapabilities",
+      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"59a9dab7b74c563cd0809b2a1152c35a11c592c44ebda15b6ca6c64da090c7a9\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/HomeCapabilities",
+      "body_file": "get_home_capabilities_ok.json"
+    },
+    {
       "name": "get_home_layout_include_items_out_of_range",
       "operation_id": "getHomeLayout",
       "scenario": "An include_items above the maximum of 4 is a validation failure naming the parameter.",

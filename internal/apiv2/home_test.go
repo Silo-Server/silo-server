@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -377,4 +378,73 @@ func TestListSectionRecipeCandidates(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", nil), TypeAuthenticationRequired)
 	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "candidate_error", Message: "boom"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", viewerHeaders()), TypeInternalError)
+}
+
+// TestHomeCapabilities pins the home capability document: available with
+// include_items_max where the home sections service is wired, revalidated by
+// its ETag, not_configured without it, and include_items_max equal to the
+// include_items maximum getHomeLayout validates.
+func TestHomeCapabilities(t *testing.T) {
+	path := Prefix + "/home/capabilities"
+	deps, _ := homeDeps(t)
+	h := newTestHandler(t, deps)
+	requireProblem(t, do(t, h, http.MethodGet, path, "", nil), TypeAuthenticationRequired)
+
+	rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
+	var out HomeCapabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || out.State != StateAvailable || out.Allowed == nil || !*out.Allowed || out.Revision == "" ||
+		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections {
+		t.Fatalf("capabilities: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != cachePrivateNoCache {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	tag := rec.Header().Get("ETag")
+	if cached := do(t, h, http.MethodGet, path, "", with(viewerHeaders(), "If-None-Match", tag)); tag == "" || cached.Code != http.StatusNotModified {
+		t.Fatalf("revalidation with %q: %d", tag, cached.Code)
+	}
+
+	deps.HomeSections = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders())
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") {
+		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
+	}
+	out = HomeCapabilities{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.State != StateNotConfigured || out.Allowed == nil || *out.Allowed {
+		t.Fatalf("unconfigured: %+v %v", out, err)
+	}
+
+	// The advertised bound is the one the layout enforces.
+	data, err := generatedOpenAPIBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name   string `json:"name"`
+				Schema struct {
+					Maximum *float64 `json:"maximum"`
+				} `json:"schema"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var maximum *float64
+	for _, p := range doc.Paths[Prefix+"/home/layout"]["get"].Parameters {
+		if p.Name == "include_items" {
+			maximum = p.Schema.Maximum
+		}
+	}
+	if maximum == nil || int(*maximum) != handlers.MaxHomeLayoutIncludedSections {
+		t.Fatalf("getHomeLayout include_items maximum = %v, want %d", maximum, handlers.MaxHomeLayoutIncludedSections)
+	}
+	if rec := do(t, h, http.MethodGet, fmt.Sprintf("%s/home/layout?include_items=%d", Prefix, handlers.MaxHomeLayoutIncludedSections+1), "", viewerHeaders()); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("include_items above the advertised maximum: %d", rec.Code)
+	}
 }

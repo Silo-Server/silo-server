@@ -30735,6 +30735,43 @@
         ],
         "type": "object"
       },
+      "HomeCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "include_items_max": {
+            "description": "The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured",
+            "examples": [
+              4
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "HomeDismissal": {
         "additionalProperties": false,
         "properties": {
@@ -158548,6 +158585,207 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/home/capabilities": {
+      "get": {
+        "operationId": "getHomeCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The home page features this server supports, such as the cards of the first sections on getHomeLayout.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/home/dismissals/{surface}/{item_id}": {
       "delete": {
         "operationId": "undismissHomeItem",
@@ -158950,13 +159188,13 @@
             }
           },
           {
-            "description": "Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone",
+            "description": "Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter",
             "explode": false,
             "in": "query",
             "name": "include_items",
             "schema": {
               "default": 0,
-              "description": "Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone",
+              "description": "Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter",
               "examples": [
                 2
               ],

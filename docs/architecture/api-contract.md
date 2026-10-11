@@ -1524,9 +1524,9 @@ its revision are read in one database snapshot; authorization and catalog hydrat
 by checks of that revision. Smart results are live keysets, not a frozen catalog snapshot.
 The pinned web carousel requests a bounded teaser and links to the full collection browse view.
 
-**Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
-`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
-`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
+**Section catalog-home (Phase 4).** Nine profile-scoped operations under the `home` tag:
+`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeCapabilities`, `getHomeLayout`,
+`listHomeSections`, `getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
 gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
 `RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
 shape as a library page with scope=home, so the section and card reads reuse
@@ -1535,10 +1535,14 @@ shape as a library page with scope=home, so the section and card reads reuse
 carries `included_sections`, so the library layout's contract stays unchanged. With
 `include_items=N` (0 to 4, default 0) and an optional `image_size`, the layout also answers the
 first N sections in display order, each identical to its `getHomeSectionItems` answer for the
-same viewer and `image_size` (no cross-row duplicate filter). The rows are fetched in parallel
-under a fixed budget measured from the start of their item fetches; a row that errors or is not
-ready in time is left out rather than failing or delaying the layout, and the client reads it
-from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
+same viewer and `image_size` (no cross-row duplicate filter). The rows are built in parallel
+under one fixed budget that covers each row's whole build, its item fetch and its card lookups; a
+row that errors or is not built in time is left out rather than failing or delaying the layout,
+and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
+Because v2 rejects unknown query parameters, a client sends `include_items` only after
+`getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
+largest value the layout accepts (4); the document is `not_configured`, without the field, when the
+home sections service is not wired.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
