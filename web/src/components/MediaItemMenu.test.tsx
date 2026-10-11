@@ -1142,3 +1142,72 @@ describe("MediaItemMenu long-press action sheet", () => {
     ).toBeTruthy();
   });
 });
+
+describe("MediaItemMenu lazy machinery", () => {
+  function renderMenu() {
+    return render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  const radixRoot = () => document.querySelector('[data-slot="dropdown-menu-trigger"]');
+
+  it("mounts no menu root until the card is used, then opens on the first press", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(radixRoot()).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("data-state", "closed");
+
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(radixRoot()).not.toBeNull();
+    // The visible trigger kept its element and reports the open menu.
+    expect(screen.getByRole("button", { name: "More actions" })).toBe(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("data-state", "open");
+    expect(trigger.getAttribute("aria-controls")).toBe(screen.getByRole("menu").id);
+  });
+
+  it("mounts the menu when the trigger takes focus and opens to the first item by keyboard", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    act(() => trigger.focus());
+    expect(radixRoot()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await userEvent.keyboard("{Enter}");
+
+    const items = screen.getAllByRole("menuitem");
+    await waitFor(() => expect(document.activeElement).toBe(items[0]));
+  });
+
+  it("runs a quick action pressed before the machinery mounted", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Remove from favorites" })).toBeTruthy();
+  });
+
+  it("warms the machinery on mouse hover without opening the menu", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+
+    await waitFor(() => expect(radixRoot()).not.toBeNull());
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
