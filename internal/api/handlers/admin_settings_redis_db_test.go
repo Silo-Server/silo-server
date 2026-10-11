@@ -110,6 +110,7 @@ func saveSettings(t *testing.T, handler *AdminHandler, body string) (*httptest.R
 }
 
 func TestAdminSettingsSaveRedisDB(t *testing.T) {
+	acceptRedisSaves(t)
 	const savedURL = "redis://cache.example.invalid:6379/3"
 
 	t.Run("a new number is stored and needs a restart", func(t *testing.T) {
@@ -221,6 +222,7 @@ func redisDatabaseAfterRestart(t *testing.T, settings *fakeServerSettingsStore) 
 // what a save stores cannot depend on the saves before it. Each of these
 // installs shows 3 or 5 and is then given the 3 its URL already names.
 func TestAdminSettingsRedisDBRowIgnoresEarlierSaves(t *testing.T) {
+	acceptRedisSaves(t)
 	const savedURL = "redis://cache.example.invalid:6379/3"
 	for name, stored := range map[string]map[string]string{
 		"never set":              {"redis.url": savedURL},
@@ -301,8 +303,11 @@ func TestAdminSettingsStoreNoRedisDBWithoutRedis(t *testing.T) {
 }
 
 // A redis.url saved by an older build can be a bare address, which names no
-// number to compare with.
+// number to compare with. The Redis clients cannot read it either, so outside
+// this test a save that changes redis.db next to it fails its connection check
+// until the URL is saved again.
 func TestAdminSettingsStoreRedisDBNextToAnUnreadableURL(t *testing.T) {
+	acceptRedisSaves(t)
 	for _, single := range []bool{false, true} {
 		settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": "cache.example.invalid:6379"}}
 		if rec := saveRedisDB(&AdminHandler{SettingsRepo: settings}, "0", single); rec.Code != http.StatusOK {
@@ -384,6 +389,24 @@ func TestAdminSettingsClearRedisDBManagedByEnvironment(t *testing.T) {
 // database each PING used, so the check exercises the production Redis client.
 func redisCheckServer(t *testing.T) (string, <-chan int) {
 	t.Helper()
+	return fakeRedisServer(t, fakeRedis{})
+}
+
+// fakeRedis is the Redis fakeRedisServer plays.
+type fakeRedis struct {
+	// databases is how many databases the server has: it refuses a SELECT of
+	// any other number the way Redis does. With 0 it accepts every number.
+	databases int
+	// denyChannels refuses every SUBSCRIBE, as Redis does for a user whose
+	// ACL does not grant the channels.
+	denyChannels bool
+}
+
+// fakeRedisServer is redisCheckServer for the Redis server describes. It also
+// refuses a subscription to a channel not scoped to the selected database, so
+// a check that names the channels wrongly fails.
+func fakeRedisServer(t *testing.T, server fakeRedis) (string, <-chan int) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -433,13 +456,23 @@ func redisCheckServer(t *testing.T) (string, <-chan int) {
 						if len(args) != 2 {
 							return
 						}
-						db, err = strconv.Atoi(args[1])
+						n, err := strconv.Atoi(args[1])
 						if err != nil {
 							return
 						}
+						if server.databases > 0 && (n < 0 || n >= server.databases) {
+							reply = "-ERR DB index is out of range\r\n"
+							break
+						}
+						db = n
 					case "PING":
-						checked <- db
+						select {
+						case checked <- db:
+						default:
+						}
 						reply = "+PONG\r\n"
+					case "SUBSCRIBE":
+						reply = subscribeReply(server, db, args[1:])
 					}
 					if _, err := fmt.Fprint(conn, reply); err != nil {
 						return
@@ -449,6 +482,22 @@ func redisCheckServer(t *testing.T) (string, <-chan int) {
 		}
 	}()
 	return "redis://" + listener.Addr().String(), checked
+}
+
+// subscribeReply answers a SUBSCRIBE of channels on database db.
+func subscribeReply(server fakeRedis, db int, channels []string) string {
+	var reply strings.Builder
+	for i, channel := range channels {
+		if server.denyChannels {
+			return "-NOPERM User default has no permissions to access the '" + channel + "' channel\r\n"
+		}
+		_, scope, _ := strings.Cut(channel, "@")
+		if want := "db" + strconv.Itoa(db); (db > 0 && scope != want) || (db == 0 && scope != "") {
+			return "-ERR channel " + channel + " is not scoped to database " + strconv.Itoa(db) + "\r\n"
+		}
+		fmt.Fprintf(&reply, "*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:%d\r\n", len(channel), channel, i+1)
+	}
+	return reply.String()
 }
 
 func TestRedisConnectionCheckUsesRedisDB(t *testing.T) {

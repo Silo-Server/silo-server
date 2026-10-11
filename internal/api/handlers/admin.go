@@ -2260,6 +2260,10 @@ type updateSettingsResponse struct {
 
 const errCodeStorageUnavailable = "storage_unavailable"
 
+// errCodeInvalidSettings refuses a save whose settings cannot work together
+// or that the server could not start with.
+const errCodeInvalidSettings = "invalid_settings"
+
 func (h *AdminHandler) normalizeBatchSetting(
 	ctx context.Context,
 	key, value string,
@@ -2617,6 +2621,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		}
 		normalized[key] = value
 	}
+	checkedRedis, err := h.checkRedisSave(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
 
 	var (
 		after            map[string]string
@@ -2626,7 +2634,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2635,17 +2643,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			for key, value := range normalized {
-				prospective[key] = value
-			}
-			rows := normalized
-			if value, ok := normalized[config.RedisDBSettingKey]; ok {
-				// The same batch can replace redis.url, so the row is decided
-				// against the URL the batch leaves in place.
-				rows = maps.Clone(normalized)
-				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
-				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			prospective, rows := h.prospectiveSettings(stored, normalized)
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
@@ -2666,7 +2667,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = errCodeInvalidSettings
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -2996,6 +2997,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		}
 		req.Value = strconv.FormatBool(enabled)
 	}
+	change := map[string]string{key: req.Value}
+	checkedRedis, err := h.checkRedisSave(ctx, change)
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
 
 	var (
 		after            map[string]string
@@ -3004,7 +3010,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -3013,12 +3019,12 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			row := req.Value
-			if key == config.RedisDBSettingKey {
-				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
+			prospective, rows := h.prospectiveSettings(stored, change)
+			row := rows[key]
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
-			prospective[key] = row
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
@@ -3030,7 +3036,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}
@@ -3045,7 +3051,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}
@@ -3055,7 +3061,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			if key == artworkStorageBackendKey || key == s3PublicBucketKey || key == s3OperationalBucketKey {
 				if err := config.ValidateArtworkStorageSettings(h.effectiveAdminSettings(prospective)); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}
