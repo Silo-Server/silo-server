@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrCollectionGroupNotFound = errors.New("collection group not found")
@@ -66,6 +67,23 @@ type PreferenceSettingsWriter interface {
 // canonical SettingMutationTransactioner writes for this account.
 type PreferenceSettingsTransactioner interface {
 	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
+}
+
+// AuditedProfileWriter is implemented by a PreferenceSettingsWriter that runs
+// in the server's PostgreSQL transaction. A domain audit row recorded through
+// AuditTx commits or rolls back with the profile write, and GetProfile reads
+// the profile inside that transaction. The SQLite backend has no such
+// transaction, so its profile writes record no domain audit rows.
+type AuditedProfileWriter interface {
+	AuditTx() pgx.Tx
+	GetProfile(ctx context.Context, id string) (*Profile, error)
+}
+
+// AuditedProfileDeleter deletes a profile like UserStore.DeleteProfile and
+// runs audit in the same PostgreSQL transaction, after the delete and before
+// the commit; an audit error rolls the delete back.
+type AuditedProfileDeleter interface {
+	DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx) error) error
 }
 
 // UserStore defines the interface for per-user data storage.

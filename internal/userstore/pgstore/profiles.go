@@ -343,6 +343,14 @@ var profileCascadeTables = []string{
 }
 
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
+	return s.DeleteProfileAudited(ctx, id, nil)
+}
+
+var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
+
+// DeleteProfileAudited is DeleteProfile with audit run in the delete's
+// transaction before it commits; a nil audit records nothing.
+func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
@@ -416,6 +424,11 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("profile %s not found", id)
+	}
+	if audit != nil {
+		if err := audit(tx); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit(ctx)

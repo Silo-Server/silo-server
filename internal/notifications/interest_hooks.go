@@ -653,11 +653,29 @@ func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profi
 func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) error {
 	err := s.UserStore.DeleteProfile(ctx, id)
 	if err == nil {
-		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		if purgeErr := s.system.PurgeProfile(purgeCtx, s.userID, id); purgeErr != nil {
-			slog.WarnContext(ctx, "notifications: profile purge failed", "component", "notifications", "profile_id", id, "error", purgeErr)
-		}
+		s.purgeProfile(ctx, id)
+	}
+	return err
+}
+
+func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
+	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if purgeErr := s.system.PurgeProfile(purgeCtx, s.userID, id); purgeErr != nil {
+		slog.WarnContext(ctx, "notifications: profile purge failed", "component", "notifications", "profile_id", id, "error", purgeErr)
+	}
+}
+
+// DeleteProfileAudited is DeleteProfile through the wrapped store's audited
+// delete. A backend without one deletes the profile without an audit row.
+func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx) error) error {
+	deleter, ok := s.UserStore.(userstore.AuditedProfileDeleter)
+	if !ok {
+		return s.DeleteProfile(ctx, id)
+	}
+	err := deleter.DeleteProfileAudited(ctx, id, audit)
+	if err == nil {
+		s.purgeProfile(ctx, id)
 	}
 	return err
 }
