@@ -588,6 +588,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
@@ -1850,6 +1851,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
