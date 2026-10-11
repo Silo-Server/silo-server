@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -22,7 +23,23 @@ type BandwidthManager struct {
 	rates         func(context.Context) (int64, int64, error)
 	serverBPS     int64
 	userBPS       int64
+	// ratesKnown and ratesAt track the shared-mode copy of the two settings.
+	// ratesMu lets one transfer refresh them while the others keep sending.
+	ratesMu    sync.Mutex
+	ratesKnown bool
+	ratesAt    time.Time
 }
+
+// bandwidthRatesTTL bounds how long an edit takes to reach transfers that are
+// already running, without a settings query per chunk.
+const bandwidthRatesTTL = 5 * time.Second
+
+// sharedBudgetGrace is how long a transfer retries an unavailable budget before
+// it fails closed. It rides out a brief Redis or database hiccup. Tests shorten it.
+var (
+	sharedBudgetGrace = 10 * time.Second
+	sharedBudgetRetry = 250 * time.Millisecond
+)
 
 // NewBandwidthManager creates a bandwidth manager with the given limits.
 // A value of 0 for either limit means unlimited.
@@ -38,9 +55,10 @@ func NewBandwidthManager(serverBPS, userBPS int64) *BandwidthManager {
 	return bm
 }
 
-// SetSharedBudget uses cluster-wide byte buckets and authoritative rates read
-// at every chunk. Production callers always set this, including without Redis:
-// a capped transfer then fails closed rather than getting a node-local budget.
+// SetSharedBudget uses cluster-wide byte buckets. Rates come from the
+// authoritative settings, refreshed at most every bandwidthRatesTTL. Production
+// callers always set this, including without Redis: a capped transfer then
+// fails closed rather than getting a node-local budget.
 func (bm *BandwidthManager) SetSharedBudget(client *redis.Client, rates func(context.Context) (int64, int64, error)) {
 	bm.rates = rates
 	if client != nil {
@@ -57,6 +75,7 @@ func (bm *BandwidthManager) Reload(serverBPS, userBPS int64) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	bm.serverBPS, bm.userBPS = serverBPS, userBPS
+	bm.ratesKnown, bm.ratesAt = true, time.Now()
 	if serverBPS > 0 {
 		if bm.serverLimiter == nil {
 			bm.serverLimiter = rate.NewLimiter(rate.Limit(serverBPS), bandwidthBurst(serverBPS))
@@ -168,27 +187,40 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 		}
 		return nil
 	}
+	var failingSince time.Time
 	for {
 		chunkCtx, cancel := context.WithTimeout(ctx, time.Second)
-		server, user, err := bm.rates(chunkCtx)
-		var delay int64
+		server, user, err := bm.currentRates(chunkCtx)
+		var delay time.Duration
 		if err == nil && (server > 0 || user > 0) {
 			if bm.shared == nil {
 				err = fmt.Errorf("shared download bandwidth requires Redis")
 			} else {
-				delay, err = sharedBandwidthScript.Run(chunkCtx, bm.shared,
+				var micros int64
+				micros, err = sharedBandwidthScript.Run(chunkCtx, bm.shared,
 					[]string{"silo:downloads:{bandwidth}:global", fmt.Sprintf("silo:downloads:{bandwidth}:user:%d", userID)},
 					server, user, bytes).Int64()
+				delay = time.Duration(micros) * time.Microsecond
 			}
 		}
 		cancel()
 		if err != nil {
-			return fmt.Errorf("download bandwidth budget unavailable: %w", err)
-		}
-		if delay <= 0 {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if failingSince.IsZero() {
+				failingSince = time.Now()
+			}
+			if time.Since(failingSince) >= sharedBudgetGrace {
+				return fmt.Errorf("download bandwidth budget unavailable: %w", err)
+			}
+			delay = sharedBudgetRetry
+		} else if delay <= 0 {
 			return nil
+		} else {
+			failingSince = time.Time{}
 		}
-		timer := time.NewTimer(min(time.Duration(delay)*time.Microsecond, 250*time.Millisecond))
+		timer := time.NewTimer(min(delay, 250*time.Millisecond))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -196,6 +228,43 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// currentRates returns the shared-mode rates, reading the settings at most once
+// per bandwidthRatesTTL. A failed read keeps the last known rates, so a database
+// hiccup neither stops transfers nor lifts their limits. Without known rates it
+// returns the error and the caller fails closed.
+func (bm *BandwidthManager) currentRates(ctx context.Context) (int64, int64, error) {
+	bm.mu.RLock()
+	server, user, known, at := bm.serverBPS, bm.userBPS, bm.ratesKnown, bm.ratesAt
+	bm.mu.RUnlock()
+	if known && time.Since(at) < bandwidthRatesTTL {
+		return server, user, nil
+	}
+	if known && !bm.ratesMu.TryLock() {
+		return server, user, nil
+	}
+	if !known {
+		bm.ratesMu.Lock()
+	}
+	defer bm.ratesMu.Unlock()
+
+	freshServer, freshUser, err := bm.rates(ctx)
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if err != nil {
+		if !bm.ratesKnown {
+			return 0, 0, err
+		}
+		// Retry the read in about a second rather than on every chunk.
+		bm.ratesAt = time.Now().Add(time.Second - bandwidthRatesTTL)
+		slog.WarnContext(ctx, "download bandwidth settings unavailable; keeping last known limits",
+			"component", "downloads", "error", err)
+		return bm.serverBPS, bm.userBPS, nil
+	}
+	bm.serverBPS, bm.userBPS = freshServer, freshUser
+	bm.ratesKnown, bm.ratesAt = true, time.Now()
+	return freshServer, freshUser, nil
 }
 
 // Both buckets are debited atomically. Redis time prevents node clock skew;

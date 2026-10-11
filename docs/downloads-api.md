@@ -2050,12 +2050,15 @@ prevent additional budgets from API/proxy restarts. All serving nodes must run
 the implementation; capped proxy routing remains disabled for compatibility
 with older workers. API delivery of worker artifacts is charged once at egress.
 
-Saved bandwidth edits are read at the next byte chunk, including on transfers
-that started unlimited. A pending chunk rechecks rates at most every 250 ms;
-there is no cached full-bucket refill on edit. A failed authoritative settings
-read or shared budget operation stops delivery without exposing uncharged bytes.
-These reads have a one-second deadline. Clients must handle incomplete bodies
-and retry using their existing Range/resume flow after dependency recovery.
+Each serving process reads the two bandwidth settings at most every 5 seconds,
+so saved edits reach running transfers within about 5 seconds, including
+transfers that started unlimited. An edit does not refill a bucket. Unlimited
+transfers make no Redis calls. A failed settings read keeps the last known
+limits. A failed budget operation is retried for up to 10 seconds, sending no
+bytes meanwhile; after that the transfer stops without exposing uncharged
+bytes. Each attempt has a one-second deadline. Clients must handle incomplete
+bodies and retry using their existing Range/resume flow after dependency
+recovery.
 
 `download.max_per_period` counts registrations independently for each account
 in the rolling `download.period_duration`; zero is unlimited. It is not a
