@@ -40,3 +40,17 @@ jobs:
     uses: Silo-Server/silo-server/.github/workflows/trusted-linux-ci.yml@main
     with:
       self_hosted: false
+
+  # Needs only the Compose CLI, and runs from this file so a pull request
+  # checks its own Compose files and bootstrap script.
+  compose:
+    name: Compose credentials
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Verify Compose credential handling
+        run: python3 scripts/check-compose-credentials.py

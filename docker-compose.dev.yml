@@ -12,12 +12,25 @@ services:
     shm_size: ${POSTGRES_SHM_SIZE:-2gb}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-silo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-silo}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - silo-dev-postgres:/var/lib/postgresql
+    # Refuse to start the bundled database without a password. The check runs
+    # here rather than through Compose interpolation so an override that
+    # replaces this service with an external database still renders.
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        if [ -z "$${POSTGRES_PASSWORD:-}" ]; then
+          echo "POSTGRES_PASSWORD is required: set it in .env" >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh "$$@"
+      - docker-entrypoint.sh
     command: ["postgres", "-c", "listen_addresses=*"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
@@ -107,7 +120,7 @@ services:
     environment:
       MODE: integrated
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
       POSTGRES_TUNE: "off"
