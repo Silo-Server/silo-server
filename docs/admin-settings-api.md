@@ -104,9 +104,9 @@ saves in ChatGPT mode also validate against the account catalog.
 A selection that changes during validation rejects the save so the client can
 refresh its settings. The web refreshes persisted settings after activation and
 preserves unsaved drafts under the existing revision guards. Completion,
-selection, and disconnect also refresh cached viewer translation readiness.
-Successful selection
-and login completion return `X-Silo-Settings-Before-ETag` and
+selection, and disconnect also reconcile cached viewer translation readiness
+after an error response, because the server may already have changed credentials.
+Successful selection and login completion return `X-Silo-Settings-Before-ETag` and
 `X-Silo-Settings-After-ETag`, signed from the settings inside the activation
 transaction. `X-Silo-ChatGPT-First-Connection` is `true` only for the activation
 that first enabled this server's plan connection and `false` for later

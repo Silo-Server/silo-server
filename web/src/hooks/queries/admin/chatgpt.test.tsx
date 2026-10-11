@@ -304,12 +304,12 @@ it.each([
   async (_name, hook) => {
     const client = new QueryClient();
     let finishInvalidation!: () => void;
-    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishInvalidation = resolve;
-        }),
-    );
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation((filter) => {
+      if (filter?.queryKey === metadataAIStatusKey) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        finishInvalidation = resolve;
+      });
+    });
     request.mockResolvedValue({ attempt_id: "old-attempt" });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -326,14 +326,15 @@ it.each([
       pending = result.current.mutateAsync("fixture");
     });
     const rejected = expect(pending).rejects.toBeInstanceOf(StaleApiRequestContextError);
-    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(finishInvalidation).toBeTypeOf("function"));
+    const callsBeforeSwitch = invalidate.mock.calls.length;
     setAccessToken("account-b");
     rerender();
     await act(async () => {
       finishInvalidation();
       await rejected;
     });
-    expect(invalidate).toHaveBeenCalledOnce();
+    expect(invalidate).toHaveBeenCalledTimes(callsBeforeSwitch);
   },
 );
 
@@ -369,40 +370,95 @@ it.each(["settings", "viewer capability"])(
       await rejected;
     });
     expect(invalidate).toHaveBeenCalledTimes(callsBeforeSwitch);
-    if (refresh === "settings") {
-      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: metadataAIStatusKey, exact: true });
-    }
   },
 );
 
-it("leaves viewer readiness cached after a failed disconnect", async () => {
-  const client = new QueryClient();
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  request.mockImplementation(async (operation) => {
-    if (operation === "GET /api/v2/capabilities/metadata-ai") {
-      return { state: "available", on_view: "button" };
-    }
-    throw new Error("disconnect failed");
-  });
-  const { result } = renderHook(
-    () => ({ capability: useMetadataAIStatus(), disconnect: useDisconnectChatGPTAccount() }),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.capability.data?.enabled).toBe(true));
-  await act(async () => {
-    await expect(result.current.disconnect.mutateAsync("fixture")).rejects.toThrow(
-      "disconnect failed",
+it.each([
+  ["completion reconciliation", useCompleteChatGPTLogin],
+  ["disconnect cleanup", useDisconnectChatGPTAccount],
+] as const)(
+  "refreshes viewer readiness when %s fails after deactivating the account",
+  async (_name, hook) => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-  });
-  expect(result.current.capability.data?.enabled).toBe(true);
-  expect(
-    request.mock.calls.filter(
-      ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
-    ),
-  ).toHaveLength(1);
-});
+    let ready = true;
+    const failure = new Error("cleanup failed after deactivation");
+    request.mockImplementation(async (operation) => {
+      if (operation === "GET /api/v2/capabilities/metadata-ai") {
+        return { state: ready ? "available" : "not_configured", on_view: "button" };
+      }
+      ready = false;
+      throw failure;
+    });
+    const { result } = renderHook(
+      () => ({ capability: useMetadataAIStatus(), connection: hook() }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.capability.data?.enabled).toBe(true));
+    await act(async () => {
+      await expect(result.current.connection.mutateAsync("fixture")).rejects.toBe(failure);
+    });
+    await waitFor(() => expect(result.current.capability.data?.enabled).toBe(false));
+    expect(
+      request.mock.calls.filter(
+        ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
+      ),
+    ).toHaveLength(2);
+  },
+);
+
+it.each(["authority changes before error", "authority changes during refresh", "refresh fails"])(
+  "preserves the request error when %s",
+  async (ending) => {
+    const client = new QueryClient();
+    const failure = new Error("cleanup failed after deactivation");
+    let rejectRequest!: (error: Error) => void;
+    request.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    let finishRefresh!: () => void;
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(() =>
+      ending === "refresh fails"
+        ? Promise.reject(new Error("capability unavailable"))
+        : new Promise<void>((resolve) => {
+            finishRefresh = resolve;
+          }),
+    );
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(useDisconnectChatGPTAccount, { wrapper });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.mutateAsync("fixture");
+    });
+    const rejected = expect(pending).rejects.toBe(failure);
+    await vi.waitFor(() => expect(rejectRequest).toBeTypeOf("function"));
+    if (ending === "authority changes before error") {
+      setProfileId("profile-b");
+      rerender();
+    }
+    act(() => rejectRequest(failure));
+    if (ending === "authority changes during refresh") {
+      await vi.waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
+      setProfileId("profile-b");
+      rerender();
+    }
+    await act(async () => {
+      if (ending === "authority changes during refresh") finishRefresh();
+      await rejected;
+    });
+    expect(invalidate).toHaveBeenCalledTimes(ending === "authority changes before error" ? 0 : 1);
+    if (ending !== "authority changes before error") {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: metadataAIStatusKey, exact: true });
+    }
+  },
+);
 
 it("refreshes an expired Silo token while preserving the captured write authority", async () => {
   setRefreshToken("refresh-a");

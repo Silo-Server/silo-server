@@ -93,7 +93,17 @@ function useConnectionWrite<TInput, TResult>(
     mutationFn: async (input: TInput) => {
       if (!context || !isCapturedProfileAuthorityActive(context))
         throw new StaleApiRequestContextError();
-      const result = await request(input, context);
+      let result: TResult;
+      try {
+        result = await request(input, context);
+      } finally {
+        if (options.changesReadiness && isCapturedProfileAuthorityActive(context)) {
+          // A failed write can still deactivate the account on the server.
+          await qc.invalidateQueries({ queryKey: metadataAIStatusKey, exact: true }).catch(() => {
+            // Preserve the write outcome if the capability refresh fails.
+          });
+        }
+      }
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       await qc.invalidateQueries({ queryKey: scopedConnectionKey(context) });
       if (options.afterSettingsRefresh && isCapturedProfileAuthorityActive(context)) {
@@ -101,9 +111,6 @@ function useConnectionWrite<TInput, TResult>(
         if (isCapturedProfileAuthorityActive(context)) {
           options.afterSettingsRefresh(result, qc.getQueryData(adminSettingsKey(context)));
         }
-      }
-      if (options.changesReadiness && isCapturedProfileAuthorityActive(context)) {
-        await qc.invalidateQueries({ queryKey: metadataAIStatusKey, exact: true });
       }
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       return result;
