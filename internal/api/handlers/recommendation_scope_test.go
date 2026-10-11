@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -168,10 +166,12 @@ func TestProfileRestrictionChangeRebuildsRecommendations(t *testing.T) {
 	n := &recordingScopeNotifier{}
 	h := NewProfileHandler(testUserStoreProvider{store: store})
 	h.RecWorker = n
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: "admin", TokenType: auth.TokenTypeAccess})
+	// profile-1 is the household primary; the update acts as it.
 	update := func(req ProfileUpdateRequest) {
 		t.Helper()
-		if _, err := h.UpdateProfile(ctx, ProfileUpdateCommand{UserID: 1, ProfileID: "kid", Request: req}); err != nil {
+		if _, err := h.UpdateProfile(profileServiceContext("profile-1"), ProfileUpdateCommand{
+			UserID: 1, ProfileID: "kid", ActiveProfileID: "profile-1", Request: req, VerifyProfile: noProfileVerification,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
