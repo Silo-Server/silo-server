@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1486,7 +1487,7 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	}
 	// Compare without spaces so "Live Stream From Hell" is an exact match for
 	// "Livestream from Hell" and "spiderman" for "Spider-Man".
-	compactTitle, compactQuery := strings.ReplaceAll(title, " ", ""), strings.ReplaceAll(query, " ", "")
+	compactTitle, compactQuery := compactFuzzyTokens(titleTokens), compactFuzzyTokens(queryTokens)
 	score := fuzzyTitleScore{
 		exact:       compactTitle == compactQuery,
 		contiguous:  strings.Contains(compactTitle, compactQuery),
@@ -1500,7 +1501,7 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 		matches[i] = bestFuzzyTokenMatch(token, titleTerms)
 	}
 	for i := 0; i < len(queryTokens); i++ {
-		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) {
+		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) && fuzzyTokensJoinable(queryTokens[i], queryTokens[i+1]) {
 			if pair := bestFuzzyPairMatch(queryTokens[i], queryTokens[i+1], titleTerms); pair.ok {
 				score.matchedTokens += 2
 				score.editDistance += pair.distance
@@ -1562,9 +1563,30 @@ func joinAdjacentFuzzyTokens(tokens [][]rune) [][]rune {
 	}
 	joined := make([][]rune, 0, len(tokens)-1)
 	for i := 0; i+1 < len(tokens); i++ {
-		joined = append(joined, slices.Concat(tokens[i], tokens[i+1]))
+		if fuzzyTokensJoinable(tokens[i], tokens[i+1]) {
+			joined = append(joined, slices.Concat(tokens[i], tokens[i+1]))
+		}
 	}
 	return joined
+}
+
+// compactFuzzyTokens joins tokens without spaces, except between two numbers.
+func compactFuzzyTokens(tokens [][]rune) string {
+	var b strings.Builder
+	for i, token := range tokens {
+		if i > 0 && !fuzzyTokensJoinable(tokens[i-1], token) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(string(token))
+	}
+	return b.String()
+}
+
+// fuzzyTokensJoinable reports whether two adjacent words may be read as one.
+// Normalization turns number words into digits, so joining "1 2" into "12"
+// would make "One Two" an exact match for "Twelve".
+func fuzzyTokensJoinable(left, right []rune) bool {
+	return !unicode.IsDigit(left[len(left)-1]) || !unicode.IsDigit(right[0])
 }
 
 func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {

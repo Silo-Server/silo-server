@@ -968,6 +968,9 @@ func TestScoreFuzzyTitleVariantJoinsWordsWithinTheirTypoAllowance(t *testing.T) 
 		{"ed wood", "Wood", 1},
 		{"a spider", "Spider", 1},
 		{"live streem", "Livestream", 2},
+		// Adjacent numbers stay separate words: "1 2" is not "12".
+		{"1 2 monkeys", "Twelve Monkeys", 1},
+		{"12 monkeys", "One Two Monkeys", 1},
 	} {
 		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
 		if got := scoreFuzzyTitleVariant(tc.query, tokens, tc.title).matchedTokens; got != tc.want {
