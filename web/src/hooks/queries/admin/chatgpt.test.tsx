@@ -140,6 +140,38 @@ it.each([
 });
 
 it.each([
+  ["selection", useSelectChatGPTAccount],
+  ["completed login", useCompleteChatGPTLogin],
+] as const)("uses transaction-owned welcome metadata for %s", async (_name, hook) => {
+  const client = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result } = renderHook(hook, { wrapper });
+  for (const firstConnection of [true, false]) {
+    request.mockImplementation(async (_operation, options) => {
+      options.onResponse(
+        new Response(null, {
+          status: 204,
+          headers: {
+            "X-Silo-Settings-Before-ETag": "before",
+            "X-Silo-Settings-After-ETag": "after",
+            "X-Silo-ChatGPT-First-Connection": String(firstConnection),
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      await expect(result.current.mutateAsync("fixture")).resolves.toMatchObject({
+        beforeETag: "before",
+        afterETag: "after",
+        firstConnection,
+      });
+    });
+  }
+});
+
+it.each([
   ["start", useStartChatGPTLogin],
   ["complete", useCompleteChatGPTLogin],
   ["select", useSelectChatGPTAccount],

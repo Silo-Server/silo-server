@@ -21,13 +21,15 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, clientID, authMode               string
-		status                                 int
-		empty, timeout, omitScope, usagePaused bool
-		wantActive, wantModel                  string
+		name, clientID, authMode                      string
+		status                                        int
+		empty, timeout, omitScope, usagePaused, first bool
+		wantActive, wantModel                         string
 	}{
 		{name: "renewed credentials preserve usage pause", clientID: "a", authMode: "chatgpt", status: 200, usagePaused: true, wantActive: "a", wantModel: "gpt-4o-mini"},
 		{name: "new account", clientID: "b", authMode: "chatgpt", status: 200, wantActive: "b", wantModel: "gpt-4o-mini"},
+		{name: "first activation", clientID: "b", authMode: "chatgpt", status: 200, first: true, wantActive: "b", wantModel: "gpt-4o-mini"},
+		{name: "failed first catalog", clientID: "b", authMode: "chatgpt", status: 503, first: true, wantModel: "a-model"},
 		{name: "omitted scope activates the requested plan grant", clientID: "b", authMode: "chatgpt", status: 200, omitScope: true, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "failed new account catalog", clientID: "b", authMode: "chatgpt", status: 503, wantActive: "a", wantModel: "a-model"},
 		{name: "catalog timeout preserves accepted tokens", clientID: "b", authMode: "chatgpt", status: 503, timeout: true, wantActive: "a", wantModel: "a-model"},
@@ -38,6 +40,10 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s, store := selectionFixture(t, map[string]string{"ai.auth_mode": test.authMode, "ai.chat_model": "a-model", "ai.reasoning_effort": "high"})
+				if test.first {
+					c := stored(t, store)
+					save(t, store, credentials{Accounts: c.Accounts})
+				}
 				if test.usagePaused {
 					c := stored(t, store)
 					c.Accounts[0].UsageLimited = true
@@ -106,6 +112,11 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 				c := stored(t, store)
 				if c.Active != test.wantActive || store.values["ai.chat_model"] != test.wantModel {
 					t.Fatalf("activation=%q, model=%q", c.Active, store.values["ai.chat_model"])
+				}
+				requireConnectionHistory(t, store, !test.first || !failed)
+				state, err := NewService(store).Status(t.Context())
+				if err != nil || state.LoginFirstConnection != (test.first && !failed) || (receipt != nil && receipt.FirstConnection != (test.first && !failed)) {
+					t.Fatalf("first activation metadata: status=%+v, receipt=%+v, error=%v", state, receipt, err)
 				}
 				for _, a := range c.Accounts {
 					if a.ClientID == test.clientID && (a.RefreshToken != "accepted-refresh" || a.NeedsLogin) {

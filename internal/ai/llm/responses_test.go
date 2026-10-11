@@ -94,6 +94,35 @@ func TestSubscriptionStreamLineEndings(t *testing.T) {
 	}
 }
 
+func TestSubscriptionStreamStripsOnlyOneLeadingBOM(t *testing.T) {
+	for _, test := range []struct {
+		name, leading, firstPrefix, secondPrefix, want string
+	}{
+		{name: "leading BOM", firstPrefix: "\ufeff", want: "prefixsuffix"},
+		{name: "second BOM preserved", firstPrefix: "\ufeff\ufeff", want: "suffix"},
+		{name: "later BOM preserved", secondPrefix: "\ufeff", want: "prefix"},
+		{name: "BOM after first line preserved", leading: "\n", firstPrefix: "\ufeff", want: "suffix"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stream := test.leading + test.firstPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"prefix\"}\n\n" +
+				test.secondPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"suffix\"}\n\n" +
+				"data: {\"type\":\"response.completed\"}\n\n"
+			for _, chunked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("chunked=%t", chunked), func(t *testing.T) {
+					var reader io.Reader = strings.NewReader(stream)
+					if chunked {
+						reader = iotest.OneByteReader(reader)
+					}
+					out, err := readResponseStream(reader)
+					if err != nil || out != test.want {
+						t.Fatalf("response = %q, %v; want %q", out, err, test.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSubscriptionCompletionDoesNotWaitForStreamEOF(t *testing.T) {
 	for _, ending := range []string{"\n", "\r\n", "\r"} {
 		t.Run(fmt.Sprintf("ending=%q", ending), func(t *testing.T) {
@@ -184,45 +213,67 @@ func TestSubscriptionDoesNotAuthorizeTranscription(t *testing.T) {
 }
 
 func TestSubscriptionRecoversUnauthorizedOnlyOnce(t *testing.T) {
-	for _, finalUnauthorized := range []bool{false, true} {
-		t.Run(fmt.Sprintf("finalUnauthorized=%t", finalUnauthorized), func(t *testing.T) {
-			token := "old-token"
-			calls, rejections := 0, 0
-			client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
-				ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return token, nil }),
-				ChatGPTTokenRejected: func(_ context.Context, rejected string, needsLogin bool) error {
-					rejections++
-					if rejected != token || needsLogin != (rejections == 2) {
-						t.Fatalf("incorrect rejection: %s, %t", rejected, needsLogin)
+	for _, test := range []struct {
+		name, body string
+		status     int
+	}{
+		{"HTTP", "{}", http.StatusUnauthorized},
+		{"SSE failed", "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_invalid_user\"}}}\n\n", http.StatusOK},
+		{"SSE error", "data: {\"type\":\"error\",\"code\":\"subscription_sharing_invalid_user\"}\n\n", http.StatusOK},
+	} {
+		for _, finalUnauthorized := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/finalUnauthorized=%t", test.name, finalUnauthorized), func(t *testing.T) {
+				token := "old-token"
+				calls, rejections, verifications := 0, 0, 0
+				client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
+					ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return token, nil }),
+					ChatGPTTokenRejected: func(_ context.Context, rejected string, needsLogin bool) error {
+						rejections++
+						if rejected != token || needsLogin != (rejections == 2) {
+							t.Fatalf("incorrect rejection: %s, %t", rejected, needsLogin)
+						}
+						token = "new-token"
+						return nil
+					},
+					ChatGPTUsageVerified: func(_ context.Context, verified string) error {
+						if verified != "new-token" {
+							t.Fatal("verified wrong credential")
+						}
+						verifications++
+						return nil
+					},
+					ChatGPTUsageLimited: func(context.Context, string) error { t.Fatal("credential failure paused usage"); return nil },
+					ChatGPTPlanRejected: func(context.Context, string) error { t.Fatal("credential failure rejected eligibility"); return nil },
+				})
+				client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.Header.Get("Authorization") != "Bearer "+token {
+						t.Fatal("retry used stale token")
 					}
-					token = "new-token"
-					return nil
-				},
+					if calls == 1 || finalUnauthorized {
+						body := test.body
+						if test.status == http.StatusOK {
+							body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" + body
+						}
+						return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+					}
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
+				})
+				out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
+				wantRejections := 1
+				if finalUnauthorized {
+					wantRejections = 2
+					if e, _ := errors.AsType[*HTTPError](err); e == nil || e.StatusCode != http.StatusUnauthorized || (test.status == http.StatusOK && e.Code != "subscription_sharing_invalid_user") || out != "" || verifications != 0 {
+						t.Fatalf("final rejection: %q, %v, verifications=%d", out, err, verifications)
+					}
+				} else if err != nil || out != "complete" || verifications != 1 {
+					t.Fatalf("recovery: %q, %v, verifications=%d", out, err, verifications)
+				}
+				if calls != 2 || rejections != wantRejections {
+					t.Fatalf("calls=%d rejections=%d", calls, rejections)
+				}
 			})
-			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				calls++
-				if r.Header.Get("Authorization") != "Bearer "+token {
-					t.Fatal("retry used stale token")
-				}
-				if calls == 1 || finalUnauthorized {
-					return &http.Response{StatusCode: 401, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
-				}
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
-			})
-			out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
-			wantRejections := 1
-			if finalUnauthorized {
-				wantRejections = 2
-				if e, _ := errors.AsType[*HTTPError](err); e == nil || e.StatusCode != 401 {
-					t.Fatalf("final rejection: %v", err)
-				}
-			} else if err != nil || out != "complete" {
-				t.Fatalf("recovery: %q, %v", out, err)
-			}
-			if calls != 2 || rejections != wantRejections {
-				t.Fatalf("calls=%d rejections=%d", calls, rejections)
-			}
-		})
+		}
 	}
 }
 

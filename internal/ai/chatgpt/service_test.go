@@ -95,9 +95,11 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 		omitScope                                                   bool
 		superseded, interrupted, expiryCrossed, omitRefresh         bool
 		retainRegistration, preserveActive, reconsent, invalidGrant bool
+		disconnectReconnect                                         bool
 		want                                                        bool
 	}{
 		{name: "copied browser callback", scope: planScope, want: true},
+		{name: "disconnect and reconnect retains activation history", scope: planScope, want: true, disconnectReconnect: true},
 		{name: "omitted initial scope uses requested grant", omitScope: true, want: true},
 		{name: "omitted reconnect scope uses requested grant", omitScope: true, clientID: "oaiapp_registered", want: true},
 		{name: "omitted initial scope still requires refresh token", omitScope: true, omitRefresh: true},
@@ -211,6 +213,8 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					return response(200, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
 				case "/keys":
 					return response(200, map[string]any{"keys": []map[string]string{{"kty": "RSA", "kid": "test-key", "n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}}), nil
+				case "/revoke":
+					return response(200, nil), nil
 				default:
 					t.Fatalf("unexpected request: %s", r.URL)
 					return nil, nil
@@ -256,6 +260,10 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 			} else if state.ActiveClientID != activeBefore || state.LoginResult != "failed" {
 				t.Fatalf("failed login changed active account: %+v", state)
 			}
+			requireConnectionHistory(t, store, test.want || activeBefore != "")
+			if state.LoginFirstConnection != (test.want && activeBefore == "") {
+				t.Fatalf("login_first_connection=%t for success=%t, previous active=%q", state.LoginFirstConnection, test.want, activeBefore)
+			}
 			if test.preserveActive {
 				activeToken, err := s.BearerToken(t.Context())
 				if err != nil || activeToken != "old-access" {
@@ -289,7 +297,13 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					t.Fatal("unverified registration retained")
 				}
 			}
-			if test.reconsent {
+			if test.reconsent || test.disconnectReconnect {
+				if test.disconnectReconnect {
+					if _, err := s.Disconnect(t.Context(), clientID); err != nil {
+						t.Fatal(err)
+					}
+					requireConnectionHistory(t, store, true)
+				}
 				login, err = s.StartLogin(t.Context(), clientID)
 				if err != nil {
 					t.Fatal(err)
@@ -298,6 +312,9 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 				wantPrompt, wantHint, wantEmail := "consent", signed, claims.Email
 				if test.invalidGrant {
 					wantPrompt, wantHint, wantEmail = "", "", ""
+				}
+				if test.disconnectReconnect {
+					wantHint = ""
 				}
 				if u.Query().Get("client_id") != clientID || u.Query().Get("prompt") != wantPrompt || !hasPlanScope(u.Query().Get("scope")) || u.Query().Get("id_token_hint") != wantHint || u.Query().Get("login_hint") != wantEmail {
 					t.Fatal("re-consent lost saved registration, identity hints or permission request")
@@ -316,9 +333,10 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					t.Fatal(err)
 				}
 				state, err = s.Status(t.Context())
-				if err != nil || state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != loginConnected || calls != 2 {
+				if err != nil || state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != loginConnected || state.LoginFirstConnection != !test.disconnectReconnect || calls != 2 {
 					t.Fatalf("re-consent failed: %+v, %v, exchanges=%d", state, err, calls)
 				}
+				requireConnectionHistory(t, store, true)
 			}
 		})
 	}

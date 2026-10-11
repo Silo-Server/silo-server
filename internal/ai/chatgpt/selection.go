@@ -58,8 +58,11 @@ func (s *Service) selectionSettings(ctx context.Context) (map[string]string, err
 }
 
 // SettingsTransition contains the exact settings surrounding a committed activation.
-// It stays inside the server; transports expose only keyed validators.
-type SettingsTransition struct{ Before, After map[string]string }
+// Transports expose keyed validators and whether this activation first connected.
+type SettingsTransition struct {
+	Before, After   map[string]string
+	FirstConnection bool
+}
 
 func (s *Service) mutateSettingsWithSnapshot(ctx context.Context, fn func(*credentials, map[string]string) error) (*SettingsTransition, error) {
 	store, ok := s.store.(selectionStore)
@@ -81,6 +84,7 @@ func (s *Service) mutateSettingsWithSnapshot(ctx context.Context, fn func(*crede
 			return nil, err
 		}
 		before := maps.Clone(values)
+		hadConnected := c.HasConnected
 		if err := fn(&c, values); err != nil {
 			return nil, err
 		}
@@ -97,7 +101,7 @@ func (s *Service) mutateSettingsWithSnapshot(ctx context.Context, fn func(*crede
 		}
 		after := maps.Clone(before)
 		maps.Copy(after, writes)
-		transition = &SettingsTransition{Before: before, After: after}
+		transition = &SettingsTransition{Before: before, After: after, FirstConnection: !hadConnected && c.HasConnected}
 		return writes, nil
 	})
 	if err == nil && s.OnSettingUpdated != nil && len(changed) > 0 {
@@ -158,6 +162,8 @@ func (s *Service) SelectAccountWithSettings(ctx context.Context, clientID string
 			return err
 		}
 		c.Active, c.Pending, c.LoginID, c.LoginResult = clientID, nil, "", loginIdle
+		c.HasConnected = true
+		c.LoginFirstConnection = false
 		return nil
 	})
 }

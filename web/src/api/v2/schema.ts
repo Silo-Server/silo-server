@@ -20743,6 +20743,8 @@ export interface components {
       accounts: components["schemas"]["ChatGPTAccountStatus"][];
       active_client_id: string;
       attempt_id: string;
+      /** @description Whether the matching connected login outcome first activated this server's ChatGPT plan connection. */
+      login_first_connection?: boolean;
       login_pending: boolean;
       /** @enum {string} */
       login_result: "idle" | "pending" | "connected" | "failed" | "expired";
@@ -34249,6 +34251,7 @@ export interface operations {
       200: {
         headers: {
           "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
           "X-Silo-Settings-After-ETag"?: string;
           "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;
@@ -34468,6 +34471,7 @@ export interface operations {
       200: {
         headers: {
           "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
           "X-Silo-Settings-After-ETag"?: string;
           "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;
@@ -34719,6 +34723,7 @@ export interface operations {
       204: {
         headers: {
           "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
           "X-Silo-Settings-After-ETag"?: string;
           "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;

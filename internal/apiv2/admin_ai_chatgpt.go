@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
@@ -24,11 +25,12 @@ type ChatGPTAccountStatus chatgpt.AccountStatus
 type ChatGPTLogin chatgpt.Login
 type ChatGPTModel chatgpt.Model
 type ChatGPTStatus struct {
-	ActiveClientID string                 `json:"active_client_id"`
-	Accounts       []ChatGPTAccountStatus `json:"accounts"`
-	LoginPending   bool                   `json:"login_pending"`
-	LoginResult    string                 `json:"login_result" enum:"idle,pending,connected,failed,expired"`
-	AttemptID      string                 `json:"attempt_id"`
+	ActiveClientID       string                 `json:"active_client_id"`
+	Accounts             []ChatGPTAccountStatus `json:"accounts"`
+	LoginPending         bool                   `json:"login_pending"`
+	LoginResult          string                 `json:"login_result" enum:"idle,pending,connected,failed,expired"`
+	AttemptID            string                 `json:"attempt_id"`
+	LoginFirstConnection bool                   `json:"login_first_connection,omitzero" doc:"Whether the matching connected login outcome first activated this server's ChatGPT plan connection."`
 }
 
 func nativeChatGPTStatus(status chatgpt.Status) ChatGPTStatus {
@@ -36,7 +38,7 @@ func nativeChatGPTStatus(status chatgpt.Status) ChatGPTStatus {
 	for i, account := range status.Accounts {
 		accounts[i] = ChatGPTAccountStatus(account)
 	}
-	return ChatGPTStatus{ActiveClientID: status.ActiveClientID, Accounts: accounts, LoginPending: status.LoginPending, LoginResult: status.LoginResult, AttemptID: status.AttemptID}
+	return ChatGPTStatus{ActiveClientID: status.ActiveClientID, Accounts: accounts, LoginPending: status.LoginPending, LoginResult: status.LoginResult, AttemptID: status.AttemptID, LoginFirstConnection: status.LoginFirstConnection}
 }
 
 type AdminAICapabilitiesInput struct {
@@ -60,8 +62,9 @@ type AdminAICapabilitiesOutput struct {
 func (AdminAICapabilities) capabilityState() string { return StateAvailable }
 
 type ChatGPTSettingsTransitionHeaders struct {
-	BeforeETag string `header:"X-Silo-Settings-Before-ETag"`
-	AfterETag  string `header:"X-Silo-Settings-After-ETag"`
+	BeforeETag      string `header:"X-Silo-Settings-Before-ETag"`
+	AfterETag       string `header:"X-Silo-Settings-After-ETag"`
+	FirstConnection string `header:"X-Silo-ChatGPT-First-Connection" doc:"True only for the activation that first enabled this server's ChatGPT plan connection."`
 }
 
 type ChatGPTCompleteOutput struct {
@@ -238,5 +241,5 @@ func (reg *Registry) chatGPTSettingsTransitionHeaders(ctx context.Context, trans
 	if err != nil {
 		return ChatGPTSettingsTransitionHeaders{}, err
 	}
-	return ChatGPTSettingsTransitionHeaders{BeforeETag: before.String(), AfterETag: after.String()}, nil
+	return ChatGPTSettingsTransitionHeaders{BeforeETag: before.String(), AfterETag: after.String(), FirstConnection: strconv.FormatBool(transition.FirstConnection)}, nil
 }

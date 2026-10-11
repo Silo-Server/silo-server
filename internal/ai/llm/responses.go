@@ -14,6 +14,7 @@ import (
 
 const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceeded"
 const subscriptionUserNotEligible = "subscription_sharing_user_not_eligible"
+const subscriptionInvalidUser = "subscription_sharing_invalid_user"
 
 var ErrPlanIneligible = errors.New("this account cannot share ChatGPT plan usage; check ChatGPT usage settings")
 
@@ -156,6 +157,7 @@ func readResponseStream(data io.Reader) (string, error) {
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	scanner.Split(splitEventLines())
 	var eventData []string
+	firstLine := true
 	consume := func() error {
 		if len(eventData) == 0 {
 			return nil
@@ -200,6 +202,11 @@ func readResponseStream(data io.Reader) (string, error) {
 			if code == subscriptionUserNotEligible {
 				return &permanentError{ErrPlanIneligible}
 			}
+			if code == subscriptionInvalidUser {
+				// A streamed subscriber rejection uses the same refresh-once path
+				// as an HTTP 401, without retrying the rejected token first.
+				return &permanentError{&HTTPError{StatusCode: http.StatusUnauthorized, Code: code, message: "ChatGPT subscriber credentials were rejected"}}
+			}
 			return &permanentError{errors.New("ChatGPT request failed; check the account and ChatGPT usage settings")}
 		case "response.incomplete":
 			return &permanentError{errors.New("ChatGPT returned an incomplete response")}
@@ -208,6 +215,10 @@ func readResponseStream(data io.Reader) (string, error) {
 	}
 	for scanner.Scan() {
 		line := scanner.Text()
+		if firstLine {
+			line = strings.TrimPrefix(line, "\ufeff")
+			firstLine = false
+		}
 		if line == "" {
 			if err := consume(); err != nil {
 				return "", err

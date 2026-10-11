@@ -12,6 +12,7 @@ export type SettingsBaseline = { etag: string; profileContext: ProfileRequestCon
 export type ChatGPTSettingsChange = {
   beforeETag: string;
   afterETag: string;
+  firstConnection?: boolean;
   settingsSnapshot?: SettingsValues;
 };
 const baselines = new WeakMap<SettingsValues, SettingsBaseline>();

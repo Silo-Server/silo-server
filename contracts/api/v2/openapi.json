@@ -23282,6 +23282,10 @@
           "attempt_id": {
             "type": "string"
           },
+          "login_first_connection": {
+            "description": "Whether the matching connected login outcome first activated this server's ChatGPT plan connection.",
+            "type": "boolean"
+          },
           "login_pending": {
             "type": "boolean"
           },
@@ -54169,6 +54173,12 @@
                   "type": "string"
                 }
               },
+              "X-Silo-ChatGPT-First-Connection": {
+                "schema": {
+                  "description": "True only for the activation that first enabled this server's ChatGPT plan connection.",
+                  "type": "string"
+                }
+              },
               "X-Silo-Settings-After-ETag": {
                 "schema": {
                   "type": "string"
@@ -54489,6 +54499,12 @@
             "headers": {
               "Cache-Control": {
                 "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-ChatGPT-First-Connection": {
+                "schema": {
+                  "description": "True only for the activation that first enabled this server's ChatGPT plan connection.",
                   "type": "string"
                 }
               },
@@ -54844,6 +54860,12 @@
             "headers": {
               "Cache-Control": {
                 "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-ChatGPT-First-Connection": {
+                "schema": {
+                  "description": "True only for the activation that first enabled this server's ChatGPT plan connection.",
                   "type": "string"
                 }
               },

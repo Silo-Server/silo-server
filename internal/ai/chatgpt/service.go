@@ -89,13 +89,15 @@ type pendingLogin struct {
 }
 
 type credentials struct {
-	HostID         string        `json:"host_id"`
-	Active         string        `json:"active"`
-	Accounts       []account     `json:"accounts"`
-	Pending        *pendingLogin `json:"pending,omitempty"`
-	LoginResult    string        `json:"login_result"`
-	LoginID        string        `json:"login_id"`
-	LoginExpiresAt time.Time     `json:"login_expires_at"`
+	HostID               string        `json:"host_id"`
+	Active               string        `json:"active"`
+	HasConnected         bool          `json:"has_connected,omitzero"`
+	Accounts             []account     `json:"accounts"`
+	Pending              *pendingLogin `json:"pending,omitempty"`
+	LoginResult          string        `json:"login_result"`
+	LoginID              string        `json:"login_id"`
+	LoginExpiresAt       time.Time     `json:"login_expires_at"`
+	LoginFirstConnection bool          `json:"login_first_connection,omitzero"`
 }
 
 type AccountStatus struct {
@@ -108,11 +110,12 @@ type AccountStatus struct {
 }
 
 type Status struct {
-	ActiveClientID string          `json:"active_client_id"`
-	Accounts       []AccountStatus `json:"accounts"`
-	LoginPending   bool            `json:"login_pending"`
-	LoginResult    string          `json:"login_result" enum:"idle,pending,connected,failed,expired"`
-	AttemptID      string          `json:"attempt_id"`
+	ActiveClientID       string          `json:"active_client_id"`
+	Accounts             []AccountStatus `json:"accounts"`
+	LoginPending         bool            `json:"login_pending"`
+	LoginResult          string          `json:"login_result" enum:"idle,pending,connected,failed,expired"`
+	AttemptID            string          `json:"attempt_id"`
+	LoginFirstConnection bool            `json:"login_first_connection,omitzero"`
 }
 
 type Login struct {
@@ -155,6 +158,10 @@ func decode(raw string) (credentials, error) {
 			return c, errors.New("ChatGPT credentials could not be read")
 		}
 	}
+	// Before activation history was stored explicitly, only a successfully
+	// activated registration could become Active. Preserve that history on the
+	// next mutation, including disconnect and a failed reconnect.
+	c.HasConnected = c.HasConnected || c.Active != ""
 	return c, nil
 }
 
@@ -176,7 +183,11 @@ func (s *Service) mutate(ctx context.Context, fn func(*credentials) error) error
 }
 
 func status(c credentials) Status {
-	out := Status{ActiveClientID: c.Active, Accounts: []AccountStatus{}, LoginPending: c.LoginResult == loginPending && time.Now().Before(c.LoginExpiresAt)}
+	out := Status{
+		ActiveClientID: c.Active, Accounts: []AccountStatus{},
+		LoginPending:         c.LoginResult == loginPending && time.Now().Before(c.LoginExpiresAt),
+		LoginFirstConnection: c.LoginResult == loginConnected && c.LoginFirstConnection,
+	}
 	out.LoginResult = c.LoginResult
 	out.AttemptID = c.LoginID
 	if out.LoginResult == "" {
@@ -231,6 +242,7 @@ func (s *Service) StartLogin(ctx context.Context, clientID string) (Login, error
 		}
 		c.Pending = p
 		c.LoginResult = loginPending
+		c.LoginFirstConnection = false
 		c.LoginID = p.State
 		c.LoginExpiresAt = p.ExpiresAt
 		login.AttemptID = p.State
@@ -441,6 +453,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			return ErrInvalidLogin
 		}
 		c.LoginResult = loginFailed
+		c.LoginFirstConnection = false
 		if completionErr != nil {
 			if pending.ClientID == "" && errors.Is(completionErr, errInvalidAuthorizationGrant) &&
 				!slices.ContainsFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID }) {
@@ -493,6 +506,8 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			return nil
 		}
 		c.Active = clientID
+		c.LoginFirstConnection = !c.HasConnected
+		c.HasConnected = true
 		c.LoginResult = loginConnected
 		return nil
 	})
@@ -770,6 +785,7 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 		c.Pending = nil
 		c.LoginID = ""
 		c.LoginResult = loginIdle
+		c.LoginFirstConnection = false
 		return nil
 	})
 	if err != nil {

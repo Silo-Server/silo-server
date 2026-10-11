@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
@@ -22,6 +22,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+
+type LoginAttempt = { id: string; confirmed: boolean };
 
 export function ChatGPTConnection(props: {
   model: string;
@@ -55,14 +57,21 @@ function ChatGPTConnectionPanel({
   const authorityActive = () => authority !== null && isCapturedProfileAuthorityActive(authority);
   const [loginOpen, setLoginOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
-  const [firstConnection, setFirstConnection] = useState(false);
   const [callbackURL, setCallbackURL] = useState("");
   const [callbackError, setCallbackError] = useState("");
+  const loginAttempt = useRef<LoginAttempt | null>(null);
   const callbackID = useId();
   const start = useStartChatGPTLogin();
   const complete = useCompleteChatGPTLogin();
 
-  function clearLogin() {
+  useEffect(
+    () => () => {
+      loginAttempt.current = null;
+    },
+    [],
+  );
+
+  function resetLoginDialog() {
     setLoginOpen(false);
     setCallbackURL("");
     setCallbackError("");
@@ -70,16 +79,37 @@ function ChatGPTConnectionPanel({
     complete.reset();
   }
 
+  function clearLogin() {
+    loginAttempt.current = null;
+    resetLoginDialog();
+  }
+
+  function confirmLogin(attempt: LoginAttempt, firstConnection: boolean) {
+    if (!authorityActive() || loginAttempt.current !== attempt || attempt.confirmed) return;
+    attempt.confirmed = true;
+    resetLoginDialog();
+    onConnectionConfirmed?.();
+    toast.success("ChatGPT connected. Review your text model settings.");
+    if (firstConnection) setWelcomeOpen(true);
+  }
+
   const status = useChatGPTStatus(loginOpen);
   const observeLogin = useEffectEvent(() => {
     const next = status.data;
     const attempt = start.data;
-    if (!authorityActive() || !loginOpen || !next || !attempt) return;
+    const local = loginAttempt.current;
+    if (
+      !authorityActive() ||
+      !loginOpen ||
+      !next ||
+      !attempt ||
+      !local ||
+      local.id !== attempt.attempt_id ||
+      local.confirmed
+    )
+      return;
     if (next.attempt_id === attempt.attempt_id && next.login_result === "connected") {
-      clearLogin();
-      onConnectionConfirmed?.();
-      toast.success("ChatGPT connected. Review your text model settings.");
-      if (firstConnection) setWelcomeOpen(true);
+      confirmLogin(local, next.login_first_connection === true);
       return;
     }
     if (complete.isPending || status.isFetching) return;
@@ -105,20 +135,33 @@ function ChatGPTConnectionPanel({
   const models = useChatGPTModels(active?.client_id ?? "", authenticated);
 
   async function begin(clientID?: string) {
-    setFirstConnection((status.data?.accounts.length ?? 0) === 0);
+    const attempt: LoginAttempt = { id: "", confirmed: false };
+    loginAttempt.current = attempt;
     setCallbackURL("");
     setCallbackError("");
     try {
-      await start.mutateAsync(clientID);
-      if (authorityActive()) setLoginOpen(true);
+      const login = await start.mutateAsync(clientID);
+      if (!authorityActive() || loginAttempt.current !== attempt) return;
+      attempt.id = login.attempt_id;
+      setLoginOpen(true);
     } catch {
-      if (!authorityActive()) return;
+      if (!authorityActive() || loginAttempt.current !== attempt) return;
+      loginAttempt.current = null;
       toast.error("Could not start ChatGPT sign-in. Refresh the connection status and try again.");
     }
   }
 
   async function finish() {
-    if (!authorityActive() || !start.data || complete.isPending) return;
+    const attempt = loginAttempt.current;
+    if (
+      !authorityActive() ||
+      !start.data ||
+      complete.isPending ||
+      !attempt ||
+      attempt.confirmed ||
+      attempt.id !== start.data.attempt_id
+    )
+      return;
     let pasted: URL;
     try {
       pasted = new URL(callbackURL.trim());
@@ -142,9 +185,11 @@ function ChatGPTConnectionPanel({
     try {
       const acceptTransition = onSettingsTransitionStarted?.();
       const change = await complete.mutateAsync(callbackURL.trim());
-      if (authorityActive()) acceptTransition?.(change);
+      if (!authorityActive() || loginAttempt.current !== attempt) return;
+      acceptTransition?.(change);
+      confirmLogin(attempt, change.firstConnection === true);
     } catch {
-      if (!authorityActive()) return;
+      if (!authorityActive() || loginAttempt.current !== attempt || attempt.confirmed) return;
       setCallbackError(
         "Could not complete sign-in. Check the pasted URL. If this attempt expired, close this dialog and start again.",
       );
@@ -156,7 +201,9 @@ function ChatGPTConnectionPanel({
     try {
       const acceptTransition = onSettingsTransitionStarted?.();
       const change = await select.mutateAsync(clientID);
-      if (authorityActive()) acceptTransition?.(change);
+      if (!authorityActive()) return;
+      acceptTransition?.(change);
+      if (change.firstConnection) setWelcomeOpen(true);
     } catch {
       if (!authorityActive()) return;
       toast.error("Could not switch ChatGPT accounts. Refresh the connection status.");

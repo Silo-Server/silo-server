@@ -18,11 +18,27 @@ type fakeChatGPT struct {
 	clientID   string
 	err        error
 	transition *chatgpt.SettingsTransition
+	status     *chatgpt.Status
 }
 
 func (f *fakeChatGPT) Status(context.Context) (chatgpt.Status, error) {
 	f.calls++
+	if f.status != nil {
+		return *f.status, f.err
+	}
 	return chatgpt.Status{Accounts: []chatgpt.AccountStatus{}, LoginResult: "idle"}, f.err
+}
+
+func TestChatGPTStatusRetainsFirstLoginOutcome(t *testing.T) {
+	deps := requestDeps(fixtureRequests())
+	deps.ChatGPT = &fakeChatGPT{status: &chatgpt.Status{
+		Accounts: []chatgpt.AccountStatus{}, LoginFirstConnection: true,
+		LoginResult: "connected", AttemptID: "first-attempt",
+	}}
+	res := do(t, NewHandler(deps), "GET", Prefix+"/admin/ai/chatgpt", "", actingRequestAdmin)
+	if res.Code != 200 || !strings.Contains(res.Body.String(), `"login_first_connection":true`) || !strings.Contains(res.Body.String(), `"attempt_id":"first-attempt"`) {
+		t.Fatalf("first-login reconciliation metadata was lost: %d %s", res.Code, res.Body.String())
+	}
 }
 func (f *fakeChatGPT) StartLogin(context.Context, string) (chatgpt.Login, error) {
 	f.calls++
@@ -158,7 +174,8 @@ func TestChatGPTActivationHeadersMatchSettingsInspection(t *testing.T) {
 			deps.CursorSecret = []byte("synthetic-settings-secret")
 			deps.AdminSettingsWrite = settings
 			deps.AdminSettingsInspection = settings
-			deps.ChatGPT = &fakeChatGPT{transition: &chatgpt.SettingsTransition{Before: before, After: after}}
+			activation := &chatgpt.SettingsTransition{Before: before, After: after, FirstConnection: true}
+			deps.ChatGPT = &fakeChatGPT{transition: activation}
 			h := NewHandler(deps)
 			read := do(t, h, "GET", Prefix+"/admin/settings/effective", "", actingRequestAdmin)
 			res := do(t, h, "POST", Prefix+path, `{"callback_url":"callback"}`, actingRequestAdmin)
@@ -176,6 +193,14 @@ func TestChatGPTActivationHeadersMatchSettingsInspection(t *testing.T) {
 			}
 			if strings.Contains(res.Body.String(), "private-secret") {
 				t.Fatal("receipt exposed raw settings")
+			}
+			if res.Header().Get("X-Silo-ChatGPT-First-Connection") != "true" {
+				t.Fatal("first activation header was lost")
+			}
+			activation.FirstConnection = false
+			res = do(t, h, "POST", Prefix+path, `{"callback_url":"callback"}`, actingRequestAdmin)
+			if res.Code != wantStatus || res.Header().Get("X-Silo-ChatGPT-First-Connection") != "false" {
+				t.Fatalf("later activation repeated the welcome: %d %s", res.Code, res.Body.String())
 			}
 		})
 	}

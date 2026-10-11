@@ -51,6 +51,9 @@ The following operations require an acting administrator:
 - `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
   connection status, and the latest login outcome without credentials.
   `attempt_id` identifies the attempt that produced that outcome.
+  `login_first_connection: true` identifies the connected login outcome
+  that first activated the connection; clients must match its `attempt_id`.
+  The field is absent when false.
   A registration with `plan_ineligible: true` has a terminal plan-sharing
   restriction: `connected` is false, and clients explain the restriction without
   prompting repeated authorization. The optional field is absent when false.
@@ -94,8 +97,17 @@ refresh its settings. The web refreshes persisted settings after activation and
 preserves unsaved drafts under the existing revision guards. Successful selection
 and login completion return `X-Silo-Settings-Before-ETag` and
 `X-Silo-Settings-After-ETag`, signed from the settings inside the activation
-transaction. Completion remains HTTP 204. A client may advance an unrelated
-draft only if its baseline matches the before validator and refreshed settings
+transaction. `X-Silo-ChatGPT-First-Connection` is `true` only for the activation
+that first enabled this server's plan connection and `false` for later
+activations. Completion remains HTTP 204. The web opens its welcome message
+from that header after selection or successful browser sign-in completion.
+It reconciles uncertain completion responses through matching
+`login_first_connection` status; both paths confirm an attempt once.
+The welcome applies once per server credential
+bundle shared by all administrators and saved OpenAI accounts.
+The activation transaction owns the decision, so stale status reads or
+concurrent selections cannot request additional welcomes. A client may advance
+an unrelated draft only if its baseline matches the before validator and refreshed settings
 match the after validator, under the same authority and without an overlapping
 settings save. Dirty model/effort fields retain their original guard. Background
 reads and uncertain completion status cannot acknowledge this transition.

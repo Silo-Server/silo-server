@@ -151,6 +151,7 @@ async function captureActivationChange(
   await request((response) => {
     change.beforeETag = response.headers.get("X-Silo-Settings-Before-ETag") ?? "";
     change.afterETag = response.headers.get("X-Silo-Settings-After-ETag") ?? "";
+    change.firstConnection = response.headers.get("X-Silo-ChatGPT-First-Connection") === "true";
   });
   return change;
 }

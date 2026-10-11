@@ -140,6 +140,17 @@ The response distinguishes confirmed provider revocation from local credential
 removal. Credential requests reject redirects, and OIDC
 discovery URLs must remain on `https://auth.openai.com`.
 
+First-connection welcome history belongs to the shared server configuration. A
+retained registration does not establish that history: successful activation
+commits `has_connected` with the selected account and compatible settings. The
+activation transaction supplies `X-Silo-ChatGPT-First-Connection`; matching login
+status retains `login_first_connection` so a lost completion reply can reconcile.
+The browser confirms a successful completion from its own response even if
+another browser replaces the latest login status. Response and polling share
+confirmation for the same local attempt; cancellation, a new attempt, unmounting,
+and authority changes discard late results. Later activation, refresh, and
+disconnect preserve the history. Legacy bundles with a selected account infer prior activation.
+
 ## Inference
 
 Subscription credentials go only to `https://api.openai.com/v1/responses` and
@@ -148,12 +159,13 @@ to developer messages, and sets `store:false` and `stream:true`. It omits
 temperature. Explicit effort uses `reasoning.effort`; API-key Chat Completions
 requests use `reasoning_effort`.
 
-The stream reader accepts LF, CRLF, and CR line endings across transport reads,
-and buffers output until `response.completed`. Failed, incomplete,
+The stream reader strips one leading UTF-8 BOM and accepts LF, CRLF, and CR
+line endings across transport reads, and buffers output until `response.completed`. Failed, incomplete,
 or truncated streams cannot publish partial translations. Account usage-limit
 errors terminate retries; temporary usage-check failures and streamed
 `server_error` failures use bounded backoff
-and retain credentials. An inference or model-catalog HTTP 401 invalidates only
+and retain credentials. An inference or model-catalog HTTP 401, or a streamed
+`subscription_sharing_invalid_user` failure, invalidates only
 the rejected access token, then retries once with serialized token refresh. A
 second rejection marks that account as needing login. Comparing the rejected
 token protects credentials replaced concurrently by another node.
