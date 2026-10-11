@@ -43,7 +43,7 @@ connection for its locks.
 | Taste profiles | `recommendations.taste_profiles_cron` (04:00) | Rebuild every profile with signals or a taste row |
 | Co-watch | `recommendations.cowatch_cron` (04:30) | Rebuild `item_cowatch`, pruning pairs the run did not rewrite |
 | Cache | `recommendations.recommendations_cron` (05:00) | Global rows, then the rows of every profile with a taste-profile row, oldest For You row first (profiles without one first) |
-| Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first |
+| Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first; a sweep that refreshed or failed one is recorded under `recommendations.stale_sweep` |
 
 At startup the worker also builds the global rows when none are cached, so
 cold-start rows exist before the first nightly cache run. Each global row

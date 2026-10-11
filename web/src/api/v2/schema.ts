@@ -17273,7 +17273,18 @@ export interface components {
       /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
       lock_conflict: string;
       recommendations: components["schemas"]["AdminRecommendationJobStatus"];
+      /** @description The stale profile sweep, which rebuilds profiles after their signals or access change. */
+      stale_sweep: components["schemas"]["AdminRecommendationStaleSweep"];
       taste_profiles: components["schemas"]["AdminRecommendationJobStatus"];
+    };
+    AdminRecommendationStaleSweep: {
+      /** @description The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does. */
+      last_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /**
+       * Format: int64
+       * @description Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.
+       */
+      pending: number;
     };
     AdminRecommendationStarted: {
       /**

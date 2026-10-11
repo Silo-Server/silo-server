@@ -62,6 +62,10 @@ const (
 	globalRowsTaskKey        = "recommendations.cache.global_rows"
 )
 
+// staleSweepTaskKey records stale sweeps that refreshed or failed at
+// least one profile.
+const staleSweepTaskKey = "recommendations.stale_sweep"
+
 var partialJobTaskKeys = map[JobName]string{
 	JobEmbeddings:      embeddingsCatchUpTaskKey,
 	JobRecommendations: globalRowsTaskKey,
@@ -194,6 +198,29 @@ func (w *Worker) LastRuns(ctx context.Context) (map[JobName]JobRuns, error) {
 		}
 	}
 	return runs, nil
+}
+
+// StaleSweepStatus is the stale sweep's backlog and its newest recorded run.
+type StaleSweepStatus struct {
+	// Pending counts the profiles marked stale and not yet refreshed.
+	Pending int
+	// LastRun is nil until a sweep refreshes or fails a profile.
+	LastRun *taskmanager.ExecutionResult
+}
+
+// StaleSweep reports the stale sweep's backlog and its newest recorded run.
+func (w *Worker) StaleSweep(ctx context.Context) (StaleSweepStatus, error) {
+	var status StaleSweepStatus
+	var err error
+	if status.Pending, err = w.engine.repo.StaleProfileCount(ctx); err != nil {
+		return status, err
+	}
+	if w.history != nil {
+		if status.LastRun, err = w.history.GetLatest(ctx, staleSweepTaskKey); err != nil {
+			return status, fmt.Errorf("read last stale sweep: %w", err)
+		}
+	}
+	return status, nil
 }
 
 // jobResult is the summary a job body returns. It is logged and stored as the
@@ -351,16 +378,17 @@ func (w *Worker) executeJob(j job, held clusterLock) {
 		slog.InfoContext(ctx, "recommendation job completed", attrs...)
 	}
 
-	w.recordJob(j, started, completed, resultData, err)
-}
-
-func (w *Worker) recordJob(j job, started, completed time.Time, resultData json.RawMessage, runErr error) {
-	if w.history == nil {
-		return
-	}
 	taskKey := jobTaskKeys[j.name]
 	if j.partial {
 		taskKey = partialJobTaskKeys[j.name]
+	}
+	w.recordRun(taskKey, started, completed, resultData, err)
+}
+
+// recordRun stores one finished run under taskKey.
+func (w *Worker) recordRun(taskKey string, started, completed time.Time, resultData json.RawMessage, runErr error) {
+	if w.history == nil {
+		return
 	}
 	run := taskmanager.ExecutionResult{
 		TaskKey:     taskKey,
@@ -377,6 +405,6 @@ func (w *Worker) recordJob(j job, started, completed time.Time, resultData json.
 	ctx, cancel := context.WithTimeout(context.Background(), jobHistoryTimeout)
 	defer cancel()
 	if err := w.history.Insert(ctx, run); err != nil {
-		slog.WarnContext(ctx, "recording recommendation job run failed", "component", "recommendations", "job", j.name, "error", err)
+		slog.WarnContext(ctx, "recording recommendation job run failed", "component", "recommendations", "task_key", taskKey, "error", err)
 	}
 }

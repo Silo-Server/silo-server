@@ -1448,6 +1448,15 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	return profiles, rows.Err()
 }
 
+// StaleProfileCount counts the profiles waiting for the stale sweep.
+func (r *Repo) StaleProfileCount(ctx context.Context) (int, error) {
+	var n int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_taste_profiles WHERE stale_at IS NOT NULL`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count stale profiles: %w", err)
+	}
+	return n, nil
+}
+
 // ClearStaleAt resets stale_at to NULL after a refresh that started reading
 // signals at started. A mark newer than that records a change the refresh may
 // have missed, so it stays for the stale sweep.

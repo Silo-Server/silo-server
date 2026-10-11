@@ -30,6 +30,7 @@ type fakeAdminRecommendations struct {
 	refreshErr  error
 	resets      int
 	resetErr    error
+	sweepErr    error
 }
 
 func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int, int, int, error) {
@@ -74,6 +75,19 @@ func (f *fakeAdminRecommendations) CacheRefreshedAt(context.Context) (*time.Time
 	}
 	at := fakeAdminRecommendationsTime.Add(2*time.Hour + time.Minute)
 	return &at, nil
+}
+func (f *fakeAdminRecommendations) StaleSweep(context.Context) (recommendations.StaleSweepStatus, error) {
+	if f.sweepErr != nil {
+		return recommendations.StaleSweepStatus{}, f.sweepErr
+	}
+	if f.noRuns {
+		return recommendations.StaleSweepStatus{}, nil
+	}
+	return recommendations.StaleSweepStatus{Pending: 7, LastRun: &taskmanager.ExecutionResult{
+		TaskKey: "recommendations.stale_sweep", Status: "completed",
+		StartedAt: fakeAdminRecommendationsTime.Add(3 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(3*time.Hour + 20*time.Second),
+		ResultData: json.RawMessage(`{"stale":3,"refreshed":2,"failed":1,"elsewhere":0,"queued":0}`),
+	}}, nil
 }
 func (f *fakeAdminRecommendations) ResetEmbeddings(context.Context) (recommendations.EmbeddingsReset, error) {
 	f.resets++
@@ -210,6 +224,10 @@ func TestAdminRecommendationsStatusReportsRunsConflictAndRefresh(t *testing.T) {
 	if status.TasteProfiles.LastRun != nil || status.Cowatch.LastRun != nil {
 		t.Fatalf("jobs with no recorded run report one: %+v %+v", status.TasteProfiles.LastRun, status.Cowatch.LastRun)
 	}
+	// The stale sweep's backlog and a sweep whose refresh failed are visible.
+	if sw := status.StaleSweep; sw.Pending != 7 || sw.LastRun == nil || sw.LastRun.Result["failed"] != float64(1) {
+		t.Fatalf("stale sweep = %+v", sw)
+	}
 
 	// Nothing recorded, no conflict and an empty cache: last_run and
 	// cache_refreshed_at are absent and lock_conflict is empty.
@@ -224,8 +242,9 @@ func TestAdminRecommendationsStatusReportsRunsConflictAndRefresh(t *testing.T) {
 		"runs":     func() { f.runsErr = errors.New("private history detail") },
 		"conflict": func() { f.conflictErr = errors.New("private history detail") },
 		"refresh":  func() { f.refreshErr = errors.New("private history detail") },
+		"sweep":    func() { f.sweepErr = errors.New("private history detail") },
 	} {
-		f.runsErr, f.conflictErr, f.refreshErr = nil, nil, nil
+		f.runsErr, f.conflictErr, f.refreshErr, f.sweepErr = nil, nil, nil, nil
 		fail()
 		rec = do(t, h, "GET", Prefix+"/admin/recommendations/status", "", bearer(adminToken))
 		if rec.Code != 500 || strings.Contains(rec.Body.String(), "private history") {

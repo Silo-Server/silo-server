@@ -14013,6 +14013,24 @@
         ],
         "type": "object"
       },
+      "AdminRecommendationStaleSweep": {
+        "additionalProperties": false,
+        "properties": {
+          "last_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."
+          },
+          "pending": {
+            "description": "Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "type": "object"
+      },
       "AdminRecommendationStarted": {
         "additionalProperties": false,
         "properties": {
@@ -14052,6 +14070,10 @@
           "recommendations": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
+          "stale_sweep": {
+            "$ref": "#/components/schemas/AdminRecommendationStaleSweep",
+            "description": "The stale profile sweep, which rebuilds profiles after their signals or access change."
+          },
           "taste_profiles": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           }
@@ -14061,7 +14083,8 @@
           "taste_profiles",
           "cowatch",
           "recommendations",
-          "lock_conflict"
+          "lock_conflict",
+          "stale_sweep"
         ],
         "type": "object"
       },

@@ -78,6 +78,7 @@ function statusWith(overrides: Record<string, unknown> = {}) {
     taste_profiles: idleJob(4),
     cowatch: idleJob(6),
     recommendations: idleJob(5),
+    stale_sweep: { pending: 0 },
     lock_conflict: "",
     ...overrides,
   };
@@ -259,6 +260,15 @@ describe("AdminRecommendations", () => {
             completed_at: minutesAgo(60),
           },
         },
+        stale_sweep: {
+          pending: 7,
+          last_run: {
+            status: "completed",
+            started_at: minutesAgo(2),
+            completed_at: minutesAgo(2),
+            result: { stale: 3, refreshed: 2, failed: 1 },
+          },
+        },
         cache_refreshed_at: minutesAgo(5),
         lock_conflict: 'Embeddings were created with model "a", not "b".',
       }),
@@ -273,6 +283,8 @@ describe("AdminRecommendations", () => {
     expect(text).toContain("Last run completed 1h ago");
     expect(text).toContain("No finished run recorded");
     expect(text).toContain("Newest cached row written 5m ago");
+    expect(text).toContain("7 profiles wait for a rebuild");
+    expect(text).toContain("Last stale sweep completed 2m ago");
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Embeddings were created with model "a", not "b".',
     );

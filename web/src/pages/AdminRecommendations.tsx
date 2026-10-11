@@ -254,8 +254,8 @@ function RecJobStatusCard({
   total,
   running,
   lastRun,
-  lastPartialRun,
-  partialRunLabel,
+  secondaryRun,
+  secondaryRunLabel,
   note,
   onTrigger,
   triggerPending,
@@ -265,9 +265,9 @@ function RecJobStatusCard({
   total?: number;
   running: boolean;
   lastRun?: RecJobRun;
-  /** A partial run between full runs, shown beside the last full run. */
-  lastPartialRun?: RecJobRun;
-  partialRunLabel?: string;
+  /** Work that runs between full runs (a catch-up pass, the stale sweep), shown beside the last full run. */
+  secondaryRun?: RecJobRun;
+  secondaryRunLabel?: string;
   note?: string;
   onTrigger: () => void;
   triggerPending: boolean;
@@ -288,7 +288,7 @@ function RecJobStatusCard({
           </p>
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
-          {lastPartialRun && <RecJobLastRun run={lastPartialRun} label={partialRunLabel} />}
+          {secondaryRun && <RecJobLastRun run={secondaryRun} label={secondaryRunLabel} />}
         </div>
         <Button
           size="sm"
@@ -640,8 +640,8 @@ export default function AdminRecommendations() {
               total={status.embeddings.total}
               running={status.embeddings.running}
               lastRun={status.embeddings.last_run}
-              lastPartialRun={status.embeddings.last_partial_run}
-              partialRunLabel="Last catch-up"
+              secondaryRun={status.embeddings.last_partial_run}
+              secondaryRunLabel="Last catch-up"
               onTrigger={() => triggerEmbeddings.mutate()}
               triggerPending={triggerEmbeddings.isPending}
             />
@@ -650,6 +650,13 @@ export default function AdminRecommendations() {
               count={status.taste_profiles.count}
               running={status.taste_profiles.running}
               lastRun={status.taste_profiles.last_run}
+              secondaryRun={status.stale_sweep.last_run}
+              secondaryRunLabel="Last stale sweep"
+              note={
+                status.stale_sweep.pending > 0
+                  ? `${status.stale_sweep.pending.toLocaleString()} ${status.stale_sweep.pending === 1 ? "profile waits" : "profiles wait"} for a rebuild`
+                  : undefined
+              }
               onTrigger={() => triggerTasteProfiles.mutate()}
               triggerPending={triggerTasteProfiles.isPending}
             />
@@ -666,8 +673,8 @@ export default function AdminRecommendations() {
               count={status.recommendations.count}
               running={status.recommendations.running}
               lastRun={status.recommendations.last_run}
-              lastPartialRun={status.recommendations.last_partial_run}
-              partialRunLabel="Last startup build"
+              secondaryRun={status.recommendations.last_partial_run}
+              secondaryRunLabel="Last startup build"
               // Profile refreshes also write rows, so this is not job health;
               // the last run above is.
               note={

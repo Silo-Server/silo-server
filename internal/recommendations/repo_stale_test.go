@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -235,6 +236,35 @@ func TestFailedRefreshLeavesTheProfilePendingPostgres(t *testing.T) {
 	}
 	if !p.pending() {
 		t.Fatalf("stale_at = %v; a failed refresh must leave the profile pending", p.staleAt())
+	}
+}
+
+// A sweep whose refresh fails is recorded with the failure counted, and the
+// profile stays in the backlog admin status reports.
+func TestStaleSweepRecordsFailedRefreshesPostgres(t *testing.T) {
+	p := newStaleTestProfile(t)
+	p.mark()
+	engine := NewEngine(p.pool, nil, nil, nil, failingStoreProvider{}, config.RecommendationsConfig{})
+	history := newFakeHistory()
+	w := newJobTestWorker(&fakeLocker{}, history)
+	w.engine = engine
+	w.staleMarker = engine.repo
+
+	w.refreshStaleProfiles(t.Context())
+	run := waitRun(t, history)
+	var res staleSweepResult
+	if err := json.Unmarshal(run.ResultData, &res); err != nil {
+		t.Fatal(err)
+	}
+	if run.TaskKey != staleSweepTaskKey || run.Status != runStatusCompleted || res.Failed == 0 {
+		t.Fatalf("recorded sweep %+v %s; want a completed run counting the failure", run, run.ResultData)
+	}
+	status, err := w.StaleSweep(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Pending == 0 || status.LastRun == nil || status.LastRun.TaskKey != staleSweepTaskKey || !p.pending() {
+		t.Fatalf("stale sweep status = %+v; want the failed profile pending and the run reported", status)
 	}
 }
 

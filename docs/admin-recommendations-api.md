@@ -32,6 +32,12 @@ carry `last_partial_run`, in the same shape: the newest embedding catch-up
 pass, or the newest startup build of the global rows. Partial runs are
 recorded apart, so one that runs after a failed full run does not hide it.
 
+`stale_sweep` reports the sweep that rebuilds profiles after their signals or
+access change: `pending` counts the profiles waiting for a rebuild, and
+`last_run`, in the job run shape, is the newest sweep on any server that
+rebuilt or failed at least one profile. A profile whose rebuild keeps failing
+stays pending and shows as `failed` in each sweep's `result`.
+
 `lock_conflict` is empty unless the stored embedding lock rejects the
 embedding base URL or model this server runs with, or records a vector size
 Silo cannot store. It is then a sentence for the administrator that never

@@ -220,6 +220,7 @@
 ./internal/recommendations TestRecommendationJobRunsOnOneServerPostgres
 ./internal/recommendations TestJobLocksShareOneConnectionPostgres
 ./internal/recommendations TestCacheJobPurgesAProfileDeletedWhileItWritesPostgres
+./internal/recommendations TestStaleSweepRecordsFailedRefreshesPostgres
 ./internal/database/pglock TestReleaseAlsoUnlocksOnlyThatKey
 ./internal/recommendations TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres
 ./internal/recommendations TestRefreshPurgesAProfileDeletedWhileItWritesPostgres

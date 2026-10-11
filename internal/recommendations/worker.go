@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -963,10 +964,25 @@ func (w *Worker) stalenessLoop(ctx context.Context) {
 	}
 }
 
+// staleSweepResult counts one stale sweep's profiles.
+type staleSweepResult struct {
+	// Stale counts the marked profiles the sweep took, up to its batch.
+	Stale     int `json:"stale"`
+	Refreshed int `json:"refreshed"`
+	// Failed counts refreshes that failed; their profiles are marked stale
+	// again for the next sweep.
+	Failed int `json:"failed"`
+	// Elsewhere counts profiles another server was refreshing, and Queued
+	// those already queued or refreshing on this server.
+	Elsewhere int `json:"elsewhere"`
+	Queued    int `json:"queued"`
+}
+
 // refreshStaleProfiles refreshes the profiles marked stale. One server sweeps
 // at a time: the sweep holds its cluster lock until its refreshes finish, so a
 // server whose tick lands meanwhile skips instead of rebuilding the same
-// profiles.
+// profiles. A sweep that refreshed or failed a profile is recorded in job
+// history under staleSweepTaskKey.
 func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
 	held, acquired, err := w.locker.TryLock(lockCtx, staleSweepLock)
@@ -980,26 +996,52 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	}
 	defer held.Release()
 
-	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
-	if err != nil {
-		slog.ErrorContext(ctx, "staleness check failed", "component", "recommendations", "error", err)
+	started := time.Now()
+	res, err := w.sweepStaleProfiles(ctx, held)
+	if err == nil && res.Refreshed == 0 && res.Failed == 0 {
 		return
 	}
+	switch {
+	case err != nil:
+		slog.ErrorContext(ctx, "stale profile sweep failed", "component", "recommendations", "error", err)
+	case res.Failed > 0:
+		slog.WarnContext(ctx, "stale profile sweep completed with errors", "component", "recommendations", "stale", res.Stale, "refreshed", res.Refreshed, "failed", res.Failed)
+	}
+	data, _ := json.Marshal(res) // only ints: it cannot fail
+	w.recordRun(staleSweepTaskKey, started, time.Now(), data, err)
+}
+
+func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (staleSweepResult, error) {
+	var res staleSweepResult
+	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
+	if err != nil {
+		return res, fmt.Errorf("list stale profiles: %w", err)
+	}
+	res.Stale = len(stale)
 	if len(stale) == 0 {
-		return
+		return res, nil
 	}
 
 	slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
 	for _, p := range stale {
 		if ctx.Err() != nil {
-			return
+			return res, nil
 		}
 		key := profileRefreshKey(p.UserID, p.ProfileID)
 		if !w.claimProfileRefresh(key) {
-			continue // already queued or refreshing on this server
+			res.Queued++ // already queued or refreshing on this server
+			continue
 		}
-		w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID)
+		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID); {
+		case err == nil:
+			res.Refreshed++
+		case errors.Is(err, errProfileRefreshElsewhere):
+			res.Elsewhere++
+		default:
+			res.Failed++
+		}
 	}
+	return res, nil
 }
 
 func (w *Worker) profileRefreshLoop(ctx context.Context) {
@@ -1008,14 +1050,15 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			w.runProfileRefresh(ctx, nil, req.userID, req.profileID)
+			_ = w.runProfileRefresh(ctx, nil, req.userID, req.profileID)
 		}
 	}
 }
 
 // runProfileRefresh refreshes a profile whose pending key the caller claimed,
-// then releases the key. held is the caller's cluster lock, or nil.
-func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string) {
+// then releases the key, and returns the refresh's error after logging it.
+// held is the caller's cluster lock, or nil.
+func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string) error {
 	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
 	err := w.refreshProfile(ctx, held, userID, profileID)
 	switch {
@@ -1024,6 +1067,7 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 	case err != nil:
 		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
+	return err
 }
 
 // tryProfileLock takes the profile's cluster-wide refresh lock without
