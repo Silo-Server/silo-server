@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -43,6 +44,48 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 	}
 }
 
+type localArtworkSearchedKey struct{}
+
+// withLocalArtworkSearched marks ctx as serving a refresh that asked the local
+// provider for sidecar artwork. Only such a refresh can tell that cached local
+// art went undiscovered. Without the mark (local metadata off for the library,
+// an Identify, or local artwork unusable), cached local art is stored artwork
+// like any other and no library folder is probed, so a wedged share costs a
+// refresh that never searched it nothing.
+func withLocalArtworkSearched(ctx context.Context) context.Context {
+	return context.WithValue(ctx, localArtworkSearchedKey{}, true)
+}
+
+func localArtworkSearched(ctx context.Context) bool {
+	searched, _ := ctx.Value(localArtworkSearchedKey{}).(bool)
+	return searched
+}
+
+// isLocalArtworkProvider reports whether p is the local (NFO) provider, which
+// the pipeline recognizes, here as elsewhere, by IdentityHintProvider.
+func isLocalArtworkProvider(p Provider) bool {
+	_, local := p.(IdentityHintProvider)
+	return local
+}
+
+// localArtworkInChain reports whether the chain of any of levels asks the local
+// provider for artwork that the image cache can use.
+func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int, levels ...string) bool {
+	if !s.localArtworkUsable() {
+		return false
+	}
+	for _, level := range levels {
+		chain, err := s.resolveChainCached(ctx, folderID, level)
+		if err != nil {
+			continue
+		}
+		if slices.ContainsFunc(chain, isLocalArtworkProvider) {
+			return true
+		}
+	}
+	return false
+}
+
 // localArtworkRetention keeps cached local artwork through a refresh that did
 // not rediscover it. A library mount that is down, or a sidecar that is
 // briefly unreadable, yields no local candidate; without this, rated remote
@@ -51,19 +94,26 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 type localArtworkRetention struct {
 	ctx       context.Context
 	contentID string
+	// searched is set when the refresh asked the local provider for artwork
+	// (withLocalArtworkSearched); otherwise nothing is kept.
+	searched bool
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe.
 	probes map[string]rootcheck.Result
 }
 
 func newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
-	return &localArtworkRetention{ctx: ctx, contentID: contentID, probes: make(map[string]rootcheck.Result)}
+	return &localArtworkRetention{
+		ctx: ctx, contentID: contentID, searched: localArtworkSearched(ctx),
+		probes: make(map[string]rootcheck.Result),
+	}
 }
 
 // keep reports whether a slot serving a cached copy of a local sidecar should
 // ignore the remote incoming path this refresh chose.
 func (r *localArtworkRetention) keep(incoming, existingPath, existingSource string) bool {
-	if !artworkkey.IsLocal(existingPath) ||
+	if !r.searched ||
+		!artworkkey.IsLocal(existingPath) ||
 		!isLocalImageSourcePath(existingSource) ||
 		!isRemoteImageSourcePath(incoming) ||
 		r.sidecarGone(existingSource) {

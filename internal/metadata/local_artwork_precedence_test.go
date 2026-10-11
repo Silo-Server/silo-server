@@ -138,7 +138,7 @@ func TestMergeAndPersistKeepsCachedLocalArtworkUntilSidecarIsGone(t *testing.T) 
 			t.Run(fmt.Sprintf("mode %d/%s", mode, tc.name), func(t *testing.T) {
 				localSource := "file://" + tc.layout(t, t.TempDir()) + "?v=12-1"
 				h := newTestHarness()
-				ctx := context.Background()
+				ctx := withLocalArtworkSearched(context.Background())
 				if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
 					ContentID:        contentID,
 					Type:             "movie",
@@ -221,7 +221,7 @@ func TestPersistSeasonsAndEpisodesKeepsCachedLocalArtworkUntilSidecarIsGone(t *t
 				Title: "Pilot", StillPath: cachedStill, StillSourcePath: stillSource, StillThumbhash: "still-thumb",
 			}
 
-			service.persistSeasonsAndEpisodes(context.Background(),
+			service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background()),
 				&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
 				map[string]string{"tvdb": "123"}, "en", "en",
 				[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: remoteSeason}},
@@ -389,5 +389,133 @@ func TestLocalizationRefreshKeepsProviderSeasonPoster(t *testing.T) {
 	refresh("en", "tvdb://en-season-1.jpg")
 	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].PosterSourcePath; got != localPoster {
 		t.Fatalf("canonical refresh: base season poster source = %q, want the local poster", got)
+	}
+}
+
+// A refresh that never asked the local provider for artwork (local metadata
+// off, an Identify) treats cached local art like any stored artwork: a rated
+// remote image replaces it, and no library folder is consulted.
+func TestCachedLocalArtworkNotKeptWithoutLocalSearch(t *testing.T) {
+	const (
+		contentID    = "movie:tmdb:7"
+		cachedPoster = "local/movies/movie:tmdb:7/0badf00d/poster/original.webp"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	unmounted := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
+	h := newTestHarness()
+	ctx := context.Background()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+		PosterPath: cachedPoster, PosterSourcePath: unmounted, PosterThumbhash: "local-thumb",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+	h.service.providerIDRepo = providerRepo
+
+	if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
+		&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+		[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
+		nil, nil, "movie"); err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+	got, err := h.itemRepo.GetByID(ctx, contentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.PosterSourcePath != remotePoster {
+		t.Fatalf("poster source = %q, want the remote poster when the refresh did not search local art", got.PosterSourcePath)
+	}
+	retention := newLocalArtworkRetention(ctx, contentID)
+	if retention.keep(remotePoster, cachedPoster, unmounted) || len(retention.probes) != 0 {
+		t.Fatalf("an unmarked refresh kept local art or probed a folder (%d probes)", len(retention.probes))
+	}
+}
+
+// imageArtProvider is a movie provider with fixed metadata and images.
+type imageArtProvider struct {
+	slug     string
+	metadata *MetadataResult
+	images   []RemoteImage
+}
+
+func (p *imageArtProvider) Slug() string       { return p.slug }
+func (p *imageArtProvider) Name() string       { return p.slug }
+func (p *imageArtProvider) ForTypes() []string { return []string{"movie"} }
+
+func (p *imageArtProvider) GetMetadata(context.Context, MetadataRequest) (*MetadataResult, error) {
+	if p.metadata == nil {
+		return &MetadataResult{}, nil
+	}
+	cp := *p.metadata
+	return &cp, nil
+}
+
+func (p *imageArtProvider) GetImages(context.Context, ImageRequest) ([]RemoteImage, error) {
+	return append([]RemoteImage(nil), p.images...), nil
+}
+
+// localHintArtProvider stands in for the local (NFO) provider, which the
+// pipeline recognizes by IdentityHintProvider.
+type localHintArtProvider struct{ imageArtProvider }
+
+func (p *localHintArtProvider) IdentityHints(context.Context, SearchQuery) map[string]string {
+	return nil
+}
+
+func TestRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderRan(t *testing.T) {
+	const (
+		contentID    = "movie:tmdb:7"
+		cachedPoster = "local/movies/movie:tmdb:7/0badf00d/poster/original.webp"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	unmounted := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
+	remote := &imageArtProvider{
+		slug:     "tmdb",
+		metadata: &MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+		images:   []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
+	}
+	// The local provider ran but found nothing: the library is unmounted.
+	local := &localHintArtProvider{imageArtProvider{slug: "nfo"}}
+
+	for _, tc := range []struct {
+		name  string
+		chain []Provider
+		want  string
+	}{
+		{"local provider searched", []Provider{remote, local}, unmounted},
+		{"local provider not in the chain", []Provider{remote}, remotePoster},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			h.service.SetAutoCacheImages(true)
+			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+			providerRepo := newFakeProviderIDRepo()
+			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+			h.service.providerIDRepo = providerRepo
+			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+				DefaultMetadataLanguage: "en",
+				PosterPath:              cachedPoster, PosterSourcePath: unmounted, PosterThumbhash: "local-thumb",
+				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+			}); err != nil {
+				t.Fatalf("seed item: %v", err)
+			}
+			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+				ContentID: contentID, Mode: ModeManualRefresh, Language: "en",
+			}, tc.chain); err != nil {
+				t.Fatalf("refresh: %v", err)
+			}
+			got, err := h.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got.PosterSourcePath != tc.want {
+				t.Fatalf("poster source = %q, want %q", got.PosterSourcePath, tc.want)
+			}
+		})
 	}
 }

@@ -1915,6 +1915,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
+	localArtworkSearched := false
 	for _, p := range itemChain {
 		ip, ok := p.(ImageProvider)
 		if !ok {
@@ -1943,6 +1944,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
 			continue
+		}
+		if isLocalArtworkProvider(p) {
+			localArtworkSearched = true
 		}
 		allImages = append(allImages, images...)
 	}
@@ -2003,6 +2007,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if !s.localArtworkUsable() {
 				dropLocalSeasonArtwork(seasons)
 			}
+			if isLocalArtworkProvider(p) {
+				localArtworkSearched = true
+			}
 			accumulateSeasonResults(seasonResults, seasons)
 		}
 		allSeasons = flattenSeasonResults(seasonResults)
@@ -2060,6 +2067,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					if !s.localArtworkUsable() {
 						dropLocalEpisodeArtwork(episodes)
 					}
+					if isLocalArtworkProvider(p) {
+						localArtworkSearched = true
+					}
 					accumulateEpisodeResults(episodeResults, episodes)
 				}
 			}
@@ -2087,6 +2097,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
+	if localArtworkSearched && s.localArtworkUsable() {
+		ctx = withLocalArtworkSearched(ctx)
+	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
 		return nil, err
@@ -4085,7 +4098,11 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		if s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
+		persistCtx := ctx
+		if s.localArtworkInChain(ctx, folderID, "season", "episode") {
+			persistCtx = withLocalArtworkSearched(ctx)
+		}
+		if s.persistSeasonAndEpisodeRows(persistCtx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 			updated = true
 		}
 	}
