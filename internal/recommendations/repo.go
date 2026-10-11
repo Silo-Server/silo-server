@@ -1359,11 +1359,39 @@ func (r *Repo) MarkAccountsStale(ctx context.Context, userIDs []int) (int64, err
 }
 
 // MarkAllProfilesStale marks every taste profile stale and returns how many
-// it marked. A policy change that can reach every account's scope calls it.
+// it marked.
 func (r *Repo) MarkAllProfilesStale(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `UPDATE user_taste_profiles SET stale_at = NOW()`)
 	if err != nil {
 		return 0, fmt.Errorf("mark all profiles stale: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// policyMarkedGenerationKey is the server setting holding the newest policy
+// generation whose change has marked every taste profile stale.
+const policyMarkedGenerationKey = "recommendations.policy_marked_generation"
+
+// MarkAllProfilesStaleForPolicy marks every taste profile stale for a policy
+// change that can reach every account's scope, once per generation across
+// the cluster: every node calls it after loading the generation, and only
+// the first call for a generation newer than the last one marked marks
+// anything. It returns how many profiles it marked. One mark is enough
+// because a refresh, the only thing that clears marks, does not run on a node
+// that has not loaded the stored generation (see Worker.WithPolicyCheck).
+func (r *Repo) MarkAllProfilesStaleForPolicy(ctx context.Context, generation int64) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		WITH claim AS (
+			INSERT INTO server_settings (key, value) VALUES ($1, $2::bigint::text)
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+			WHERE server_settings.value::bigint < EXCLUDED.value::bigint
+			RETURNING 1
+		)
+		UPDATE user_taste_profiles SET stale_at = NOW()
+		WHERE  EXISTS (SELECT 1 FROM claim)`,
+		policyMarkedGenerationKey, generation)
+	if err != nil {
+		return 0, fmt.Errorf("mark all profiles stale for policy generation %d: %w", generation, err)
 	}
 	return tag.RowsAffected(), nil
 }

@@ -268,6 +268,74 @@ func TestStaleSweepRecordsFailedRefreshesPostgres(t *testing.T) {
 	}
 }
 
+// Every node announces a policy generation once it loads it, but only the
+// first announcement of a generation newer than the last marked one marks the
+// profiles: one full-table update per change, not one per node.
+func TestMarkAllProfilesStaleForPolicyMarksOncePerGenerationPostgres(t *testing.T) {
+	p := newStaleTestProfile(t)
+	ctx := context.Background()
+	var saved *string
+	_ = p.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, policyMarkedGenerationKey).Scan(&saved)
+	t.Cleanup(func() {
+		if saved == nil {
+			_, _ = p.pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = $1`, policyMarkedGenerationKey)
+			return
+		}
+		_, _ = p.pool.Exec(context.Background(), `UPDATE server_settings SET value = $2 WHERE key = $1`, policyMarkedGenerationKey, *saved)
+	})
+	if _, err := p.pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, policyMarkedGenerationKey); err != nil {
+		t.Fatal(err)
+	}
+
+	mark := func(generation int64) int64 {
+		t.Helper()
+		n, err := p.repo.MarkAllProfilesStaleForPolicy(ctx, generation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := mark(5); n == 0 || !p.pending() {
+		t.Fatalf("first node's mark for generation 5 marked %d profiles, pending = %v", n, p.pending())
+	}
+	p.upsert(p.now())
+	if err := p.repo.ClearStaleAt(ctx, p.userID, p.profile, p.now()); err != nil {
+		t.Fatal(err)
+	}
+	if n := mark(5); n != 0 || p.pending() {
+		t.Fatalf("a second node's mark for generation 5 marked %d profiles; want none", n)
+	}
+	if n := mark(4); n != 0 {
+		t.Fatalf("an older generation marked %d profiles; want none", n)
+	}
+	if n := mark(6); n == 0 || !p.pending() {
+		t.Fatalf("generation 6 marked %d profiles, pending = %v", n, p.pending())
+	}
+}
+
+// A server that has not loaded the stored policy generation does not
+// refresh: the refresh would build under the old scope and clear the mark the
+// change left. The profile stays pending for a server, or a later sweep, that
+// has loaded it.
+func TestRefreshWaitsForThePolicyChangePostgres(t *testing.T) {
+	p := newStaleTestProfile(t)
+	p.mark()
+	engine := NewEngine(p.pool, nil, nil, nil, failingStoreProvider{}, config.RecommendationsConfig{})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	w.staleMarker = engine.repo
+	w.WithPolicyCheck(func(context.Context) (bool, error) { return false, nil })
+
+	// failingStoreProvider would fail the refresh's first read; the policy
+	// check stops it before that.
+	if err := w.refreshProfile(t.Context(), nil, p.userID, p.profile); !errors.Is(err, errPolicyNotLoaded) {
+		t.Fatalf("refresh on a server behind the policy = %v, want errPolicyNotLoaded", err)
+	}
+	if !p.pending() {
+		t.Fatal("the profile is no longer pending")
+	}
+}
+
 // After a merge or split moves user state onto items, every profile with
 // progress, history, a rating, favorite or watchlist entry on them, or on an
 // episode of a series among them, is marked stale; other profiles are not.

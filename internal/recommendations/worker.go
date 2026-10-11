@@ -63,7 +63,7 @@ type profileStaleMarker interface {
 // *Repo implements it.
 type accountsStaleMarker interface {
 	MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error)
-	MarkAllProfilesStale(ctx context.Context) (int64, error)
+	MarkAllProfilesStaleForPolicy(ctx context.Context, generation int64) (int64, error)
 }
 
 // Worker runs scheduled recommendation jobs.
@@ -75,6 +75,7 @@ type Worker struct {
 	staleMarker           profileStaleMarker
 	accountsMarker        accountsStaleMarker
 	savedConfig           SavedConfig
+	policyCurrent         PolicyCheck
 	mu                    sync.Mutex
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
@@ -345,24 +346,44 @@ func (w *Worker) NotifyAccountsScopeChanged(ctx context.Context, userIDs []int) 
 	slog.InfoContext(ctx, "access change: taste profiles marked stale", "component", "recommendations", "accounts", len(userIDs), "profiles", marked)
 }
 
-// NotifyPolicyChanged records that an access policy change may have changed
-// the scope of every profile: a custom scope policy can widen or narrow any
-// account's libraries or maturity limits. Every taste profile is marked stale
-// and the stale sweep rebuilds them; reads already filter out titles the new
-// scope forbids, but only a rebuild adds the titles it allows.
-func (w *Worker) NotifyPolicyChanged(ctx context.Context) {
+// PolicyCheck reports whether this server serves the access policy
+// generation stored now. policy.System.Current implements it.
+type PolicyCheck func(ctx context.Context) (bool, error)
+
+// WithPolicyCheck makes refreshes wait until this server has loaded the
+// stored access policy, and returns the worker. A refresh that finds the
+// server behind leaves its profile marked stale for a later sweep. Profile
+// scope comes from the policy, and a refresh is what clears stale marks, so
+// with the check one mark per policy generation (NotifyPolicyChanged) covers
+// every server.
+func (w *Worker) WithPolicyCheck(check PolicyCheck) *Worker {
+	if w != nil {
+		w.policyCurrent = check
+	}
+	return w
+}
+
+// NotifyPolicyChanged records that this server loaded access policy
+// generation, which may have changed the scope of every profile: a custom
+// scope policy can widen or narrow any account's libraries or maturity
+// limits. Every taste profile is marked stale, once per generation across the
+// cluster, and the stale sweep rebuilds them; reads already filter out titles
+// the new scope forbids, but only a rebuild adds the titles it allows.
+func (w *Worker) NotifyPolicyChanged(ctx context.Context, generation int64) {
 	if w == nil || w.accountsMarker == nil {
 		return
 	}
 	// The change is already committed; see NotifySignalsChanged.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
 	defer cancel()
-	marked, err := w.accountsMarker.MarkAllProfilesStale(ctx)
+	marked, err := w.accountsMarker.MarkAllProfilesStaleForPolicy(ctx, generation)
 	if err != nil {
-		slog.WarnContext(ctx, "marking taste profiles stale after a policy change failed", "component", "recommendations", "error", err)
+		slog.WarnContext(ctx, "marking taste profiles stale after a policy change failed", "component", "recommendations", "generation", generation, "error", err)
 		return
 	}
-	slog.InfoContext(ctx, "policy change: taste profiles marked stale", "component", "recommendations", "profiles", marked)
+	if marked > 0 {
+		slog.InfoContext(ctx, "policy change: taste profiles marked stale", "component", "recommendations", "generation", generation, "profiles", marked)
+	}
 }
 
 // RequestReadRefresh queues a refresh for a profile whose cached rows a read
@@ -976,10 +997,12 @@ type staleSweepResult struct {
 	// Failed counts refreshes that failed; their profiles are marked stale
 	// again for the next sweep.
 	Failed int `json:"failed"`
-	// Elsewhere counts profiles another server was refreshing, and Queued
-	// those already queued or refreshing on this server.
-	Elsewhere int `json:"elsewhere"`
-	Queued    int `json:"queued"`
+	// Deferred counts profiles left marked for a later sweep: another
+	// server was refreshing them, or this server had not loaded a policy
+	// change yet. Queued counts those already queued or refreshing on this
+	// server.
+	Deferred int `json:"deferred"`
+	Queued   int `json:"queued"`
 }
 
 // refreshStaleProfiles refreshes the profiles marked stale. One server sweeps
@@ -1039,8 +1062,8 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (stal
 		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID); {
 		case err == nil:
 			res.Refreshed++
-		case errors.Is(err, errProfileRefreshElsewhere):
-			res.Elsewhere++
+		case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
+			res.Deferred++
 		default:
 			res.Failed++
 		}
@@ -1068,6 +1091,8 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 	switch {
 	case errors.Is(err, errProfileRefreshElsewhere):
 		slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+	case errors.Is(err, errPolicyNotLoaded):
+		slog.InfoContext(ctx, "this server has not loaded the latest access policy; profile left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
 	case err != nil:
 		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
@@ -1112,6 +1137,10 @@ func (w *Worker) markBusyProfileStale(ctx context.Context, userID int, profileID
 // errProfileRefreshElsewhere reports a profile refresh skipped because
 // another server holds the profile's refresh lock.
 var errProfileRefreshElsewhere = errors.New("profile refresh running on another server")
+
+// errPolicyNotLoaded reports a profile refresh skipped because this server
+// has not loaded the stored access policy generation yet.
+var errPolicyNotLoaded = errors.New("access policy change not loaded on this server yet")
 
 // profileRefreshLock is the cluster-wide advisory lock key for one profile's
 // refresh. Keys hash into the same space as the job locks; a collision only
@@ -1163,6 +1192,18 @@ func (w *Worker) refreshProfile(ctx context.Context, held clusterLock, userID in
 	started, err := repo.Now(refreshCtx)
 	if err != nil {
 		return err
+	}
+	// Checked after started: a policy change committed before the check
+	// stops this refresh, and one committed after it is marked, on its first
+	// load anywhere, after started, so this refresh does not clear the mark.
+	if w.policyCurrent != nil {
+		current, err := w.policyCurrent(refreshCtx)
+		if err != nil {
+			return fmt.Errorf("check access policy generation: %w", err)
+		}
+		if !current {
+			return errPolicyNotLoaded
+		}
 	}
 	if _, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started); err != nil {
 		return fmt.Errorf("refresh taste profile: %w", err)

@@ -53,7 +53,7 @@
       "started_at": "2026-10-03T06:00:00.000Z",
       "completed_at": "2026-10-03T06:00:20.000Z",
       "result": {
-        "elsewhere": 0,
+        "deferred": 0,
         "failed": 1,
         "queued": 0,
         "refreshed": 2,

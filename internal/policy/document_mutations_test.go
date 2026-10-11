@@ -313,7 +313,7 @@ func TestDocumentServiceCommittedApplyFailure(t *testing.T) {
 				runtimeStore.pool.Close()
 			}
 			applied := 0
-			system.OnChangeApplied(func(context.Context) { applied++ })
+			system.OnChangeApplied(func(context.Context, int64) { applied++ })
 			service := NewDocumentService(store, system)
 			result, err := service.Activate(ctx, document.ID, version.ID, document.Revision)
 			if err != nil || !result.Persisted || result.Generation != 2 || result.Document.ActiveVersionID == nil {

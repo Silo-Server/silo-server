@@ -108,8 +108,8 @@ func TestProfileAccessFilterFallbackFailsClosed(t *testing.T) {
 }
 
 type recordingAccountsMarker struct {
-	got [][]int
-	all int
+	got         [][]int
+	generations []int64
 }
 
 func (m *recordingAccountsMarker) MarkAccountsStale(_ context.Context, userIDs []int) (int64, error) {
@@ -117,8 +117,8 @@ func (m *recordingAccountsMarker) MarkAccountsStale(_ context.Context, userIDs [
 	return int64(len(userIDs)), nil
 }
 
-func (m *recordingAccountsMarker) MarkAllProfilesStale(context.Context) (int64, error) {
-	m.all++
+func (m *recordingAccountsMarker) MarkAllProfilesStaleForPolicy(_ context.Context, generation int64) (int64, error) {
+	m.generations = append(m.generations, generation)
 	return 0, nil
 }
 
@@ -140,18 +140,19 @@ func TestNotifyAccountsScopeChangedMarksWithoutRefreshing(t *testing.T) {
 	nilWorker.NotifyAccountsScopeChanged(t.Context(), []int{3}) // recommendations disabled
 }
 
-// A policy change marks every profile stale in one call and queues nothing.
+// A policy change marks every profile stale, for its generation, in one
+// call and queues nothing.
 func TestNotifyPolicyChangedMarksEveryProfileWithoutRefreshing(t *testing.T) {
 	w, _ := newRefreshTestWorker()
 	marker := &recordingAccountsMarker{}
 	w.accountsMarker = marker
 
-	w.NotifyPolicyChanged(t.Context())
-	if marker.all != 1 {
-		t.Fatalf("whole-server marks = %d, want 1", marker.all)
+	w.NotifyPolicyChanged(t.Context(), 9)
+	if !slices.Equal(marker.generations, []int64{9}) {
+		t.Fatalf("whole-server marks = %v, want one for generation 9", marker.generations)
 	}
 	assertNothingQueued(t, w, "after a policy change")
 
 	var nilWorker *Worker
-	nilWorker.NotifyPolicyChanged(t.Context()) // recommendations disabled
+	nilWorker.NotifyPolicyChanged(t.Context(), 9) // recommendations disabled
 }

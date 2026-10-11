@@ -2688,6 +2688,7 @@ func main() {
 			slog.Error("failed to create recommendation worker", "error", err)
 		} else {
 			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
+				WithPolicyCheck(policySystem.Current).
 				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
 					saved, err := settingsRepo.GetAll(ctx)
 					if err != nil {
@@ -2706,8 +2707,9 @@ func main() {
 				watchProviderService.WithSignalsChangedNotifier(recWorker)
 			}
 			// A scope policy can change every profile's scope, and cached
-			// rows are built under it; each node marks them after it loads a
-			// new policy generation.
+			// rows are built under it. The first node to load a new policy
+			// generation marks every profile stale; refreshes wait until
+			// their node has loaded it (WithPolicyCheck above).
 			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
 	}

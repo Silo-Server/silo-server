@@ -86,7 +86,7 @@ func (f *fakeAdminRecommendations) StaleSweep(context.Context) (recommendations.
 	return recommendations.StaleSweepStatus{Pending: 7, LastRun: &taskmanager.ExecutionResult{
 		TaskKey: "recommendations.stale_sweep", Status: "completed",
 		StartedAt: fakeAdminRecommendationsTime.Add(3 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(3*time.Hour + 20*time.Second),
-		ResultData: json.RawMessage(`{"stale":3,"refreshed":2,"failed":1,"elsewhere":0,"queued":0}`),
+		ResultData: json.RawMessage(`{"stale":3,"refreshed":2,"failed":1,"deferred":0,"queued":0}`),
 	}}, nil
 }
 func (f *fakeAdminRecommendations) ResetEmbeddings(context.Context) (recommendations.EmbeddingsReset, error) {
