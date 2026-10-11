@@ -44,7 +44,7 @@ type readerRepo interface {
 	GetTasteClusterMeta(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
 	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error)
 	ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error)
-	GetTopGenres(ctx context.Context, limit int) ([]string, error)
+	TopGenre(ctx context.Context) (string, error)
 	FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error)
 	ListDislikedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
@@ -468,11 +468,10 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 	}
 
 	if genre == "" {
-		topGenres, err := r.repo.GetTopGenres(ctx, 1)
-		if err != nil || len(topGenres) == 0 {
+		var err error
+		if genre, err = r.repo.TopGenre(ctx); err != nil || genre == "" {
 			return nil, err
 		}
-		genre = topGenres[0]
 	}
 
 	items, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeGenreSamplerPrefix+genre, "")

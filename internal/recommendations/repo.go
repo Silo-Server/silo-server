@@ -212,6 +212,7 @@ func interleaveByGenre(ranked []tasteSeedCandidate) []string {
 type Repo struct {
 	pool        *pgxpool.Pool
 	titleCounts *titleCountCache
+	topGenre    topGenreCache
 }
 
 // NewRepo creates a new Repo with the given connection pool.
@@ -2168,6 +2169,19 @@ func (r *Repo) tasteSeedCandidates(ctx context.Context, filter catalog.AccessFil
 		candidates = append(candidates, c)
 	}
 	return candidates, rows.Err()
+}
+
+// TopGenre returns GetTopGenres' first genre, or "" when there is none.
+// It is the same for every viewer and reads the whole catalog, so each
+// server reuses it for topGenreTTL (see topGenreCache).
+func (r *Repo) TopGenre(ctx context.Context) (string, error) {
+	return r.topGenre.get(ctx, func(ctx context.Context) (string, error) {
+		genres, err := r.GetTopGenres(ctx, 1)
+		if err != nil || len(genres) == 0 {
+			return "", err
+		}
+		return genres[0], nil
+	})
 }
 
 // GetTopGenres returns the genres of the matched recommendableMediaTypes

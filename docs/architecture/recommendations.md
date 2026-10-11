@@ -415,7 +415,9 @@ The Reader serves cached rows, except the default rows on Discover and their
 section pages; home and library sections keep the cached Recently Added row
 instead, since a library has its own shelves. The other live query
 is the server's top genre, for a taste-match section with no genre and no
-matching cluster. The standalone popular and recently-added list endpoints
+matching cluster; it is the same for every viewer and reads the whole
+catalog, so each server reuses it for 10 minutes, serving an expired genre
+while a background read refreshes it. The standalone popular and recently-added list endpoints
 query the catalog live rather than reading the cache. Discover leaves out of
 each row the items earlier rows show, but not those they cut at the row limit.
 A read that

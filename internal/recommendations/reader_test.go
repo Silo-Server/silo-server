@@ -228,8 +228,8 @@ func (f *fakeReaderRepo) ListCachedGenreSamplers(context.Context) (map[string][]
 	return f.genres, nil
 }
 
-func (f *fakeReaderRepo) GetTopGenres(context.Context, int) ([]string, error) {
-	return nil, nil
+func (f *fakeReaderRepo) TopGenre(context.Context) (string, error) {
+	return "", nil
 }
 
 func (f *fakeReaderRepo) FilterRecommendableItemIDs(_ context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
