@@ -191,10 +191,11 @@ func (r *UnsupportedFileRepository) AddNew(ctx context.Context, folderID int, st
 }
 
 // unsupportedFileSearchWhere is the search ListPage and Count share, so a
-// page and its total always agree on which rows match.
+// page and its total always agree on which rows match. $2 holds the reasons
+// whose code, label or message matches, from unsupportedReasonsMatching.
 const unsupportedFileSearchWhere = `$1 = '' OR strpos(lower(directory_path), lower($1)) > 0
  OR EXISTS (SELECT 1 FROM unnest(file_names) AS name WHERE strpos(lower(name), lower($1)) > 0)
- OR strpos(lower(reason), lower($1)) > 0
+ OR reason = ANY($2::text[])
  OR media_folder_id IN (SELECT id FROM media_folders WHERE strpos(lower(name), lower($1)) > 0)`
 
 // ListPage answers a page of rows matching the search, newest first by when
@@ -203,7 +204,7 @@ const unsupportedFileSearchWhere = `$1 = '' OR strpos(lower(directory_path), low
 func (r *UnsupportedFileRepository) ListPage(ctx context.Context, search string, limit, offset int) ([]models.UnsupportedMediaFileGroup, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+unsupportedFileColumns+` FROM unsupported_media_files
  WHERE `+unsupportedFileSearchWhere+`
- ORDER BY first_seen_at DESC, media_folder_id ASC, directory_path ASC, reason ASC LIMIT $2 OFFSET $3`, search, limit, max(offset, 0))
+ ORDER BY first_seen_at DESC, media_folder_id ASC, directory_path ASC, reason ASC LIMIT $3 OFFSET $4`, search, unsupportedReasonsMatching(search), limit, max(offset, 0))
 	if err != nil {
 		return nil, fmt.Errorf("listing unsupported file page: %w", err)
 	}
@@ -233,7 +234,7 @@ func (r *UnsupportedFileRepository) ListPage(ctx context.Context, search string,
 // Count answers how many rows match the search across every page.
 func (r *UnsupportedFileRepository) Count(ctx context.Context, search string) (int, error) {
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM unsupported_media_files WHERE `+unsupportedFileSearchWhere, search).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM unsupported_media_files WHERE `+unsupportedFileSearchWhere, search, unsupportedReasonsMatching(search)).Scan(&total); err != nil {
 		return 0, fmt.Errorf("counting unsupported files: %w", err)
 	}
 	return total, nil
