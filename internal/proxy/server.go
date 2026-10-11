@@ -903,7 +903,11 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 
 // SetDownloadBandwidth wires the shared cluster budget before serving requests.
 func (s *Server) SetDownloadBandwidth(pool *pgxpool.Pool, client *redis.Client) {
-	s.downloadBandwidth = downloads.NewBandwidthManager(0, 0)
+	var serverBPS, userBPS int64
+	if cfg := s.watcher.Config(); cfg != nil {
+		serverBPS, userBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
+	}
+	s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
 	s.downloadBandwidth.SetSharedBudget(client, downloads.BandwidthRates(pool))
 }
 

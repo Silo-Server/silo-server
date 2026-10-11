@@ -21,8 +21,7 @@ func TestLocalDownloadBudgetFailureReturnsCommittedError(t *testing.T) {
 	if err := os.WriteFile(path, []byte("synthetic media"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) {
+	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) {
 		return 0, 0, errors.New("budget unavailable")
 	})
 	svc := &Service{bandwidth: bm}
@@ -35,8 +34,7 @@ func TestLocalDownloadBudgetFailureReturnsCommittedError(t *testing.T) {
 
 func TestThrottledReaderDoesNotExposeUnchargedBytes(t *testing.T) {
 	shortenBudgetGrace(t)
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) { return 0, 0, errors.New("budget unavailable") })
+	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) { return 0, 0, errors.New("budget unavailable") })
 	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader([]byte("private media")), 2)
 	buffer := make([]byte, 100)
 	if n, err := reader.Read(buffer); n != 0 || err == nil {
@@ -88,44 +86,101 @@ func shortenBudgetGrace(t *testing.T) {
 	t.Cleanup(func() { sharedBudgetGrace, sharedBudgetRetry = grace, retry })
 }
 
+// unreachableRedis is a client whose every command fails quickly.
+func unreachableRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 20 * time.Millisecond, MaxRetries: -1})
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+// unknownSharedManager is a shared-mode manager that has never read its rates.
+func unknownSharedManager(t *testing.T, rates func(context.Context) (int64, int64, error)) *BandwidthManager {
+	t.Helper()
+	bm := NewBandwidthManager(0, 0)
+	bm.SetSharedBudget(unreachableRedis(t), rates)
+	bm.ratesKnown = false
+	return bm
+}
+
 func TestSharedBudgetReadsSettingsOncePerTTL(t *testing.T) {
 	reads := 0
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) {
+	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) {
 		reads++
-		return 0, 0, nil
+		return 0, 125000, nil
 	})
-	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader(make([]byte, 100*32*1024)), 2)
-	if _, err := io.Copy(io.Discard, reader); err != nil {
-		t.Fatal(err)
+	for range 100 {
+		if _, _, err := bm.currentRates(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if reads != 1 {
 		t.Fatalf("settings read %d times for one cached window", reads)
 	}
 }
 
+func TestUnlimitedTransferUsesTheRawReader(t *testing.T) {
+	bm := NewBandwidthManager(0, 0)
+	bm.SetSharedBudget(unreachableRedis(t), func(context.Context) (int64, int64, error) { return 0, 0, nil })
+	raw := bytes.NewReader([]byte("media"))
+	if got := bm.ThrottledReader(context.Background(), raw, 2); got != raw {
+		t.Fatalf("unlimited transfer wrapped as %T", got)
+	}
+}
+
+func TestWithoutRedisLimitsStayInProcess(t *testing.T) {
+	bm := NewBandwidthManager(0, 4*1024*1024)
+	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) { return 0, 0, errors.New("unused") })
+	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader(make([]byte, 64*1024)), 2)
+	if got, err := io.ReadAll(reader); err != nil || len(got) != 64*1024 {
+		t.Fatalf("read %d bytes, error %v", len(got), err)
+	}
+}
+
+func TestBandwidthChunkScalesWithTheStrictestRate(t *testing.T) {
+	for _, tc := range []struct {
+		server, user int64
+		want         int
+	}{
+		{0, 0, minBandwidthChunk},
+		{125000, 0, minBandwidthChunk},
+		{0, 125000000, maxBandwidthChunk},
+		{12500000, 125000000, 12500000 / 40},
+	} {
+		if got := bandwidthChunk(tc.server, tc.user); got != tc.want {
+			t.Fatalf("chunk(%d, %d) = %d, want %d", tc.server, tc.user, got, tc.want)
+		}
+		if limit := min(nonZero(tc.server), nonZero(tc.user)); limit > 0 && int64(bandwidthChunk(tc.server, tc.user)) > max(limit/4, 32*1024) {
+			t.Fatalf("chunk above burst for %d/%d", tc.server, tc.user)
+		}
+	}
+}
+
+func nonZero(v int64) int64 {
+	if v == 0 {
+		return 1 << 62
+	}
+	return v
+}
+
 func TestSharedBudgetRetriesTransientSettingsFailure(t *testing.T) {
 	shortenBudgetGrace(t)
 	failures := 3
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) {
+	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) {
 		if failures > 0 {
 			failures--
 			return 0, 0, errors.New("database restarting")
 		}
 		return 0, 0, nil
 	})
-	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader([]byte("private media")), 2)
-	got, err := io.ReadAll(reader)
-	if err != nil || string(got) != "private media" {
-		t.Fatalf("read %q, error %v", got, err)
+	if err := bm.wait(context.Background(), 2, 1024); err != nil {
+		t.Fatalf("wait after transient failures: %v", err)
 	}
 }
 
 func TestSharedBudgetKeepsLastKnownRatesWhenSettingsFail(t *testing.T) {
-	bm := NewBandwidthManager(0, 0)
 	fail := false
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) {
+	bm := unknownSharedManager(t, func(context.Context) (int64, int64, error) {
 		if fail {
 			return 0, 0, errors.New("database unavailable")
 		}
@@ -145,11 +200,11 @@ func TestSharedBudgetKeepsLastKnownRatesWhenSettingsFail(t *testing.T) {
 
 func TestSharedBudgetFailsClosedAfterGrace(t *testing.T) {
 	shortenBudgetGrace(t)
-	bm := NewBandwidthManager(0, 0)
-	bm.SetSharedBudget(nil, func(context.Context) (int64, int64, error) { return 0, 125000, nil })
+	bm := NewBandwidthManager(0, 125000)
+	bm.SetSharedBudget(unreachableRedis(t), func(context.Context) (int64, int64, error) { return 0, 125000, nil })
 	reader := bm.ThrottledStreamReader(context.Background(), bytes.NewReader([]byte("private media")), 2)
 	buffer := make([]byte, 100)
 	if n, err := reader.Read(buffer); n != 0 || err == nil {
-		t.Fatalf("capped read without Redis exposed %d bytes, error %v", n, err)
+		t.Fatalf("capped read with Redis down exposed %d bytes, error %v", n, err)
 	}
 }
