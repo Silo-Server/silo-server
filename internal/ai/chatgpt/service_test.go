@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -472,6 +473,89 @@ func TestRevokedRefreshAndDisconnectPreserveRegistration(t *testing.T) {
 	c := stored(t, store)
 	if c.Active != "" || c.HostID != "host" || c.Accounts[0].ClientID != "app" || c.Accounts[0].RefreshToken != "" {
 		t.Fatal("disconnect lost registration or retained credentials")
+	}
+}
+
+func TestDisconnectRetriesTransientRevocation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		network     bool
+		persistent  bool
+		canceled    bool
+		deadline    bool
+		wantCalls   int
+		wantRevoked bool
+	}{
+		{name: "network recovery", network: true, wantCalls: 2, wantRevoked: true},
+		{name: "server recovery", status: http.StatusServiceUnavailable, wantCalls: 2, wantRevoked: true},
+		{name: "server outage", status: http.StatusServiceUnavailable, persistent: true, wantCalls: 3},
+		{name: "network outage", network: true, persistent: true, wantCalls: 3},
+		{name: "client rejection", status: http.StatusBadRequest, persistent: true, wantCalls: 1},
+		{name: "caller cancellation", canceled: true, wantCalls: 1, wantRevoked: true},
+		{name: "provider timeout leaves time for cleanup", deadline: true, wantCalls: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &memoryStore{values: map[string]string{}}
+				save(t, store, credentials{HostID: "host", Active: "app", Accounts: []account{
+					{ClientID: "app", Subject: "user", AccessToken: "access", RefreshToken: "refresh", IDToken: "identity", Scopes: planScope},
+					{ClientID: "other", Subject: "other-user", RefreshToken: "other-refresh"},
+				}})
+				s := NewService(store)
+				var calls []time.Time
+				s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+					if r.URL.String() == s.discoveryURL {
+						return response(http.StatusOK, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
+					}
+					calls = append(calls, time.Now())
+					if r.URL.String() != issuer+"/revoke" || r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+						t.Fatal("unexpected revocation request")
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Fatal(err)
+					}
+					if r.Form.Get("token") != "refresh" || r.Form.Get("token_type_hint") != oauthRefreshToken || r.Form.Get(oauthClientID) != "app" {
+						t.Fatal("revocation changed the starting credentials")
+					}
+					// Disconnect holds the store lock throughout provider calls.
+					c, err := decode(store.values[CredentialsKey])
+					if err != nil || c.Accounts[0].RefreshToken != "refresh" || r.Context().Err() != nil {
+						t.Fatal("credentials or request context cleared before revocation")
+					}
+					if tc.deadline {
+						<-r.Context().Done()
+						return nil, r.Context().Err()
+					}
+					if len(calls) == 1 || tc.persistent {
+						if tc.network {
+							return nil, errors.New("provider offline")
+						}
+						if tc.status != 0 {
+							return response(tc.status, nil), nil
+						}
+					}
+					return response(http.StatusOK, nil), nil
+				})
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.canceled {
+					cancel()
+				}
+				revoked, err := s.Disconnect(ctx, "app")
+				if err != nil || revoked != tc.wantRevoked || len(calls) != tc.wantCalls {
+					t.Fatalf("disconnect: revoked=%v, calls=%d, err=%v", revoked, len(calls), err)
+				}
+				if len(calls) > 1 && !calls[1].After(calls[0]) {
+					t.Fatal("revocation retry omitted backoff")
+				}
+				c := stored(t, store)
+				a := c.Accounts[0]
+				if c.Active != "" || c.HostID != "host" || a.ClientID != "app" || a.Subject != "user" || !a.NeedsLogin || a.AccessToken != "" || a.RefreshToken != "" || a.IDToken != "" || a.Scopes != "" || c.Accounts[1].RefreshToken != "other-refresh" {
+					t.Fatal("disconnect lost registration, retained credentials, or changed another account")
+				}
+			})
+		})
 	}
 }
 

@@ -83,9 +83,12 @@ consuming the attempt; an accepted exchange may finish after that deadline.
 A provider-side rotation followed by a lost database commit may require login
 again; Silo never promises an atomic transaction across OpenAI and PostgreSQL.
 
-Disconnect clears tokens and retains registration and host identity for later
-authorization. The response distinguishes confirmed provider revocation from
-local credential removal. Credential requests reject redirects, and OIDC
+Disconnect makes up to three revocation attempts, backing off after network
+failures and HTTP 5xx responses before clearing tokens. The provider deadline
+leaves time for local cleanup, and caller cancellation does not interrupt it.
+Registration and host identity remain available for later authorization.
+The response distinguishes confirmed provider revocation from local credential
+removal. Credential requests reject redirects, and OIDC
 discovery URLs must remain on `https://auth.openai.com`.
 
 ## Inference

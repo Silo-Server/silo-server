@@ -682,12 +682,16 @@ func (s *Service) Models(ctx context.Context) ([]Model, error) {
 	return models, nil
 }
 
-// Disconnect revokes renewable credentials before clearing them. The boolean
-// records whether OpenAI confirmed revocation; local credentials are cleared
+// Disconnect retries transient revocation failures before clearing tokens.
+// The boolean records whether OpenAI confirmed revocation; local credentials are cleared
 // even if the network is unavailable, and registrations remain for reconnect.
 func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error) {
 	disconnectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
+	// Leave time to commit local cleanup after a provider timeout.
+	deadline, _ := disconnectCtx.Deadline()
+	revocationCtx, cancelRevocation := context.WithDeadline(disconnectCtx, deadline.Add(-5*time.Second))
+	defer cancelRevocation()
 	revoked := false
 	err := s.mutate(disconnectCtx, func(c *credentials) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
@@ -697,16 +701,8 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 		a := &c.Accounts[i]
 		if a.RefreshToken == "" {
 			revoked = true
-		} else if d, err := s.discovery(disconnectCtx); err == nil {
-			form := url.Values{"token": {a.RefreshToken}, "token_type_hint": {oauthRefreshToken}, oauthClientID: {a.ClientID}}
-			req, err := http.NewRequestWithContext(disconnectCtx, http.MethodPost, d.RevocationEndpoint, strings.NewReader(form.Encode()))
-			if err == nil {
-				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-				if resp, err := s.http.Do(req); err == nil {
-					revoked = resp.StatusCode == http.StatusOK
-					_ = resp.Body.Close()
-				}
-			}
+		} else if d, err := s.discovery(revocationCtx); err == nil {
+			revoked = s.revokeSession(revocationCtx, d.RevocationEndpoint, *a)
 		}
 		a.AccessToken, a.RefreshToken, a.IDToken, a.Scopes = "", "", "", ""
 		a.NeedsLogin = true
@@ -719,4 +715,39 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 		return nil
 	})
 	return revoked, err
+}
+
+func (s *Service) revokeSession(ctx context.Context, endpoint string, a account) bool {
+	form := url.Values{"token": {a.RefreshToken}, "token_type_hint": {oauthRefreshToken}, oauthClientID: {a.ClientID}}.Encode()
+	for attempt := range 3 {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Second << (attempt - 1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return false
+			case <-timer.C:
+			}
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form))
+		if err != nil {
+			return false
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := s.http.Do(req)
+		if err != nil {
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return true
+		}
+		if resp.StatusCode < http.StatusInternalServerError || resp.StatusCode >= 600 {
+			return false
+		}
+	}
+	return false
 }
