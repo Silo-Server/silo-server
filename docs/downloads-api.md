@@ -2040,25 +2040,28 @@ Both use decimal Mbps (`1 Mbps = 125000 bytes/s`); zero is unlimited. Both ceili
 apply, so the stricter available budget wins. These are download byte controls,
 separate from playback media bitrate and prepared-file storage capacity.
 
-Capped delivery requires the shared Redis database used by the installation.
-Each forward read exposes at most 32768 charged bytes. One global bucket and one
-account bucket are atomically debited, with a burst of `max(rate/4, 32768)` bytes
-per bucket across the installation. For any interval of length T, charged bytes
-are bounded by `rate*T + burst`; HTTP/socket buffering may shift the observed
-arrival times of previously charged chunks. Redis time and retained balances
-prevent additional budgets from API/proxy restarts. All serving nodes must run
-the implementation; capped proxy routing remains disabled for compatibility
-with older workers. API delivery of worker artifacts is charged once at egress.
+With Redis configured, every API process and proxy node charges capped
+downloads to shared Redis buckets: one global bucket and one per account,
+debited atomically, each with a burst of `max(rate/4, 32768)` bytes across the
+installation. Without Redis, each process keeps in-process limiters, which is
+exact only for a single API process. Each forward read exposes at most one
+charged chunk: about 25 ms of the strictest active rate, between 32 KiB and
+1 MiB, so a fast cap is not bounded by one Redis round trip per 32 KiB. For any
+interval of length T, charged bytes are bounded by `rate*T + burst`; HTTP and
+socket buffering may shift the observed arrival times of charged chunks. Redis
+time and retained balances keep API or proxy restarts from granting new
+budget. Capped downloads stay on the API egress path rather than being routed to
+proxies. API delivery of worker artifacts is charged once at egress.
 
 Each serving process reads the two bandwidth settings at most every 5 seconds,
-so saved edits reach running transfers within about 5 seconds, including
-transfers that started unlimited. An edit does not refill a bucket. Unlimited
-transfers make no Redis calls. A failed settings read keeps the last known
-limits. A failed budget operation is retried for up to 10 seconds, sending no
-bytes meanwhile; after that the transfer stops without exposing uncharged
-bytes. Each attempt has a one-second deadline. Clients must handle incomplete
-bodies and retry using their existing Range/resume flow after dependency
-recovery.
+so saved edits reach capped transfers within about 5 seconds. An edit does not
+refill a bucket. A transfer that starts with both limits at zero is served
+without the limiter and stays unlimited; later edits apply to new transfers. A
+failed settings read keeps the last known limits. A failed budget operation is
+retried for up to 10 seconds, sending no bytes meanwhile; after that the
+transfer stops without exposing uncharged bytes. Each attempt has a one-second
+deadline. Clients must handle incomplete bodies and retry using their existing
+Range/resume flow after dependency recovery.
 
 `download.max_per_period` counts registrations independently for each account
 in the rolling `download.period_duration`; zero is unlimited. It is not a

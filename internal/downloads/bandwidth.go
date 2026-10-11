@@ -55,15 +55,19 @@ func NewBandwidthManager(serverBPS, userBPS int64) *BandwidthManager {
 	return bm
 }
 
-// SetSharedBudget uses cluster-wide byte buckets. Rates come from the
-// authoritative settings, refreshed at most every bandwidthRatesTTL. Production
-// callers always set this, including without Redis: a capped transfer then
-// fails closed rather than getting a node-local budget.
+// SetSharedBudget uses cluster-wide byte buckets in Redis. Rates come from the
+// authoritative settings, refreshed at most every bandwidthRatesTTL and seeded
+// from the manager's current limits. Without Redis the manager keeps its
+// in-process limiters, which is exact for a single API process.
 func (bm *BandwidthManager) SetSharedBudget(client *redis.Client, rates func(context.Context) (int64, int64, error)) {
-	bm.rates = rates
-	if client != nil {
-		bm.shared = client.WithTimeout(time.Second)
+	if client == nil {
+		return
 	}
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.rates = rates
+	bm.shared = client.WithTimeout(time.Second)
+	bm.ratesKnown, bm.ratesAt = true, time.Now()
 }
 
 // Reload updates the standalone manager without replacing its buckets. Active
@@ -98,6 +102,24 @@ func (bm *BandwidthManager) Reload(serverBPS, userBPS int64) {
 
 func bandwidthBurst(bps int64) int { return int(max(bps/4, 32*1024)) }
 
+const minBandwidthChunk, maxBandwidthChunk = 32 * 1024, 1024 * 1024
+
+// bandwidthChunk sizes one charged read: about 25 ms of the strictest active
+// rate, so a fast capped transfer is not bounded by one budget round trip per
+// 32 KiB. It never exceeds the strictest bucket's burst.
+func bandwidthChunk(serverBPS, userBPS int64) int {
+	strictest := int64(0)
+	for _, bps := range []int64{serverBPS, userBPS} {
+		if bps > 0 && (strictest == 0 || bps < strictest) {
+			strictest = bps
+		}
+	}
+	if strictest == 0 {
+		return minBandwidthChunk
+	}
+	return int(min(max(strictest/40, minBandwidthChunk), maxBandwidthChunk))
+}
+
 func (bm *BandwidthManager) getUserLimiter(userID int) *rate.Limiter {
 	bm.mu.RLock()
 	ubps := bm.userBPS
@@ -127,12 +149,32 @@ func (bm *BandwidthManager) ThrottledReader(ctx context.Context, r io.ReadSeeker
 }
 
 // ThrottledStreamReader applies the same aggregate limits to a non-seekable
-// stream, such as an authenticated response relayed from a transcode node.
+// stream, such as an authenticated response relayed from a transcode node. A
+// transfer that starts with both limits off gets the raw reader, keeping
+// sendfile and avoiding per-chunk work; a later edit applies to new transfers.
 func (bm *BandwidthManager) ThrottledStreamReader(ctx context.Context, r io.Reader, userID int) io.Reader {
 	if bm == nil {
 		return r
 	}
+	if server, user := bm.limits(ctx); server <= 0 && user <= 0 {
+		return r
+	}
 	return &throttledReader{r: r, ctx: ctx, manager: bm, userID: userID}
+}
+
+// limits returns the limits a new transfer starts with. A failed shared-mode
+// read reports a limit so the transfer is throttled and fails closed.
+func (bm *BandwidthManager) limits(ctx context.Context) (int64, int64) {
+	if bm.rates == nil {
+		bm.mu.RLock()
+		defer bm.mu.RUnlock()
+		return bm.serverBPS, bm.userBPS
+	}
+	server, user, err := bm.currentRates(ctx)
+	if err != nil {
+		return 1, 1
+	}
+	return server, user
 }
 
 type throttledReadSeeker struct {
@@ -155,8 +197,11 @@ type throttledReader struct {
 
 func (t *throttledReader) Read(p []byte) (int, error) {
 	// Bound exposure to one charged chunk, regardless of io.Copy's buffer size.
-	if len(p) > 32*1024 {
-		p = p[:32*1024]
+	t.manager.mu.RLock()
+	chunk := bandwidthChunk(t.manager.serverBPS, t.manager.userBPS)
+	t.manager.mu.RUnlock()
+	if len(p) > chunk {
+		p = p[:chunk]
 	}
 	if err := t.ctx.Err(); err != nil {
 		return 0, err
@@ -188,20 +233,19 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 		return nil
 	}
 	var failingSince time.Time
-	for {
+	for bytes > 0 {
 		chunkCtx, cancel := context.WithTimeout(ctx, time.Second)
 		server, user, err := bm.currentRates(chunkCtx)
 		var delay time.Duration
+		// A rate lowered mid-read can leave the chunk above the new burst,
+		// which a bucket could never pay at once; charge it in pieces.
+		charge := min(bytes, bandwidthChunk(server, user))
 		if err == nil && (server > 0 || user > 0) {
-			if bm.shared == nil {
-				err = fmt.Errorf("shared download bandwidth requires Redis")
-			} else {
-				var micros int64
-				micros, err = sharedBandwidthScript.Run(chunkCtx, bm.shared,
-					[]string{"silo:downloads:{bandwidth}:global", fmt.Sprintf("silo:downloads:{bandwidth}:user:%d", userID)},
-					server, user, bytes).Int64()
-				delay = time.Duration(micros) * time.Microsecond
-			}
+			var micros int64
+			micros, err = sharedBandwidthScript.Run(chunkCtx, bm.shared,
+				[]string{"silo:downloads:{bandwidth}:global", fmt.Sprintf("silo:downloads:{bandwidth}:user:%d", userID)},
+				server, user, charge).Int64()
+			delay = time.Duration(micros) * time.Microsecond
 		}
 		cancel()
 		if err != nil {
@@ -215,10 +259,12 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 				return fmt.Errorf("download bandwidth budget unavailable: %w", err)
 			}
 			delay = sharedBudgetRetry
-		} else if delay <= 0 {
-			return nil
 		} else {
 			failingSince = time.Time{}
+			if delay <= 0 {
+				bytes -= charge
+				continue
+			}
 		}
 		timer := time.NewTimer(min(delay, 250*time.Millisecond))
 		select {
@@ -228,6 +274,7 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 		case <-timer.C:
 		}
 	}
+	return nil
 }
 
 // currentRates returns the shared-mode rates, reading the settings at most once
@@ -248,6 +295,13 @@ func (bm *BandwidthManager) currentRates(ctx context.Context) (int64, int64, err
 		bm.ratesMu.Lock()
 	}
 	defer bm.ratesMu.Unlock()
+	bm.mu.RLock()
+	if bm.ratesKnown && time.Since(bm.ratesAt) < bandwidthRatesTTL {
+		server, user = bm.serverBPS, bm.userBPS
+		bm.mu.RUnlock()
+		return server, user, nil
+	}
+	bm.mu.RUnlock()
 
 	freshServer, freshUser, err := bm.rates(ctx)
 	bm.mu.Lock()
