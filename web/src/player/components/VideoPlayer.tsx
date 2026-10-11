@@ -3117,8 +3117,13 @@ export function VideoPlayer({
   const handlePlayPause = useCallback(() => setPlayback("toggle"), [setPlayback]);
 
   const handleFullscreenToggle = useCallback(() => {
-    toggleFullscreen(fullscreenRootRef?.current ?? containerRef.current, videoRef.current);
-  }, [fullscreenRootRef]);
+    // The engine draws on a canvas beside the <video>, so the video's own
+    // native fullscreen (the iPhone fallback) would show an empty player.
+    toggleFullscreen(
+      fullscreenRootRef?.current ?? containerRef.current,
+      browserEngineActive ? null : videoRef.current,
+    );
+  }, [browserEngineActive, fullscreenRootRef]);
 
   const handleSurfaceTap = useCallback(
     (event?: React.MouseEvent<HTMLElement>) => {
@@ -4322,7 +4327,9 @@ export function VideoPlayer({
           onVideoFitToggle={() =>
             setVideoFit((current) => (current === "cover" ? "contain" : "cover"))
           }
-          onFullscreenToggle={handleFullscreenToggle}
+          onFullscreenToggle={
+            browserEngineActive && !document.fullscreenEnabled ? undefined : handleFullscreenToggle
+          }
           onSurfaceTap={handleSurfaceTap}
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}

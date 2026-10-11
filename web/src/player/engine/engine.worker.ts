@@ -136,7 +136,10 @@ function post(message: WorkerToPageMessage, transfer: Transferable[] = []): void
 function fail(run: number | null, error: unknown, fallback: string): void {
   if (run !== null && run !== generation) return;
   const classification = error instanceof EngineFailure ? error.classification : fallback;
-  const message = redactStreamUrls(error instanceof Error ? error.message : String(error));
+  const message = redactStreamUrls(
+    error instanceof Error ? error.message : String(error),
+    source?.url,
+  );
   post({ type: "error", generation: run, classification, message });
 }
 
@@ -298,14 +301,20 @@ async function copyPlanes(frame: VideoFrame): Promise<EnginePlaneFrame> {
   const buffer = planeBuffer(lumaBytes + chromaBytes * 2);
   const offsets: [number, number, number] = [0, lumaBytes, lumaBytes + chromaBytes];
   const strides: [number, number, number] = [rect.width * 2, chromaWidth * 2, chromaWidth * 2];
-  await frame.copyTo(buffer, {
-    rect,
-    layout: [
-      { offset: offsets[0], stride: strides[0] },
-      { offset: offsets[1], stride: strides[1] },
-      { offset: offsets[2], stride: strides[2] },
-    ],
-  });
+  try {
+    await frame.copyTo(buffer, {
+      rect,
+      layout: [
+        { offset: offsets[0], stride: strides[0] },
+        { offset: offsets[1], stride: strides[1] },
+        { offset: offsets[2], stride: strides[2] },
+      ],
+    });
+  } catch (error) {
+    // The caller falls back to handing the frame over; keep the buffer for the next copy.
+    planePool.push(buffer);
+    throw error;
+  }
   return {
     timestamp: frame.timestamp / 1e6,
     duration: (frame.duration ?? 0) / 1e6,
@@ -320,6 +329,10 @@ async function copyPlanes(frame: VideoFrame): Promise<EnginePlaneFrame> {
   };
 }
 
+function readFailure(kind: "video" | "audio", error: unknown): EngineFailure {
+  return new EngineFailure(ENGINE_FAILURES.read, `Reading ${kind} failed: ${String(error)}`);
+}
+
 /**
  * Finds where a run starts. The lookup reads the file, so its failure is a
  * read failure like any other, not a decoder one.
@@ -331,7 +344,35 @@ async function findStartPacket(
   try {
     return await lookup();
   } catch (error) {
-    throw new EngineFailure(ENGINE_FAILURES.read, `Reading ${kind} failed: ${String(error)}`);
+    throw readFailure(kind, error);
+  }
+}
+
+/**
+ * The packets from `start` on, with a failed read reported as a read failure.
+ * Only the reads: an error the caller raises while handling a packet, such as
+ * a decoder rejecting it, keeps its own classification, so a bad packet fails
+ * over to another route instead of reconnecting to the same one.
+ */
+async function* readPackets(
+  kind: "video" | "audio",
+  sink: EncodedPacketSink,
+  start: EncodedPacket,
+): AsyncGenerator<EncodedPacket> {
+  const packets = sink.packets(start)[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let next: IteratorResult<EncodedPacket>;
+      try {
+        next = await packets.next();
+      } catch (error) {
+        throw readFailure(kind, error);
+      }
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    await packets.return?.();
   }
 }
 
@@ -372,7 +413,14 @@ async function runVideo(run: number, position: number): Promise<void> {
           frame.close();
           return;
         }
-        if (usePlanes && frame.format && RAW_PLANE_FORMATS.test(frame.format)) {
+        // The plane shader assumes limited range; a full-range frame goes to
+        // frame import instead, which converts with the frame's own range.
+        if (
+          usePlanes &&
+          frame.format &&
+          RAW_PLANE_FORMATS.test(frame.format) &&
+          frame.colorSpace?.fullRange !== true
+        ) {
           try {
             const planes = await copyPlanes(frame);
             frame.close();
@@ -396,31 +444,23 @@ async function runVideo(run: number, position: number): Promise<void> {
   decoder.addEventListener("dequeue", () => waker.wake());
   decoder.configure(config);
 
-  try {
-    for await (const packet of sink.packets(startPacket)) {
-      while (
-        run === generation &&
-        (framesInFlight >= MAX_FRAMES_IN_FLIGHT ||
-          decoder.decodeQueueSize >= MAX_VIDEO_DECODE_QUEUE)
-      ) {
-        await waker.wait();
-      }
-      if (run !== generation || decoder.state === "closed") return;
-      const data = nalLengthSize
-        ? stripDolbyVisionNalUnits(packet.data, nalLengthSize)
-        : packet.data;
-      decoder.decode(
-        new EncodedVideoChunk({
-          type: packet.type,
-          timestamp: Math.round(packet.timestamp * 1e6),
-          duration: Math.round(packet.duration * 1e6),
-          data,
-        }),
-      );
+  for await (const packet of readPackets("video", sink, startPacket)) {
+    while (
+      run === generation &&
+      (framesInFlight >= MAX_FRAMES_IN_FLIGHT || decoder.decodeQueueSize >= MAX_VIDEO_DECODE_QUEUE)
+    ) {
+      await waker.wait();
     }
-  } catch (error) {
-    if (run !== generation) return;
-    throw new EngineFailure(ENGINE_FAILURES.read, `Reading video failed: ${String(error)}`);
+    if (run !== generation || decoder.state === "closed") return;
+    const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
+    decoder.decode(
+      new EncodedVideoChunk({
+        type: packet.type,
+        timestamp: Math.round(packet.timestamp * 1e6),
+        duration: Math.round(packet.duration * 1e6),
+        data,
+      }),
+    );
   }
   if (run !== generation || decoder.state === "closed") return;
   await decoder.flush();
@@ -609,22 +649,12 @@ async function runAudio(run: number, position: number): Promise<void> {
     }
   };
 
-  try {
-    for await (const packet of sink.packets(startPacket)) {
-      while (
-        run === generation &&
-        audioPostedSeconds - audioConsumedSeconds > AUDIO_AHEAD_SECONDS
-      ) {
-        await waker.wait();
-      }
-      if (run !== generation) return;
-      for (const decoded of await decoder.decode(packet)) emit(decoded);
+  for await (const packet of readPackets("audio", sink, startPacket)) {
+    while (run === generation && audioPostedSeconds - audioConsumedSeconds > AUDIO_AHEAD_SECONDS) {
+      await waker.wait();
     }
-  } catch (error) {
     if (run !== generation) return;
-    throw error instanceof EngineFailure
-      ? error
-      : new EngineFailure(ENGINE_FAILURES.read, `Reading audio failed: ${String(error)}`);
+    for (const decoded of await decoder.decode(packet)) emit(decoded);
   }
   if (run !== generation) return;
   for (const decoded of await decoder.flush()) emit(decoded);

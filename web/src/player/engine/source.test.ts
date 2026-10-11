@@ -13,4 +13,15 @@ describe("redactStreamUrls", () => {
     );
     expect(redactStreamUrls("Decoder closed")).toBe("Decoder closed");
   });
+
+  it("removes same-origin stream paths and their tokens", () => {
+    const url = "/api/v2/stream/direct/eyJh.eyJz.c2ln?st=abc&token=def";
+    expect(redactStreamUrls(`Error fetching ${url}: 401 Unauthorized`, url)).toBe(
+      "Error fetching <stream URL>: 401 Unauthorized",
+    );
+    // Without the plan's URL to match, a relative path with a token still goes.
+    expect(redactStreamUrls(`Error fetching ${url}: 401 Unauthorized`)).toBe(
+      "Error fetching <stream URL>: 401 Unauthorized",
+    );
+  });
 });

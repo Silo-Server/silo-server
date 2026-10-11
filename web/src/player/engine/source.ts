@@ -30,9 +30,14 @@ export interface EngineSourceSpec {
 }
 
 /**
- * Fetch errors quote the stream URL, whose path carries the stream token. A
- * failure message goes to the server and its logs, so the URL is left out.
+ * Fetch errors quote the stream URL, which carries the stream token and, for
+ * API-local routes, the access token. A failure message goes to the server and
+ * its logs, so the URL is left out: the plan's own URL wherever it appears,
+ * any absolute URL, and any relative path with a token in its query.
  */
-export function redactStreamUrls(message: string): string {
-  return message.replace(/https?:\/\/\S+?(?=:?(?:\s|$))/g, "<stream URL>");
+export function redactStreamUrls(message: string, streamUrl?: string): string {
+  const withoutStream = streamUrl ? message.split(streamUrl).join("<stream URL>") : message;
+  return withoutStream
+    .replace(/https?:\/\/\S+?(?=:?(?:\s|$))/g, "<stream URL>")
+    .replace(/(^|\s)\/\S*?[?&](?:token|st)=\S+?(?=:?(?:\s|$))/g, "$1<stream URL>");
 }
