@@ -162,7 +162,10 @@ and again when cached rows are read.
 
 Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are
-shown on their own. Below the floor the row is cached empty.
+shown on their own. Below the floor the row is cached empty. Co-watch pairs,
+which feed Because You Watched and similar titles, follow the same rule: an
+item needs watchers on 5 accounts, and a pair's shared watchers must span 3
+accounts, so one household's profiles cannot make a pair.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until

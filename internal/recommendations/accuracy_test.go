@@ -219,13 +219,27 @@ func TestCollaborativeSupportAggregatesAcrossPeers(t *testing.T) {
 	}
 }
 
-func TestCowatchMatrixTreatsProfilesAsDistinctWatchers(t *testing.T) {
-	watchers := map[string][]string{
-		"a": {"1:p1", "1:p2"},
-		"b": {"1:p1", "1:p2"},
+// Profiles are distinct watchers in the Jaccard score, but the shared-watcher
+// floor counts accounts, so one household's profiles cannot make a pair other
+// households see.
+func TestCowatchMatrixCountsSharedWatchersByAccount(t *testing.T) {
+	oneHousehold := map[string][]string{
+		"a": {"1:p1", "1:p2", "1:p3"},
+		"b": {"1:p1", "1:p2", "1:p3"},
+	}
+	pairs, err := computeCowatchMatrix(t.Context(), oneHousehold, 2, 2, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pairs) != 0 {
+		t.Fatalf("one account's profiles made pairs: %#v", pairs)
 	}
 
-	pairs, err := computeCowatchMatrix(t.Context(), watchers, 2, 2, 10)
+	twoHouseholds := map[string][]string{
+		"a": {"1:p1", "1:p2", "2:p1"},
+		"b": {"1:p1", "1:p2", "2:p1"},
+	}
+	pairs, err = computeCowatchMatrix(t.Context(), twoHouseholds, 2, 2, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,8 +247,8 @@ func TestCowatchMatrixTreatsProfilesAsDistinctWatchers(t *testing.T) {
 		t.Fatalf("got %d co-watch pairs, want 2: %#v", len(pairs), pairs)
 	}
 	for _, pair := range pairs {
-		if pair.CowatchCount != 2 {
-			t.Fatalf("cowatch count = %d, want two profile identities: %#v", pair.CowatchCount, pair)
+		if pair.CowatchCount != 3 {
+			t.Fatalf("cowatch count = %d, want three profile identities: %#v", pair.CowatchCount, pair)
 		}
 	}
 }

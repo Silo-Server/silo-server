@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"sort"
+	"strings"
 )
 
 // Default co-watch matrix parameters.
@@ -15,9 +16,12 @@ const (
 )
 
 // computeCowatchMatrix builds a co-watch similarity matrix from per-item watcher
-// lists. For every pair of items that each have at least minWatchers viewers,
-// it computes the Jaccard similarity of their watcher sets. Pairs with fewer
-// than minShared shared watchers are discarded. For each item only the topN
+// lists. Watchers are profile identities, "userID:profileID". For every pair
+// of items that each have at least minWatchers viewers, it computes the
+// Jaccard similarity of their watcher sets. Pairs whose shared watchers come
+// from fewer than minShared accounts are discarded: the profiles of one
+// household would otherwise make a pair that reveals what that household
+// watches to every other account. For each item only the topN
 // most similar neighbors (by Jaccard score, then similar item ID) are
 // retained, and only those are held while scanning. It stops with ctx's error
 // when ctx ends.
@@ -58,6 +62,9 @@ func computeCowatchMatrix(ctx context.Context, watchers map[string][]string, min
 		kept.offer(n, topN)
 	}
 
+	// sharedAccounts collects the accounts of one pair's shared watchers.
+	sharedAccounts := make(map[string]struct{})
+
 	// Compare every pair once (i < j), then record from both sides.
 	for i := 0; i < len(eligible); i++ {
 		if err := ctx.Err(); err != nil {
@@ -77,13 +84,15 @@ func computeCowatchMatrix(ctx context.Context, watchers map[string][]string, min
 			if len(setA) > len(setB) {
 				small, big = setB, setA
 			}
+			clear(sharedAccounts)
 			for uid := range small {
 				if _, ok := big[uid]; ok {
 					shared++
+					sharedAccounts[watcherAccount(uid)] = struct{}{}
 				}
 			}
 
-			if shared < minShared {
+			if len(sharedAccounts) < minShared {
 				continue
 			}
 
@@ -118,6 +127,12 @@ func computeCowatchMatrix(ctx context.Context, watchers map[string][]string, min
 	}
 
 	return result, nil
+}
+
+// watcherAccount returns the account part of a "userID:profileID" watcher.
+func watcherAccount(watcher string) string {
+	account, _, _ := strings.Cut(watcher, ":")
+	return account
 }
 
 // cowatchNeighbor is one co-watched item and its similarity to another.
