@@ -46,7 +46,7 @@ func presignCompatListItems(ctx context.Context, detailSvc *catalog.DetailServic
 func attachListExtraBackdrops(ctx context.Context, detailSvc *catalog.DetailService, items []upstreamListItem) {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
-		if item.Type == "movie" || item.Type == "series" {
+		if item.Type == compatMovieType || item.Type == compatSeriesType {
 			ids = append(ids, item.ContentID)
 		}
 	}

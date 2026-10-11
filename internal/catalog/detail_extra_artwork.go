@@ -65,7 +65,7 @@ func (s *DetailService) attachBackdropURLs(ctx context.Context, details []*ItemD
 // hasItemBackdrops reports whether detail is a movie or series, the items
 // whose own row carries backdrops.
 func hasItemBackdrops(detail *ItemDetail) bool {
-	return detail != nil && (detail.Type == "movie" || detail.Type == "series")
+	return detail != nil && (detail.Type == playableTypeMovie || detail.Type == playableTypeSeries)
 }
 
 // ExtraBackdropPaths returns the cached artwork paths of each item's backdrops

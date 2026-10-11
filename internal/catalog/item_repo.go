@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -206,14 +207,23 @@ const (
 	advisorySourceColumn = "advisory_source"
 )
 
+// Served-path columns of the banner, thumb, clear art and disc slots, shared
+// by the item select lists in this package.
+const (
+	bannerPathColumn   = "banner_path"
+	thumbPathColumn    = "thumb_path"
+	clearArtPathColumn = "clearart_path"
+	discPathColumn     = "disc_path"
+)
+
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
 	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_source_path", "backdrop_thumbhash", "logo_path", "logo_source_path",
-	"banner_path", "banner_source_path", "banner_thumbhash", "thumb_path", "thumb_source_path", "thumb_thumbhash",
-	"clearart_path", "clearart_source_path", "disc_path", "disc_source_path",
+	bannerPathColumn, "banner_source_path", "banner_thumbhash", thumbPathColumn, "thumb_source_path", "thumb_thumbhash",
+	clearArtPathColumn, "clearart_source_path", discPathColumn, "disc_source_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -2548,7 +2558,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			WHERE content_id = $1
 			  AND logo_source_path = $2`
 		args = []any{contentID, sourcePath, cachedPath}
-	case "banner", "thumb":
+	case artworkkey.ImageBanner, artworkkey.ImageThumb:
 		// imageType is one of the two literals matched above, so it is safe
 		// to splice into the column names.
 		query = fmt.Sprintf(`
@@ -2560,7 +2570,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			WHERE content_id = $1
 			  AND %[1]s_source_path = $2`, imageType)
 		args = []any{contentID, sourcePath, cachedPath, thumbhash}
-	case "clearart", "disc":
+	case artworkkey.ImageClearArt, artworkkey.ImageDisc:
 		query = fmt.Sprintf(`
 			UPDATE media_items
 			SET %[1]s_path = $3,

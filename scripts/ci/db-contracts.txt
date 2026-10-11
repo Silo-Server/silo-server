@@ -209,3 +209,11 @@
 ./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
 ./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
+
+# Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
+# and Down, slot write-back, backdrop row identity and GC queueing, and the
+# folder-delete reference check over the new columns.
+./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
+./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
+./internal/catalog TestItemBackdropRepositoryDB
+./internal/catalog TestFilterUnreferencedImageDirsPostgres
