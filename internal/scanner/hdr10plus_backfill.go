@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -44,8 +46,8 @@ type HDR10PlusBackfillResult struct {
 	HDR10Plus int `json:"hdr10_plus"`
 	// NotHDR10Plus files have a first frame without HDR10+ metadata.
 	NotHDR10Plus int `json:"not_hdr10_plus"`
-	// Changed files had their row rewritten during the pass. The next pass
-	// checks the row as it now stands.
+	// Changed files differ on disk from their row, or their row was rewritten
+	// during the pass. The next scan or pass settles them.
 	Changed int `json:"changed"`
 	// Unreadable files could not be opened or decoded, or ffprobe failed.
 	// None is recorded as not HDR10+: a misconfigured ffprobe would otherwise
@@ -71,8 +73,10 @@ type HDR10PlusBackfiller struct {
 	ffprobePath string
 	workers     int
 	batch       int
-	// readFrame is the frame read; tests replace it.
+	// readFrame is the frame read and statFile the on-disk check; tests
+	// replace them.
 	readFrame func(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error)
+	statFile  func(path string) (fs.FileInfo, error)
 }
 
 // NewHDR10PlusBackfiller returns a backfiller over repo's database that reads
@@ -87,6 +91,7 @@ func NewHDR10PlusBackfiller(repo *FileRepository, ffprobePath string) *HDR10Plus
 		workers:     hdr10PlusBackfillWorkers,
 		batch:       hdr10PlusBackfillBatchSize,
 		readFrame:   probeVideoFrameSideData,
+		statFile:    os.Stat,
 	}
 }
 
@@ -248,6 +253,19 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not read the first frame",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
 		return hdr10PlusOutcomeUnreadable, nil
+	}
+	// The frame describes the file on disk, which a scan has not reprobed if
+	// it changed since the row was written. Such a file is settled by that
+	// scan, not by writing its new status onto the old row. A row stored
+	// without an mtime can only be checked on size.
+	info, err := b.statFile(c.path)
+	if err != nil {
+		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not stat the file",
+			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
+		return hdr10PlusOutcomeUnreadable, nil
+	}
+	if info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime())) {
+		return hdr10PlusOutcomeChanged, nil
 	}
 	outcome := hdr10PlusOutcomeNotHDR10Plus
 	if mediaprobe.HasHDR10Plus(sideData) {

@@ -130,6 +130,25 @@ func TestProbeFileKeepsStreamFactsWhenFrameProbeFails(t *testing.T) {
 	}
 }
 
+// A first packet that does not decode on its own is read again over a longer
+// window before the file counts as having no frame.
+func TestProbeFileRereadsWhenTheFirstPacketDecodesNoFrame(t *testing.T) {
+	ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON,
+		"case \" $* \" in *\" %+#1 \"*) printf '{\"frames\":[]}' ;; *) printf '%s' '"+hdr10PlusFrameJSON+"' ;; esac")
+
+	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
+	if err != nil {
+		t.Fatalf("ProbeFile: %v", err)
+	}
+	if track := probe.VideoTracks[0]; !track.HDR10Plus || track.HDR10PlusUnchecked {
+		t.Fatalf("track = %+v, want HDR10+ found by the second read", track)
+	}
+	frames := frameProbeInvocations(t, argsLog)
+	if len(frames) != 2 || !strings.Contains(frames[1], "-read_intervals %+#24 ") {
+		t.Fatalf("frame probes = %q, want a one-packet read then a 24-packet read", frames)
+	}
+}
+
 func TestProbeFileStreamsOnlyLeavesHDR10PlusUnchecked(t *testing.T) {
 	ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON, "printf '%s' '"+hdr10PlusFrameJSON+"'")
 

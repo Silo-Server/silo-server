@@ -720,12 +720,28 @@ var (
 
 // probeVideoFrameSideData decodes the first frame of the stream that
 // streamSpecifier selects and returns the side data FFmpeg attached to it.
+//
+// One packet normally decodes to the first frame. A stream whose first packet
+// does not decode on its own, such as one that starts mid-GOP, is read again
+// over frameSideDataFallbackPackets before it counts as having no frame.
 func probeVideoFrameSideData(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error) {
+	sideData, err := probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
+	if errors.Is(err, errNoFrameDecoded) {
+		return probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
+	}
+	return sideData, err
+}
+
+// frameSideDataFallbackPackets is the second read's packet budget: about a
+// second of video, enough to reach a keyframe in common GOP layouts.
+const frameSideDataFallbackPackets = 24
+
+func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
-		"-read_intervals", "%+#1",
+		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
 		"-show_frames",
 		"-show_entries", "frame=media_type:frame_side_data=side_data_type",

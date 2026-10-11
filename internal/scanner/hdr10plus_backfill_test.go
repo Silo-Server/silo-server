@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -102,6 +103,13 @@ func insertHDR10PlusBackfillRow(t *testing.T, ctx context.Context, pool *pgxpool
 	).Scan(&fileID); err != nil {
 		t.Fatalf("insert media file %s: %v", path, err)
 	}
+	// The file on disk matches the row, as it does until something changes it.
+	if err := os.WriteFile(path, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modifiedAt, modifiedAt); err != nil {
+		t.Fatal(err)
+	}
 	return fileID, probedAt
 }
 
@@ -133,6 +141,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		{name: "timed-out", tracks: "[" + hdr10Track + "]", readErr: fmt.Errorf("%w after 30s", errFrameSideDataTimeout)},
 		{name: "sdr", tracks: "[" + sdrTrack + "]", sideData: hdr10PlusFrame},
 		{name: "already-checked", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","hdr10_plus":false}]`, sideData: hdr10PlusFrame},
+		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
 	}
 	byPath := make(map[string]hdr10PlusBackfillRow, len(rows))
 	ids := make(map[string]int, len(rows))
@@ -142,6 +151,11 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		path := dir + "/" + row.name + ".mkv"
 		byPath[path] = row
 		ids[row.name], probedAt = insertHDR10PlusBackfillRow(t, ctx, pool, folderID, path, row.tracks)
+	}
+
+	// A replaced file that no scan has reprobed yet.
+	if err := os.WriteFile(dir+"/changed-on-disk.mkv", make([]byte, 2000), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	var mu sync.Mutex
@@ -189,7 +203,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	} else if _, ok := got["video_range_type"]; ok {
 		t.Fatalf("plain HDR10 file = %v, want no video_range_type added", got)
 	}
-	for _, name := range []string{"undecodable", "storage-error", "timed-out"} {
+	for _, name := range []string{"undecodable", "storage-error", "timed-out", "changed-on-disk"} {
 		if _, ok := track(name)["hdr10_plus"]; ok {
 			t.Fatalf("%s file = %v, want it left unchecked for the next pass", name, track(name))
 		}
@@ -221,7 +235,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	}
 	for name, count := range reads {
 		want := 0
-		if name == "undecodable" || name == "storage-error" || name == "timed-out" {
+		if name == "undecodable" || name == "storage-error" || name == "timed-out" || name == "changed-on-disk" {
 			want = 1
 		}
 		if count != want {
