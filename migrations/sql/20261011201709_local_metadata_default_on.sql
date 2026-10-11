@@ -72,10 +72,11 @@ WHERE c.media_folder_id = b.media_folder_id
   AND c.content_level = b.content_level;
 
 -- +goose Down
--- Restores the opt-in default and puts each chain row this migration changed
--- back to the order and on/off state it had, unless it was edited after the
--- upgrade. Builtin NFO rows added since (new libraries, the startup sync) go
--- back to the old default, off.
+-- Restores the opt-in default and puts each chain row's priority and on/off
+-- state back to what it was before the upgrade, each only while it still has
+-- the value the Up gave it, so edits made after the upgrade stay. Builtin NFO
+-- rows added since (new libraries, the startup sync) go back to the old
+-- default, off.
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'false'::jsonb)
 FROM plugin_installations pi
@@ -84,14 +85,14 @@ WHERE pc.plugin_installation_id = pi.id
   AND pc.capability_type = 'metadata_provider.v1' AND pc.capability_id = 'nfo';
 
 UPDATE library_provider_chains c
-SET priority = b.priority, enabled = b.enabled
+SET priority = CASE WHEN c.priority = b.up_priority THEN b.priority ELSE c.priority END,
+    enabled = CASE WHEN c.enabled = b.up_enabled THEN b.enabled ELSE c.enabled END
 FROM local_metadata_default_on_chain_backup b
 WHERE c.media_folder_id = b.media_folder_id
   AND c.plugin_installation_id = b.plugin_installation_id
   AND c.capability_id = b.capability_id
   AND c.content_level = b.content_level
-  AND c.priority = b.up_priority
-  AND c.enabled = b.up_enabled;
+  AND (c.priority = b.up_priority OR c.enabled = b.up_enabled);
 
 UPDATE library_provider_chains c
 SET enabled = false

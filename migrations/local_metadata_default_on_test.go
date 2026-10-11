@@ -8,9 +8,9 @@ import (
 // Turning local metadata on by default enables the built-in NFO rows of
 // existing chains, including ones the startup sync appended disabled and last,
 // moves them to the front, and keeps the other providers' order. Rolling back
-// puts every row it changed back as it was, including an NFO row an admin had
-// turned on, leaves rows an admin edited after the upgrade alone, and turns
-// off NFO rows added since.
+// puts each row's priority and on/off state back as they were, including an
+// NFO row an admin had turned on, keeps a field an admin edited after the
+// upgrade, and turns off NFO rows added since.
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -95,9 +95,9 @@ UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AN
 	}
 	want = []row{
 		{10, "tmdb", 0, true}, {10, "nfo", 1, false},
-		{11, "tvdb", 0, true}, {11, "nfo", 2, false}, {11, "tmdb", 2, true},
+		{11, "tvdb", 0, true}, {11, "tmdb", 1, true}, {11, "nfo", 2, false},
 		{12, "nfo", 0, false}, {12, "tmdb", 1, true},
-		{13, "nfo", 0, false}, {13, "tmdb", 0, true},
+		{13, "tmdb", 0, true}, {13, "nfo", 1, false},
 		{14, "nfo", 0, false}, {14, "tmdb", 1, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
