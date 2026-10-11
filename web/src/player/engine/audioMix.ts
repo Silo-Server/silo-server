@@ -30,32 +30,10 @@ const S = SPEAKER;
 
 /**
  * Speaker order a decoder uses when it reports only a channel count: the WAVE
- * order, which FFmpeg's defaults and FLAC follow. WebCodecs keeps each codec's
- * own order, so Opus needs `vorbisSpeakers` instead.
+ * order, which FFmpeg's defaults follow. Chrome and Firefox WebCodecs output
+ * multichannel AAC and Opus in this order too: they reorder from the codecs'
+ * own layouts (AAC's center-first, Opus's Vorbis order) before handing data out.
  */
-/**
- * Opus channel order (RFC 7845 §5.1.1.2, mapping family 1), shared with Vorbis,
- * which WebCodecs passes through as encoded. It differs from WAVE from three
- * channels up: the center comes second and the LFE last.
- */
-export function vorbisSpeakers(count: number): number[] {
-  switch (count) {
-    case 3:
-      return [S.FL, S.FC, S.FR];
-    case 5:
-      return [S.FL, S.FC, S.FR, S.BL, S.BR];
-    case 6:
-      return [S.FL, S.FC, S.FR, S.BL, S.BR, S.LFE];
-    case 7:
-      return [S.FL, S.FC, S.FR, S.SL, S.SR, S.BC, S.LFE];
-    case 8:
-      return [S.FL, S.FC, S.FR, S.SL, S.SR, S.BL, S.BR, S.LFE];
-    default:
-      // One, two and four channels match the WAVE order.
-      return defaultSpeakers(count);
-  }
-}
-
 export function defaultSpeakers(count: number): number[] {
   switch (count) {
     case 1:

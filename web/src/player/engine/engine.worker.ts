@@ -30,7 +30,6 @@ import {
   SERVER_PCM_FORMATS,
   speakersFromMask,
   unpackPCM,
-  vorbisSpeakers,
   type PCMFormat,
 } from "./audioMix";
 import { isFFmpegAudioCodec, type FFmpegAudioCodec } from "./codecs";
@@ -470,8 +469,6 @@ async function runVideo(run: number, position: number): Promise<void> {
 }
 
 function webCodecsAudioDecoder(config: AudioDecoderConfig, run: number): AudioDecoderAdapter {
-  // WebCodecs keeps the codec's own channel order.
-  const speakersFor = config.codec === "opus" ? vorbisSpeakers : defaultSpeakers;
   let ready: DecodedAudio[] = [];
   const decoder = new AudioDecoder({
     output: (data) => {
@@ -484,7 +481,7 @@ function webCodecsAudioDecoder(config: AudioDecoderConfig, run: number): AudioDe
       ready.push({
         planes,
         sampleRate: data.sampleRate,
-        speakers: speakersFor(data.numberOfChannels),
+        speakers: defaultSpeakers(data.numberOfChannels),
         timestamp: data.timestamp / 1e6,
       });
       data.close();
