@@ -28,10 +28,22 @@ func TestAccumulateSeasonResultsLocalPosterBeatsEarlierRemote(t *testing.T) {
 		t.Fatalf("title = %q: only artwork is local-first, text keeps chain order", got.Title)
 	}
 
-	// A remote poster from a later provider does not displace it.
+	// A remote poster from a later provider does not displace it, and the
+	// displaced remote poster stays available for localization rows.
 	accumulateSeasonResults(accumulator, []SeasonResult{{SeasonNumber: 1, PosterPath: "tmdb://season-1.jpg"}})
 	if accumulator[1].PosterPath != testLocalSeasonPoster {
 		t.Fatalf("poster = %q, want the local poster to stay", accumulator[1].PosterPath)
+	}
+	if got := accumulator[1].remotePosterPath; got != "tvdb://season-1.jpg" {
+		t.Fatalf("remote poster kept for localization = %q, want the first remote poster", got)
+	}
+
+	// Local first: the first later remote poster is kept beside it.
+	localFirst := make(map[int]*SeasonResult)
+	accumulateSeasonResults(localFirst, []SeasonResult{{SeasonNumber: 1, PosterPath: testLocalSeasonPoster}})
+	accumulateSeasonResults(localFirst, []SeasonResult{{SeasonNumber: 1, PosterPath: "tvdb://season-1.jpg"}})
+	if localFirst[1].PosterPath != testLocalSeasonPoster || localFirst[1].remotePosterPath != "tvdb://season-1.jpg" {
+		t.Fatalf("local-first season = %+v, want the local poster with the remote one kept beside it", localFirst[1])
 	}
 }
 
@@ -317,9 +329,9 @@ func (p *seasonArtProvider) GetEpisodes(context.Context, EpisodesRequest) ([]Epi
 }
 
 // A refresh in a language other than the series' canonical one writes only
-// localization rows. Local season art belongs to the base row, so it must not
-// displace the provider's localized season poster there; the canonical
-// refresh still puts the local poster first.
+// localization rows. Local season art belongs to the base row, so the
+// localization row takes the provider's localized season poster that the local
+// one displaced; the canonical refresh still puts the local poster first.
 func TestLocalizationRefreshKeepsProviderSeasonPoster(t *testing.T) {
 	const (
 		seriesID    = "series:tvdb:1"

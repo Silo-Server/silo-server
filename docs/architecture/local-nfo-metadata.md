@@ -139,10 +139,10 @@ sits in the chain.
 - Seasons and episodes: `accumulateSeasonResults`/`accumulateEpisodeResults`
   merge first-provider-wins, except that a local poster or still replaces a
   remote one from an earlier provider (`internal/metadata/local_artwork_precedence.go`).
-  A refresh that writes only localization rows (its language is not the
-  item's canonical one, `canonicalWriteLanguage`) sets local season and episode
-  art aside, so those rows take the provider's localized art, as item
-  localization rows do.
+  The remote poster a local one displaced stays on the merged result, and a
+  write that touches only a season's localization row (a refresh in a
+  language other than the item's canonical one) stores that provider poster,
+  as item localization rows skip local candidates.
 - A refresh that does not rediscover a slot's cached local copy (a `local/`
   key with a `file://` source) keeps it unless the sidecar's own folder answers
   and lists entries: then the file is either missing or still on disk but no

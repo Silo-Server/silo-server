@@ -485,6 +485,13 @@ type SeasonResult struct {
 	PosterSourcePath string
 	PosterThumbhash  string
 	Episodes         []EpisodeResult
+
+	// remotePosterPath keeps the best remote poster when a local sidecar
+	// poster won the merge (preferLocalSeasonPoster). Local art belongs to the
+	// base season row, so a write that only touches the localization row uses
+	// this provider poster instead.
+	remotePosterPath      string
+	remotePosterThumbhash string
 }
 
 // EpisodeResult carries episode data from a provider.

@@ -19,11 +19,18 @@ import (
 // wins, so a remote poster from an earlier provider would hide a local one.
 
 // preferLocalSeasonPoster gives target the local poster from source when
-// target's accumulated poster is not local.
+// target's accumulated poster is not local, and keeps the first remote poster
+// beside a local one for localization rows (SeasonResult.remotePosterPath).
 func preferLocalSeasonPoster(target *SeasonResult, source SeasonResult) {
-	if isLocalImageSourcePath(source.PosterPath) && !isLocalImageSourcePath(target.PosterPath) {
-		target.PosterPath = source.PosterPath
-		target.PosterThumbhash = source.PosterThumbhash
+	switch {
+	case isLocalImageSourcePath(source.PosterPath) && !isLocalImageSourcePath(target.PosterPath):
+		if target.PosterPath != "" {
+			target.remotePosterPath, target.remotePosterThumbhash = target.PosterPath, target.PosterThumbhash
+		}
+		target.PosterPath, target.PosterThumbhash = source.PosterPath, source.PosterThumbhash
+	case isLocalImageSourcePath(target.PosterPath) && source.PosterPath != "" &&
+		!isLocalImageSourcePath(source.PosterPath) && target.remotePosterPath == "":
+		target.remotePosterPath, target.remotePosterThumbhash = source.PosterPath, source.PosterThumbhash
 	}
 }
 
@@ -34,23 +41,6 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 		target.StillPath = source.StillPath
 		target.StillThumbhash = source.StillThumbhash
 	}
-}
-
-// refreshWritesLocalizationOnly reports whether a refresh of req.ContentID in
-// req.Language writes only localization rows (canonicalWriteLanguage). Local
-// sidecar art is language-neutral and belongs to the base rows, so such a
-// refresh sets local season and episode art aside and the localization rows
-// take the provider's localized art, as item localization rows already do.
-func (s *MetadataService) refreshWritesLocalizationOnly(ctx context.Context, req ProcessRequest) bool {
-	if s == nil || s.itemRepo == nil || req.ContentID == "" {
-		return false
-	}
-	item, err := s.itemRepo.GetByID(ctx, req.ContentID)
-	if err != nil || item == nil {
-		return false
-	}
-	_, canonical := canonicalWriteLanguage(req, item, intSliceToFields(item.LockedFields))
-	return !canonical
 }
 
 // localArtworkRetention keeps cached local artwork through a refresh that did
