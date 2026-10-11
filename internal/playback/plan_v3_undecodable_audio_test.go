@@ -84,3 +84,17 @@ func TestPlanPlaybackV3KeepsTracksWithoutRecordedCodecs(t *testing.T) {
 		t.Fatalf("prepared audio = %+v, want the track kept", plan.Audio)
 	}
 }
+
+// A file without a completed probe has no audio tracks to judge, so it keeps
+// the retryable metadata terminal rather than the decodability refusal.
+func TestPlanPlaybackV3UnprobedAudioStaysRetryable(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	file.CodecAudio = ""
+	file.AudioTracks = nil
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" || !result.Terminal.Retryable {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
