@@ -423,7 +423,13 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(opts)
+	copyPlan := resolveCopyPlan(ctx, opts)
+	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
+		// Rebuilding without the plan would serve FFmpeg's playlist to a
+		// player that may hold the planned one; a later request rebuilds.
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
+	}
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
 	}

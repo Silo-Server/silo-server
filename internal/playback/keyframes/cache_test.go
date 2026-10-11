@@ -2,6 +2,7 @@ package keyframes
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadVerified(path)
+	got, err := LoadVerified(t.Context(), path)
 	wantIndex(t, got, err)
 
 	// Same size and time with different bytes: still the cached index.
@@ -100,7 +101,7 @@ func TestLoadCachesMalformedFiles(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadVerified(path); !errors.Is(err, ErrNoIndex) {
+	if _, err := LoadVerified(t.Context(), path); !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("malformed file err = %v, want ErrNoIndex", err)
 	}
 	// Repaired in place with the same size and time: still the cached result.
@@ -113,4 +114,20 @@ func TestLoadCachesMalformedFiles(t *testing.T) {
 	if _, err := Load(path); !errors.Is(err, ErrNoIndex) || errors.Is(err, ErrUnverified) {
 		t.Fatalf("second load err = %v, want the cached ErrNoIndex", err)
 	}
+}
+
+// A full check whose caller has gone stops with the caller's error, which
+// isn't cached: the next check reads the file.
+func TestLoadVerifiedStopsWhenCanceled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "canceled.mkv")
+	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := LoadVerified(gone, path); !errors.Is(err, context.Canceled) || errors.Is(err, ErrNoIndex) {
+		t.Fatalf("canceled check: err = %v, want context.Canceled and not ErrNoIndex", err)
+	}
+	got, err := LoadVerified(t.Context(), path)
+	wantIndex(t, got, err)
 }
