@@ -31,7 +31,12 @@ describe("PolicyLimitFields", () => {
     expect(triggers).toHaveLength(2);
     for (const classes of triggers) {
       expect(classes.split(" ")).toEqual(
-        expect.arrayContaining(["max-w-full", "whitespace-normal", "data-[size=default]:h-auto"]),
+        expect.arrayContaining([
+          "max-w-full",
+          "whitespace-normal",
+          "data-[size=default]:h-auto",
+          "*:data-[slot=select-value]:line-clamp-none",
+        ]),
       );
       expect(classes).not.toContain("whitespace-nowrap");
       expect(classes).not.toContain("data-[size=default]:h-9");
