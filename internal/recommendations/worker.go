@@ -1205,6 +1205,10 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 // runs. held is the caller's cluster lock, or nil.
 type profileRefresh func(ctx context.Context, held clusterLock, userID int, profileID string) error
 
+// profileRefreshMaxRuns is the most times runProfileRefresh runs a refresh
+// back to back for requests made while it ran.
+const profileRefreshMaxRuns = 3
+
 // runProfileRefresh runs refresh for a profile whose pending key the caller
 // claimed, then releases the key, and returns the last run's error after
 // logging it. held is the caller's cluster lock, or nil. A refresh request
@@ -1212,10 +1216,13 @@ type profileRefresh func(ctx context.Context, held clusterLock, userID int, prof
 // changes is fully applied in seconds rather than at the next stale sweep. A
 // failed run, one another server is already doing, or one this server cannot
 // run under the latest access policy stops: the profile stays marked stale,
-// and the sweep retries it.
+// and the sweep retries it. So does a profile still changing after
+// profileRefreshMaxRuns runs, so a stream of changes to one profile cannot
+// hold the refresh queue, or the sweep's lock, for as long as it lasts: each
+// signal change marked the profile stale before asking.
 func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh) error {
 	key := profileRefreshKey(userID, profileID)
-	for {
+	for run := 1; ; run++ {
 		// A request made before this run started is read by it.
 		w.dropProfileRefreshAgain(key)
 		err := refresh(ctx, held, userID, profileID)
@@ -1232,6 +1239,11 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 			return err
 		}
 		if !w.finishProfileRefresh(key) {
+			return nil
+		}
+		if run == profileRefreshMaxRuns {
+			slog.InfoContext(ctx, "profile still changing after repeated refreshes; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID, "runs", run)
+			w.clearProfileRefreshPending(key)
 			return nil
 		}
 	}

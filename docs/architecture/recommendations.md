@@ -134,7 +134,9 @@ A refresh takes a cluster-wide advisory lock for the profile, then records the
 database time it started, stores the taste profile with that time as
 `updated_at`, and clears only stale marks set before it. A refresh request
 made on the same server while the refresh runs makes it run once more as soon
-as it ends, so a burst of changes is applied within seconds. A mark set during
+as it ends, so a burst of changes is applied within seconds; after 3 runs
+in a row a profile still changing is left to the stale sweep, so one
+profile cannot hold the queue. A mark set during
 the refresh from another server survives, and a failed refresh marks the
 profile stale again, so the stale sweep retries both. The sweep takes every
 profile with a mark; only a full refresh clears one, so a mark the nightly

@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -212,6 +213,34 @@ func TestProfileRefreshRunsAgainForAChangeMadeWhileItRuns(t *testing.T) {
 	refresh.release <- struct{}{}
 	receive(t, refresh.finished, "the second run to finish")
 	receive(t, done, "the refresh to end after two runs")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("the pending key was not released")
+	}
+}
+
+// A profile still changing after profileRefreshMaxRuns runs is left for the
+// stale sweep: the refresh stops and releases the key rather than looping
+// for as long as the changes keep coming.
+func TestProfileRefreshStopsRerunningAfterTheCap(t *testing.T) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = &Engine{}
+	refresh := newBlockingRefresh()
+	key := profileRefreshKey(1, "p")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("could not claim the profile refresh")
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = w.runProfileRefresh(context.Background(), nil, 1, "p", refresh.run)
+		close(done)
+	}()
+	for run := 1; run <= profileRefreshMaxRuns; run++ {
+		receive(t, refresh.started, fmt.Sprintf("run %d", run))
+		w.RequestProfileRefresh(t.Context(), 1, "p") // a change on every run
+		refresh.release <- struct{}{}
+		receive(t, refresh.finished, fmt.Sprintf("run %d to finish", run))
+	}
+	receive(t, done, "the refresh to stop at the cap")
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("the pending key was not released")
 	}
