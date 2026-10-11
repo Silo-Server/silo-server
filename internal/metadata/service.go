@@ -2641,6 +2641,7 @@ func (s *MetadataService) mergeAndPersist(
 	// Apply best images.
 	if handleArtwork {
 		applyBestImages(item, images, mergeMode, req.Language)
+		s.keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -4469,6 +4470,7 @@ func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []Season
 		}
 
 		MergeSeasonResult(&season, existing, MergeFillEmpty)
+		preferLocalSeasonPoster(existing, season)
 	}
 }
 
@@ -4504,6 +4506,7 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 		}
 
 		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
+		preferLocalEpisodeStill(existing, episode)
 	}
 }
 
@@ -4937,6 +4940,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
+	localArtwork := s.newLocalArtworkRetention(ctx, seriesID)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,
@@ -5090,7 +5094,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				season.PosterPath,
+				localArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5485,7 +5489,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					ep.StillPath,
+					localArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,
