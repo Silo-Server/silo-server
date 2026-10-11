@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setAccessToken, setProfileId } from "@/api/client";
 import { ChatGPTConnection } from "./ChatGPTConnection";
 
 const mocks = vi.hoisted(() => ({
@@ -66,6 +67,8 @@ vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error }
 describe("ChatGPTConnection", () => {
   afterEach(() => vi.useRealTimers());
   beforeEach(() => {
+    setAccessToken("chatgpt-test");
+    setProfileId("profile-a");
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.start.mockResolvedValue({ attempt_id: "fixture-state" });
     status = {
@@ -80,6 +83,36 @@ describe("ChatGPTConnection", () => {
     statusFetching = false;
     completePending = false;
     loginExpiresAt = new Date(Date.now() + 600_000).toISOString();
+  });
+
+  it("clears the login dialog when the active authority changes", async () => {
+    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Browser URL" }), "old-callback");
+    setProfileId("profile-b");
+    view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.success).not.toHaveBeenCalled();
+  });
+
+  it("does not open an old pending login result after an account switch", async () => {
+    let resolve!: (value: object) => void;
+    mocks.start.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    setAccessToken("another-account");
+    view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    await act(async () => {
+      resolve({ attempt_id: "fixture-state" });
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("opens browser sign-in, submits the pasted URL, and welcomes a confirmed connection", async () => {

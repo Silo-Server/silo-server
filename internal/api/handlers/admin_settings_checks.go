@@ -170,8 +170,8 @@ func checkAIChatConnection(ctx context.Context, cfg *config.Config) connectionCh
 	return checkAIChatConnectionWithToken(ctx, cfg, nil, nil)
 }
 
-func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, token func(context.Context) (string, error), rejected func(context.Context, string, bool) error) connectionCheckResponse {
-	if cfg.AI.AuthMode != "chatgpt" && strings.TrimSpace(cfg.AI.BaseURL) == "" {
+func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tokenSource func(context.Context) (func(context.Context) (string, error), error), rejected func(context.Context, string, bool) error) connectionCheckResponse {
+	if cfg.AI.AuthMode != llm.AuthModeChatGPT && strings.TrimSpace(cfg.AI.BaseURL) == "" {
 		return connectionCheckResponse{Success: false, Message: "Text AI base URL is required."}
 	}
 	if strings.TrimSpace(cfg.AI.ChatModel) == "" {
@@ -179,7 +179,7 @@ func checkAIChatConnectionWithToken(ctx context.Context, cfg *config.Config, tok
 	}
 
 	clientCfg := aiClientConfig(cfg)
-	clientCfg.ChatGPTToken = token
+	clientCfg.ChatGPTTokenSource = tokenSource
 	clientCfg.ChatGPTTokenRejected = rejected
 	client := newAdminAISettingsCheckClient(clientCfg)
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

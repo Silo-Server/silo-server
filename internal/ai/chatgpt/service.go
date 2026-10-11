@@ -431,9 +431,35 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 	return completionErr
 }
 
-// BearerToken serializes refreshes with the encrypted credentials transaction.
-// Refresh failures requiring login are committed as a status change.
+// TokenSource pins a logical request to its initial registration. Each use reads
+// current credentials for that registration, including rotations on other nodes.
+func (s *Service) TokenSource(ctx context.Context) (func(context.Context) (string, error), error) {
+	raw, err := s.store.Get(ctx, CredentialsKey)
+	if err != nil {
+		return nil, err
+	}
+	c, err := decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	if i < 0 || c.Accounts[i].NeedsLogin || c.Accounts[i].RefreshToken == "" {
+		return nil, ErrSignInRequired
+	}
+	clientID := c.Accounts[i].ClientID
+	return func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) }, nil
+}
+
+// BearerToken reads the active registration once, then serializes its refresh.
 func (s *Service) BearerToken(ctx context.Context) (string, error) {
+	source, err := s.TokenSource(ctx)
+	if err != nil {
+		return "", err
+	}
+	return source(ctx)
+}
+
+func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (string, error) {
 	raw, err := s.store.Get(ctx, CredentialsKey)
 	if err != nil {
 		return "", err
@@ -443,7 +469,7 @@ func (s *Service) BearerToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	for _, a := range current.Accounts {
-		if a.ClientID == current.Active && !a.NeedsLogin && a.AccessToken != "" && a.RefreshToken != "" && time.Until(a.ExpiresAt) > 2*time.Minute {
+		if a.ClientID == clientID && !a.NeedsLogin && a.AccessToken != "" && a.RefreshToken != "" && time.Until(a.ExpiresAt) > 2*time.Minute {
 			return a.AccessToken, nil
 		}
 	}
@@ -455,7 +481,7 @@ func (s *Service) BearerToken(ctx context.Context) (string, error) {
 	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
 	err = s.mutate(refreshCtx, func(c *credentials) error {
-		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
 		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 			return ErrSignInRequired
 		}
@@ -613,7 +639,11 @@ func (s *Service) getJSON(ctx context.Context, endpoint, token string, out any) 
 }
 
 func (s *Service) Models(ctx context.Context) ([]Model, error) {
-	token, err := s.BearerToken(ctx)
+	source, err := s.TokenSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	token, err := source(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -635,7 +665,7 @@ func (s *Service) Models(ctx context.Context) ([]Model, error) {
 		if attempt == 1 {
 			return nil, err
 		}
-		token, err = s.BearerToken(ctx)
+		token, err = source(ctx)
 		if err != nil {
 			return nil, err
 		}

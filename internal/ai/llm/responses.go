@@ -30,8 +30,12 @@ type responseRequest struct {
 }
 
 func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, jsonObject bool) (string, error) {
-	if cfg.ChatGPTToken == nil {
+	if cfg.ChatGPTTokenSource == nil {
 		return "", errors.New("connect a ChatGPT account in AI Services")
+	}
+	tokenSource, err := cfg.ChatGPTTokenSource(ctx)
+	if err != nil {
+		return "", err
 	}
 	input := make([]Message, len(messages))
 	for i, m := range messages {
@@ -58,7 +62,7 @@ func (c *Client) chatGPT(ctx context.Context, cfg Config, messages []Message, js
 	for attempt := range 2 {
 		err = c.doReaderWithRetry(ctx, &httpClient, "ChatGPT plan",
 			func() (*http.Request, error) {
-				token, err := cfg.ChatGPTToken(ctx)
+				token, err := tokenSource(ctx)
 				if err != nil {
 					return nil, err
 				}

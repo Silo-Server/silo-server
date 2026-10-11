@@ -1808,7 +1808,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	aiConfig := func(cfg *config.Config) llm.Config {
 		c := llmConfigFromServer(cfg)
 		if chatGPT != nil {
-			c.ChatGPTToken = chatGPT.BearerToken
+			c.ChatGPTTokenSource = chatGPT.TokenSource
 			c.ChatGPTTokenRejected = chatGPT.RejectToken
 		}
 		return c

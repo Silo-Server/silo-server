@@ -17,10 +17,13 @@ acting-administrator operation. The loopback tab can show a connection error
 because this manual flow runs no local listener. This works independently of
 where the Silo server runs, including remote servers and containers.
 
-The browser holds the pasted URL and authorization link in memory, clears the
-dialog's state when it closes or sign-in ends, and discards unobserved login
-mutations without a cache retention period. It does not persist them to browser
-storage. Connection polling uses the attempt identifier to ignore another
+The browser binds connection mutations and their results to the initiating
+account, server, and profile authority. An authority change clears the dialog
+and its mutation state; a late response cannot reopen it or send the previous
+callback under a new session. The browser holds the pasted URL and authorization
+link in memory, clears the dialog's state when it closes or sign-in ends, and
+discards unobserved login mutations without a cache retention period. It does
+not persist them to browser storage. Connection polling uses the attempt identifier to ignore another
 attempt's outcome. Silo parses the address without requesting it. It requires
 the exact prepared scheme, host, port, and path, and rejects userinfo, fragments,
 duplicate query parameters, and oversized fields. A malformed or mismatched
@@ -58,9 +61,13 @@ and pending state. Generic admin settings cannot read or overwrite this key,
 and refreshes do not change the admin settings revision. Encryption remains
 bound to the setting's key name.
 
-Every node reads the active credentials on demand. Refresh occurs inside the
-settings repository's transaction with a dedicated lock for this machine-managed
-key, so nodes cannot concurrently reuse a rotating refresh token. This key is
+Each text request selects the active ChatGPT registration once. Its retries and
+token refreshes retain that registration even if an administrator switches the
+active account. Disconnecting that registration stops recovery; retries never
+fall back to another account. Model-catalog requests follow the same rule.
+Every node reads that registration's credentials on demand. Refresh occurs inside
+the settings repository's transaction with a dedicated lock for this
+machine-managed key, so nodes cannot concurrently reuse a rotating refresh token. This key is
 excluded from the general settings surface and its validation lock. Waiting on
 OpenAI does not block unrelated settings. Local waiters share admission by pool
 and key before acquiring connections; idle admission entries are removed.

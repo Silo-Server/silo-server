@@ -679,3 +679,145 @@ func TestInvalidCodeRegistrationRetentionRequiresMatchingAttempt(t *testing.T) {
 		})
 	}
 }
+
+func TestPinnedTokenSourcesRefreshInitialAccountAcrossServices(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	save(t, store, credentials{Active: "a", Accounts: []account{{ClientID: "a", Subject: "a-user", AccessToken: "a-token", RefreshToken: "a-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}, {ClientID: "b", Subject: "b-user", AccessToken: "b-token", RefreshToken: "b-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}}})
+	first, second := NewService(store), NewService(store)
+	one, err := first.TokenSource(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := second.TokenSource(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.SelectAccount(t.Context(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	beforeB := stored(t, store).Accounts[1]
+	if err := second.RejectToken(t.Context(), "a-token", false); err != nil {
+		t.Fatal(err)
+	}
+	var refreshes atomic.Int32
+	transport := transportFunc(func(r *http.Request) (*http.Response, error) {
+		_ = r.ParseForm()
+		if r.Form.Get("client_id") != "a" || r.Form.Get("refresh_token") != "a-refresh" {
+			t.Error("pinned refresh used switched account")
+		}
+		refreshes.Add(1)
+		return response(200, tokenResponse{AccessToken: "a-renewed", RefreshToken: "a-rotated", TokenType: "Bearer", ExpiresIn: 3600}), nil
+	})
+	first.http.Transport, second.http.Transport = transport, transport
+	var wg sync.WaitGroup
+	for i := range 12 {
+		wg.Go(func() {
+			source := one
+			if i%2 == 1 {
+				source = two
+			}
+			token, err := source(t.Context())
+			if err != nil || token != "a-renewed" {
+				t.Errorf("pinned token=%q, %v", token, err)
+			}
+		})
+	}
+	wg.Wait()
+	c := stored(t, store)
+	if refreshes.Load() != 1 || c.Active != "b" || c.Accounts[1] != beforeB || c.Accounts[0].RefreshToken != "a-rotated" {
+		t.Fatal("pinned refresh changed active account, lost rotation or reused token")
+	}
+	// A rotation observed from another node remains visible to the pinned source.
+	c.Accounts[0].AccessToken = "a-other-node"
+	save(t, store, c)
+	if token, err := one(t.Context()); err != nil || token != "a-other-node" {
+		t.Fatalf("pinned source cached stale credentials: %q, %v", token, err)
+	}
+	if token, err := second.BearerToken(t.Context()); err != nil || token != "b-token" {
+		t.Fatalf("next request failed to use active account: %q, %v", token, err)
+	}
+}
+
+func TestPinnedTokenSourceStopsAfterDisconnectOrRemoval(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remove=%t", remove), func(t *testing.T) {
+			store := &memoryStore{values: map[string]string{}}
+			save(t, store, credentials{Active: "a", Accounts: []account{{ClientID: "a", AccessToken: "a-token", RefreshToken: "a-refresh", ExpiresAt: time.Now().Add(time.Hour)}, {ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", ExpiresAt: time.Now().Add(time.Hour)}}})
+			s := NewService(store)
+			source, err := s.TokenSource(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SelectAccount(t.Context(), "b"); err != nil {
+				t.Fatal(err)
+			}
+			if remove {
+				c := stored(t, store)
+				c.Accounts = c.Accounts[1:]
+				save(t, store, c)
+			} else {
+				s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") })
+				if _, err := s.Disconnect(t.Context(), "a"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if token, err := source(t.Context()); !errors.Is(err, ErrSignInRequired) || token != "" {
+				t.Fatalf("unavailable pinned account fell through: %q, %v", token, err)
+			}
+			if token, err := s.BearerToken(t.Context()); err != nil || token != "b-token" {
+				t.Fatalf("unrelated active account changed: %q, %v", token, err)
+			}
+		})
+	}
+}
+
+func TestModelsRecoveryPinsInitialAccount(t *testing.T) {
+	for _, finalUnauthorized := range []bool{false, true} {
+		t.Run(fmt.Sprintf("finalUnauthorized=%t", finalUnauthorized), func(t *testing.T) {
+			store := &memoryStore{values: map[string]string{}}
+			save(t, store, credentials{Active: "a", Accounts: []account{{ClientID: "a", AccessToken: "a-token", RefreshToken: "a-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}, {ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}}})
+			s := NewService(store)
+			calls, refreshes := 0, 0
+			s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() == s.tokenURL {
+					refreshes++
+					_ = r.ParseForm()
+					if r.Form.Get("client_id") != "a" {
+						t.Fatal("model recovery refreshed switched account")
+					}
+					return response(200, tokenResponse{AccessToken: "a-renewed", RefreshToken: "a-rotated", TokenType: "Bearer", ExpiresIn: 3600}), nil
+				}
+				calls++
+				expected := "a-token"
+				if calls > 1 {
+					expected = "a-renewed"
+				}
+				if r.Header.Get("Authorization") != "Bearer "+expected {
+					t.Fatal("model retry consumed switched account")
+				}
+				if calls == 1 {
+					if err := s.SelectAccount(t.Context(), "b"); err != nil {
+						t.Fatal(err)
+					}
+					return response(401, nil), nil
+				}
+				if finalUnauthorized {
+					return response(401, nil), nil
+				}
+				return response(200, map[string]any{"models": []map[string]string{{"slug": "a-model", "visibility": "list"}}}), nil
+			})
+			models, err := s.Models(t.Context())
+			if finalUnauthorized {
+				if !errors.Is(err, ErrSignInRequired) {
+					t.Fatal(err)
+				}
+			} else if err != nil || len(models) != 1 || models[0].ID != "a-model" {
+				t.Fatalf("models=%v, %v", models, err)
+			}
+			c := stored(t, store)
+			if calls != 2 || refreshes != 1 || c.Active != "b" || c.Accounts[1].AccessToken != "b-token" || c.Accounts[1].NeedsLogin || c.Accounts[0].NeedsLogin != finalUnauthorized {
+				t.Fatal("model recovery changed active account or incorrect retry status")
+			}
+		})
+	}
+}

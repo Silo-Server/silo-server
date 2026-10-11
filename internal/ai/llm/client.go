@@ -29,7 +29,7 @@ import (
 type Config struct {
 	AuthMode             string
 	ReasoningEffort      string
-	ChatGPTToken         func(context.Context) (string, error)
+	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
 	BaseURL              string // e.g. "https://api.openai.com" (no trailing /v1)
 	APIKey               string // empty for keyless local servers

@@ -13,7 +13,7 @@ import (
 )
 
 func TestChatGPTRequestUsesSubscriptionContract(t *testing.T) {
-	client := NewClient(Config{BaseURL: "https://custom-provider.example.test", APIKey: "api-key", AuthMode: "chatgpt", ChatModel: "gpt-6.1-sol", ReasoningEffort: "high", ChatGPTToken: func(context.Context) (string, error) { return "subscription-token", nil }})
+	client := NewClient(Config{BaseURL: "https://custom-provider.example.test", APIKey: "api-key", AuthMode: "chatgpt", ChatModel: "gpt-6.1-sol", ReasoningEffort: "high", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return "subscription-token", nil })})
 	client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.openai.com/v1/responses" || r.Header.Get("Authorization") != "Bearer subscription-token" {
 			t.Fatalf("wrong subscription destination: %s", r.URL)
@@ -101,7 +101,7 @@ func TestSubscriptionCompletionDoesNotWaitForStreamEOF(t *testing.T) {
 }
 
 func TestSubscriptionCredentialsDoNotFollowRedirects(t *testing.T) {
-	client := NewClient(Config{AuthMode: "chatgpt", ChatModel: "gpt-6.1-sol", ChatGPTToken: func(context.Context) (string, error) { return "token", nil }})
+	client := NewClient(Config{AuthMode: "chatgpt", ChatModel: "gpt-6.1-sol", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return "token", nil })})
 	calls := 0
 	client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -144,10 +144,10 @@ func TestChatReasoningOmitsUnsupportedTemperature(t *testing.T) {
 }
 
 func TestSubscriptionDoesNotAuthorizeTranscription(t *testing.T) {
-	client := NewClient(Config{BaseURL: "https://speech.example.test", APIKey: "speech-key", AuthMode: "chatgpt", ASRModel: "whisper-1", ChatGPTToken: func(context.Context) (string, error) {
+	client := NewClient(Config{BaseURL: "https://speech.example.test", APIKey: "speech-key", AuthMode: "chatgpt", ASRModel: "whisper-1", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) {
 		t.Fatal("ChatGPT subscription token requested for transcription")
 		return "", nil
-	}})
+	})})
 	client.asrHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://speech.example.test/v1/audio/transcriptions" || r.Header.Get("Authorization") != "Bearer speech-key" {
 			t.Fatalf("transcription connection changed: %s", r.URL)
@@ -165,7 +165,7 @@ func TestSubscriptionRecoversUnauthorizedOnlyOnce(t *testing.T) {
 			token := "old-token"
 			calls, rejections := 0, 0
 			client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
-				ChatGPTToken: func(context.Context) (string, error) { return token, nil },
+				ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return token, nil }),
 				ChatGPTTokenRejected: func(_ context.Context, rejected string, needsLogin bool) error {
 					rejections++
 					if rejected != token || needsLogin != (rejections == 2) {
@@ -208,7 +208,7 @@ func TestSubscriptionUsageUnavailableRetries(t *testing.T) {
 	}
 	calls := 0
 	client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
-		ChatGPTToken:         func(context.Context) (string, error) { return "token", nil },
+		ChatGPTTokenSource:   testTokenSource(func(context.Context) (string, error) { return "token", nil }),
 		ChatGPTTokenRejected: func(context.Context, string, bool) error { t.Fatal("usage outage invalidated credentials"); return nil },
 	})
 	client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -222,5 +222,66 @@ func TestSubscriptionUsageUnavailableRetries(t *testing.T) {
 	out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
 	if err != nil || out != "complete" || calls != 2 {
 		t.Fatalf("temporary failure recovery: %q, %v, calls=%d", out, err, calls)
+	}
+}
+
+func testTokenSource(getToken func(context.Context) (string, error)) func(context.Context) (func(context.Context) (string, error), error) {
+	return func(context.Context) (func(context.Context) (string, error), error) { return getToken, nil }
+}
+
+func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusUnauthorized} {
+		t.Run(fmt.Sprintf("status=%d", status), func(t *testing.T) {
+			active := "a"
+			tokens := map[string]string{"a": "a-token", "b": "b-token"}
+			calls, factories := 0, 0
+			cfg := Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol", ReasoningEffort: "high"}
+			cfg.ChatGPTTokenSource = func(context.Context) (func(context.Context) (string, error), error) {
+				factories++
+				pinned := active
+				return func(context.Context) (string, error) { return tokens[pinned], nil }, nil
+			}
+			cfg.ChatGPTTokenRejected = func(_ context.Context, rejected string, needsLogin bool) error {
+				if rejected != "a-token" || needsLogin {
+					t.Fatal("recovery rejected wrong account")
+				}
+				tokens["a"] = "a-renewed"
+				return nil
+			}
+			client := NewClient(cfg)
+			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				var body responseRequest
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				wantToken, wantModel, wantEffort := "a-token", "gpt-6.1-sol", "high"
+				if calls == 2 && status == 401 {
+					wantToken = "a-renewed"
+				}
+				if calls == 3 {
+					wantToken, wantModel, wantEffort = "b-token", "gpt-5.4", "low"
+				}
+				if r.Header.Get("Authorization") != "Bearer "+wantToken || body.Model != wantModel || body.Reasoning == nil || body.Reasoning.Effort != wantEffort {
+					t.Fatalf("retry changed account/model/effort: auth=%s body=%+v", r.Header.Get("Authorization"), body)
+				}
+				if calls == 1 {
+					active = "b"
+					next := client.Config()
+					next.ChatModel, next.ReasoningEffort = "gpt-5.4", "low"
+					client.UpdateConfig(next)
+					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
+			})
+			for range 2 {
+				if out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false); err != nil || out != "complete" {
+					t.Fatalf("chat=%q, %v", out, err)
+				}
+			}
+			if calls != 3 || factories != 2 {
+				t.Fatalf("calls=%d source resolutions=%d", calls, factories)
+			}
+		})
 	}
 }
