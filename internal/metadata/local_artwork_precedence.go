@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -45,18 +43,14 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 // when the refresh can confirm the sidecar is gone (see sidecarGone).
 type localArtworkRetention struct {
 	ctx       context.Context
-	service   *MetadataService
 	contentID string
-
-	rootsLoaded bool
-	roots       []string
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe.
 	probes map[string]rootcheck.Result
 }
 
-func (s *MetadataService) newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
-	return &localArtworkRetention{ctx: ctx, service: s, contentID: contentID, probes: make(map[string]rootcheck.Result)}
+func newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
+	return &localArtworkRetention{ctx: ctx, contentID: contentID, probes: make(map[string]rootcheck.Result)}
 }
 
 // keep reports whether a slot serving a cached copy of a local sidecar should
@@ -86,11 +80,11 @@ func (r *localArtworkRetention) providerPath(incoming, existingPath, existingSou
 // artwork slot that applyBestImages moved from cached local art to a remote
 // image, when keep holds. prepareItemImagesForQueue then keeps the stored
 // local source.
-func (s *MetadataService) keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models.MediaItem) {
+func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models.MediaItem) {
 	if item == nil || existing == nil {
 		return
 	}
-	retention := s.newLocalArtworkRetention(ctx, existing.ContentID)
+	retention := newLocalArtworkRetention(ctx, existing.ContentID)
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
 		if retention.keep(*field.path, *stored[i].path, *stored[i].source) {
@@ -100,92 +94,28 @@ func (s *MetadataService) keepUnconfirmedLocalItemArtwork(ctx context.Context, i
 }
 
 // sidecarGone reports whether the refresh can confirm that a local source no
-// longer supplies artwork:
-//   - the file is still on disk, so discovery saw it and passed it over (it no
-//     longer qualifies, another sidecar now wins, or local artwork is off);
-//   - the file is missing and the nearest existing folder above it, searching
-//     no higher than the library root, lists entries: the library is mounted
-//     and the file or its folder was removed.
-//
-// An unmounted share leaves its mount point empty or missing, so a missing file
-// under an empty or missing folder keeps the local copy, as does a folder that
-// cannot be read or does not answer in time. Stopping at the library root
-// means a parent of several mounts cannot vouch for one of them. Without a
-// known library root only the file's own folder counts. Folders are probed
-// through rootcheck, with its timeout, before the file itself is looked up.
+// longer supplies artwork. Only the sidecar's own folder can confirm it: the
+// folder must answer and list entries, which shows the library is mounted.
+// Then the file is either missing, or still on disk and passed over by
+// discovery (it no longer qualifies, another sidecar now wins, or local
+// artwork is off). An unmounted share leaves the folder missing or its mount
+// point empty, and an unreadable or unresponsive folder proves nothing, so in
+// those cases the local copy stays. The folder is probed through rootcheck,
+// with its timeout, before the file itself is looked up.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true
 	}
-	folder := r.probeFolder(filepath.Dir(path))
-	switch {
-	case folder.Reachable:
-		_, err := os.Lstat(path)
-		if err == nil {
-			return true
-		}
-		return errors.Is(err, fs.ErrNotExist) && !folder.Empty
-	case folder.ErrorCode == rootcheck.ErrCodeNotFound:
-		return r.nearestFolderListsEntries(filepath.Dir(filepath.Dir(path)), r.rootsContaining(path))
-	default:
+	dir := filepath.Dir(path)
+	folder, ok := r.probes[dir]
+	if !ok {
+		folder = rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
+		r.probes[dir] = folder
+	}
+	if !folder.Reachable || folder.Empty {
 		return false
 	}
-}
-
-// probeFolder probes dir once per retention.
-func (r *localArtworkRetention) probeFolder(dir string) rootcheck.Result {
-	if probe, ok := r.probes[dir]; ok {
-		return probe
-	}
-	probe := rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
-	r.probes[dir] = probe
-	return probe
-}
-
-// nearestFolderListsEntries walks up from dir to the first folder that exists,
-// going no higher than the library roots, and reports whether it lists
-// entries.
-func (r *localArtworkRetention) nearestFolderListsEntries(dir string, roots []string) bool {
-	if len(roots) == 0 {
-		return false
-	}
-	for {
-		probe := r.probeFolder(dir)
-		if probe.Reachable {
-			return !probe.Empty
-		}
-		if probe.ErrorCode != rootcheck.ErrCodeNotFound || slices.Contains(roots, dir) {
-			return false
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
-		dir = parent
-	}
-}
-
-// rootsContaining returns the item's library roots that hold path.
-func (r *localArtworkRetention) rootsContaining(path string) []string {
-	if !r.rootsLoaded {
-		r.rootsLoaded = true
-		roots, err := r.service.configuredNamingRootsForContent(r.ctx, r.contentID, 0)
-		if err != nil {
-			slog.DebugContext(r.ctx, "metadata: cannot load library roots to check local artwork", "component", "metadata",
-				"content_id", r.contentID, "error", err)
-		}
-		for _, root := range roots {
-			if root = filepath.Clean(strings.TrimSpace(root)); filepath.IsAbs(root) {
-				r.roots = append(r.roots, root)
-			}
-		}
-	}
-	var containing []string
-	for _, root := range r.roots {
-		if localImagePathWithinRoots(path, []string{root}) {
-			containing = append(containing, root)
-		}
-	}
-	return containing
+	_, err := os.Lstat(path)
+	return err == nil || errors.Is(err, fs.ErrNotExist)
 }

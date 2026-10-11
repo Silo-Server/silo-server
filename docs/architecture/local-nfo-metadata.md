@@ -140,16 +140,15 @@ sits in the chain.
   merge first-provider-wins, except that a local poster or still replaces a
   remote one from an earlier provider (`internal/metadata/local_artwork_precedence.go`).
 - A refresh that does not rediscover a slot's cached local copy (a `local/`
-  key with a `file://` source) keeps it unless the sidecar is confirmed gone:
-  the file is still on disk but no longer offered (renamed out of the naming
-  rules, replaced by a better match, or local metadata disabled), or the file
-  is missing and the nearest existing folder above it, searching no higher
-  than the library root, lists entries. An unmounted share leaves its mount
-  point empty or missing, so the local copy stays; stopping at the library
-  root keeps a parent of several mounts from vouching for one of them. A
-  folder that cannot be read or does not answer in time also keeps the copy.
-  Folder probes go through `internal/rootcheck` with its timeout, and the
-  sidecar itself is looked up only after its folder answered.
+  key with a `file://` source) keeps it unless the sidecar's own folder answers
+  and lists entries: then the file is either missing or still on disk but no
+  longer offered (renamed out of the naming rules, replaced by a better match,
+  or local metadata disabled), and the slot takes the provider's art. A folder
+  that is missing, empty, unreadable or slow to answer is what an unmounted
+  share or a vanished nested mount looks like, so the local copy stays; an
+  item whose folder moved keeps its old local art until its new folder
+  supplies some. The folder is probed through `internal/rootcheck` with its
+  timeout, once per folder, before the sidecar itself is looked up.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in

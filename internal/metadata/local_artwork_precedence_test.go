@@ -246,38 +246,28 @@ func TestPersistSeasonsAndEpisodesKeepsCachedLocalArtworkUntilSidecarIsGone(t *t
 	}
 }
 
-// When the sidecar's own folder is gone too (a moved or deleted item), the
-// nearest existing folder up to the library root decides: one that lists
-// entries shows the library is mounted.
-func TestLocalArtworkRetentionReadsNearestFolderUpToLibraryRoot(t *testing.T) {
-	gone := func(roots []string, source string) bool {
-		retention := (&MetadataService{}).newLocalArtworkRetention(context.Background(), "movie-1")
-		retention.rootsLoaded = true
-		retention.roots = roots
-		return retention.sidecarGone(source)
+// Only the sidecar's own folder can confirm it is gone. A missing folder is
+// what a vanished mount looks like, even while a sibling mount or the folder
+// above it still lists entries, so the local copy stays.
+func TestLocalArtworkRetentionTrustsOnlyTheSidecarFolder(t *testing.T) {
+	gone := func(path string) bool {
+		return newLocalArtworkRetention(context.Background(), "movie-1").sidecarGone("file://" + path + "?v=1-1")
 	}
+	media := filepath.Join(t.TempDir(), "media")
+	writeTestBytes(t, filepath.Join(media, "disk1", "Film A", "Film A.mkv"))
 
-	library := filepath.Join(t.TempDir(), "library")
-	mkdirAll(t, library)
-	moved := "file://" + filepath.Join(library, "Moved Film", "poster.jpg") + "?v=1-1"
-	if gone([]string{library}, moved) {
-		t.Fatal("an empty library root looks unmounted; the local copy must stay")
+	// A nested mount gone entirely, with its sibling still mounted.
+	if gone(filepath.Join(media, "disk2", "Film B", "poster.jpg")) {
+		t.Fatal("a vanished nested mount must keep its local copy")
 	}
-	writeTestBytes(t, filepath.Join(library, "Other Film", "Other Film.mkv"))
-	if !gone([]string{library}, moved) {
-		t.Fatal("a mounted library root without the folder confirms the sidecar is gone")
+	// A sidecar directly in an unmounted library root (an empty mount point).
+	mkdirAll(t, filepath.Join(media, "disk3"))
+	if gone(filepath.Join(media, "disk3", "poster.jpg")) {
+		t.Fatal("an empty mount point must keep its local copy")
 	}
-	if gone([]string{filepath.Join(t.TempDir(), "elsewhere")}, moved) {
-		t.Fatal("a root that does not hold the sidecar proves nothing about it")
-	}
-
-	// A library root holding several mount points: one disk's empty mount
-	// point keeps its art even though the root lists the other disk.
-	disks := filepath.Join(t.TempDir(), "media")
-	writeTestBytes(t, filepath.Join(disks, "disk1", "Film A", "Film A.mkv"))
-	mkdirAll(t, filepath.Join(disks, "disk2"))
-	if gone([]string{disks}, "file://"+filepath.Join(disks, "disk2", "Film B", "poster.jpg")+"?v=1-1") {
-		t.Fatal("an unmounted disk under a shared root must keep its local copy")
+	// The mounted folder lists entries and the sidecar is missing.
+	if !gone(filepath.Join(media, "disk1", "Film A", "poster.jpg")) {
+		t.Fatal("a sidecar missing from a mounted folder is gone")
 	}
 }
 
@@ -293,7 +283,7 @@ func TestLocalArtworkRetentionKeepsArtInUnreadableFolder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	retention := (&MetadataService{}).newLocalArtworkRetention(context.Background(), "movie-1")
+	retention := newLocalArtworkRetention(context.Background(), "movie-1")
 	if retention.sidecarGone("file://" + filepath.Join(dir, "poster.jpg") + "?v=1-1") {
 		t.Fatal("an unreadable folder must keep the cached local copy")
 	}

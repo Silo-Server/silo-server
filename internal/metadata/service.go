@@ -2641,7 +2641,7 @@ func (s *MetadataService) mergeAndPersist(
 	// Apply best images.
 	if handleArtwork {
 		applyBestImages(item, images, mergeMode, req.Language)
-		s.keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
+		keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -4940,7 +4940,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
-	localArtwork := s.newLocalArtworkRetention(ctx, seriesID)
+	localArtwork := newLocalArtworkRetention(ctx, seriesID)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,
