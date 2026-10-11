@@ -49,6 +49,7 @@ type RecommendationsHandler struct {
 	recsRepo            *recommendations.Repo
 	signals             *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
 	accessibleIDs       accessibleItemIDFilter
+	cardsRepo           discoverCardsRepo // nil without recsRepo
 	enabled             bool
 	Fetcher             discoverFetcher
 	DetailSvc           discoverPresigner
@@ -94,6 +95,7 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 	if recsRepo != nil {
 		h.signals = recommendations.NewSignalReader(recsRepo, storeProvider)
 		h.accessibleIDs = recsRepo
+		h.cardsRepo = recsRepo
 	}
 	return h
 }

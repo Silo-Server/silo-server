@@ -422,6 +422,8 @@ library sections, which scope the whole row to their libraries.
 With recommendations disabled the Reader serves no personal rows (the main
 For You row, cluster rows, Because You Watched, Similar Users), even ones
 still cached from before, and reads fall back to the global and default rows.
+Watch Tonight's discover-mode cards skip the taste profile the same way and
+come from the global rows.
 
 The Reader serves cached rows, except the default rows on Discover and their
 section pages, and the Recently Added row Watch Tonight falls back to for a

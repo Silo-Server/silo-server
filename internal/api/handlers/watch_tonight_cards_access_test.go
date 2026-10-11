@@ -108,3 +108,67 @@ func TestWatchTonightItemLookupFailureIsAnError(t *testing.T) {
 		t.Fatalf("err = %v, want a 500 API error", err)
 	}
 }
+
+// fakeCardsRepo serves discover-mode cards from memory: a taste profile
+// whose candidates are personal, cached global rows, and a type check that
+// leaves books out.
+type fakeCardsRepo struct {
+	tasteReads int
+	global     map[string][]recommendations.ScoredItem
+	books      map[string]struct{}
+}
+
+func (f *fakeCardsRepo) GetTasteProfile(context.Context, int, string) ([]float32, error) {
+	f.tasteReads++
+	return []float32{1}, nil
+}
+
+func (f *fakeCardsRepo) FindTasteProfileCandidates(context.Context, []float32, []string, []string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, map[string][]string, error) {
+	return []recommendations.ScoredItem{{MediaItemID: "personal", Score: 1}}, map[string][]string{}, nil
+}
+
+func (f *fakeCardsRepo) GetItemAllGenres(context.Context, []string) (map[string][]string, error) {
+	return map[string][]string{}, nil
+}
+
+func (f *fakeCardsRepo) GetRecommendationCache(_ context.Context, _ int, _, recType, _ string) ([]recommendations.ScoredItem, error) {
+	return f.global[recType], nil
+}
+
+func (f *fakeCardsRepo) FilterRecommendableItemIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]struct{}, error) {
+	out := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, book := f.books[id]; !book {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+// With recommendations disabled, discover-mode cards come from the global
+// rows only, never the profile's taste profile, and leave out types the rows
+// no longer offer, such as a book cached before books left them.
+func TestDiscoverCardsServeNoPersonalCandidatesWhileDisabled(t *testing.T) {
+	repo := &fakeCardsRepo{
+		global: map[string][]recommendations.ScoredItem{
+			recommendations.RecTypePopular:       {{MediaItemID: "popular", Score: 2}, {MediaItemID: "cached-book", Score: 3}},
+			recommendations.RecTypeRecentlyAdded: {{MediaItemID: "recent", Score: 1}},
+		},
+		books: map[string]struct{}{"cached-book": {}},
+	}
+	h := &RecommendationsHandler{cardsRepo: repo, enabled: false}
+	merged, isCold, err := h.buildDiscoverCards(t.Context(), 7, "p1", catalog.AccessFilter{}, nil, map[string]struct{}{}, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range merged {
+		ids = append(ids, m.scored.MediaItemID)
+	}
+	if !isCold || !slices.Equal(ids, []string{"popular", "recent"}) {
+		t.Fatalf("cards = %v (cold %t), want the global rows without the book", ids, isCold)
+	}
+	if repo.tasteReads != 0 {
+		t.Fatalf("taste profile read %d times, want none while disabled", repo.tasteReads)
+	}
+}
