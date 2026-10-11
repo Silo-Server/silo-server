@@ -333,7 +333,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List models available to the active ChatGPT account. */
+    /** List models available to a saved ChatGPT account, defaulting to the active account. */
     get: operations["listAdminChatGPTModels"];
     put?: never;
     post?: never;
@@ -34835,7 +34835,9 @@ export interface operations {
   };
   listAdminChatGPTModels: {
     parameters: {
-      query?: never;
+      query?: {
+        client_id?: string;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;

@@ -15,6 +15,7 @@ import (
 type fakeChatGPT struct {
 	calls      int
 	callback   string
+	clientID   string
 	err        error
 	transition *chatgpt.SettingsTransition
 }
@@ -32,9 +33,23 @@ func (f *fakeChatGPT) CompleteLoginWithSettings(_ context.Context, callback stri
 	f.callback = callback
 	return f.transition, f.err
 }
-func (f *fakeChatGPT) Models(context.Context) ([]chatgpt.Model, error) {
+func (f *fakeChatGPT) Models(_ context.Context, clientID string) ([]chatgpt.Model, error) {
 	f.calls++
+	f.clientID = clientID
 	return []chatgpt.Model{}, f.err
+}
+
+func TestChatGPTModelsBindRequestedAccount(t *testing.T) {
+	f := new(fakeChatGPT)
+	deps := requestDeps(fixtureRequests())
+	deps.ChatGPT = f
+	h := NewHandler(deps)
+	for _, clientID := range []string{"", "account-a"} {
+		res := do(t, h, "GET", Prefix+"/admin/ai/chatgpt/models?client_id="+clientID, "", actingRequestAdmin)
+		if res.Code != 200 || f.clientID != clientID {
+			t.Fatal(res.Code, res.Body.String(), f.clientID)
+		}
+	}
 }
 func (f *fakeChatGPT) SelectAccountWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error) {
 	f.calls++

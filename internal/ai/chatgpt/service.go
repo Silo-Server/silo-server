@@ -677,7 +677,12 @@ func (s *Service) getJSON(ctx context.Context, endpoint, token string, out any) 
 	return nil
 }
 
-func (s *Service) Models(ctx context.Context) ([]Model, error) {
+func (s *Service) Models(ctx context.Context, clientID string) ([]Model, error) {
+	if clientID != "" {
+		return s.modelsForSource(ctx, func(ctx context.Context) (string, error) {
+			return s.bearerTokenForAccount(ctx, clientID)
+		})
+	}
 	source, err := s.TokenSource(ctx)
 	if err != nil {
 		return nil, err
@@ -722,9 +727,7 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 	}
 	revoked := departing.RefreshToken == ""
 	if !revoked {
-		if d, err := s.discovery(revocationCtx); err == nil {
-			revoked = s.revokeSession(revocationCtx, d.RevocationEndpoint, departing)
-		}
+		revoked = s.revokeSession(revocationCtx, departing)
 	}
 	err = s.mutate(disconnectCtx, func(c *credentials) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
@@ -737,8 +740,9 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 	return revoked, err
 }
 
-func (s *Service) revokeSession(ctx context.Context, endpoint string, a account) bool {
+func (s *Service) revokeSession(ctx context.Context, a account) bool {
 	form := url.Values{"token": {a.RefreshToken}, "token_type_hint": {oauthRefreshToken}, oauthClientID: {a.ClientID}}.Encode()
+	var endpoint string
 	for attempt := range 3 {
 		if attempt > 0 {
 			timer := time.NewTimer(time.Second << (attempt - 1))
@@ -751,6 +755,16 @@ func (s *Service) revokeSession(ctx context.Context, endpoint string, a account)
 		}
 		if ctx.Err() != nil {
 			return false
+		}
+		if endpoint == "" {
+			d, err := s.discovery(ctx)
+			if err != nil {
+				if errors.Is(err, ErrIdentity) || errors.Is(err, ErrSignInRequired) {
+					return false
+				}
+				continue
+			}
+			endpoint = d.RevocationEndpoint
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form))
 		if err != nil {

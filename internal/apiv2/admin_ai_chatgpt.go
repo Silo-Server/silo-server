@@ -14,7 +14,7 @@ type ChatGPTService interface {
 	Status(context.Context) (chatgpt.Status, error)
 	StartLogin(context.Context, string) (chatgpt.Login, error)
 	CompleteLoginWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error)
-	Models(context.Context) ([]chatgpt.Model, error)
+	Models(context.Context, string) ([]chatgpt.Model, error)
 	SelectAccountWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error)
 	Disconnect(context.Context, string) (bool, error)
 }
@@ -88,6 +88,9 @@ type ChatGPTModelsOutput struct {
 		Models []ChatGPTModel `json:"models"`
 	}
 }
+type ChatGPTModelsInput struct {
+	ClientID string `query:"client_id" maxLength:"256"`
+}
 type ChatGPTAccountInput struct {
 	ClientID string `path:"client_id" minLength:"1" maxLength:"256"`
 }
@@ -155,11 +158,11 @@ func registerChatGPT(reg *Registry) {
 		}
 		return &ChatGPTLoginOutput{CacheControl: chatGPTCacheControl, Body: ChatGPTLogin(v)}, nil
 	})
-	Register(reg, op("GET", "/admin/ai/chatgpt/models", "listAdminChatGPTModels", "List models available to the active ChatGPT account."), func(ctx context.Context, _ *struct{}) (*ChatGPTModelsOutput, error) {
+	Register(reg, op("GET", "/admin/ai/chatgpt/models", "listAdminChatGPTModels", "List models available to a saved ChatGPT account, defaulting to the active account."), func(ctx context.Context, in *ChatGPTModelsInput) (*ChatGPTModelsOutput, error) {
 		if reg.deps.ChatGPT == nil {
 			return nil, unavailable("ChatGPT plan connection")
 		}
-		models, err := reg.deps.ChatGPT.Models(ctx)
+		models, err := reg.deps.ChatGPT.Models(ctx, in.ClientID)
 		if err != nil {
 			return nil, chatGPTProblem(err)
 		}

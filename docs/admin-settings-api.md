@@ -62,10 +62,12 @@ The following operations require an acting administrator:
   starting a new attempt. Status must match the initiating `attempt_id` before
   a client treats a terminal outcome as its own. Responses carrying connection
   state or authorization URLs use `Cache-Control: no-store`.
-- `GET /api/v2/admin/ai/chatgpt/models` returns the active account's visible
+- `GET /api/v2/admin/ai/chatgpt/models` returns a saved account's visible
   streaming text models in provider order with display names; `o1-pro` and
-  `o3-pro` are excluded because they do not support streaming. The capability endpoint supplies
-  reasoning levels for the selected model.
+  `o3-pro` are excluded because they do not support streaming. Optional `client_id`
+  pins the catalog to that registration even if the active account changes;
+  omitting it uses the active account. The capability endpoint supplies reasoning
+  levels for the selected model.
 - `POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select` selects a connected
   registration for subsequent requests. In ChatGPT mode, selection and successful
   login retain the current model when available, otherwise select the first

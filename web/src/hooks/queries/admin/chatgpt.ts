@@ -6,6 +6,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
+import { adminAuthorityScope } from "@/api/v2/adminAuthority";
 import {
   adminSettingsKey,
   captureSettingsBaseline,
@@ -15,10 +16,25 @@ import {
 
 const connectionKey = ["admin", "ai", "chatgpt"] as const;
 
+function scopedConnectionKey(context: ProfileRequestContextSnapshot | null) {
+  return [
+    ...connectionKey,
+    adminAuthorityScope(context),
+    context?.profileTokenGeneration ?? 0,
+  ] as const;
+}
+
 export function useAdminAICapabilities(model: string) {
   const context = captureProfileRequestContext();
   return useQuery({
-    queryKey: ["admin", "ai", "capabilities", model, context],
+    queryKey: [
+      "admin",
+      "ai",
+      "capabilities",
+      model,
+      adminAuthorityScope(context),
+      context?.profileTokenGeneration ?? 0,
+    ],
     enabled: context !== null,
     queryFn: () => {
       if (!context) throw new StaleApiRequestContextError();
@@ -32,7 +48,7 @@ export function useAdminAICapabilities(model: string) {
 export function useChatGPTStatus(poll: boolean, enabled = true) {
   const context = captureProfileRequestContext();
   return useQuery({
-    queryKey: [...connectionKey, "status", context],
+    queryKey: [...scopedConnectionKey(context), "status"],
     enabled: enabled && context !== null,
     queryFn: () => {
       if (!context) throw new StaleApiRequestContextError();
@@ -47,11 +63,14 @@ export function useChatGPTStatus(poll: boolean, enabled = true) {
 export function useChatGPTModels(clientID: string, enabled: boolean) {
   const context = captureProfileRequestContext();
   return useQuery({
-    queryKey: [...connectionKey, "models", clientID, context],
-    enabled: enabled && context !== null,
+    queryKey: [...scopedConnectionKey(context), "models", clientID],
+    enabled: enabled && context !== null && clientID !== "",
     queryFn: () => {
       if (!context) throw new StaleApiRequestContextError();
-      return v2("GET /api/v2/admin/ai/chatgpt/models", { profileContext: context });
+      return v2("GET /api/v2/admin/ai/chatgpt/models", {
+        query: { client_id: clientID },
+        profileContext: context,
+      });
     },
     retry: false,
     staleTime: 60_000,
@@ -73,18 +92,7 @@ function useConnectionWrite<TInput, TResult>(
         throw new StaleApiRequestContextError();
       const result = await request(input, context);
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
-      await qc.invalidateQueries({
-        queryKey: connectionKey,
-        predicate: (query) => {
-          const authority = query.queryKey.at(-1) as ProfileRequestContextSnapshot | null;
-          return (
-            authority?.authContextVersion === context.authContextVersion &&
-            authority.serverOrigin === context.serverOrigin &&
-            authority.profileId === context.profileId &&
-            authority.profileTokenGeneration === context.profileTokenGeneration
-          );
-        },
-      });
+      await qc.invalidateQueries({ queryKey: scopedConnectionKey(context) });
       if (changesSettings && isCapturedProfileAuthorityActive(context)) {
         await qc.invalidateQueries({ queryKey: adminSettingsKey(context), exact: true });
         if (isCapturedProfileAuthorityActive(context)) {

@@ -376,9 +376,37 @@ func TestModelsPreserveVisibleAccountCatalogOrder(t *testing.T) {
 			{"slug": "gpt-6.1-sol", "display_name": "GPT-6.1 Sol", "visibility": "list"},
 		}}), nil
 	})
-	models, err := s.Models(t.Context())
+	models, err := s.Models(t.Context(), "")
 	if err != nil || len(models) != 2 || models[0].ID != "gpt-6-astra" || models[1].ID != "gpt-6.1-sol" {
 		t.Fatalf("models = %+v, err = %v", models, err)
+	}
+}
+
+func TestModelsUseRequestedAccountInsteadOfActiveAccount(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	c := credentials{Active: "b", Accounts: []account{
+		{ClientID: "a", AccessToken: "a-token", RefreshToken: "a-refresh", ExpiresAt: time.Now().Add(time.Hour)},
+		{ClientID: "b", AccessToken: "b-token", RefreshToken: "b-refresh", ExpiresAt: time.Now().Add(time.Hour)},
+	}}
+	save(t, store, c)
+	s := NewService(store)
+	s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != s.modelsURL {
+			t.Fatal("unexpected provider request")
+		}
+		model := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		return response(http.StatusOK, map[string]any{"models": []map[string]string{{"slug": model, "visibility": "list"}}}), nil
+	})
+	for _, active := range []string{"b", "a", "b"} {
+		c.Active = active
+		save(t, store, c)
+		models, err := s.Models(t.Context(), "a")
+		if err != nil || len(models) != 1 || models[0].ID != "a-token" {
+			t.Fatalf("active=%s: models=%v, err=%v", active, models, err)
+		}
+	}
+	if _, err := s.Models(t.Context(), "missing"); !errors.Is(err, ErrSignInRequired) {
+		t.Fatal("missing account fell back to the active one", err)
 	}
 }
 
@@ -562,6 +590,77 @@ func TestDisconnectRetriesTransientRevocation(t *testing.T) {
 	}
 }
 
+func TestDisconnectRetriesDiscoveryWithinRevocationBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		status        int
+		network       bool
+		persistent    bool
+		invalid       bool
+		revokeFailure bool
+		wantDiscovery int
+		wantRevoke    int
+		wantConfirmed bool
+	}{
+		{name: "network recovery", network: true, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
+		{name: "server recovery", status: http.StatusServiceUnavailable, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
+		{name: "rate limit recovery", status: http.StatusTooManyRequests, wantDiscovery: 2, wantRevoke: 1, wantConfirmed: true},
+		{name: "persistent outage", network: true, persistent: true, wantDiscovery: 3},
+		{name: "shared retry budget", status: http.StatusServiceUnavailable, revokeFailure: true, wantDiscovery: 2, wantRevoke: 2, wantConfirmed: true},
+		{name: "invalid endpoint", invalid: true, wantDiscovery: 1},
+		{name: "identity rejection", status: http.StatusUnauthorized, wantDiscovery: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &memoryStore{values: map[string]string{}}
+				save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", AccessToken: "access", RefreshToken: "refresh"}}})
+				s := NewService(store)
+				var discoveryCalls, revokeCalls int
+				s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+					c := stored(t, store)
+					if c.Active != "" || !c.Accounts[0].NeedsLogin || c.Accounts[0].AccessToken != "" || c.Accounts[0].RefreshToken != "refresh" {
+						t.Fatal("account usable or refresh token discarded before revocation")
+					}
+					if r.URL.String() == s.discoveryURL {
+						discoveryCalls++
+						if discoveryCalls == 1 || tc.persistent {
+							if tc.network {
+								return nil, errors.New("discovery offline")
+							}
+							if tc.status != 0 {
+								return response(tc.status, nil), nil
+							}
+						}
+						endpoint := issuer + "/revoke"
+						if tc.invalid {
+							endpoint = "https://untrusted.example.test/revoke"
+						}
+						return response(http.StatusOK, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: endpoint}), nil
+					}
+					if r.URL.String() != issuer+"/revoke" || r.Method != http.MethodPost {
+						t.Fatal("sent credentials to an unexpected endpoint")
+					}
+					if err := r.ParseForm(); err != nil || r.Form.Get("token") != "refresh" || r.Form.Get(oauthClientID) != "app" {
+						t.Fatal("revocation lost departing credentials", err)
+					}
+					revokeCalls++
+					if tc.revokeFailure && revokeCalls == 1 {
+						return response(http.StatusServiceUnavailable, nil), nil
+					}
+					return response(http.StatusOK, nil), nil
+				})
+				revoked, err := s.Disconnect(t.Context(), "app")
+				if err != nil || revoked != tc.wantConfirmed || discoveryCalls != tc.wantDiscovery || revokeCalls != tc.wantRevoke {
+					t.Fatalf("revoked=%v, discovery=%d, revoke=%d, err=%v", revoked, discoveryCalls, revokeCalls, err)
+				}
+				if c := stored(t, store); c.Accounts[0].RefreshToken != "" || c.Accounts[0].DisconnectID != "" {
+					t.Fatal("cleanup retained credentials")
+				}
+			})
+		})
+	}
+}
+
 func TestRefreshPreservesRotationOnCallerCancellation(t *testing.T) {
 	store := &memoryStore{values: map[string]string{}}
 	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "user", IDToken: "validated-at-login", RefreshToken: "old-refresh", Scopes: planScope}}})
@@ -653,7 +752,7 @@ func TestModelsRecoverEarlyUnauthorizedOnce(t *testing.T) {
 				}
 				return response(200, map[string]any{"models": []map[string]string{{"slug": "model", "visibility": "list"}}}), nil
 			})
-			models, err := s.Models(t.Context())
+			models, err := s.Models(t.Context(), "")
 			if finalUnauthorized {
 				if !errors.Is(err, ErrSignInRequired) {
 					t.Fatalf("final rejection: %v", err)
@@ -893,7 +992,7 @@ func TestModelsRecoveryPinsInitialAccount(t *testing.T) {
 				}
 				return response(200, map[string]any{"models": []map[string]string{{"slug": "a-model", "visibility": "list"}}}), nil
 			})
-			models, err := s.Models(t.Context())
+			models, err := s.Models(t.Context(), "")
 			if finalUnauthorized {
 				if !errors.Is(err, ErrSignInRequired) {
 					t.Fatal(err)

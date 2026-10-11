@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import {
   setAccessToken,
   setRefreshToken,
   setProfileId,
+  setProfileToken,
   StaleApiRequestContextError,
 } from "@/api/client";
 import {
@@ -13,6 +14,9 @@ import {
   useCompleteChatGPTLogin,
   useSelectChatGPTAccount,
   useDisconnectChatGPTAccount,
+  useAdminAICapabilities,
+  useChatGPTStatus,
+  useChatGPTModels,
 } from "./chatgpt";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
@@ -24,6 +28,89 @@ beforeEach(() => {
   request.mockReset();
   setAccessToken("account-a");
   setProfileId("profile-a");
+  setProfileToken(null);
+});
+
+it("keeps bearer and PIN credentials out of query keys while fencing PIN changes", async () => {
+  setAccessToken("synthetic-bearer-secret");
+  setProfileToken("synthetic-pin-secret");
+  request.mockResolvedValue({});
+  const client = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { rerender } = renderHook(
+    () => {
+      useAdminAICapabilities("gpt-6-luna");
+      useChatGPTStatus(false);
+      useChatGPTModels("account-a", true);
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  const oldKeys = client
+    .getQueryCache()
+    .getAll()
+    .map((q) => q.queryKey);
+  expect(JSON.stringify(oldKeys)).not.toContain("synthetic-bearer-secret");
+  expect(JSON.stringify(oldKeys)).not.toContain("synthetic-pin-secret");
+  expect(request.mock.calls[0]?.[1]?.profileContext).toMatchObject({
+    accessToken: "synthetic-bearer-secret",
+    profileToken: "synthetic-pin-secret",
+  });
+  setProfileToken("next-pin-secret");
+  rerender();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(6));
+  const nextKeys = client
+    .getQueryCache()
+    .getAll()
+    .map((q) => q.queryKey);
+  expect(nextKeys).toHaveLength(6);
+  expect(JSON.stringify(nextKeys)).not.toContain("next-pin-secret");
+});
+
+it("keeps refetched model catalogs tied to their account during selection", async () => {
+  const client = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  let active = "a";
+  request.mockImplementation(async (operation, options) => {
+    if (operation.includes("/select")) {
+      active = options.path.client_id;
+      return {};
+    }
+    if (operation.endsWith("/models")) {
+      const account = options.query?.client_id ?? active;
+      return { models: [{ id: account + "-model", name: account }] };
+    }
+    return {};
+  });
+  const { result, rerender } = renderHook(
+    ({ account }) => ({
+      models: useChatGPTModels(account, true),
+      select: useSelectChatGPTAccount(),
+    }),
+    { wrapper, initialProps: { account: "a" } },
+  );
+  await waitFor(() => expect(result.current.models.data?.models[0]?.id).toBe("a-model"));
+  const accountAKey = client
+    .getQueryCache()
+    .getAll()
+    .find((query) => query.queryKey.includes("models") && query.queryKey.includes("a"))!.queryKey;
+  // Keep the A observer active while selection refetches it after B becomes active.
+  await act(async () => {
+    await result.current.select.mutateAsync("b");
+  });
+  expect(active).toBe("b");
+  expect(client.getQueryData(accountAKey)).toMatchObject({ models: [{ id: "a-model" }] });
+  rerender({ account: "b" });
+  await waitFor(() => expect(result.current.models.data?.models[0]?.id).toBe("b-model"));
+  await act(async () => {
+    await result.current.select.mutateAsync("a");
+  });
+  rerender({ account: "a" });
+  await waitFor(() => expect(result.current.models.data?.models[0]?.id).toBe("a-model"));
 });
 
 it.each([
