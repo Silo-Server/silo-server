@@ -144,7 +144,9 @@ Registration and host identity remain available for later authorization.
 The browser offers Disconnect for every saved registration, including inactive
 accounts that cannot supply inference credentials.
 The response distinguishes confirmed provider revocation from local credential
-removal. Credential requests reject redirects, and OIDC
+removal. Missing local tokens do not confirm remote revocation, including after
+an earlier disconnect cleared them without provider confirmation.
+Credential requests reject redirects, and OIDC
 discovery URLs must remain on `https://auth.openai.com`.
 
 First-connection welcome history belongs to the shared server configuration. A
@@ -199,7 +201,12 @@ fresh provider limit, so blocked retries cannot replace the pause being checked.
 API-key and speech requests do not read
 or change this state.
 The account model catalog preserves provider order and includes only entries
-with `visibility:list`, excluding the non-streaming `o1-pro` and `o3-pro` families.
+with `visibility:list`, excluding the non-streaming `o1-pro`, `o3-pro`, and
+`gpt-5.5-pro` families. Catalog reads make up to three attempts for transient
+transport/read failures and HTTP 429/5xx responses. Backoff honors `Retry-After`
+within one minute and any earlier caller deadline, keeping the same account token.
+Unauthorized responses
+use the existing single refresh recovery; malformed or terminal responses do not retry.
 
 OpenAI-compatible requests omit reasoning effort when empty, and omit
 temperature for known reasoning models or an explicit effort. Known model

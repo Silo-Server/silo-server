@@ -819,8 +819,8 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	revoked := departing.RefreshToken == ""
-	if !revoked {
+	revoked := false
+	if departing.RefreshToken != "" {
 		revoked = s.revokeSession(revocationCtx, departing)
 	}
 	err = s.mutate(disconnectCtx, func(c *credentials) error {

@@ -281,6 +281,8 @@ func (v *ModelValidation) Check(stored, prospective map[string]string) error {
 }
 
 func (s *Service) modelCatalog(ctx context.Context, token string) ([]Model, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	var response struct {
 		Models []struct {
 			Slug       string `json:"slug"`
@@ -288,13 +290,26 @@ func (s *Service) modelCatalog(ctx context.Context, token string) ([]Model, erro
 			Visibility string `json:"visibility"`
 		} `json:"models"`
 	}
-	if err := s.getJSON(ctx, s.modelsURL, token, &response); err != nil {
-		return nil, err
+	for attempt := range 3 {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(&transientProviderError{}, err)
+		}
+		err := s.getJSON(ctx, s.modelsURL, token, &response)
+		if err == nil {
+			break
+		}
+		temporary, retry := errors.AsType[*transientProviderError](err)
+		if !retry || attempt == 2 {
+			return nil, err
+		}
+		if !waitProviderRetry(ctx, attempt, temporary.retryAfter) {
+			return nil, errors.Join(err, ctx.Err())
+		}
 	}
 	models := []Model{}
 	for _, m := range response.Models {
 		// These Responses models do not support the streaming text transport.
-		if m.Visibility == visibilityListed && m.Slug != "" && !strings.HasPrefix(m.Slug, "o1-pro") && !strings.HasPrefix(m.Slug, "o3-pro") {
+		if m.Visibility == visibilityListed && m.Slug != "" && !strings.HasPrefix(m.Slug, "o1-pro") && !strings.HasPrefix(m.Slug, "o3-pro") && !strings.HasPrefix(m.Slug, "gpt-5.5-pro") {
 			models = append(models, Model{ID: m.Slug, Name: m.Name})
 		}
 	}

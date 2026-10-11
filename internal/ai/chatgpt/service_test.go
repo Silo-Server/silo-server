@@ -403,6 +403,8 @@ func TestModelsPreserveVisibleAccountCatalogOrder(t *testing.T) {
 		return response(200, map[string]any{"models": []map[string]string{
 			{"slug": "o1-pro", "visibility": "list"},
 			{"slug": "o3-pro-2025-06-10", "visibility": "list"},
+			{"slug": "gpt-5.5-pro", "visibility": "list"},
+			{"slug": "gpt-5.5-pro-2026-04-23", "visibility": "list"},
 			{"slug": "gpt-6-astra", "display_name": "GPT-6 Astra", "visibility": "list"},
 			{"slug": "hidden", "visibility": "hidden"},
 			{"slug": "gpt-6.1-sol", "display_name": "GPT-6.1 Sol", "visibility": "list"},

@@ -76,6 +76,32 @@ func newDisconnectStore(t *testing.T) *committedStore {
 	return &committedStore{value: string(raw)}
 }
 
+func TestDisconnectWithoutTokenDoesNotConfirmRevocation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := newDisconnectStore(t)
+		service := NewService(store)
+		calls := 0
+		service.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.URL.String() == service.discoveryURL {
+				return response(http.StatusOK, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
+			}
+			return response(http.StatusServiceUnavailable, nil), nil
+		})
+		confirmed, err := service.Disconnect(t.Context(), "a")
+		if err != nil || confirmed || calls != 4 {
+			t.Fatalf("failed remote revocation: confirmed=%t error=%v calls=%d", confirmed, err, calls)
+		}
+		if store.credentials(t).Accounts[0].RefreshToken != "" {
+			t.Fatal("local cleanup retained token")
+		}
+		confirmed, err = service.Disconnect(t.Context(), "a")
+		if err != nil || confirmed || calls != 4 {
+			t.Fatalf("empty token falsely confirmed revocation: confirmed=%t error=%v calls=%d", confirmed, err, calls)
+		}
+	})
+}
+
 func TestDisconnectCommitsDeactivationBeforeProviderCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newDisconnectStore(t)

@@ -21,14 +21,15 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name, clientID, authMode                      string
-		status                                        int
-		empty, timeout, omitScope, usagePaused, first bool
-		wantActive, wantModel                         string
+		name, clientID, authMode                               string
+		status                                                 int
+		empty, timeout, omitScope, usagePaused, first, recover bool
+		wantActive, wantModel                                  string
 	}{
 		{name: "renewed credentials preserve usage pause", clientID: "a", authMode: "chatgpt", status: 200, usagePaused: true, wantActive: "a", wantModel: "gpt-4o-mini"},
 		{name: "new account", clientID: "b", authMode: "chatgpt", status: 200, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "first activation", clientID: "b", authMode: "chatgpt", status: 200, first: true, wantActive: "b", wantModel: "gpt-4o-mini"},
+		{name: "first activation recovers temporary catalog failure", clientID: "b", authMode: "chatgpt", status: 503, first: true, recover: true, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "failed first catalog", clientID: "b", authMode: "chatgpt", status: 503, first: true, wantModel: "a-model"},
 		{name: "omitted scope activates the requested plan grant", clientID: "b", authMode: "chatgpt", status: 200, omitScope: true, wantActive: "b", wantModel: "gpt-4o-mini"},
 		{name: "failed new account catalog", clientID: "b", authMode: "chatgpt", status: 503, wantActive: "a", wantModel: "a-model"},
@@ -91,7 +92,11 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 						if !test.empty {
 							models = append(models, map[string]string{"slug": "gpt-4o-mini", "visibility": "list"})
 						}
-						return response(test.status, map[string]any{"models": models}), nil
+						status := test.status
+						if test.recover && modelsCalls > 1 {
+							status = http.StatusOK
+						}
+						return response(status, map[string]any{"models": models}), nil
 					default:
 						t.Fatalf("unexpected provider path %s", r.URL.Path)
 						return nil, errors.New("unexpected path")
@@ -99,7 +104,7 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 				})
 				callback := login.CallbackURI + "?state=" + url.QueryEscape(login.AttemptID) + "&code=code&client_id=" + test.clientID
 				receipt, err := s.CompleteLoginWithSettings(t.Context(), callback)
-				failed := test.status != 200 || test.empty
+				failed := (test.status != 200 && !test.recover) || test.empty
 				if failed && receipt != nil {
 					t.Fatal("failed activation returned settings receipt")
 				}

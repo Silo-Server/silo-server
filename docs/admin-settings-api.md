@@ -74,7 +74,9 @@ The following operations require an acting administrator:
   state or authorization URLs use `Cache-Control: no-store`.
 - `GET /api/v2/admin/ai/chatgpt/models` returns a saved account's visible
   streaming text models in provider order with display names; `o1-pro` and
-  `o3-pro` are excluded because they do not support streaming. Optional `client_id`
+  `o3-pro` and `gpt-5.5-pro` families are excluded because they do not support
+  streaming. Catalog reads make up to three attempts for transient failures, honoring
+  `Retry-After` within a minute and any earlier caller deadline. Optional `client_id`
   pins the catalog to that registration even if the active account changes;
   omitting it uses the active account. The capability endpoint supplies reasoning
   levels for the selected model.
@@ -88,7 +90,8 @@ The following operations require an acting administrator:
   contacting OpenAI, retains the refresh token for bounded revocation retries,
   then clears it while retaining the registration. `revocation_confirmed` reports
   whether OpenAI confirmed revocation; a local disconnect succeeds even if
-  revocation fails. Cleanup cannot overwrite a newer successful reconnect.
+  revocation fails. Missing local tokens do not confirm remote revocation.
+  Cleanup cannot overwrite a newer successful reconnect.
 
 Single-setting and batch writes validate model/effort pairs. Model and reasoning
 saves in ChatGPT mode also validate against the account catalog.
