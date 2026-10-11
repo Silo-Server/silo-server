@@ -1648,7 +1648,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and a bounded silent-frame smoke test executes the exact stereo-downmix limiter graph |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
-| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor |
+| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`) |
 
 `GET /playback/capability` reports the union of currently eligible local and
 pooled executors. The generic tone-map transformation does not reveal hardware
@@ -1657,8 +1657,20 @@ recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
-legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR. ID `0`,
-Profile 5, and a declared absent base layer remain unsupported. Missing,
+legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
+resolve to the `dolby_vision` source kind. Only executors that apply the RPU
+advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC
+`tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot, so a
+pool of those executors still refuses these sources with
+`hdr_transcode_unsupported`. A source without an RPU, or with a declared absent
+base layer, remains unsupported. Profile 5 is accepted from its configuration
+record. ID `0` on any other profile says nothing about the base, so it is
+accepted only when the stream is tagged PQ, and the decoded samples must carry
+both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
+SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
+complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
+other kinds cached. Missing,
 reserved, legacy, or contradictory signaling
 is only a candidate classification: the selected executor must successfully
 decode and normalize samples near the beginning, midpoint, and end before the

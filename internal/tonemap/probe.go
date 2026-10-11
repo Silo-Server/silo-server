@@ -260,6 +260,11 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // for every executor class it was asked to inspect. A software capability does
 // not make a missing configured hardware executor permanent: temporary device
 // contention must be retried after the negative-cache interval.
+//
+// Only the standard kinds count. A Dolby Vision smoke that FFmpeg refuses is a
+// genuine answer for that build, and executors that cannot apply an RPU never
+// run it; counting it would re-probe those devices every negative-cache
+// interval for good.
 func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend string) bool {
 	if !capabilityCoversAllSourceKinds(capabilities, ModeSoftware, BackendSoftware) {
 		return false
@@ -280,19 +285,20 @@ func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backen
 	if index < 0 {
 		return false
 	}
-	return !slices.ContainsFunc(AllSourceKinds(), func(kind SourceKind) bool {
+	return !slices.ContainsFunc(StandardSourceKinds(), func(kind SourceKind) bool {
 		return !slices.Contains(capabilities[index].SourceKinds, kind)
 	})
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
-// command the selected backend and device set can execute.
+// command the selected backend and device set can execute. The software filter
+// is only known after the listing, so its Dolby Vision smoke is always counted.
 func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	total := time.Duration(2+len(AllSourceKinds())) * probeCommandTimeout
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		hardwareCommandCount := len(AllSourceKinds()) * len(probeDevices(hardwareDevice, backend))
+		hardwareCommandCount := len(smokeKindsForFilter(hardwareFilter(backend))) * len(probeDevices(hardwareDevice, backend))
 		total += time.Duration(hardwareCommandCount) * hardwareProbeCommandTimeout(backend)
 	}
 	return total + probeTimeoutSlack
@@ -369,7 +375,7 @@ func ProbeWithRunner(
 		softwareFilter = selected
 	}
 	if softwareFilter != "" && hasToken(encoders, "libx264") {
-		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, func(kind SourceKind) []string {
+		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, smokeKindsForFilter(softwareFilter), func(kind SourceKind) []string {
 			return softwareSmokeArgs(fixturePath, kind, softwareFilter)
 		})
 		if len(kinds) > 0 {
@@ -391,9 +397,9 @@ func ProbeWithRunner(
 // every configured device so the advertised union is safe for later selection.
 func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, hardwareDevice string) []SourceKind {
 	devices := probeDevices(hardwareDevice, backend)
-	validated := AllSourceKinds()
+	validated := smokeKindsForFilter(hardwareFilter(backend))
 	for _, device := range devices {
-		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), func(kind SourceKind) []string {
+		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, device, kind)
 		})
 		validated = intersectSourceKinds(validated, supported)
@@ -526,6 +532,20 @@ func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	}
 }
 
+// smokeKindsForFilter lists the source kinds worth smoke testing on an
+// executor. The Dolby Vision kind is tried only where the filter can apply an
+// RPU; elsewhere the conversion would run and still be wrong.
+//
+// The embedded fixture carries no RPU, so a Dolby Vision smoke proves the
+// filter accepts apply_dovi and the graph runs on the device, not the reshaping
+// itself.
+func smokeKindsForFilter(filter string) []SourceKind {
+	if FilterAppliesDolbyVision(filter) {
+		return AllSourceKinds()
+	}
+	return StandardSourceKinds()
+}
+
 // smokeSourceKinds runs one bounded conversion per source kind and returns only
 // the kinds whose command completed successfully.
 func smokeSourceKinds(
@@ -533,10 +553,11 @@ func smokeSourceKinds(
 	run CommandRunner,
 	ffmpegPath string,
 	commandTimeout time.Duration,
+	candidates []SourceKind,
 	argsFor func(SourceKind) []string,
 ) []SourceKind {
-	kinds := make([]SourceKind, 0, len(AllSourceKinds()))
-	for _, kind := range AllSourceKinds() {
+	kinds := make([]SourceKind, 0, len(candidates))
+	for _, kind := range candidates {
 		if _, err := runBoundedWithTimeout(ctx, commandTimeout, run, ffmpegPath, argsFor(kind)...); err == nil {
 			kinds = append(kinds, kind)
 		}
@@ -601,7 +622,7 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 		if IsSDRSource(kind) {
 			return "hwdownload,format=" + NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth) + "," + SoftwareFilter(kind, "") + ",format=nv12,hwupload_cuda"
 		}
-		return SourceParameters(kind) + "," + CUDAFilter() + "," + HDRMetadataRemovalFilter()
+		return SourceParameters(kind) + "," + CUDAFilter(kind) + "," + HDRMetadataRemovalFilter()
 	}
 	filter := VAAPIFilter(kind)
 	if backend == BackendQSV {
