@@ -14278,7 +14278,7 @@ export interface components {
       running: number;
     };
     AdminDownloadPreparationOutput: {
-      /** @description Every source audio track is kept, in source order */
+      /** @description Every source audio track the server can decode is kept, in source order */
       all_audio_tracks: boolean;
       /** @description Target audio codec, or copy */
       audio_codec: string;

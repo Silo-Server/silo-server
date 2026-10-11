@@ -6034,7 +6034,7 @@
         "additionalProperties": false,
         "properties": {
           "all_audio_tracks": {
-            "description": "Every source audio track is kept, in source order",
+            "description": "Every source audio track the server can decode is kept, in source order",
             "type": "boolean"
           },
           "audio_codec": {
