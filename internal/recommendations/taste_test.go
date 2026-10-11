@@ -370,6 +370,34 @@ func TestRefreshPurgesAProfileDeletedWhileItWritesPostgres(t *testing.T) {
 	}
 }
 
+// The cache job likewise purges the rows it wrote for a profile deleted
+// after its build checked that the profile exists.
+func TestCacheJobPurgesAProfileDeletedWhileItWritesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "ttaste-cache-racing-"
+	userID, _ := newTasteTestAccount(t, pool, prefix)
+	repo := NewRepo(pool)
+	racing := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES($1, $2, 'racing')`, racing, userID); err != nil {
+		t.Fatal(err)
+	}
+	provider := &deletingStoreProvider{UserStoreProvider: pgstore.NewPostgresProvider(pool), repo: repo, userID: userID, profile: racing}
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, provider, config.RecommendationsConfig{})
+
+	built := w.cacheProfileRows(ctx, repo, userID, racing, cacheExpiry(time.Now()))
+	if built.failed != 0 || built.cached == 0 {
+		t.Fatalf("build = %+v; want rows written, then purged", built)
+	}
+	if provider.checks != 2 {
+		t.Fatalf("existence checks = %d, want one before the writes and one after", provider.checks)
+	}
+	if n := countRows(t, pool, `SELECT COUNT(*) FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`, userID, racing); n != 0 {
+		t.Fatalf("profile deleted during its cache build has %d cached rows, want none", n)
+	}
+}
+
 // A refresh that runs after its profile was deleted, as a queued one can,
 // writes no taste row: not from no signal, and not from a rewatch in the
 // watch history the deletion keeps. A row left behind loses its vector and

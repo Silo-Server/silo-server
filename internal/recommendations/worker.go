@@ -705,7 +705,7 @@ func (w *Worker) doRecommendations(ctx context.Context, held clusterLock) (cache
 			w.markBusyProfileStale(ctx, p.UserID, p.ProfileID)
 			continue
 		}
-		built := w.cacheUserRows(ctx, repo, p.UserID, p.ProfileID, expires)
+		built := w.cacheProfileRows(ctx, repo, p.UserID, p.ProfileID, expires)
 		unlock()
 		res.Processed++
 		res.CachedRows += built.cached
@@ -818,6 +818,19 @@ func (w *Worker) ensureGlobalRows(ctx context.Context, store globalRowCache) {
 	if err != nil {
 		slog.InfoContext(ctx, "global recommendation rows not built at startup", "component", "recommendations", "reason", err)
 	}
+}
+
+// cacheProfileRows is cacheUserRows for the cache job. A profile deleted
+// after the build checked it exists, and purged before the build wrote, would
+// keep the rows written; like a refresh, it checks again after the last write
+// and purges them.
+func (w *Worker) cacheProfileRows(ctx context.Context, repo *Repo, userID int, profileID, expires string) userRowsResult {
+	built := w.cacheUserRows(ctx, repo, userID, profileID, expires)
+	if err := w.engine.purgeIfProfileDeleted(ctx, userID, profileID); err != nil {
+		built.failed++
+		slog.WarnContext(ctx, "checking that a cached profile still exists failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+	}
+	return built
 }
 
 // userRowsResult counts one profile's cache build.
