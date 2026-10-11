@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,21 +259,17 @@ func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profi
 }
 
 // scopeToLibraries narrows filter so an item must also be in one of
-// libraryIDs, unless libraryIDs is nil. An empty libraryIDs allows nothing.
+// libraryIDs (see catalog.AccessFilter.LibraryScope), unless libraryIDs is
+// nil. An empty libraryIDs allows nothing, where LibraryScope would read it as
+// every library.
 func scopeToLibraries(filter catalog.AccessFilter, libraryIDs []int) catalog.AccessFilter {
 	if libraryIDs == nil {
 		return filter
 	}
 	scoped := filter
-	if filter.AllowedLibraryIDs == nil {
-		scoped.AllowedLibraryIDs = slices.Clone(libraryIDs)
-		return scoped
-	}
-	scoped.AllowedLibraryIDs = make([]int, 0, len(libraryIDs))
-	for _, id := range libraryIDs {
-		if slices.Contains(filter.AllowedLibraryIDs, id) {
-			scoped.AllowedLibraryIDs = append(scoped.AllowedLibraryIDs, id)
-		}
+	scoped.AllowedLibraryIDs = []int{}
+	if ids, none := filter.LibraryScope(libraryIDs); len(libraryIDs) > 0 && !none {
+		scoped.AllowedLibraryIDs = ids
 	}
 	return scoped
 }

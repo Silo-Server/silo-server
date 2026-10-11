@@ -260,3 +260,29 @@ func TestReadLoadsTheExclusionSetOncePerRequest(t *testing.T) {
 		}
 	}
 }
+
+// A section's library scope narrows the viewer's filter: nil leaves it, an
+// empty scope allows nothing, and a list is limited to what the viewer may
+// see.
+func TestScopeToLibraries(t *testing.T) {
+	restricted := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2, 3}}
+	for name, tc := range map[string]struct {
+		filter catalog.AccessFilter
+		scope  []int
+		want   []int
+	}{
+		"no scope keeps the filter":        {restricted, nil, []int{1, 2, 3}},
+		"no scope keeps unrestricted":      {catalog.AccessFilter{}, nil, nil},
+		"empty scope allows nothing":       {catalog.AccessFilter{}, []int{}, []int{}},
+		"unrestricted viewer takes scope":  {catalog.AccessFilter{}, []int{4, 5}, []int{4, 5}},
+		"restricted viewer intersects":     {restricted, []int{2, 4}, []int{2}},
+		"nothing in common allows nothing": {restricted, []int{4}, []int{}},
+		"hidden library leaves the scope":  {catalog.AccessFilter{DisabledLibraryIDs: []int{5}}, []int{4, 5}, []int{4}},
+		"only hidden libraries allow none": {catalog.AccessFilter{DisabledLibraryIDs: []int{5}}, []int{5}, []int{}},
+	} {
+		got := scopeToLibraries(tc.filter, tc.scope).AllowedLibraryIDs
+		if (got == nil) != (tc.want == nil) || !slices.Equal(got, tc.want) {
+			t.Errorf("%s: AllowedLibraryIDs = %#v, want %#v", name, got, tc.want)
+		}
+	}
+}
