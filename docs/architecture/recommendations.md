@@ -192,7 +192,10 @@ generation marked last is stored in `server_settings`
 as the mark, so a change costs one full-table update, not one per server. A
 refresh, the only thing that clears marks, first checks that its server has
 loaded the stored generation and otherwise leaves the profile pending, so no
-server rebuilds under the old policy and clears the change's mark.
+server rebuilds under the old policy and clears the change's mark. Changing
+the server setting `access.unrated_content`, part of every rating ceiling's
+maturity limits, marks every profile stale too, and again once servers'
+10-second cache of the setting has expired.
 
 Every read filters again with the viewer's access filter. List endpoints that
 return bare identifiers filter before answering, and a list anchored on an

@@ -1273,6 +1273,8 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	// Assigned below when recommendations start; nil (a no-op) otherwise.
+	var settingsRecWorker *recommendations.Worker
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
 		shutdownWork = append(shutdownWork, done)
@@ -1324,6 +1326,11 @@ func main() {
 				if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 					slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
 				}
+			}
+			// Cached recommendation rows of profiles with a rating ceiling
+			// are built under the unrated-content decision.
+			if key == config.AccessUnratedContentSettingKey {
+				settingsRecWorker.NotifyUnratedContentChanged(context.Background(), config.UnratedContentCacheTTL+time.Second)
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
@@ -2701,6 +2708,7 @@ func main() {
 					return savedCfg.Recommendations, nil
 				})
 			deps.RecWorker = recWorker
+			settingsRecWorker = recWorker
 			// Watch-provider syncs rebuild a profile's recommendations once
 			// per run that imported something.
 			if watchProviderService != nil {

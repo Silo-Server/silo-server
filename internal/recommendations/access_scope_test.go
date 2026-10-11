@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,13 +109,28 @@ func TestProfileAccessFilterFallbackFailsClosed(t *testing.T) {
 }
 
 type recordingAccountsMarker struct {
+	mu          sync.Mutex
 	got         [][]int
 	generations []int64
+	all         int
 }
 
 func (m *recordingAccountsMarker) MarkAccountsStale(_ context.Context, userIDs []int) (int64, error) {
 	m.got = append(m.got, userIDs)
 	return int64(len(userIDs)), nil
+}
+
+func (m *recordingAccountsMarker) MarkAllProfilesStale(context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.all++
+	return 0, nil
+}
+
+func (m *recordingAccountsMarker) allMarks() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.all
 }
 
 func (m *recordingAccountsMarker) MarkAllProfilesStaleForPolicy(_ context.Context, generation int64) (int64, error) {
@@ -138,6 +154,30 @@ func TestNotifyAccountsScopeChangedMarksWithoutRefreshing(t *testing.T) {
 
 	var nilWorker *Worker
 	nilWorker.NotifyAccountsScopeChanged(t.Context(), []int{3}) // recommendations disabled
+}
+
+// A change to access.unrated_content marks every profile stale at once, and
+// again after the other servers' cached copy of the setting has expired.
+func TestNotifyUnratedContentChangedMarksTwice(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	marker := &recordingAccountsMarker{}
+	w.accountsMarker = marker
+
+	w.NotifyUnratedContentChanged(t.Context(), 10*time.Millisecond)
+	if n := marker.allMarks(); n != 1 {
+		t.Fatalf("marks right after the change = %d, want 1", n)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for marker.allMarks() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("no second mark after the settle delay")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	assertNothingQueued(t, w, "after an unrated content change")
+
+	var nilWorker *Worker
+	nilWorker.NotifyUnratedContentChanged(t.Context(), time.Millisecond) // recommendations disabled
 }
 
 // A policy change marks every profile stale, for its generation, in one

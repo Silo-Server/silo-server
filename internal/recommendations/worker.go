@@ -63,6 +63,7 @@ type profileStaleMarker interface {
 // *Repo implements it.
 type accountsStaleMarker interface {
 	MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error)
+	MarkAllProfilesStale(ctx context.Context) (int64, error)
 	MarkAllProfilesStaleForPolicy(ctx context.Context, generation int64) (int64, error)
 }
 
@@ -384,6 +385,32 @@ func (w *Worker) NotifyPolicyChanged(ctx context.Context, generation int64) {
 	if marked > 0 {
 		slog.InfoContext(ctx, "policy change: taste profiles marked stale", "component", "recommendations", "generation", generation, "profiles", marked)
 	}
+}
+
+// NotifyUnratedContentChanged records that the server setting
+// access.unrated_content changed. It is part of the maturity limits every
+// profile with a content-rating ceiling builds its rows under, so every taste
+// profile is marked stale. Servers cache the setting for up to settle, and a
+// refresh on one that still serves the old value would clear the mark, so the
+// profiles are marked again once settle has passed. Rows built under the old
+// value are filtered by the new one when read until then.
+func (w *Worker) NotifyUnratedContentChanged(ctx context.Context, settle time.Duration) {
+	if w == nil || w.accountsMarker == nil {
+		return
+	}
+	mark := func() {
+		// The change is already committed; see NotifySignalsChanged.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+		defer cancel()
+		marked, err := w.accountsMarker.MarkAllProfilesStale(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "marking taste profiles stale after an unrated content change failed", "component", "recommendations", "error", err)
+			return
+		}
+		slog.InfoContext(ctx, "unrated content change: taste profiles marked stale", "component", "recommendations", "profiles", marked)
+	}
+	mark()
+	time.AfterFunc(settle, mark)
 }
 
 // RequestReadRefresh queues a refresh for a profile whose cached rows a read
