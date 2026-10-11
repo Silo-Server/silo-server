@@ -70,13 +70,15 @@ func PreparedTracksAvailable(file *models.MediaFile) bool {
 }
 
 // PlanPreparedTracks derives the stream layout of a prepared download from the
-// probed source. Every audio track is kept in source order. With a "copy"
+// probed source. Every audio track FFmpeg can decode (AudioTrackDecodable) is
+// kept in source order; any other track would fail the whole encode, so it is
+// left out and later tracks move up one output position. With a "copy"
 // audio target a track is copied when the MP4 muxer accepts its codec and it
 // either shares the primary track's codec (which client negotiation verified)
 // or is universally decodable, otherwise it is encoded to AAC; an "aac" target
 // encodes every track. audioTrackIndex
-// marks the default track, falling back to the source default and then the
-// first track. Embedded plain-text subtitles become mov_text. ASS/SSA keep
+// marks the default track, falling back to SelectAudioTrack's file default.
+// Embedded plain-text subtitles become mov_text. ASS/SSA keep
 // their styling, typesetting, and overlapping events only as sidecars, and
 // bitmap subtitles cannot be stored in MP4, so both are left to sidecar
 // delivery (PreparedSubtitleSidecarFormat).
@@ -92,6 +94,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 	}
 	defaultIndex := preparedDefaultAudioIndex(file.AudioTracks, audioTrackIndex)
 	for i, track := range file.AudioTracks {
+		if !AudioTrackDecodable(track) {
+			continue
+		}
 		codec := PreparedAudioAAC
 		if copyAudio && preparedAudioCopyable(track.Codec, primaryCodec) {
 			codec = PreparedAudioCopy
@@ -135,15 +140,10 @@ func (p *PreparedTracks) allAudioCopied() bool {
 }
 
 func preparedDefaultAudioIndex(tracks []models.AudioTrack, requested int) int {
-	if requested >= 0 && requested < len(tracks) {
+	if requested >= 0 && requested < len(tracks) && AudioTrackDecodable(tracks[requested]) {
 		return requested
 	}
-	for i, track := range tracks {
-		if track.Default {
-			return i
-		}
-	}
-	return 0
+	return SelectAudioTrack(tracks, "", nil)
 }
 
 // preparedMP4AudioCodecs lists audio codecs FFmpeg's MP4 muxer stores without

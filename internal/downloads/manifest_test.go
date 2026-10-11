@@ -262,6 +262,47 @@ func TestManifestDescribesFrozenAudioAfterSourceReprobe(t *testing.T) {
 	}
 }
 
+// TestManifestDescribesArtifactWithoutUndecodableAudio verifies a prepared
+// file that left out an audio track FFmpeg cannot decode is described by
+// output position, and the viewer's catalog selection follows its track.
+func TestManifestDescribesArtifactWithoutUndecodableAudio(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+	})
+	audio := []models.AudioTrack{
+		{Codec: "", Channels: 6, Language: "zh", Default: true},
+		{Codec: "eac3", Channels: 6, Language: "zh"},
+		{Codec: "aac", Channels: 2, Language: "en", Title: "Commentary"},
+	}
+	selected := 2
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio
+	b.detail.(fakeManifestSource).detail.Versions[0].EffectiveAudioTrackIndex = &selected
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 2 || m.AudioTracks[0].Index != 0 || m.AudioTracks[0].Language != "zh" || !m.AudioTracks[0].Default ||
+		m.AudioTracks[1].Index != 1 || m.AudioTracks[1].Title != "Commentary" || m.AudioTracks[1].Default {
+		t.Fatalf("audio tracks = %+v, want the two decodable tracks at outputs 0 and 1", m.AudioTracks)
+	}
+	if m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 1 {
+		t.Fatalf("selected = %v, want source track 2 at output 1", m.SelectedAudioTrackIndex)
+	}
+
+	// With no decodable track the prepared file carries no audio.
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio[:1]
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio[:1]
+	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 0 || m.SelectedAudioTrackIndex != nil {
+		t.Fatalf("audio tracks = %+v selected %v, want none", m.AudioTracks, m.SelectedAudioTrackIndex)
+	}
+}
+
 // TestManifestDescribesLegacySingleTrackArtifact keeps already-prepared files
 // described as the one audio stream they contain, without PGS sidecars.
 func TestManifestDescribesLegacySingleTrackArtifact(t *testing.T) {

@@ -275,3 +275,55 @@ func TestIsOriginalLanguagePreference(t *testing.T) {
 		}
 	}
 }
+
+// undecodableFirstAudioTracks mirrors an MP4 whose first audio track is AVS3
+// (av3a): ffprobe's JSON names no codec for it, so the scanner stores none.
+func undecodableFirstAudioTracks() []models.AudioTrack {
+	return []models.AudioTrack{
+		{Language: "zh", Codec: "", Channels: 6, Default: true},
+		{Language: "zh", Codec: "eac3", Channels: 6, Layout: "5.1"},
+		{Language: "zh", Codec: "aac", Channels: 2, Layout: "stereo"},
+	}
+}
+
+func TestSelectAudioTrackSkipsUndecodableTracks(t *testing.T) {
+	tracks := undecodableFirstAudioTracks()
+	tests := []struct {
+		name          string
+		preferredLang string
+		seriesPref    *playback.AudioTrackPreference
+		want          int
+	}{
+		{name: "file default is undecodable", want: 1},
+		{name: "language match prefers a decodable track", preferredLang: "zh", want: 1},
+		{name: "saved index on the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh"}, want: 1},
+		{name: "saved index after the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 2, AudioLanguage: "zh"}, want: 2},
+		{name: "saved signature of the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(tracks[0])}, want: 1},
+		{name: "saved signature of a decodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(tracks[2])}, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := playback.SelectAudioTrack(tracks, tt.preferredLang, tt.seriesPref); got != tt.want {
+				t.Fatalf("SelectAudioTrack() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectAudioTrackWithNoDecodableTrackKeepsOrdinaryChoice(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "zh", Codec: "unknown"},
+		{Language: "en", Codec: "", Default: true},
+	}
+	if got := playback.SelectAudioTrack(tracks, "", nil); got != 1 {
+		t.Fatalf("SelectAudioTrack() = %d, want the container default 1", got)
+	}
+}
+
+func TestAudioTrackDecodable(t *testing.T) {
+	for codec, want := range map[string]bool{"": false, " Unknown ": false, "eac3": true, "aac": true, "truehd": true} {
+		if got := playback.AudioTrackDecodable(models.AudioTrack{Codec: codec}); got != want {
+			t.Errorf("AudioTrackDecodable(%q) = %v, want %v", codec, got, want)
+		}
+	}
+}

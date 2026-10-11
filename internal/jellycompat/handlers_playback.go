@@ -2540,6 +2540,11 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	audioSupported := !channelsRequireEncode && profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := !bitrateRequiresEncode && profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
+	// FFmpeg can neither decode nor MP4-copy an audio track the probe could
+	// not name, so only direct play can carry an explicit choice of one.
+	if len(version.AudioTracks) > 0 && !playback.AudioTrackDecodable(audio) {
+		enableDirectStream, enableTranscoding = false, false
+	}
 	targetAudioChannels := 2
 	if req.MaxAudioChannels == 1 {
 		targetAudioChannels = 1
@@ -2931,13 +2936,7 @@ func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 		value := len(version.VideoTracks) + *effective
 		return &value
 	}
-	for index, track := range version.AudioTracks {
-		if track.Default {
-			value := len(version.VideoTracks) + index
-			return &value
-		}
-	}
-	value := len(version.VideoTracks)
+	value := len(version.VideoTracks) + playback.SelectAudioTrack(version.AudioTracks, "", nil)
 	return &value
 }
 

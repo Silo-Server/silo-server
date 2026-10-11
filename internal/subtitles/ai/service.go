@@ -404,7 +404,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 
 	audioIdx := job.SourceIndex
 	if audioIdx < 0 {
-		audioIdx = defaultAudioTrackIndex(file.AudioTracks)
+		audioIdx = playback.SelectAudioTrack(file.AudioTracks, "", nil)
 	}
 	if audioIdx >= len(file.AudioTracks) {
 		s.finishWithError(ctx, job, fmt.Errorf("%w: audio track index out of range", ErrInvalidRequest))
@@ -624,17 +624,6 @@ func (s *Service) finishTranslatedTrack(
 		s.notifierFor(job).SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
 	}
 	return true
-}
-
-// defaultAudioTrackIndex returns the index of the default-flagged audio
-// track, falling back to the first track.
-func defaultAudioTrackIndex(tracks []models.AudioTrack) int {
-	for i, t := range tracks {
-		if t.Default {
-			return i
-		}
-	}
-	return 0
 }
 
 func transcribedReleaseName(lang string) string {

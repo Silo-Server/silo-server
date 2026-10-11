@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
@@ -72,7 +73,46 @@ func langMatchRank(candidate, preferred string) int {
 // Language matches rank exact tag > bare language > another variant of the same
 // language. Track order breaks ties within a language rank. Saved signatures
 // and compatible saved indices take precedence over language-only preferences.
+//
+// Every step considers only tracks FFmpeg can decode (AudioTrackDecodable)
+// while the file has one: a server route that maps any other track fails to
+// start. When no track is decodable the ordinary choice stands and the planner
+// refuses it.
 func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPref *AudioTrackPreference) int {
+	var decodable []int
+	var candidates []models.AudioTrack
+	for i, track := range tracks {
+		if AudioTrackDecodable(track) {
+			decodable = append(decodable, i)
+			candidates = append(candidates, track)
+		}
+	}
+	if len(decodable) == 0 || len(decodable) == len(tracks) {
+		return selectAudioTrack(tracks, preferredLang, seriesPref)
+	}
+	if seriesPref != nil {
+		pref := *seriesPref
+		pref.AudioTrackIndex = slices.Index(decodable, seriesPref.AudioTrackIndex)
+		seriesPref = &pref
+	}
+	return decodable[selectAudioTrack(candidates, preferredLang, seriesPref)]
+}
+
+// AudioTrackDecodable reports whether FFmpeg can decode a probed audio track.
+// ffprobe names no codec for a stream FFmpeg has no codec ID for, such as AVS3
+// audio (av3a) in MP4: its JSON output omits codec_name, and other writers
+// print "unknown". FFmpeg then has no decoder or muxer tag for the stream
+// either, so converting or copying it fails before the first segment.
+func AudioTrackDecodable(track models.AudioTrack) bool {
+	codec := strings.ToLower(strings.TrimSpace(track.Codec))
+	return codec != "" && codec != ffprobeUnknownCodec
+}
+
+// ffprobeUnknownCodec is the codec name ffprobe's text writers print for a
+// stream FFmpeg has no codec ID for.
+const ffprobeUnknownCodec = "unknown"
+
+func selectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPref *AudioTrackPreference) int {
 	if len(tracks) == 0 {
 		return 0
 	}
