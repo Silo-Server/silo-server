@@ -262,7 +262,7 @@ func logIncludedHomeRowError(ctx context.Context, s sections.ResolvedSection, er
 	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) || errors.Is(err, context.Canceled) {
 		level = slog.LevelDebug
 	}
-	slog.Log(ctx, level, "home layout row left out after a build error", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", err)
+	slog.Log(ctx, level, "home layout row left out after a build error", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", logredact.SanitizeText(err.Error()))
 }
 
 // RecipeCategoryView is one gallery category with its recipes.
