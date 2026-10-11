@@ -1915,7 +1915,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
-	localArtworkSearched := false
+	var localArtworkSearched localArtworkLevel
 	for _, p := range itemChain {
 		ip, ok := p.(ImageProvider)
 		if !ok {
@@ -1946,7 +1946,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			continue
 		}
 		if isLocalArtworkProvider(p) {
-			localArtworkSearched = true
+			localArtworkSearched |= localArtworkItem
 		}
 		allImages = append(allImages, images...)
 	}
@@ -2008,7 +2008,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				dropLocalSeasonArtwork(seasons)
 			}
 			if isLocalArtworkProvider(p) {
-				localArtworkSearched = true
+				localArtworkSearched |= localArtworkSeason
 			}
 			accumulateSeasonResults(seasonResults, seasons)
 		}
@@ -2068,7 +2068,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						dropLocalEpisodeArtwork(episodes)
 					}
 					if isLocalArtworkProvider(p) {
-						localArtworkSearched = true
+						localArtworkSearched |= localArtworkEpisode
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
 				}
@@ -2097,8 +2097,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
-	if localArtworkSearched && s.localArtworkUsable() {
-		ctx = withLocalArtworkSearched(ctx)
+	if s.localArtworkUsable() {
+		ctx = withLocalArtworkSearched(ctx, localArtworkSearched)
 	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
@@ -4098,10 +4098,14 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		persistCtx := ctx
-		if s.localArtworkInChain(ctx, folderID, "season", "episode") {
-			persistCtx = withLocalArtworkSearched(ctx)
+		var searched localArtworkLevel
+		if s.localArtworkInChain(ctx, folderID, "season") {
+			searched |= localArtworkSeason
 		}
+		if s.localArtworkInChain(ctx, folderID, "episode") {
+			searched |= localArtworkEpisode
+		}
+		persistCtx := withLocalArtworkSearched(ctx, searched)
 		if s.persistSeasonAndEpisodeRows(persistCtx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 			updated = true
 		}
@@ -4963,7 +4967,8 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
-	localArtwork := newLocalArtworkRetention(ctx, seriesID)
+	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
+	episodeArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkEpisode)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,
@@ -5117,7 +5122,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				localArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
+				seasonArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5512,7 +5517,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					localArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
+					episodeArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,

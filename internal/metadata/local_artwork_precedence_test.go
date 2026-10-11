@@ -138,7 +138,7 @@ func TestMergeAndPersistKeepsCachedLocalArtworkUntilSidecarIsGone(t *testing.T) 
 			t.Run(fmt.Sprintf("mode %d/%s", mode, tc.name), func(t *testing.T) {
 				localSource := "file://" + tc.layout(t, t.TempDir()) + "?v=12-1"
 				h := newTestHarness()
-				ctx := withLocalArtworkSearched(context.Background())
+				ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
 				if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
 					ContentID:        contentID,
 					Type:             "movie",
@@ -221,7 +221,7 @@ func TestPersistSeasonsAndEpisodesKeepsCachedLocalArtworkUntilSidecarIsGone(t *t
 				Title: "Pilot", StillPath: cachedStill, StillSourcePath: stillSource, StillThumbhash: "still-thumb",
 			}
 
-			service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background()),
+			service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background(), localArtworkSeason|localArtworkEpisode),
 				&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
 				map[string]string{"tvdb": "123"}, "en", "en",
 				[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: remoteSeason}},
@@ -263,7 +263,7 @@ func TestPersistSeasonsAndEpisodesKeepsCachedLocalArtworkUntilSidecarIsGone(t *t
 // above it still lists entries, so the local copy stays.
 func TestLocalArtworkRetentionTrustsOnlyTheSidecarFolder(t *testing.T) {
 	gone := func(path string) bool {
-		return newLocalArtworkRetention(context.Background(), "movie-1").sidecarGone("file://" + path + "?v=1-1")
+		return newLocalArtworkRetention(context.Background(), "movie-1", localArtworkItem).sidecarGone("file://" + path + "?v=1-1")
 	}
 	media := filepath.Join(t.TempDir(), "media")
 	writeTestBytes(t, filepath.Join(media, "disk1", "Film A", "Film A.mkv"))
@@ -295,7 +295,7 @@ func TestLocalArtworkRetentionKeepsArtInUnreadableFolder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	retention := newLocalArtworkRetention(context.Background(), "movie-1")
+	retention := newLocalArtworkRetention(context.Background(), "movie-1", localArtworkItem)
 	if retention.sidecarGone("file://" + filepath.Join(dir, "poster.jpg") + "?v=1-1") {
 		t.Fatal("an unreadable folder must keep the cached local copy")
 	}
@@ -428,7 +428,7 @@ func TestCachedLocalArtworkNotKeptWithoutLocalSearch(t *testing.T) {
 	if got.PosterSourcePath != remotePoster {
 		t.Fatalf("poster source = %q, want the remote poster when the refresh did not search local art", got.PosterSourcePath)
 	}
-	retention := newLocalArtworkRetention(ctx, contentID)
+	retention := newLocalArtworkRetention(ctx, contentID, localArtworkItem)
 	if retention.keep(remotePoster, cachedPoster, unmounted) || len(retention.probes) != 0 {
 		t.Fatalf("an unmarked refresh kept local art or probed a folder (%d probes)", len(retention.probes))
 	}
@@ -517,5 +517,48 @@ func TestRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderRan(t *testing.T)
 				t.Fatalf("poster source = %q, want %q", got.PosterSourcePath, tc.want)
 			}
 		})
+	}
+}
+
+// Provider chains are configured per level: a refresh whose season chain ran
+// the local provider but whose episode chain did not keeps undiscovered local
+// season art and lets remote stills replace cached local ones.
+func TestLocalArtworkRetentionFollowsTheLevelThatSearched(t *testing.T) {
+	const (
+		seriesID     = "series:tvdb:123"
+		cachedSeason = "local/series/series:tvdb:123/0badf00d/poster/original.webp"
+		cachedStill  = "local/series/series:tvdb:123/feedface/still/original.webp"
+		remoteSeason = "tvdb://remote-season.jpg"
+		remoteStill  = "tvdb://remote-still.jpg"
+	)
+	unmounted := filepath.Join(t.TempDir(), "missing-mount", "Show", "Season 01")
+	seasonSource := "file://" + filepath.Join(unmounted, "poster.jpg") + "?v=12-1"
+	stillSource := "file://" + filepath.Join(unmounted, "Show S01E01-thumb.jpg") + "?v=9-1"
+	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+		ContentID: "season-1", SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1",
+		PosterPath: cachedSeason, PosterSourcePath: seasonSource,
+	}
+	episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
+		ContentID: "episode-1", SeriesID: seriesID, SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 1,
+		Title: "Pilot", StillPath: cachedStill, StillSourcePath: stillSource,
+	}
+
+	service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background(), localArtworkSeason),
+		&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
+		map[string]string{"tvdb": "123"}, "en", "en",
+		[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: remoteSeason}},
+		[]EpisodeResult{{
+			ProviderIDs: map[string]string{"tvdb": "ep-1"}, SeasonNumber: 1, EpisodeNumber: 1,
+			Title: "Pilot", StillPath: remoteStill,
+		}},
+		MergeReplaceUnlocked,
+	)
+
+	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].PosterSourcePath; got != seasonSource {
+		t.Fatalf("season poster source = %q, want the cached local poster kept", got)
+	}
+	if got := episodeRepo.episodes[episodeKey(seriesID, 1, 1)].StillSourcePath; got != remoteStill {
+		t.Fatalf("episode still source = %q, want the remote still: the episode chain did not search", got)
 	}
 }

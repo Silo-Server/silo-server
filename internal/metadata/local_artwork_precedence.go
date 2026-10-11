@@ -46,19 +46,33 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 
 type localArtworkSearchedKey struct{}
 
+// localArtworkLevel names the artwork levels a refresh can search for local
+// sidecars. Provider chains are configured per content level, so the local
+// provider can run for one level and not another.
+type localArtworkLevel uint8
+
+const (
+	localArtworkItem localArtworkLevel = 1 << iota
+	localArtworkSeason
+	localArtworkEpisode
+)
+
 // withLocalArtworkSearched marks ctx as serving a refresh that asked the local
-// provider for sidecar artwork. Only such a refresh can tell that cached local
-// art went undiscovered. Without the mark (local metadata off for the library,
-// an Identify, or local artwork unusable), cached local art is stored artwork
-// like any other and no library folder is probed, so a wedged share costs a
-// refresh that never searched it nothing.
-func withLocalArtworkSearched(ctx context.Context) context.Context {
-	return context.WithValue(ctx, localArtworkSearchedKey{}, true)
+// provider for sidecar artwork at levels. Only such a refresh can tell that
+// cached local art at a level went undiscovered. At an unmarked level (local
+// metadata off for it, an Identify, or local artwork unusable), cached local
+// art is stored artwork like any other and no library folder is probed, so a
+// wedged share costs a refresh that never searched it nothing.
+func withLocalArtworkSearched(ctx context.Context, levels localArtworkLevel) context.Context {
+	if levels == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, localArtworkSearchedKey{}, localArtworkSearchedLevels(ctx)|levels)
 }
 
-func localArtworkSearched(ctx context.Context) bool {
-	searched, _ := ctx.Value(localArtworkSearchedKey{}).(bool)
-	return searched
+func localArtworkSearchedLevels(ctx context.Context) localArtworkLevel {
+	levels, _ := ctx.Value(localArtworkSearchedKey{}).(localArtworkLevel)
+	return levels
 }
 
 // isLocalArtworkProvider reports whether p is the local (NFO) provider, which
@@ -68,22 +82,14 @@ func isLocalArtworkProvider(p Provider) bool {
 	return local
 }
 
-// localArtworkInChain reports whether the chain of any of levels asks the local
-// provider for artwork that the image cache can use.
-func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int, levels ...string) bool {
+// localArtworkInChain reports whether the chain for contentLevel asks the
+// local provider for artwork that the image cache can use.
+func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int, contentLevel string) bool {
 	if !s.localArtworkUsable() {
 		return false
 	}
-	for _, level := range levels {
-		chain, err := s.resolveChainCached(ctx, folderID, level)
-		if err != nil {
-			continue
-		}
-		if slices.ContainsFunc(chain, isLocalArtworkProvider) {
-			return true
-		}
-	}
-	return false
+	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
+	return err == nil && slices.ContainsFunc(chain, isLocalArtworkProvider)
 }
 
 // localArtworkRetention keeps cached local artwork through a refresh that did
@@ -95,16 +101,17 @@ type localArtworkRetention struct {
 	ctx       context.Context
 	contentID string
 	// searched is set when the refresh asked the local provider for artwork
-	// (withLocalArtworkSearched); otherwise nothing is kept.
+	// at this retention's level (withLocalArtworkSearched); otherwise nothing
+	// is kept.
 	searched bool
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe.
 	probes map[string]rootcheck.Result
 }
 
-func newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
+func newLocalArtworkRetention(ctx context.Context, contentID string, level localArtworkLevel) *localArtworkRetention {
 	return &localArtworkRetention{
-		ctx: ctx, contentID: contentID, searched: localArtworkSearched(ctx),
+		ctx: ctx, contentID: contentID, searched: localArtworkSearchedLevels(ctx)&level != 0,
 		probes: make(map[string]rootcheck.Result),
 	}
 }
@@ -141,7 +148,7 @@ func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models
 	if item == nil || existing == nil {
 		return
 	}
-	retention := newLocalArtworkRetention(ctx, existing.ContentID)
+	retention := newLocalArtworkRetention(ctx, existing.ContentID, localArtworkItem)
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
 		if retention.keep(*field.path, *stored[i].path, *stored[i].source) {

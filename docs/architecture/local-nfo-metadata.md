@@ -153,10 +153,10 @@ sits in the chain.
   item whose folder moved keeps its old local art until its new folder
   supplies some. The folder is probed through `internal/rootcheck` with its
   timeout, once per folder, before the sidecar itself is looked up. This
-  applies only to a refresh that asked the local provider for artwork
-  (`withLocalArtworkSearched`): with local metadata off for the library, or
-  during an Identify, cached local art is stored artwork like any other and
-  no library folder is probed.
+  applies only at a level (item, season, episode) whose provider chain asked
+  the local provider for artwork in this refresh (`withLocalArtworkSearched`):
+  with local metadata off for that level, or during an Identify, cached local
+  art is stored artwork like any other and no library folder is probed.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
