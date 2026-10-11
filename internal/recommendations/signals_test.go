@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -679,5 +680,51 @@ func TestWatchedSetMemoReadsEachProfileOnce(t *testing.T) {
 	read(t.Context(), rowsReader, "p1")
 	if repo.watchedReads != 3 {
 		t.Fatalf("reads = %d, want one more for another profile and one without the memo", repo.watchedReads)
+	}
+}
+
+// fakeRatedItems lists a profile's ratings from memory.
+type fakeRatedItems []string
+
+func (f fakeRatedItems) ListAll(context.Context, int, string) ([]catalog.UserRating, error) {
+	out := make([]catalog.UserRating, len(f))
+	for i, id := range f {
+		out[i] = catalog.UserRating{MediaItemID: id, Rating: 4}
+	}
+	return out, nil
+}
+
+// Rows built for a profile leave out what it watched or favorited, every
+// title it rated, and every title it abandoned: progress under 15% left for
+// 14 days. A title paused early more recently, or one partly watched, stays.
+func TestBuildExclusionSetLeavesOutRatedAndAbandonedTitles(t *testing.T) {
+	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	repo := &fakeSignalRepo{
+		canonical:         map[string]string{"episode-rated": "series-rated", "episode-abandoned": "series-abandoned"},
+		fallbackWatched:   map[string]struct{}{"watched": {}},
+		fallbackFavorites: []string{"favorite"},
+		fallbackProgress: []WatchProgressRow{
+			{MediaItemID: "abandoned", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-15 * 24 * time.Hour)},
+			{MediaItemID: "episode-abandoned", PositionSeconds: 60, DurationSeconds: 2400, UpdatedAt: now.Add(-30 * 24 * time.Hour)},
+			{MediaItemID: "paused-recently", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-2 * 24 * time.Hour)},
+			{MediaItemID: "half-watched", PositionSeconds: 1800, DurationSeconds: 6000, UpdatedAt: now.Add(-60 * 24 * time.Hour)},
+		},
+	}
+	signals := NewSignalReader(repo, nil)
+	got, err := signals.BuildExclusionSet(t.Context(), fakeRatedItems{"rated", "episode-rated"}, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"abandoned", "favorite", "rated", "series-abandoned", "series-rated", "watched"}
+	if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, want) {
+		t.Fatalf("excluded = %v, want %v", ids, want)
+	}
+
+	got, err = signals.BuildExclusionSet(t.Context(), nil, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["rated"]; ok {
+		t.Fatal("with no ratings lister, rated titles stay")
 	}
 }

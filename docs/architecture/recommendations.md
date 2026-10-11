@@ -203,10 +203,15 @@ finish out of order.
 
 ## Rows
 
-Personal rows leave out the profile's exclusion set: watched titles and
-favorites (which include taste-seed picks), canonicalized episode to series.
-Watchlist titles stay recommendable. The set is applied when rows are built
-and again when cached rows are read.
+Personal rows leave out the profile's exclusion set: watched titles,
+favorites (which include taste-seed picks), every title the profile rated,
+and every title it abandoned (progress under 15% left untouched for 14 days,
+which its taste profile counts as a dislike), canonicalized episode to
+series. A title the profile already judged is not news to it, and one it
+rated well would otherwise lead its own row. Watchlist titles stay
+recommendable. Rows are built leaving out the whole set; a read drops watched,
+favorited and rated titles again, from every row, so rows cached before a
+change are cleaned, and abandoned titles leave at the next rebuild.
 
 Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are

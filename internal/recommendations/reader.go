@@ -833,9 +833,9 @@ func servedJaccard(a, b []ScoredItem, served int) float64 {
 
 // filterRows drops from rows the items the profile cannot access, those not of
 // recommendableMediaTypes, those in its recommendation exclusion set (watched
-// and favorited titles), and those it rated 2 or lower, then drops the rows
-// left empty. Rows cached before a title was watched or favorited, or before
-// rows were kept to recommendableMediaTypes, are cleaned here.
+// and favorited titles), and those it rated, then drops the rows left empty.
+// Rows cached before a title was watched, favorited or rated, or before rows
+// were kept to recommendableMediaTypes, are cleaned here.
 func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, rows []ForYouRow, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	return r.newRowRead(userID, profileID, filter).filter(ctx, rows)
 }
@@ -892,9 +892,9 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 		}
 	}
 
-	lowRatings := map[string]int{}
+	rated := map[string]int{}
 	if len(itemIDs) > 0 && r.ratingsRepo != nil {
-		lowRatings, err = r.ratingsRepo.ListForItems(ctx, userID, profileID, itemIDs)
+		rated, err = r.ratingsRepo.ListForItems(ctx, userID, profileID, itemIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -918,7 +918,7 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 			if _, skip := excluded[item.MediaItemID]; skip {
 				continue
 			}
-			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= DislikedRatingMax {
+			if _, ok := rated[item.MediaItemID]; ok {
 				continue
 			}
 			filteredItems = append(filteredItems, item)

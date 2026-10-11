@@ -3,10 +3,12 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -204,6 +206,69 @@ func (s *SignalReader) RecommendationExclusionSet(ctx context.Context, userID in
 		merged[id] = struct{}{}
 	}
 	return merged, nil
+}
+
+// ratedItemLister lists every rating of a profile. *catalog.RatingsRepo
+// implements it.
+type ratedItemLister interface {
+	ListAll(ctx context.Context, userID int, profileID string) ([]catalog.UserRating, error)
+}
+
+// BuildExclusionSet returns the canonical IDs the rows built for the profile
+// leave out: RecommendationExclusionSet, every title the profile rated, as
+// SimilarUsersLiked leaves out, and every title it abandoned by now (see
+// AbandonedItemIDs). A title the profile already judged is not news to it,
+// and one it rated well would otherwise lead its own row, being nearest the
+// taste vector it weighs most in. With no ratings lister rated titles stay.
+func (s *SignalReader) BuildExclusionSet(ctx context.Context, ratings ratedItemLister, userID int, profileID string, now time.Time) (map[string]struct{}, error) {
+	excluded, err := s.RecommendationExclusionSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	abandoned, err := s.AbandonedItemIDs(ctx, userID, profileID, now)
+	if err != nil {
+		return nil, fmt.Errorf("read abandoned titles: %w", err)
+	}
+	maps.Copy(excluded, abandoned)
+	if ratings == nil {
+		return excluded, nil
+	}
+	rated, err := ratings.ListAll(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list rated titles: %w", err)
+	}
+	ratedIDs := make([]string, len(rated))
+	for i, rating := range rated {
+		ratedIDs[i] = rating.MediaItemID
+	}
+	canonical, err := s.repo.ResolveCanonicalItemIDSet(ctx, ratedIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve rated item IDs: %w", err)
+	}
+	maps.Copy(excluded, canonical)
+	return excluded, nil
+}
+
+// AbandonedItemIDs returns the canonical IDs of the titles the profile
+// abandoned by now: progress below lowProgressThreshold left untouched for
+// abandonedProgressAge, which its taste profile counts as a dislike (see
+// implicitWatchWeight). An abandoned episode stands for its series, as a
+// watched one does.
+func (s *SignalReader) AbandonedItemIDs(ctx context.Context, userID int, profileID string, now time.Time) (map[string]struct{}, error) {
+	progress, err := s.WatchProgressForUser(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, wp := range progress {
+		if weight, ok := implicitWatchWeight(wp, now); ok && weight == WeightWatchLow {
+			ids = append(ids, wp.MediaItemID)
+		}
+	}
+	if len(ids) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	return s.repo.ResolveCanonicalItemIDSet(ctx, ids)
 }
 
 // favoriteItemIDs lists every content ID the profile has favorited.

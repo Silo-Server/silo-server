@@ -684,3 +684,22 @@ func TestClusterRowsWithOneTitleAreToldApartOrHidden(t *testing.T) {
 		}
 	}
 }
+
+// A read drops every title the profile rated, liked or not, as rows built
+// since leave them out: a title it already judged is not a recommendation.
+func TestFilterRowsDropsEveryRatedTitle(t *testing.T) {
+	r := &Reader{
+		repo:        &fakeReaderRepo{},
+		ratingsRepo: fakeItemRatings{"rated-1": 1, "rated-3": 3, "rated-5": 5},
+		signals:     NewSignalReader(&fakeSignalRepo{}, nil),
+	}
+	rows, err := r.filterRows(t.Context(), 7, "p1", []ForYouRow{{Label: ForYouLabel, Items: []ScoredItem{
+		{MediaItemID: "rated-5"}, {MediaItemID: "unrated"}, {MediaItemID: "rated-3"}, {MediaItemID: "rated-1"},
+	}}}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Items) != 1 || rows[0].Items[0].MediaItemID != "unrated" {
+		t.Fatalf("rows = %+v, want only the unrated title", rows)
+	}
+}
