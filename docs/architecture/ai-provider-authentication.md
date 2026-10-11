@@ -41,6 +41,17 @@ completion even while it waits for the provider. Silo validates the ID token's
 RS256 signature, OpenAI issuer, audience, expiration, nonce, and subject, and
 requires the granted `chatgpt.tokens.use.direct` scope before activating a grant.
 
+A verified sign-in without plan permission retains a disabled registration and
+identity hints, without access or refresh tokens. Reconnect reuses the issued
+client ID and requests consent; ordinary reconnects do not force consent. A
+declined re-consent attempt preserves an existing usable account.
+
+An initial authorization-code `invalid_grant` retains only the issued client ID
+after callback state validation. It stores no identity or inference credentials.
+Retry reuses that ID and binds its first verified subject only after successful
+identity validation. Other identity failures and superseded attempts cannot create
+registrations.
+
 The complete bundle lives under `ai.chatgpt.credentials` in the encrypted
 settings store, including host ID, per-account registration, identity, tokens,
 and pending state. Generic admin settings cannot read or overwrite this key,
@@ -51,7 +62,9 @@ Every node reads the active credentials on demand. Refresh occurs inside the
 settings repository's transaction with a dedicated lock for this machine-managed
 key, so nodes cannot concurrently reuse a rotating refresh token. This key is
 excluded from the general settings surface and its validation lock. Waiting on
-OpenAI does not block unrelated settings. Access token, refresh token, scopes,
+OpenAI does not block unrelated settings. Local waiters share admission by pool
+and key before acquiring connections; idle admission entries are removed.
+Access token, refresh token, scopes,
 and expiry are committed together. A refresh without a replacement refresh token
 retains the existing token. Accepted refreshes and login exchanges finish under an
 independent, bounded context so request or job cancellation cannot discard a

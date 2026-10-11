@@ -48,6 +48,10 @@ func ForModel(model string) []string {
 		return []string{levelLow, levelMedium, levelHigh, levelExtraHigh, levelMax}
 	case strings.HasPrefix(model, "gpt-6-sol"), strings.HasPrefix(model, "gpt-6-luna"), strings.HasPrefix(model, "gpt-5.6"):
 		return []string{levelNone, levelLow, levelMedium, levelHigh, levelExtraHigh, levelMax}
+	case strings.HasPrefix(model, "gpt-5-pro"):
+		return []string{levelHigh}
+	case strings.HasPrefix(model, "gpt-5.2-pro"), strings.HasPrefix(model, "gpt-5.4-pro"), strings.HasPrefix(model, "gpt-5.5-pro"):
+		return []string{levelMedium, levelHigh, levelExtraHigh}
 	case strings.HasPrefix(model, "gpt-5.2"), strings.HasPrefix(model, "gpt-5.4"), strings.HasPrefix(model, "gpt-5.5"):
 		return []string{levelNone, levelLow, levelMedium, levelHigh, levelExtraHigh}
 	case strings.HasPrefix(model, "gpt-5.1"):

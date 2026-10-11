@@ -40,10 +40,12 @@ const (
 	oauthState        = "state"
 	oauthResource     = "resource"
 	oauthRefreshToken = "refresh_token"
+	oauthInvalidGrant = "invalid_grant"
 	visibilityListed  = "list"
 )
 
 var ErrSignInRequired = errors.New("sign in with ChatGPT again")
+var errInvalidAuthorizationGrant = errors.New("ChatGPT authorization code is invalid")
 var ErrInvalidLogin = errors.New("ChatGPT sign-in attempt is invalid or expired")
 var ErrInvalidCallbackURL = errors.New("paste the full ChatGPT callback URL from the browser address bar")
 var ErrIdentity = errors.New("ChatGPT identity or plan permission could not be verified")
@@ -244,6 +246,9 @@ func (s *Service) authorizationURL(c *credentials, p *pendingLogin) string {
 	} else {
 		for _, a := range c.Accounts {
 			if a.ClientID == p.ClientID {
+				if a.NeedsLogin && a.Subject != "" && !hasPlanScope(a.Scopes) {
+					q.Set("prompt", "consent")
+				}
 				if a.IDToken != "" {
 					q.Set("id_token_hint", a.IDToken)
 				}
@@ -306,13 +311,20 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 400 || resp.StatusCode == 401 {
+		var problem struct {
+			Error string `json:"error"`
+		}
+		if form.Get("grant_type") == "authorization_code" &&
+			json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&problem) == nil && problem.Error == oauthInvalidGrant {
+			return tokens, errors.Join(ErrSignInRequired, errInvalidAuthorizationGrant)
+		}
 		return tokens, ErrSignInRequired
 	}
 	if resp.StatusCode != http.StatusOK {
 		return tokens, ErrProvider
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&tokens) != nil ||
-		tokens.AccessToken == "" || (tokens.RefreshToken == "" && form.Get("grant_type") != oauthRefreshToken) || tokens.ExpiresIn <= 0 || !strings.EqualFold(tokens.TokenType, "Bearer") {
+		tokens.AccessToken == "" || (tokens.RefreshToken == "" && form.Get("grant_type") != oauthRefreshToken && hasPlanScope(tokens.Scope)) || tokens.ExpiresIn <= 0 || !strings.EqualFold(tokens.TokenType, "Bearer") {
 		return tokens, ErrIdentity
 	}
 	return tokens, nil
@@ -362,7 +374,7 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 			oauthCode: {callback.Code}, "code_verifier": {pending.Verifier}, "redirect_uri": {pending.RedirectURI}, oauthResource: {resource}})
 		if completionErr == nil {
 			claims, completionErr = s.verifyIDToken(completionCtx, tokens.IDToken, clientID, pending.Nonce)
-			if completionErr == nil && (!hasPlanScope(tokens.Scope) || (pending.Subject != "" && claims.Subject != pending.Subject)) {
+			if completionErr == nil && pending.Subject != "" && claims.Subject != pending.Subject {
 				completionErr = ErrIdentity
 			}
 		}
@@ -375,20 +387,39 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 		}
 		c.LoginResult = loginFailed
 		if completionErr != nil {
+			if pending.ClientID == "" && errors.Is(completionErr, errInvalidAuthorizationGrant) &&
+				!slices.ContainsFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID }) {
+				// The callback issued a registration, but no identity was verified.
+				// Retain only its ID so a fresh authorization can reuse it.
+				c.Accounts = append(c.Accounts, account{ClientID: clientID, NeedsLogin: true})
+			}
 			return nil //nolint:nilerr // Commit the failed outcome before returning completionErr.
 		}
 		a := account{ClientID: clientID, Subject: claims.Subject, Email: claims.Email,
-			AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, IDToken: tokens.IDToken,
-			Scopes: tokens.Scope, ExpiresAt: time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)}
+			IDToken: tokens.IDToken, Scopes: tokens.Scope, NeedsLogin: !hasPlanScope(tokens.Scope)}
+		if a.NeedsLogin {
+			// Verified sign-in without plan consent retains the registration for
+			// re-consent, but must never supply credentials for inference.
+			completionErr = ErrIdentity
+		} else {
+			a.AccessToken, a.RefreshToken = tokens.AccessToken, tokens.RefreshToken
+			a.ExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+		}
 		i := slices.IndexFunc(c.Accounts, func(existing account) bool { return existing.ClientID == clientID })
 		if i >= 0 {
-			if c.Accounts[i].Subject != a.Subject {
+			if c.Accounts[i].Subject != "" && c.Accounts[i].Subject != a.Subject {
 				completionErr = ErrIdentity
 				return nil
+			}
+			if a.NeedsLogin && c.Accounts[i].RefreshToken != "" && !c.Accounts[i].NeedsLogin {
+				return nil // Preserve an existing usable account after declined re-consent.
 			}
 			c.Accounts[i] = a
 		} else {
 			c.Accounts = append(c.Accounts, a)
+		}
+		if a.NeedsLogin {
+			return nil
 		}
 		c.Active = clientID
 		c.LoginResult = loginConnected

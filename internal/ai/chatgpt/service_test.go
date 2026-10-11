@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,12 +87,13 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name                                                string
-		nonce, audience, subject, scope, clientID           string
-		expired                                             bool
-		omitClientID                                        bool
-		superseded, interrupted, expiryCrossed, omitRefresh bool
-		want                                                bool
+		name                                                        string
+		nonce, audience, subject, scope, clientID                   string
+		expired                                                     bool
+		omitClientID                                                bool
+		superseded, interrupted, expiryCrossed, omitRefresh         bool
+		retainRegistration, preserveActive, reconsent, invalidGrant bool
+		want                                                        bool
 	}{
 		{name: "copied browser callback", scope: planScope, want: true},
 		{name: "accepted callback crosses expiry", scope: planScope, expiryCrossed: true, want: true},
@@ -101,7 +103,15 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 		{name: "interrupted completion commit", scope: planScope, interrupted: true},
 		{name: "wrong nonce", nonce: "other", scope: planScope},
 		{name: "wrong audience", audience: "different-app", scope: planScope},
-		{name: "missing plan consent", scope: "openid profile email"},
+		{name: "missing plan consent", scope: "openid profile email", retainRegistration: true, reconsent: true},
+		{name: "invalid initial code retains registration for verified retry", scope: planScope, invalidGrant: true, retainRegistration: true, reconsent: true},
+		{name: "missing consent without refresh token retains identity", scope: "openid profile email", omitRefresh: true, retainRegistration: true},
+		{name: "missing consent without refresh token rejects invalid identity", scope: "openid profile email", omitRefresh: true, nonce: "other"},
+		{name: "missing consent preserves another active account", scope: "openid profile email", retainRegistration: true, preserveActive: true},
+		{name: "declined reconnect preserves active credentials", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
+		{name: "missing consent with invalid nonce discards registration", nonce: "other", scope: "openid profile email"},
+		{name: "missing consent cannot change returning subject", subject: "another-user", scope: "openid profile email", clientID: "oaiapp_registered", preserveActive: true},
+		{name: "superseded missing consent does not retain registration", scope: "openid profile email", superseded: true},
 		{name: "expired identity", scope: planScope, expired: true},
 		{name: "different returning account", subject: "another-user", scope: planScope, clientID: "oaiapp_registered"},
 	} {
@@ -111,6 +121,15 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 			if test.clientID != "" {
 				save(t, store, credentials{HostID: "urn:uuid:existing", Accounts: []account{{ClientID: test.clientID, Subject: "user"}}})
 			}
+			if test.preserveActive {
+				activeID := test.clientID
+				if activeID == "" {
+					activeID = "oaiapp_active"
+				}
+				save(t, store, credentials{Active: activeID, Accounts: []account{{ClientID: activeID, Subject: "user", AccessToken: "old-access", RefreshToken: "old-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}}})
+			}
+			activeBefore := stored(t, store).Active
+			grantScope := test.scope
 			login, err := s.StartLogin(t.Context(), test.clientID)
 			if err != nil {
 				t.Fatal(err)
@@ -167,6 +186,9 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 						store.failNext = true
 						store.mu.Unlock()
 					}
+					if test.invalidGrant && calls == 1 {
+						return response(400, map[string]string{"error": oauthInvalidGrant}), nil
+					}
 					_ = r.ParseForm()
 					if r.Form.Get("client_id") != clientID || r.Form.Get("code_verifier") != pending.Verifier || r.Form.Get("redirect_uri") != pending.RedirectURI || r.Form.Get("resource") != resource {
 						t.Errorf("invalid token exchange: %v", r.Form)
@@ -175,7 +197,7 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					if test.omitRefresh {
 						refreshToken = ""
 					}
-					return response(200, tokenResponse{AccessToken: "access", RefreshToken: refreshToken, IDToken: signed, TokenType: "Bearer", ExpiresIn: 3600, Scope: test.scope}), nil
+					return response(200, tokenResponse{AccessToken: "access", RefreshToken: refreshToken, IDToken: signed, TokenType: "Bearer", ExpiresIn: 3600, Scope: grantScope}), nil
 				case "/.well-known/openid-configuration":
 					return response(200, discovery{JWKSURI: issuer + "/keys", RevocationEndpoint: issuer + "/revoke"}), nil
 				case "/keys":
@@ -216,8 +238,72 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 				if state.ActiveClientID != "" || state.LoginResult != "pending" {
 					t.Fatalf("old completion overwrote status: %+v", state)
 				}
-			} else if state.ActiveClientID != "" || state.LoginResult != "failed" {
-				t.Fatalf("failed login became active: %+v", state)
+			} else if state.ActiveClientID != activeBefore || state.LoginResult != "failed" {
+				t.Fatalf("failed login changed active account: %+v", state)
+			}
+			if test.preserveActive {
+				activeToken, err := s.BearerToken(t.Context())
+				if err != nil || activeToken != "old-access" {
+					t.Fatalf("active credentials changed: %q, %v", activeToken, err)
+				}
+			}
+			if test.retainRegistration {
+				c := stored(t, store)
+				i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
+				if i < 0 {
+					t.Fatal("verified disabled registration was discarded")
+				}
+				a := c.Accounts[i]
+				if test.invalidGrant {
+					if a != (account{ClientID: clientID, NeedsLogin: true}) {
+						t.Fatalf("unverified registration retained identity or tokens: %+v", a)
+					}
+				} else if a.Subject != "user" || a.Email != claims.Email || a.IDToken != signed || !a.NeedsLogin || a.AccessToken != "" || a.RefreshToken != "" || !a.ExpiresAt.IsZero() {
+					t.Fatalf("disabled registration retained inference credentials or lost identity: %+v", a)
+				}
+				if err := s.SelectAccount(t.Context(), clientID); !errors.Is(err, ErrSignInRequired) {
+					t.Fatalf("disabled account selected: %v", err)
+				}
+				if !test.preserveActive {
+					if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
+						t.Fatalf("disabled registration authorized inference: %v", err)
+					}
+				}
+			} else if !test.want && test.clientID == "" && !test.preserveActive && !test.superseded && !test.interrupted {
+				if len(stored(t, store).Accounts) != 0 {
+					t.Fatal("unverified registration retained")
+				}
+			}
+			if test.reconsent {
+				login, err = s.StartLogin(t.Context(), clientID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				u, _ = url.Parse(login.AuthorizationURL)
+				wantPrompt, wantHint, wantEmail := "consent", signed, claims.Email
+				if test.invalidGrant {
+					wantPrompt, wantHint, wantEmail = "", "", ""
+				}
+				if u.Query().Get("client_id") != clientID || u.Query().Get("prompt") != wantPrompt || !hasPlanScope(u.Query().Get("scope")) || u.Query().Get("id_token_hint") != wantHint || u.Query().Get("login_hint") != wantEmail {
+					t.Fatal("re-consent lost saved registration, identity hints or permission request")
+				}
+				pending = stored(t, store).Pending
+				claims.Nonce = pending.Nonce
+				token = jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+				token.Header["kid"] = "test-key"
+				signed, err = token.SignedString(key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				grantScope = planScope
+				callbackURL = login.CallbackURI + "?" + url.Values{"state": {pending.State}, "code": {"reconsent-code"}, "client_id": {clientID}}.Encode()
+				if err := s.CompleteLogin(t.Context(), callbackURL); err != nil {
+					t.Fatal(err)
+				}
+				state, err = s.Status(t.Context())
+				if err != nil || state.ActiveClientID != clientID || len(state.Accounts) != 1 || !state.Accounts[0].Connected || state.LoginResult != loginConnected || calls != 2 {
+					t.Fatalf("re-consent failed: %+v, %v, exchanges=%d", state, err, calls)
+				}
 			}
 		})
 	}
@@ -321,7 +407,7 @@ func TestLoginStateExpiryConsentAndReauthorization(t *testing.T) {
 	}
 	u, _ = url.Parse(login.AuthorizationURL)
 	q = u.Query()
-	if q.Get("client_id") != "registered" || q.Get("agent_name_hint") != "" || q.Get("ext_agent_host_id") != host || q.Get("id_token_hint") != "retained-identity" || q.Get("login_hint") != "user@example.test" {
+	if q.Get("client_id") != "registered" || q.Get("agent_name_hint") != "" || q.Get("ext_agent_host_id") != host || q.Get("id_token_hint") != "retained-identity" || q.Get("login_hint") != "user@example.test" || q.Get("prompt") != "" {
 		t.Fatal("reauthorization lost registration, host or account hints")
 	}
 	c = stored(t, store)
@@ -370,7 +456,7 @@ func TestRevokedRefreshAndDisconnectPreserveRegistration(t *testing.T) {
 	save(t, store, credentials{HostID: "host", Active: "app", Accounts: []account{{ClientID: "app", Subject: "user", RefreshToken: "refresh", Scopes: planScope}}})
 	s := NewService(store)
 	s.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
-		return response(400, map[string]string{"error": "invalid_grant"}), nil
+		return response(400, map[string]string{"error": oauthInvalidGrant}), nil
 	})
 	if _, err := s.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
 		t.Fatalf("refresh: %v", err)
@@ -517,5 +603,79 @@ func TestRefreshWithoutReplacementPreservesRenewableToken(t *testing.T) {
 	a := stored(t, store).Accounts[0]
 	if a.RefreshToken != "original-refresh" || a.NeedsLogin {
 		t.Fatal("nonrotating refresh lost renewable credentials")
+	}
+}
+
+func TestInvalidCodeRegistrationRetentionRequiresMatchingAttempt(t *testing.T) {
+	for _, test := range []struct {
+		name, code                              string
+		superseded, mismatch, returning, retain bool
+	}{
+		{name: "initial invalid grant", code: oauthInvalidGrant, retain: true},
+		{name: "superseded invalid grant", code: oauthInvalidGrant, superseded: true},
+		{name: "other client failure", code: "invalid_client"},
+		{name: "returning invalid grant preserves identity", code: oauthInvalidGrant, returning: true},
+		{name: "returning mismatched registration", code: oauthInvalidGrant, returning: true, mismatch: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryStore{values: map[string]string{}}
+			active := account{ClientID: "active", Subject: "verified", Email: "verified@example.test", IDToken: "verified-hint", AccessToken: "active-token", RefreshToken: "active-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(time.Hour)}
+			save(t, store, credentials{Active: active.ClientID, Accounts: []account{active}})
+			active = stored(t, store).Accounts[0] // Compare the stored representation after JSON removes monotonic time.
+			s := NewService(store)
+			selected := ""
+			if test.returning {
+				selected = active.ClientID
+			}
+			login, err := s.StartLogin(t.Context(), selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issued := "issued-app"
+			if test.returning {
+				issued = active.ClientID
+			}
+			if test.mismatch {
+				issued = "mismatched-app"
+			}
+			exchanges := 0
+			s.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != s.tokenURL {
+					t.Fatal("failed code exchange requested identity metadata")
+				}
+				exchanges++
+				if test.superseded {
+					if _, err := s.StartLogin(t.Context(), ""); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return response(400, map[string]string{"error": test.code}), nil
+			})
+			callback := login.CallbackURI + "?" + url.Values{"state": {login.AttemptID}, "code": {"expired-code"}, "client_id": {issued}}.Encode()
+			if err := s.CompleteLogin(t.Context(), callback); err == nil {
+				t.Fatal("invalid code became connected")
+			}
+			c := stored(t, store)
+			wantCount := 1
+			if test.retain {
+				wantCount = 2
+			}
+			if len(c.Accounts) != wantCount || c.Active != active.ClientID || c.Accounts[0] != active {
+				t.Fatalf("failed grant changed active account or retained unwanted registration: %+v", c)
+			}
+			if test.retain && c.Accounts[1] != (account{ClientID: issued, NeedsLogin: true}) {
+				t.Fatal("unverified registration retained more than issued ID")
+			}
+			wantExchanges := 1
+			if test.mismatch {
+				wantExchanges = 0
+			}
+			if exchanges != wantExchanges {
+				t.Fatalf("exchanges=%d", exchanges)
+			}
+			if test.superseded && c.LoginID == login.AttemptID {
+				t.Fatal("superseded attempt replaced new login")
+			}
+		})
 	}
 }

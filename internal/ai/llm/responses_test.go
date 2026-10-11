@@ -66,6 +66,14 @@ func TestSubscriptionRejectsPartialAndFailedStreams(t *testing.T) {
 	}
 }
 
+func TestSubscriptionCRLFStream(t *testing.T) {
+	stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\r\n\r\ndata: {\"type\":\"response.completed\"}\r\n\r\n"
+	out, err := readResponseStream(strings.NewReader(stream))
+	if err != nil || out != "complete" {
+		t.Fatalf("CRLF response = %q, %v", out, err)
+	}
+}
+
 func TestSubscriptionCompletionDoesNotWaitForStreamEOF(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer func() { _ = reader.Close() }()
