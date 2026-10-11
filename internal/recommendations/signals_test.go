@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -15,13 +16,14 @@ type fakeSignalRepo struct {
 	canonical map[string]string
 
 	fallbackWatched         map[string]struct{}
+	watchedReads            int
 	fallbackFavorites       []string
 	fallbackProgress        []WatchProgressRow
 	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
 
-	// missing lists canonical IDs ExistingItemIDs reports as deleted from
+	// missing lists canonical IDs RecommendableItemIDs reports as deleted from
 	// the catalog; every other ID exists.
 	missing map[string]struct{}
 
@@ -37,6 +39,7 @@ func (r *fakeSignalRepo) HasSignalRows(_ context.Context, _ int, _ string, inclu
 }
 
 func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.watchedReads++
 	return r.fallbackWatched, nil
 }
 
@@ -52,8 +55,8 @@ func (r *fakeSignalRepo) GetEbookReaderProgressForUser(context.Context, int, str
 	return r.ebookProgress, nil
 }
 
-func (r *fakeSignalRepo) GetRecentCompletedItemIDs(context.Context, int, string, int) ([]string, error) {
-	return r.fallbackRecentCompleted, nil
+func (r *fakeSignalRepo) GetRecentCompletedItemIDs(_ context.Context, _ int, _ string, limit int) ([]string, error) {
+	return r.fallbackRecentCompleted[:min(limit, len(r.fallbackRecentCompleted))], nil
 }
 
 func (r *fakeSignalRepo) GetRewatchCounts(context.Context, int, string) ([]RewatchCount, error) {
@@ -84,7 +87,7 @@ func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentI
 	return set, nil
 }
 
-func (r *fakeSignalRepo) ExistingItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
+func (r *fakeSignalRepo) RecommendableItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
 	existing := make(map[string]struct{}, len(itemIDs))
 	for _, id := range itemIDs {
 		if _, gone := r.missing[id]; !gone {
@@ -647,5 +650,81 @@ func TestSignalReaderRecommendationExclusionSet(t *testing.T) {
 	}
 	if want := map[string]struct{}{"movie-watched": {}, "series-favorite": {}, "movie-favorite": {}}; !maps.Equal(excluded, want) {
 		t.Fatalf("repo exclusion set = %v, want %v", excluded, want)
+	}
+}
+
+// Under WithWatchedSetMemo a profile's watched set is read once however many
+// SignalReaders ask for it; another profile, or a context without the memo,
+// reads again.
+func TestWatchedSetMemoReadsEachProfileOnce(t *testing.T) {
+	repo := &fakeSignalRepo{fallbackWatched: map[string]struct{}{"watched": {}}}
+	rowsReader, blendReader := NewSignalReader(repo, nil), NewSignalReader(repo, nil)
+	read := func(ctx context.Context, reader *SignalReader, profileID string) {
+		t.Helper()
+		set, err := reader.WatchedItemIDSet(ctx, 7, profileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := set["watched"]; !ok || len(set) != 1 {
+			t.Fatalf("watched set = %v", set)
+		}
+	}
+
+	ctx := WithWatchedSetMemo(t.Context())
+	read(ctx, rowsReader, "p1")
+	read(ctx, blendReader, "p1")
+	if repo.watchedReads != 1 {
+		t.Fatalf("reads under the memo = %d, want 1", repo.watchedReads)
+	}
+	read(ctx, blendReader, "p2")
+	read(t.Context(), rowsReader, "p1")
+	if repo.watchedReads != 3 {
+		t.Fatalf("reads = %d, want one more for another profile and one without the memo", repo.watchedReads)
+	}
+}
+
+// fakeRatedItems lists a profile's ratings from memory.
+type fakeRatedItems []string
+
+func (f fakeRatedItems) ListAll(context.Context, int, string) ([]catalog.UserRating, error) {
+	out := make([]catalog.UserRating, len(f))
+	for i, id := range f {
+		out[i] = catalog.UserRating{MediaItemID: id, Rating: 4}
+	}
+	return out, nil
+}
+
+// Rows built for a profile leave out what it watched or favorited, every
+// title it rated, and every title it abandoned: progress under 15% left for
+// 14 days. A title paused early more recently, or one partly watched, stays.
+func TestBuildExclusionSetLeavesOutRatedAndAbandonedTitles(t *testing.T) {
+	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	repo := &fakeSignalRepo{
+		canonical:         map[string]string{"episode-rated": "series-rated", "episode-abandoned": "series-abandoned"},
+		fallbackWatched:   map[string]struct{}{"watched": {}},
+		fallbackFavorites: []string{"favorite"},
+		fallbackProgress: []WatchProgressRow{
+			{MediaItemID: "abandoned", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-15 * 24 * time.Hour)},
+			{MediaItemID: "episode-abandoned", PositionSeconds: 60, DurationSeconds: 2400, UpdatedAt: now.Add(-30 * 24 * time.Hour)},
+			{MediaItemID: "paused-recently", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-2 * 24 * time.Hour)},
+			{MediaItemID: "half-watched", PositionSeconds: 1800, DurationSeconds: 6000, UpdatedAt: now.Add(-60 * 24 * time.Hour)},
+		},
+	}
+	signals := NewSignalReader(repo, nil)
+	got, err := signals.BuildExclusionSet(t.Context(), fakeRatedItems{"rated", "episode-rated"}, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"abandoned", "favorite", "rated", "series-abandoned", "series-rated", "watched"}
+	if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, want) {
+		t.Fatalf("excluded = %v, want %v", ids, want)
+	}
+
+	got, err = signals.BuildExclusionSet(t.Context(), nil, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["rated"]; ok {
+		t.Fatal("with no ratings lister, rated titles stay")
 	}
 }

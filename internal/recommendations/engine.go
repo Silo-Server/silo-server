@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -124,9 +125,14 @@ func (e *Engine) ActiveEmbeddingModel(ctx context.Context) (string, error) {
 	return lock.Model, nil
 }
 
-// recommendationExclusionSet is SignalReader.RecommendationExclusionSet.
+// recommendationExclusionSet is SignalReader.BuildExclusionSet: the titles
+// the rows the engine builds leave out.
 func (e *Engine) recommendationExclusionSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
-	return e.signalReader().RecommendationExclusionSet(ctx, userID, profileID)
+	var ratings ratedItemLister
+	if e.ratingsRepo != nil {
+		ratings = e.ratingsRepo
+	}
+	return e.signalReader().BuildExclusionSet(ctx, ratings, userID, profileID, time.Now())
 }
 
 func (e *Engine) signalReader() *SignalReader {

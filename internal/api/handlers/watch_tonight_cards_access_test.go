@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"testing"
@@ -106,5 +107,112 @@ func TestWatchTonightItemLookupFailureIsAnError(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
 		t.Fatalf("err = %v, want a 500 API error", err)
+	}
+}
+
+// fakeCardsRepo serves discover-mode cards from memory: a taste profile
+// whose candidates are personal, cached global rows, and a type check that
+// leaves books out.
+type fakeCardsRepo struct {
+	tasteReads int
+	global     map[string][]recommendations.ScoredItem
+	// recent is the live Recently Added row; recentExclude and recentLimit
+	// record its last read.
+	recent        []recommendations.ScoredItem
+	recentExclude []string
+	recentLimit   int
+	books         map[string]struct{}
+}
+
+func (f *fakeCardsRepo) ListDefaultRowItems(_ context.Context, _ catalog.AccessFilter, kind string, exclude []string, limit int) ([]recommendations.ScoredItem, error) {
+	if kind != recommendations.RecTypeRecentlyAdded {
+		return nil, fmt.Errorf("unexpected default row %q", kind)
+	}
+	f.recentExclude, f.recentLimit = slices.Sorted(slices.Values(exclude)), limit
+	var out []recommendations.ScoredItem
+	for _, item := range f.recent {
+		if !slices.Contains(exclude, item.MediaItemID) && len(out) < limit {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCardsRepo) GetTasteProfile(context.Context, int, string) ([]float32, error) {
+	f.tasteReads++
+	return []float32{1}, nil
+}
+
+func (f *fakeCardsRepo) FindTasteProfileCandidates(context.Context, []float32, []string, []string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, map[string][]string, error) {
+	return []recommendations.ScoredItem{{MediaItemID: "personal", Score: 1}}, map[string][]string{}, nil
+}
+
+func (f *fakeCardsRepo) GetItemAllGenres(context.Context, []string) (map[string][]string, error) {
+	return map[string][]string{}, nil
+}
+
+func (f *fakeCardsRepo) GetRecommendationCache(_ context.Context, _ int, _, recType, _ string) ([]recommendations.ScoredItem, error) {
+	return f.global[recType], nil
+}
+
+func (f *fakeCardsRepo) FilterRecommendableItemIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]struct{}, error) {
+	out := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, book := f.books[id]; !book {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+// With recommendations disabled, discover-mode cards come from the global
+// rows only, never the profile's taste profile, and leave out types the rows
+// no longer offer, such as a book cached before books left them.
+func TestDiscoverCardsServeNoPersonalCandidatesWhileDisabled(t *testing.T) {
+	repo := &fakeCardsRepo{
+		global: map[string][]recommendations.ScoredItem{
+			recommendations.RecTypePopular: {{MediaItemID: "popular", Score: 2}, {MediaItemID: "cached-book", Score: 3}},
+		},
+		recent: []recommendations.ScoredItem{{MediaItemID: "recent", Score: 1}},
+		books:  map[string]struct{}{"cached-book": {}},
+	}
+	h := &RecommendationsHandler{cardsRepo: repo, enabled: false}
+	merged, isCold, err := h.buildDiscoverCards(t.Context(), 7, "p1", catalog.AccessFilter{}, nil, map[string]struct{}{}, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range merged {
+		ids = append(ids, m.scored.MediaItemID)
+	}
+	if !isCold || !slices.Equal(ids, []string{"popular", "recent"}) {
+		t.Fatalf("cards = %v (cold %t), want the global rows without the book", ids, isCold)
+	}
+	if repo.tasteReads != 0 {
+		t.Fatalf("taste profile read %d times, want none while disabled", repo.tasteReads)
+	}
+}
+
+// With nothing cached, as on a fresh server or once the cached rows expire
+// with recommendations disabled, discover-mode cards come from the live
+// Recently Added row, read without the titles the client already showed.
+func TestDiscoverCardsFallBackToTheLiveRecentlyAddedRow(t *testing.T) {
+	repo := &fakeCardsRepo{recent: []recommendations.ScoredItem{
+		{MediaItemID: "shown", Score: 3}, {MediaItemID: "newest", Score: 2}, {MediaItemID: "older", Score: 1},
+	}}
+	h := &RecommendationsHandler{cardsRepo: repo, enabled: false}
+	merged, isCold, err := h.buildDiscoverCards(t.Context(), 7, "p1", catalog.AccessFilter{}, nil, map[string]struct{}{"shown": {}}, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range merged {
+		ids = append(ids, m.scored.MediaItemID)
+	}
+	if !isCold || !slices.Equal(ids, []string{"newest", "older"}) {
+		t.Fatalf("cards = %v (cold %t), want the live Recently Added row", ids, isCold)
+	}
+	if !slices.Equal(repo.recentExclude, []string{"shown"}) || repo.recentLimit != discoverCandidatePoolSize(12, 0) {
+		t.Fatalf("Recently Added read with exclude=%v limit=%d", repo.recentExclude, repo.recentLimit)
 	}
 }

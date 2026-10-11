@@ -98,9 +98,9 @@ func collaborativeCandidates(peers []peerLikes) map[string]collaborativeCandidat
 // SimilarUsersLiked returns items highly rated or favorited by users with
 // similar taste profiles. Scores are weighted by the similarity of each peer
 // user to the requesting user. Items the target profile already rated, those
-// in its recommendation exclusion set, and those filter does not admit are
-// filtered out before ranking. Applies MMR re-ranking for diversity. Below
-// the account floors it returns an empty list.
+// in its recommendation exclusion set, those filter does not admit and those
+// not of recommendableMediaTypes are filtered out before ranking. Applies MMR
+// re-ranking for diversity. Below the account floors it returns an empty list.
 func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
@@ -194,15 +194,16 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 		return nil, fmt.Errorf("list rated items for filtering: %w", err)
 	}
 
-	// Leave out what the viewer cannot see before ranking, so those titles
-	// do not take the row's places.
-	accessible, err := e.repo.FilterAccessibleItemIDs(ctx, candidateIDs, filter)
+	// Leave out what the viewer cannot see, and titles not of
+	// recommendableMediaTypes, before ranking, so those titles do not take
+	// the row's places.
+	accessible, err := e.repo.FilterRecommendableItemIDs(ctx, candidateIDs, filter)
 	if err != nil {
 		return nil, fmt.Errorf("filter accessible similar-users candidates: %w", err)
 	}
 
-	// Build scored result list, excluding already-rated, excluded and
-	// inaccessible items.
+	// Build scored result list, excluding already-rated, excluded,
+	// inaccessible and unrecommendable items.
 	results := make([]ScoredItem, 0, len(candidates))
 	supportCounts := make(map[string]int, len(candidates))
 	for id, candidate := range candidates {
@@ -249,13 +250,7 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, resultIDs)
 	results = applyMMR(results, embMap, e.mmrLambda(), limit)
 
-	// Apply genre cap to "Similar Users Liked" for cross-genre diversity.
+	// Keep any one genre from taking over the served window.
 	genres, _ := e.repo.GetItemAllGenres(ctx, resultIDs)
-	results = applyGenreCap(results, genres, GenreCapPercent)
-
-	if len(results) > limit {
-		results = results[:limit]
-	}
-
-	return results, nil
+	return applyGenreCap(results, genres), nil
 }
