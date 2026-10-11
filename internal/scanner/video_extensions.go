@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -72,6 +73,31 @@ var unsupportedReasonMessages = map[string]string{
 // unsupported-file reason, or "" for an unknown one.
 func UnsupportedReasonMessage(reason string) string {
 	return unsupportedReasonMessages[reason]
+}
+
+// unsupportedReasonLabels are the short names the admin web shows for each
+// reason, so a search for the text on screen finds its rows.
+var unsupportedReasonLabels = map[string]string{
+	UnsupportedReasonDVDVOB:     "DVD VOB",
+	UnsupportedReasonDiscImage:  "Disc image",
+	UnsupportedReasonRealMedia:  "RealMedia",
+	UnsupportedReasonDiscStream: "Blu-ray or AVCHD folder",
+}
+
+// unsupportedReasonsMatching returns the reasons whose code, label or message
+// contains search, ignoring case.
+func unsupportedReasonsMatching(search string) []string {
+	search = strings.ToLower(search)
+	reasons := []string{}
+	for reason, message := range unsupportedReasonMessages {
+		if strings.Contains(reason, search) ||
+			strings.Contains(strings.ToLower(unsupportedReasonLabels[reason]), search) ||
+			strings.Contains(strings.ToLower(message), search) {
+			reasons = append(reasons, reason)
+		}
+	}
+	sort.Strings(reasons)
+	return reasons
 }
 
 // UnsupportedFile is a file that looks like video but that the scanner does

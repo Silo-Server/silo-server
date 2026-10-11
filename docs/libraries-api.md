@@ -21,7 +21,7 @@ pages. Percent signs and underscores are literal characters.
 | --- | --- | --- |
 | Roots | Root path, title, sample file path | Required `library_id`; optional `state` |
 | Skipped roots | Root path, library name, reason | None |
-| Unsupported files | Directory path, listed file names (the first 100 in each directory), reason, library name | None |
+| Unsupported files | Directory path, listed file names (the first 100 in each directory), reason (its code, label, or message), library name | None |
 | Stale IDs | Title, provider, provider ID, library name | Actionable provider IDs only |
 | Unmatched items | Title, type, status, library name | Optional `ignored` |
 
