@@ -41114,6 +41114,13 @@
             ],
             "type": "boolean"
           },
+          "local": {
+            "description": "The built-in local metadata provider, which reads .nfo files and sidecar artwork. It runs before every remote provider at its level, so it is always listed and stored first.",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "plugin_installation_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -41142,7 +41149,8 @@
           "capability_id",
           "provider_slug",
           "priority",
-          "enabled"
+          "enabled",
+          "local"
         ],
         "type": "object"
       },
@@ -164650,7 +164658,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.",
+        "summary": "Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers. The local metadata entry is stored first in its level whatever priority it is sent with.",
         "tags": [
           "libraries"
         ],

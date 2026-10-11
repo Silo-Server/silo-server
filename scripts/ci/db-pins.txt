@@ -233,3 +233,9 @@
 
 # Operational log pages: a cursor prunes the partitions newer than it.
 ./internal/opslog TestListCursorPrunesNewerPartitionsDB
+
+# Local metadata runs ahead of remote providers, is on by default, and an
+# admin's Identify choice is recorded on the item.
+./migrations TestLocalMetadataDefaultOnMigrationPostgres
+./internal/metadata TestLocalTierIsStoredAndResolvedFirst
+./internal/catalog TestIdentityChoiceSurvivesUpsertAndRenameDB

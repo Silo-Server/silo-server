@@ -1,0 +1,92 @@
+package migrations
+
+import (
+	"reflect"
+	"testing"
+)
+
+// Turning local metadata on by default enables the built-in NFO rows of
+// existing chains, including ones the startup sync appended disabled and last,
+// moves them to the front, and keeps the other providers' order. Rolling back
+// turns them off again.
+func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
+	tx, schema := adminMigrationFixture(t)
+	migrationExec(t, tx, `
+CREATE TABLE plugin_installations (id integer PRIMARY KEY, plugin_id text NOT NULL, kind text NOT NULL);
+CREATE TABLE plugin_capabilities (plugin_installation_id integer NOT NULL, capability_type text NOT NULL, capability_id text NOT NULL, metadata jsonb NOT NULL);
+CREATE TABLE library_provider_chains (
+    media_folder_id integer NOT NULL, plugin_installation_id integer NOT NULL, capability_id text NOT NULL,
+    capability_type text NOT NULL DEFAULT 'metadata_provider.v1', content_level text NOT NULL,
+    priority integer NOT NULL, enabled boolean NOT NULL,
+    PRIMARY KEY (media_folder_id, plugin_installation_id, capability_id, content_level));
+INSERT INTO plugin_installations VALUES (1, 'silo.builtin', 'builtin'), (2, 'silo.tmdb', 'plugin'), (3, 'silo.tvdb', 'plugin');
+INSERT INTO plugin_capabilities VALUES
+    (1, 'metadata_provider.v1', 'nfo', '{"display_name":"NFO Files","default_priority":{"movie":1,"series":1,"season":1,"episode":1},"default_enabled":false}'),
+    (2, 'metadata_provider.v1', 'tmdb', '{"metadata":{"default_priority":{"movie":1}}}');
+-- 10: an upgraded movie library, NFO appended disabled and last.
+-- 11: an upgraded series level with two remote providers.
+-- 12: a library created after NFO existed, NFO first but disabled.
+INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
+    (10, 2, 'tmdb', 'movie', 0, true), (10, 1, 'nfo', 'movie', 1, false),
+    (11, 3, 'tvdb', 'series', 0, true), (11, 2, 'tmdb', 'series', 1, false), (11, 1, 'nfo', 'series', 2, false),
+    (12, 1, 'nfo', 'movie', 0, false), (12, 2, 'tmdb', 'movie', 1, true);`)
+
+	type row struct {
+		folder     int
+		capability string
+		priority   int
+		enabled    bool
+	}
+	chains := func() []row {
+		t.Helper()
+		rows, err := tx.Query(t.Context(), `SELECT media_folder_id, capability_id, priority, enabled FROM library_provider_chains ORDER BY media_folder_id, content_level, priority`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.folder, &r.capability, &r.priority, &r.enabled); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	defaultEnabled := func() bool {
+		t.Helper()
+		var enabled bool
+		if err := tx.QueryRow(t.Context(), `SELECT (metadata->>'default_enabled')::boolean FROM plugin_capabilities WHERE capability_id = 'nfo'`).Scan(&enabled); err != nil {
+			t.Fatal(err)
+		}
+		return enabled
+	}
+
+	const migration = "20261011201709_local_metadata_default_on"
+	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, false))
+	if !defaultEnabled() {
+		t.Error("nfo default_enabled not turned on")
+	}
+	want := []row{
+		{10, "nfo", 0, true}, {10, "tmdb", 1, true},
+		{11, "nfo", 0, true}, {11, "tvdb", 1, true}, {11, "tmdb", 2, false},
+		{12, "nfo", 0, true}, {12, "tmdb", 1, true},
+	}
+	if got := chains(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
+	}
+
+	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
+	if defaultEnabled() {
+		t.Error("nfo default_enabled not turned off on rollback")
+	}
+	for i := range want {
+		if want[i].capability == "nfo" {
+			want[i].enabled = false
+		}
+	}
+	if got := chains(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)
+	}
+}

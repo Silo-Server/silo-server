@@ -1442,6 +1442,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	quarantinedProviderIDKeys := make(map[string]struct{})
 	replacedProviderIDKeys := make(map[string]struct{})
 	rejectedIdentityIDs := make(providerIDValueSet)
+	// skipLocalProvider leaves the local (identity-hint) provider out of every
+	// item-level phase: an Identify, and a refresh whose local files conflict
+	// with an admin's Identify choice.
+	skipLocalProvider := req.Mode == ModeIdentify
 
 	switch req.Mode {
 	case ModeInitialMatch:
@@ -1749,8 +1753,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				protectedKeys[key] = true
 			}
 		}
-		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
-		stored, hinted := storedItemIdentity(existing, req.durableProviderIDs), canonicalIdentityProviderIDs(wonHints)
+		// In every refresh mode an admin's Identify choice outranks a
+		// conflicting local identity (identify_sticky.go).
+		stored := storedItemIdentity(existing, req.durableProviderIDs)
+		localHints := collectLocalIdentityHints(ctx, itemChain, searchQuery)
+		skipLocalProvider, err = s.identifyChoiceOverridesLocal(ctx, req.ContentID, localHints, stored)
+		if err != nil {
+			return nil, err
+		}
+		if skipLocalProvider {
+			localHints = nil
+		}
+		wonHints := applyLocalIdentityHints(ctx, localHints, accumulatedIDs, protectedKeys)
+		hinted := canonicalIdentityProviderIDs(wonHints)
 		if req.Mode == ModeManualRefresh && identityChoiceCorrects(hinted, stored) {
 			// The stored IDs came from the match the corrected NFO overrides,
 			// so any the NFO doesn't restate are dropped, not re-fetched.
@@ -1767,6 +1782,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		for _, p := range itemChain {
 			sp, ok := p.(SearchProvider)
 			if !ok {
+				continue
+			}
+			if _, local := p.(IdentityHintProvider); local && skipLocalProvider {
 				continue
 			}
 			results, searchErr := sp.Search(ctx, searchQuery)
@@ -1849,8 +1867,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		_, isIdentityHinter := p.(IdentityHintProvider)
 		// A manual Identify is the user's explicit identification: the local
 		// hint provider (NFO) is skipped entirely so a stale sidecar cannot
-		// re-apply its title/ids over the user's choice in the same operation.
-		if isIdentityHinter && req.Mode == ModeIdentify {
+		// re-apply its title/ids over the user's choice in the same operation,
+		// nor in a later refresh while its files still name another title.
+		if isIdentityHinter && skipLocalProvider {
 			continue
 		}
 		result, err := mp.GetMetadata(ctx, MetadataRequest{
@@ -1925,7 +1944,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// phase: its sidecar art is resolved by file path, not by the chosen id,
 		// so a stale poster/fanart must not be re-applied over the user's choice.
 		_, isIdentityHinter := p.(IdentityHintProvider)
-		if isIdentityHinter && req.Mode == ModeIdentify {
+		if isIdentityHinter && skipLocalProvider {
 			continue
 		}
 		images, err := ip.GetImages(ctx, ImageRequest{
@@ -2248,11 +2267,15 @@ func hasTransientMatchError(errs []error) bool {
 // wins each field. Identity-hint providers contribute IDs exclusively through
 // the trusted-hint phase: their results merge metadata fields but never inject
 // provider-id keys that conflict with or extend the established identity
-// (kills chimeric ID sets).
+// (kills chimeric ID sets). The identity-hint provider is the local one (NFO):
+// the lists it supplies are not extended by later results (localListFields).
 func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
 	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
 	if isIdentityHinter {
 		result.ProviderIDs = nil
+		accumulator.localLists.record(result)
+	} else {
+		result = accumulator.localLists.restrict(accumulator, result)
 	}
 	for key := range quarantined {
 		delete(result.ProviderIDs, key)
@@ -2595,15 +2618,25 @@ func (s *MetadataService) mergeAndPersist(
 		for key := range accumulator.replacedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
 		}
+		// A skeleton's title and year came from the filename, so the match
+		// replaces them, unless an admin locked them.
 		if req.Mode == ModeInitialMatch && isSkeletonLikeStatus(existingItem.Status) {
-			existingResult.Title = ""
-			existingResult.SortTitle = ""
-			existingResult.Year = 0
+			if !isFieldLocked(locked, FieldName) {
+				existingResult.Title = ""
+				existingResult.SortTitle = ""
+			}
+			if !isFieldLocked(locked, FieldReleaseDates) {
+				existingResult.Year = 0
+			}
+		}
+		mergeLocked := locked
+		if !req.enrichmentOnly {
+			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult)
 		}
 		if isCanonicalWrite {
-			MergeMetadata(accumulator, existingResult, locked, mergeMode)
+			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		} else {
-			MergeGlobalMetadata(accumulator, existingResult, locked, mergeMode)
+			MergeGlobalMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
@@ -2705,6 +2738,9 @@ func (s *MetadataService) mergeAndPersist(
 	}
 	contentID = persistedContentID
 	item.ContentID = contentID
+	if req.Mode == ModeIdentify {
+		s.recordIdentityChoice(ctx, contentID)
+	}
 	unlockProviderDedup()
 	providerDedupReleased = true
 	if handleArtwork {
@@ -9191,19 +9227,26 @@ func applyBuiltinIdentityHints(
 	accumulatedIDs map[string]string,
 	protected map[string]bool,
 ) map[string]string {
+	return applyLocalIdentityHints(ctx, collectLocalIdentityHints(ctx, chain, query), accumulatedIDs, protected)
+}
+
+// applyLocalIdentityHints is applyBuiltinIdentityHints for hints already
+// collected from the chain.
+func applyLocalIdentityHints(
+	ctx context.Context,
+	local []localIdentityHint,
+	accumulatedIDs map[string]string,
+	protected map[string]bool,
+) map[string]string {
 	var won map[string]string
-	for _, p := range chain {
-		hinter, ok := p.(IdentityHintProvider)
-		if !ok {
-			continue
-		}
-		hints := hinter.IdentityHints(ctx, query)
+	for _, hint := range local {
+		hints := hint.ids
 		for _, key := range trustedSearchIDKeys {
 			value, valid := sanitizeProviderIDValue(key, hints[key])
 			if !valid {
 				if strings.TrimSpace(hints[key]) != "" {
 					slog.WarnContext(ctx, "metadata: ignoring malformed local identity hint", "component", "metadata",
-						"provider", p.Slug(), "key", key, "value", strings.TrimSpace(hints[key]))
+						"provider", hint.provider, "key", key, "value", strings.TrimSpace(hints[key]))
 				}
 				continue
 			}
@@ -9211,13 +9254,13 @@ func applyBuiltinIdentityHints(
 			if current != "" && protected[key] {
 				if current != value {
 					slog.WarnContext(ctx, "metadata: local identity hint conflicts with stored id; keeping stored id", "component", "metadata",
-						"provider", p.Slug(), "key", key, "stored", current, "hint", value)
+						"provider", hint.provider, "key", key, "stored", current, "hint", value)
 				}
 				continue
 			}
 			if current != "" && current != value {
 				slog.WarnContext(ctx, "metadata: local identity hint overrides conflicting hint id", "component", "metadata",
-					"provider", p.Slug(), "key", key, "previous", current, "hint", value)
+					"provider", hint.provider, "key", key, "previous", current, "hint", value)
 			}
 			accumulatedIDs[key] = value
 			if won == nil {

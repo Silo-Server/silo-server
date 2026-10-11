@@ -290,7 +290,10 @@ type MetadataResult struct {
 	// sameRunStaleProviderIDs contains identity values that 404ed during this
 	// refresh and prevents them from being persisted by the same operation.
 	sameRunStaleProviderIDs providerIDValueSet
-	ContentRating           string
+	// localLists records, on a pipeline run's accumulator, which lists the
+	// local provider supplied; remote results may not extend them.
+	localLists    localListFields
+	ContentRating string
 	// AdvisoryAge is a recommended minimum viewer age from an advisory service,
 	// 0 when none was reported. It never feeds a content-rating ceiling.
 	AdvisoryAge int

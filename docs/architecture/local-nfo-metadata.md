@@ -13,9 +13,12 @@ Provider chains are keyed on `plugin_installations` rows, so builtins are
 registered **as data**: a reserved installation (`plugin_id='silo.builtin'`,
 `kind='builtin'`, sentinel `install_path`, `update_policy='manual'`) plus a
 `metadata_provider.v1` capability `nfo` with `default_priority` 1 for
-movie/series/season/episode and `default_enabled=false`
+movie/series/season/episode
 (`migrations/sql/20260712100125_builtin_host_providers.sql`,
-`...124741_nfo_capability_season_episode_levels.sql`).
+`...124741_nfo_capability_season_episode_levels.sql`). It shipped with
+`default_enabled=false`; `...20261011201709_local_metadata_default_on.sql`
+turned it on by default, enabled every existing `nfo` chain row and moved the
+builtin rows to the front of each chain.
 
 - `internal/metadata/builtin.go` is the in-process registry; providers
   self-register (`internal/metadata/nfo/register.go`) and `buildProviders`
@@ -28,10 +31,46 @@ movie/series/season/episode and `default_enabled=false`
   depends on them.
 - On startup, `SyncBuiltinProviderChains` (`internal/metadata/builtin_sync.go`)
   first materializes legacy `content_level=''` chains per level, then appends
-  builtin capabilities to all existing chains, disabled. New libraries pick the
-  capability up through normal chain seeding. The chain-less fallback respects
-  `default_enabled=false`.
-- **Everything is inert until an admin enables "NFO Files" on a library.**
+  builtin capabilities to all existing chains (enabled, since `nfo` is
+  `default_enabled`) and moves builtin rows to the front. New libraries pick
+  the capability up enabled and first through normal chain seeding, and the
+  chain-less fallback includes it.
+- Without `.nfo` files or sidecar art the provider returns nothing, so a
+  library without local files behaves as before. Each refresh still looks for
+  the candidate sidecar files.
+
+## Precedence: locks, then local, then remote
+
+Highest first: fields an admin locked while editing an item, then local
+metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
+...), then filename parsing.
+
+- **The local tier runs first.** Builtin installations are the local tier
+  (`internal/metadata/local_tier.go`). `buildProviders` returns builtin
+  providers ahead of plugin providers, which covers saved chains, the
+  chain-less fallback and person refresh, whatever priority a row stores.
+  `SetChain`, chain seeding and the startup sync store builtin rows first, so
+  the API and the chain editor show the order that runs.
+- **Fields the NFO sets win.** Phase 2 folds provider results fill-empty in
+  chain order, so the NFO wins every scalar it supplies.
+- **Lists the NFO supplies are the whole list.** Genres, studios, networks,
+  countries, keywords, cast and crew (cast and crew count separately, like
+  their locks) are not extended by remote results; remote providers fill only
+  the lists the NFO left empty. Remote cast and crew enrich the NFO's credits
+  that match by provider ID or by name and kind (IDs, photos, roles) and never
+  add people (`internal/metadata/local_precedence.go`). Lists from two remote
+  providers still accumulate.
+- **Locks win in every mode.** The persist merge applies the item's locked
+  fields in initial match, scheduled and manual refresh, and Identify. Cast and
+  Crew are separate locks; with only one set, the stored credits are read so
+  the locked group survives the wholesale credit write
+  (`internal/metadata/people_locks.go`). An initial match of a skeleton item
+  keeps a locked title and year.
+- **One switch per library.** The chain editor shows the local entry as a
+  pinned "Local metadata (NFO + artwork)" switch that sets every level's row at
+  once and cannot be reordered. v2 marks the entry with
+  `ProviderChainEntry.local`; the frozen v1 shape is unchanged. Text and
+  artwork come from the same provider, so the switch turns both on or off.
 
 ## Identity: hint-first, never candidate-first
 
@@ -48,7 +87,12 @@ search-by-title fails. Conflict policy by mode:
   different anchor is renamed to it, or merged onto the existing item already
   holding that id;
 - manual Identify: the user's choice wins; the NFO provider is skipped for the
-  whole operation.
+  whole operation. The choice is sticky: every Identify sets
+  `media_items.identity_chosen_at`, and a later refresh of any mode whose NFO
+  names a different identity keeps the chosen one, logs the conflict, and
+  leaves the NFO provider out of that refresh, since its text and art describe
+  the other title (`internal/metadata/identify_sticky.go`). NFO IDs that agree
+  with or only extend the chosen identity are not a conflict.
 
 The NFO search candidate exists only for the title-only case and is defanged:
 ID-less candidates lose provider-priority tie-breaks to ID-bearing group
@@ -198,7 +242,7 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
   OPF/metadata.json — future builtin providers via the same registry).
 - Feature detection: the `nfo` capability's presence in
   `GET /api/v1/libraries/provider-defaults` (see
-  `docs/architecture/v1-scope.md`).
+  `docs/architecture/v1-scope.md`); in v2 an entry with `local: true`.
 - `<set>` (movie collections) is not mapped: `MetadataResult` has no
   collection field, so `nfoCommon` (`internal/metadata/nfo/nfo.go`) does not
   decode it.
