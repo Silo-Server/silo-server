@@ -80,6 +80,7 @@
 # sparse first pages reuse one FTS probe, and trigger work stays bounded.
 ./migrations TestMediaSearchDocumentsMigrationPostgres
 ./migrations TestEpisodeSearchRefreshMigrationPostgres
+./migrations TestSkipUnchangedEpisodeCatalogRefreshMigrationPostgres
 ./migrations TestEpisodeExactSearchIndexMigrationPostgres
 ./internal/catalog TestMediaSearchDocumentsPostgres
 ./internal/catalog TestSearchOptimizedAccuracyPostgres

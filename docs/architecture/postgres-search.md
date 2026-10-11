@@ -23,8 +23,12 @@ refreshes update an existing entry in place and reuse its text documents. An
 upsert would fire the BEFORE INSERT trigger, which rebuilds both documents before
 ON CONFLICT discards them, so only a new entry builds documents. A moved file
 refreshes both entry identities; an attribute edit within one identity refreshes
-it once. Re-ID, membership, and parent changes must keep the entry's documents
-and access fields current.
+it once. A refresh writes nothing when the entry already holds the refreshed
+values and both documents, so a watched change the entry does not store (a
+re-probed track, a series runtime the episode overrides) costs no row or index
+write. Entries store no still image; reads join it from `episodes`, so still
+edits do not refresh entries. Re-ID, membership, and parent changes must keep
+the entry's documents and access fields current.
 
 The stored media document migration adds nullable columns, installs maintenance
 before backfill, commits batches of 1,000 rows, then builds GIN indexes
