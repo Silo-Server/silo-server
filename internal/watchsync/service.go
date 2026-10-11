@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -28,6 +29,7 @@ type Service struct {
 	dropped        droppedStore
 	locks          sync.Map
 	scrobbleQueues sync.Map
+	publicURL      atomic.Pointer[string]
 }
 
 type scrobbleQueue struct {
@@ -520,7 +522,7 @@ func (s *Service) PollDeviceAuth(
 	if err != nil {
 		return Connection{}, err
 	}
-	if session.UserID != userID || session.ProfileID != profileID || session.Provider != providerKey {
+	if session.UserID != userID || session.ProfileID != profileID || session.Provider != providerKey || session.UserCode == oauthSessionUserCode {
 		return Connection{}, ErrAuthSessionMismatch
 	}
 	if session.CompletedAt != nil {

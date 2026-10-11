@@ -48672,6 +48672,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "oauth_redirect_uri": {
+            "description": "https address to register on the provider when auth_method is authorization_code",
+            "type": "string"
+          },
           "provider": {
             "type": "string"
           },
@@ -48790,6 +48794,26 @@
           "verification_url",
           "interval_seconds",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "WatchProviderOAuthStart": {
+        "additionalProperties": false,
+        "properties": {
+          "authorization_url": {
+            "description": "Send the browser here to approve the provider",
+            "format": "uri",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "description": "Address that must be registered on the provider app",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "redirect_uri"
         ],
         "type": "object"
       },
@@ -201863,6 +201887,71 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/watch-providers/oauth/callback": {
+      "get": {
+        "operationId": "completeWatchProviderOAuth",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Sign-in outcome redirect to watch-provider settings",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Finish browser sign-in and redirect to watch-provider settings.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "redirect",
+        "x-silo-raw-reason": "The provider redirects the browser here without Silo login headers; the stored one-time state authenticates the sign-in.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/watch-providers/{provider}/auth/api-key": {
       "post": {
         "operationId": "connectWatchProviderAPIKey",
@@ -202059,6 +202148,171 @@
           }
         ],
         "summary": "Connect a watch provider with a supplied API key.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/watch-providers/{provider}/auth/authorize": {
+      "post": {
+        "operationId": "startWatchProviderOAuth",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchProviderOAuthStart"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start browser sign-in with a watch provider.",
         "tags": [
           "requests"
         ],

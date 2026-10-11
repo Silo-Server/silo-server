@@ -67,6 +67,14 @@ Trakt collections and trending send profile tokens issued to the Trakt app, so
 they read the client ID from the Trakt plugin. They fall back to the legacy
 setting only when no Trakt plugin is configured.
 
+A Trakt app that signs in with PKCE has a client ID and no client secret, and
+Trakt rejects the `urn:ietf:wg:oauth:2.0:oob` redirect. The plugin's browser
+sign-in uses `<public URL>/api/v2/watch-providers/oauth/callback`, so the
+public URL has to be `https` and that address has to be registered on the app.
+The client secret stays optional for an app that still has one. Device-code
+sign-in remains in the plugin descriptor for a host that does not know the
+browser flow; that path still needs the secret.
+
 ## Connection settings
 
 A plugin can declare connection settings in its watch-sync descriptor: preferences a
