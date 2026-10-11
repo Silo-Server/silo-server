@@ -1,8 +1,9 @@
 {
-  "revision": "acb6061b6ed685ee85933c4187157c9cf4380cd0e099b671dcee7690ef3e7e74",
+  "revision": "05c94791891e4aab3f05db96a126e9671d5aef94cd5e44c654c3d8ce2cd86860",
   "state": "available",
   "allowed": true,
   "realtime_monitoring": true,
   "trickplay": true,
-  "trickplay_supported": false
+  "trickplay_supported": false,
+  "unsupported_files": true
 }
