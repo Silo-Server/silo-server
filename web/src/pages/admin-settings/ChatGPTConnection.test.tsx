@@ -297,7 +297,11 @@ describe("ChatGPTConnection", () => {
 
   it("keeps the dialog open after a failed submission and reconciles its status", async () => {
     mocks.complete.mockRejectedValue(new Error("network failure"));
-    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    const refreshSettings = vi.fn();
+    const panel = (
+      <ChatGPTConnection model="" onModelChange={vi.fn()} onConnectionConfirmed={refreshSettings} />
+    );
+    const view = render(panel);
     await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
     await userEvent.type(
       screen.getByRole("textbox", { name: "Browser URL" }),
@@ -309,12 +313,22 @@ describe("ChatGPTConnection", () => {
     expect(mocks.refetch).toHaveBeenCalledOnce();
     expect(mocks.complete).toHaveBeenCalledOnce();
     expect(mocks.success).not.toHaveBeenCalled();
+    expect(refreshSettings).not.toHaveBeenCalled();
     act(() => {
       status = { ...status, login_result: "connected", attempt_id: "fixture-state" };
       statusVersion++;
-      view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+      view.rerender(
+        <ChatGPTConnection
+          model=""
+          onModelChange={vi.fn()}
+          onConnectionConfirmed={refreshSettings}
+        />,
+      );
     });
-    expect(mocks.success).toHaveBeenCalledWith(expect.stringContaining("ChatGPT connected"));
+    expect(mocks.success).toHaveBeenCalledWith(
+      "ChatGPT connected. Review your text model settings.",
+    );
+    expect(refreshSettings).toHaveBeenCalledOnce();
   });
 
   it("clears the pasted URL when the dialog closes", async () => {

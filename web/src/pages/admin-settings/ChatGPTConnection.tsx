@@ -25,6 +25,7 @@ import { SettingField, SettingFieldStatus } from "./SettingField";
 export function ChatGPTConnection(props: {
   model: string;
   onModelChange: (model: string) => void;
+  onConnectionConfirmed?: () => void;
 }) {
   useOptionalAuth();
   const authority = captureProfileRequestContext();
@@ -40,9 +41,11 @@ export function ChatGPTConnection(props: {
 function ChatGPTConnectionPanel({
   model,
   onModelChange,
+  onConnectionConfirmed,
 }: {
   model: string;
   onModelChange: (model: string) => void;
+  onConnectionConfirmed?: () => void;
 }) {
   const authority = captureProfileRequestContext();
   const authorityActive = () => authority !== null && isCapturedProfileAuthorityActive(authority);
@@ -70,7 +73,8 @@ function ChatGPTConnectionPanel({
     if (!authorityActive() || !loginOpen || !next || !attempt) return;
     if (next.attempt_id === attempt.attempt_id && next.login_result === "connected") {
       clearLogin();
-      toast.success("ChatGPT connected. Choose a text model and save your settings.");
+      onConnectionConfirmed?.();
+      toast.success("ChatGPT connected. Review your text model settings.");
       if (firstConnection) setWelcomeOpen(true);
       return;
     }

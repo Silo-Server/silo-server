@@ -93,6 +93,10 @@ type ChatGPTDisconnectOutput struct {
 
 func chatGPTProblem(err error) error {
 	switch {
+	case errors.Is(err, chatgpt.ErrModelUnavailable):
+		return NewProblem(TypeValidationFailed, chatgpt.ErrModelUnavailable.Error())
+	case errors.Is(err, chatgpt.ErrAccountChanged):
+		return NewProblem(TypeValidationFailed, chatgpt.ErrAccountChanged.Error())
 	case errors.Is(err, chatgpt.ErrInvalidLogin):
 		return NewProblem(TypeValidationFailed, chatgpt.ErrInvalidLogin.Error())
 	case errors.Is(err, chatgpt.ErrInvalidCallbackURL):

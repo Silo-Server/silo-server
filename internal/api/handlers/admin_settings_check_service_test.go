@@ -143,7 +143,17 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := service.SelectAccount(ctx, "b"); err != nil {
+			// Simulate an account activation completed by another node. Selection
+			// catalog validation is covered by the credential service tests.
+			if err := (settingsCheckChatGPTStore{store}).UpdateValueAtomic(ctx, chatgpt.CredentialsKey, func(raw string) (string, error) {
+				var next map[string]any
+				if err := json.Unmarshal([]byte(raw), &next); err != nil {
+					return "", err
+				}
+				next["active"] = "b"
+				data, err := json.Marshal(next)
+				return string(data), err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if token, err := source(ctx); err != nil || token != "a-token" {

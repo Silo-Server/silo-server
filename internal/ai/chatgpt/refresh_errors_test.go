@@ -1,0 +1,95 @@
+package chatgpt
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestRefreshTerminalOAuthErrorsRequireSignIn(t *testing.T) {
+	for _, code := range []string{oauthInvalidGrant, "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused"} {
+		for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized} {
+			t.Run(fmt.Sprintf("%s/%d", code, status), func(t *testing.T) {
+				store := &memoryStore{values: map[string]string{}}
+				save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "verified", IDToken: "validated-hint", RefreshToken: "old-refresh", Scopes: planScope}}})
+				service := NewService(store)
+				calls := 0
+				service.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					_ = r.ParseForm()
+					if r.Form.Get("grant_type") != oauthRefreshToken {
+						t.Fatal("expected refresh grant")
+					}
+					return response(status, map[string]string{"error": code}), nil
+				})
+				_, err := service.BearerToken(t.Context())
+				if !errors.Is(err, ErrSignInRequired) || errors.Is(err, errInvalidAuthorizationGrant) {
+					t.Fatalf("terminal refresh classification: %v", err)
+				}
+				c := stored(t, store)
+				if !c.Accounts[0].NeedsLogin || c.Accounts[0].ClientID != "app" || c.Accounts[0].Subject != "verified" || c.Accounts[0].IDToken != "validated-hint" || c.Active != "app" {
+					t.Fatal("terminal error lost registration or failed to require sign-in")
+				}
+				if _, err := service.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) || calls != 1 {
+					t.Fatal("terminal refresh attempted unusable credentials again")
+				}
+			})
+		}
+	}
+}
+
+func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		status     int
+	}{
+		{"temporary400", `{"error":"temporarily_unavailable"}`, 400},
+		{"temporary401", `{"error":"temporarily_unavailable"}`, 401},
+		{"server error", `{"error":"server_error"}`, 400},
+		{"invalid client", `{"error":"invalid_client"}`, 401},
+		{"unknown error", `{"error":"future_provider_error"}`, 400},
+		{"malformed", `{"error":`, 400},
+		{"empty", "", 401},
+		{"wrong error type", `{"error":{"code":"invalid_grant"}}`, 400},
+		{"bounded body", strings.Repeat(" ", 128<<10) + `{"error":"invalid_grant"}`, 400},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &memoryStore{values: map[string]string{}}
+			save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "verified", Email: "verified@example.test", IDToken: "validated-hint", AccessToken: "expired-access", RefreshToken: "old-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(-time.Minute)}}})
+			before := stored(t, store)
+			service := NewService(store)
+			calls := 0
+			service.http.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				_ = r.ParseForm()
+				if r.Form.Get("client_id") != "app" || r.Form.Get("refresh_token") != "old-refresh" {
+					t.Fatal("retry changed renewable credentials")
+				}
+				if calls == 1 {
+					return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(test.body))}, nil
+				}
+				return response(200, tokenResponse{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer", ExpiresIn: 3600}), nil
+			})
+			token, err := service.BearerToken(t.Context())
+			if token != "" || !errors.Is(err, ErrProvider) || errors.Is(err, ErrSignInRequired) {
+				t.Fatalf("nonterminal classification: %q, %v", token, err)
+			}
+			after := stored(t, store)
+			if after.Active != before.Active || after.Accounts[0] != before.Accounts[0] {
+				t.Fatal("nonterminal refresh modified saved credentials")
+			}
+			token, err = service.BearerToken(t.Context())
+			if err != nil || token != "new-access" || calls != 2 {
+				t.Fatalf("retry did not recover: %q, %v, calls=%d", token, err, calls)
+			}
+			a := stored(t, store).Accounts[0]
+			if a.RefreshToken != "new-refresh" || a.NeedsLogin || a.Subject != "verified" || a.IDToken != "validated-hint" {
+				t.Fatal("recovery lost rotation or verified registration")
+			}
+		})
+	}
+}

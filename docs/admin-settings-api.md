@@ -41,7 +41,8 @@ provider error bodies and credentials. Invalid kinds/configuration return `422`.
 uses the model's default. Explicit values come from the model's capability
 response. The server validates known model families against their supported
 levels; an unknown custom model is validated by the provider connection check.
-Both settings apply to subsequent AI requests after a settings reload.
+Text requests read the persisted authentication mode, endpoint, API key, model,
+effort, and active registration together at request start.
 
 The following operations require an acting administrator:
 
@@ -65,10 +66,21 @@ The following operations require an acting administrator:
   models in provider order with display names. The capability endpoint supplies
   reasoning levels for the selected model.
 - `POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select` selects a connected
-  registration for subsequent requests.
-- `DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}` clears credentials while
-  retaining the registration. `revocation_confirmed` reports whether OpenAI
-  confirmed revocation; a local disconnect succeeds even if revocation fails.
+  registration for subsequent requests. In ChatGPT mode, selection and successful
+  login retain the current model when available, otherwise select the first
+  listed model. Incompatible reasoning effort resets to the provider default.
+  These changes commit together. An unavailable or empty model catalog prevents
+  activation. API-key model settings are preserved.
+- `DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}` disables the account before
+  contacting OpenAI, retains the refresh token for bounded revocation retries,
+  then clears it while retaining the registration. `revocation_confirmed` reports
+  whether OpenAI confirmed revocation; a local disconnect succeeds even if
+  revocation fails. Cleanup cannot overwrite a newer successful reconnect.
+
+Model and reasoning saves in ChatGPT mode validate against the account catalog.
+A selection that changes during validation rejects the save so the client can
+refresh its settings. The web refreshes persisted settings after activation and
+preserves unsaved drafts under the existing revision guards.
 
 `ai.chatgpt.credentials` is encrypted internal state. Generic settings reads,
 secret-status lists, writes, and settings revision validators exclude it. The

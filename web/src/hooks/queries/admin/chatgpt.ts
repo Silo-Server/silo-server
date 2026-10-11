@@ -6,6 +6,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
+import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 
 const connectionKey = ["admin", "ai", "chatgpt"] as const;
 
@@ -54,6 +55,7 @@ export function useChatGPTModels(clientID: string, enabled: boolean) {
 
 function useConnectionWrite<TInput, TResult>(
   request: (input: TInput, context: ProfileRequestContextSnapshot) => Promise<TResult>,
+  changesSettings = false,
 ) {
   const qc = useQueryClient();
   const context = captureProfileRequestContext();
@@ -77,6 +79,9 @@ function useConnectionWrite<TInput, TResult>(
           );
         },
       });
+      if (changesSettings && isCapturedProfileAuthorityActive(context)) {
+        await qc.invalidateQueries({ queryKey: adminSettingsKey(context), exact: true });
+      }
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       return result;
     },
@@ -93,20 +98,24 @@ export function useStartChatGPTLogin() {
 }
 
 export function useCompleteChatGPTLogin() {
-  return useConnectionWrite((callbackURL: string, profileContext) =>
-    v2("POST /api/v2/admin/ai/chatgpt/login/complete", {
-      body: { callback_url: callbackURL },
-      profileContext,
-    }),
+  return useConnectionWrite(
+    (callbackURL: string, profileContext) =>
+      v2("POST /api/v2/admin/ai/chatgpt/login/complete", {
+        body: { callback_url: callbackURL },
+        profileContext,
+      }),
+    true,
   );
 }
 
 export function useSelectChatGPTAccount() {
-  return useConnectionWrite((clientID: string, profileContext) =>
-    v2("POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select", {
-      path: { client_id: clientID },
-      profileContext,
-    }),
+  return useConnectionWrite(
+    (clientID: string, profileContext) =>
+      v2("POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select", {
+        path: { client_id: clientID },
+        profileContext,
+      }),
+    true,
   );
 }
 

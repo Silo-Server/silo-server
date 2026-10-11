@@ -518,10 +518,9 @@ func TestDisconnectRetriesTransientRevocation(t *testing.T) {
 					if r.Form.Get("token") != "refresh" || r.Form.Get("token_type_hint") != oauthRefreshToken || r.Form.Get(oauthClientID) != "app" {
 						t.Fatal("revocation changed the starting credentials")
 					}
-					// Disconnect holds the store lock throughout provider calls.
-					c, err := decode(store.values[CredentialsKey])
-					if err != nil || c.Accounts[0].RefreshToken != "refresh" || r.Context().Err() != nil {
-						t.Fatal("credentials or request context cleared before revocation")
+					c := stored(t, store)
+					if c.Accounts[0].RefreshToken != "refresh" || !c.Accounts[0].NeedsLogin || c.Accounts[0].AccessToken != "" || r.Context().Err() != nil {
+						t.Fatal("refresh token lost or account still usable during revocation")
 					}
 					if tc.deadline {
 						<-r.Context().Done()

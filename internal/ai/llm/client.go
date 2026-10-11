@@ -31,9 +31,12 @@ type Config struct {
 	ReasoningEffort      string
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
-	BaseURL              string // e.g. "https://api.openai.com" (no trailing /v1)
-	APIKey               string // empty for keyless local servers
-	ChatModel            string // chat-completions model used for translation
+	// Production text requests resolve provider settings and the registration
+	// together. Draft checks and transcription retain their supplied config.
+	TextConfigSource func(context.Context) (Config, error)
+	BaseURL          string // e.g. "https://api.openai.com" (no trailing /v1)
+	APIKey           string // empty for keyless local servers
+	ChatModel        string // chat-completions model used for translation
 
 	ASRBaseURL string // optional; empty = BaseURL
 	ASRAPIKey  string // optional; empty = APIKey
@@ -138,6 +141,13 @@ type chatCompletionResponse struct {
 // that ignore the field still work because the prompt itself demands JSON.
 func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) (string, error) {
 	cfg := c.Config()
+	if cfg.TextConfigSource != nil {
+		var err error
+		cfg, err = cfg.TextConfigSource(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
 	if err := reasoning.Validate(cfg.ChatModel, cfg.ReasoningEffort); err != nil {
 		return "", err
 	}

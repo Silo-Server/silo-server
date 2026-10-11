@@ -1810,6 +1810,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if chatGPT != nil {
 			c.ChatGPTTokenSource = chatGPT.TokenSource
 			c.ChatGPTTokenRejected = chatGPT.RejectToken
+			c.TextConfigSource = chatGPT.TextConfig
 		}
 		return c
 	}

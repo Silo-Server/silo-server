@@ -42,6 +42,7 @@ const (
 	oauthRefreshToken = "refresh_token"
 	oauthInvalidGrant = "invalid_grant"
 	visibilityListed  = "list"
+	jwkKeyTypeRSA     = "RSA"
 )
 
 var ErrSignInRequired = errors.New("sign in with ChatGPT again")
@@ -68,6 +69,7 @@ type account struct {
 	Scopes       string    `json:"scopes,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	NeedsLogin   bool      `json:"needs_login,omitzero"`
+	DisconnectID string    `json:"disconnect_id,omitempty"`
 }
 
 type pendingLogin struct {
@@ -314,8 +316,21 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 		var problem struct {
 			Error string `json:"error"`
 		}
-		if form.Get("grant_type") == "authorization_code" &&
-			json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&problem) == nil && problem.Error == oauthInvalidGrant {
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&problem)
+		if form.Get("grant_type") == oauthRefreshToken {
+			if decodeErr != nil {
+				return tokens, ErrProvider
+			}
+			// Only documented unusable-token errors require reauthorization.
+			// Status alone does not establish that renewable credentials are lost.
+			switch problem.Error {
+			case oauthInvalidGrant, "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused":
+				return tokens, ErrSignInRequired
+			default:
+				return tokens, ErrProvider
+			}
+		}
+		if form.Get("grant_type") == "authorization_code" && decodeErr == nil && problem.Error == oauthInvalidGrant {
 			return tokens, errors.Join(ErrSignInRequired, errInvalidAuthorizationGrant)
 		}
 		return tokens, ErrSignInRequired
@@ -379,7 +394,17 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 			}
 		}
 	}
-	err = s.mutate(completionCtx, func(c *credentials) error {
+	var activationModels []Model
+	var activationErr error
+	if completionErr == nil && hasPlanScope(tokens.Scope) {
+		activationModels, activationErr = s.loginModels(completionCtx, tokens)
+	}
+	// A slow catalog lookup can exhaust the provider deadline after the code
+	// exchange succeeded. Reserve an independent deadline to persist its tokens
+	// and the login outcome, including when activation must be retried.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelSave()
+	err = s.mutateSettings(saveCtx, func(c *credentials, values map[string]string) error {
 		// A newer administrator attempt supersedes this completion, including
 		// a callback already exchanging credentials on another node.
 		if c.LoginID != pending.State {
@@ -419,6 +444,18 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 			c.Accounts = append(c.Accounts, a)
 		}
 		if a.NeedsLogin {
+			return nil
+		}
+		if activationErr == nil {
+			activationErr = reconcileModel(values, activationModels)
+		}
+		if activationErr != nil {
+			// Preserve accepted rotating credentials even when the model catalog
+			// cannot be reconciled. Activation can be retried through selection.
+			if c.Active == clientID {
+				c.Active = ""
+			}
+			completionErr = activationErr
 			return nil
 		}
 		c.Active = clientID
@@ -543,17 +580,7 @@ func (s *Service) RejectToken(ctx context.Context, rejected string, needsLogin b
 }
 
 func (s *Service) SelectAccount(ctx context.Context, clientID string) error {
-	return s.mutate(ctx, func(c *credentials) error {
-		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
-		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
-			return ErrSignInRequired
-		}
-		c.Active = clientID
-		c.Pending = nil
-		c.LoginID = ""
-		c.LoginResult = loginIdle
-		return nil
-	})
+	return s.selectAccount(ctx, clientID)
 }
 
 type discovery struct {
@@ -598,7 +625,7 @@ func (s *Service) verifyIDToken(ctx context.Context, raw, clientID, nonce string
 	_, err = jwt.ParseWithClaims(raw, claims, func(token *jwt.Token) (any, error) {
 		kid, _ := token.Header["kid"].(string)
 		for _, key := range keys.Keys {
-			if key.Kty != "RSA" || key.Kid != kid || kid == "" {
+			if key.Kty != jwkKeyTypeRSA || key.Kid != kid || kid == "" {
 				continue
 			}
 			n, nErr := base64.RawURLEncoding.DecodeString(key.N)
@@ -643,48 +670,13 @@ func (s *Service) Models(ctx context.Context) ([]Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	token, err := source(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var response struct {
-		Models []struct {
-			Slug       string `json:"slug"`
-			Name       string `json:"display_name"`
-			Visibility string `json:"visibility"`
-		} `json:"models"`
-	}
-	for attempt := range 2 {
-		err = s.getJSON(ctx, s.modelsURL, token, &response)
-		if !errors.Is(err, ErrSignInRequired) {
-			break
-		}
-		if rejectErr := s.RejectToken(ctx, token, attempt == 1); rejectErr != nil {
-			return nil, rejectErr
-		}
-		if attempt == 1 {
-			return nil, err
-		}
-		token, err = source(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	models := []Model{}
-	for _, m := range response.Models {
-		if m.Visibility == visibilityListed && m.Slug != "" {
-			models = append(models, Model{ID: m.Slug, Name: m.Name})
-		}
-	}
-	return models, nil
+	return s.modelsForSource(ctx, source)
 }
 
-// Disconnect retries transient revocation failures before clearing tokens.
-// The boolean records whether OpenAI confirmed revocation; local credentials are cleared
-// even if the network is unavailable, and registrations remain for reconnect.
+// Disconnect disables the account before attempting provider revocation. The
+// refresh token remains available for bounded retries, then cleanup removes it
+// unless a newer disconnect or successful reconnect superseded this operation.
+// The boolean records whether OpenAI confirmed revocation.
 func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error) {
 	disconnectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
@@ -692,26 +684,42 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 	deadline, _ := disconnectCtx.Deadline()
 	revocationCtx, cancelRevocation := context.WithDeadline(disconnectCtx, deadline.Add(-5*time.Second))
 	defer cancelRevocation()
-	revoked := false
+	disconnectID := randomValue()
+	var departing account
 	err := s.mutate(disconnectCtx, func(c *credentials) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
 		if i < 0 {
 			return ErrIdentity
 		}
 		a := &c.Accounts[i]
-		if a.RefreshToken == "" {
-			revoked = true
-		} else if d, err := s.discovery(revocationCtx); err == nil {
-			revoked = s.revokeSession(revocationCtx, d.RevocationEndpoint, *a)
-		}
-		a.AccessToken, a.RefreshToken, a.IDToken, a.Scopes = "", "", "", ""
+		departing = *a
+		a.AccessToken, a.IDToken, a.Scopes = "", "", ""
+		a.ExpiresAt = time.Time{}
 		a.NeedsLogin = true
+		a.DisconnectID = disconnectID
 		if c.Active == clientID {
 			c.Active = ""
 		}
 		c.Pending = nil
 		c.LoginID = ""
 		c.LoginResult = loginIdle
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	revoked := departing.RefreshToken == ""
+	if !revoked {
+		if d, err := s.discovery(revocationCtx); err == nil {
+			revoked = s.revokeSession(revocationCtx, d.RevocationEndpoint, departing)
+		}
+	}
+	err = s.mutate(disconnectCtx, func(c *credentials) error {
+		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
+		if i >= 0 && c.Accounts[i].DisconnectID == disconnectID {
+			c.Accounts[i].RefreshToken = ""
+			c.Accounts[i].DisconnectID = ""
+		}
 		return nil
 	})
 	return revoked, err

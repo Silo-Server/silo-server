@@ -14,6 +14,8 @@ import {
   useSelectChatGPTAccount,
   useDisconnectChatGPTAccount,
 } from "./chatgpt";
+import { captureProfileRequestContext } from "@/api/client";
+import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", () => ({ v2: request }));
@@ -22,6 +24,32 @@ beforeEach(() => {
   request.mockReset();
   setAccessToken("account-a");
   setProfileId("profile-a");
+});
+
+it.each([
+  ["selection", useSelectChatGPTAccount],
+  ["completed login", useCompleteChatGPTLogin],
+] as const)("refreshes persisted model settings after %s", async (_name, hook) => {
+  const client = new QueryClient();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  request.mockResolvedValue({});
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result } = renderHook(
+    () => {
+      const mutation = hook();
+      return { mutateAsync: (input: string): Promise<unknown> => mutation.mutateAsync(input) };
+    },
+    { wrapper },
+  );
+  await act(async () => {
+    await result.current.mutateAsync("fixture");
+  });
+  expect(invalidate).toHaveBeenCalledWith({
+    queryKey: adminSettingsKey(captureProfileRequestContext()!),
+    exact: true,
+  });
 });
 
 it.each([

@@ -2622,6 +2622,11 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		normalized[key] = value
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanges map[string]bool
@@ -2630,7 +2635,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2650,6 +2655,12 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				rows = maps.Clone(normalized)
 				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
 				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			}
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
 			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
@@ -3001,6 +3012,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		req.Value = strconv.FormatBool(enabled)
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanged bool
@@ -3008,7 +3024,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -3023,6 +3039,12 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
 			}
 			prospective[key] = row
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
+			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err

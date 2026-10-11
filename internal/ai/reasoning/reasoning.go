@@ -40,6 +40,8 @@ func Validate(model, effort string) error {
 func ForModel(model string) []string {
 	model = strings.TrimPrefix(strings.ToLower(model), "openai/")
 	switch {
+	case model == "chat-latest", strings.HasPrefix(model, "gpt-") && strings.HasSuffix(model, "-chat-latest"):
+		return []string{}
 	case strings.HasPrefix(model, "gpt-4"), strings.HasPrefix(model, "gpt-3"):
 		return []string{}
 	case strings.HasPrefix(model, "gpt-6.1-sol"):

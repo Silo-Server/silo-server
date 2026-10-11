@@ -1,8 +1,9 @@
 # AI provider authentication
 
 The shared AI client serves subtitle translation, metadata translation, and
-Whisper-compatible transcription. Text requests snapshot `ai.auth_mode`, model,
-and reasoning effort at request start. API-key mode uses the configured
+Whisper-compatible transcription. Text requests snapshot `ai.auth_mode`, endpoint,
+API key, model, reasoning effort, and active registration at request start.
+API-key mode uses the configured
 OpenAI-compatible endpoint. ChatGPT mode uses the documented OSS token-sharing
 flow and the fixed OpenAI Responses endpoint. Transcription uses the existing
 speech endpoint and API key regardless of text authentication mode.
@@ -61,6 +62,21 @@ and pending state. Generic admin settings cannot read or overwrite this key,
 and refreshes do not change the admin settings revision. Encryption remains
 bound to the setting's key name.
 
+Account activation coordinates the encrypted credential value with model and
+effort settings in one transaction. It takes the credential lock before the
+general settings lock on the same connection, after fetching the target account's
+catalog outside the transaction. In ChatGPT mode it retains a supported model or
+chooses the first listed model and resets incompatible effort to the provider
+default. Catalog failures prevent activation; accepted login credentials remain
+available for a later selection. API-key settings are preserved.
+
+Model-setting writes fetch the catalog outside settings transactions and recheck
+the active registration at commit. Each text request reads the complete provider
+configuration and active registration from one database snapshot. Provider
+dispatch uses that snapshot, avoiding stale authentication modes or models
+during asynchronous configuration reload.
+Draft connection checks retain the submitted model and effort.
+
 Each text request selects the active ChatGPT registration once. Its retries and
 token refreshes retain that registration even if an administrator switches the
 active account. Disconnecting that registration stops recovery; retries never
@@ -77,14 +93,24 @@ retains the existing token. Accepted refreshes and login exchanges finish under 
 independent, bounded context so request or job cancellation cannot discard a
 replacement. The final database write has its own bounded context. The verified
 sign-in identity remains authoritative during refresh; optional refresh ID
-tokens are not used. A rejected refresh marks the account as needing login.
-Transient provider failures leave it retryable. Sign-in expiry is checked before
+tokens are not used. Only the documented unusable-token errors (`invalid_grant`,
+`invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
+`refresh_token_invalidated`, and `refresh_token_reused`) mark the account as
+needing login. Other, empty, and malformed OAuth errors leave it retryable.
+Sign-in expiry is checked before
 consuming the attempt; an accepted exchange may finish after that deadline.
 A provider-side rotation followed by a lost database commit may require login
 again; Silo never promises an atomic transaction across OpenAI and PostgreSQL.
 
-Disconnect makes up to three revocation attempts, backing off after network
-failures and HTTP 5xx responses before clearing tokens. The provider deadline
+Disconnect first commits a disabled account, clears its access token and active
+selection, and retains its refresh token with an operation identifier. Fresh and
+pinned token sources reject the disabled account. Provider calls run outside the
+credential lock. Disconnect makes up to three revocation attempts, backing off
+after network failures and HTTP 5xx responses before clearing the refresh token.
+Cleanup checks the operation identifier, preserving a newer disconnect or
+successful reconnect, another account selection, and newer pending login. A
+failed cleanup commit leaves the account disabled with its retry token.
+The provider deadline
 leaves time for local cleanup, and caller cancellation does not interrupt it.
 Registration and host identity remain available for later authorization.
 The response distinguishes confirmed provider revocation from local credential

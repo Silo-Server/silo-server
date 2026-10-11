@@ -40,3 +40,28 @@ func TestProModelCapabilitiesAndValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestChatModelCapabilitiesAndValidation(t *testing.T) {
+	for _, model := range []string{
+		"chat-latest",
+		"gpt-5-chat-latest",
+		"gpt-5.1-chat-latest",
+		"gpt-5.2-chat-latest",
+		"openai/GPT-5.2-Chat-Latest",
+		"openai/CHAT-LATEST",
+	} {
+		t.Run(model, func(t *testing.T) {
+			if levels := ForModel(model); len(levels) != 0 {
+				t.Fatalf("ForModel(%q) = %v, want no reasoning levels", model, levels)
+			}
+			if err := Validate(model, ""); err != nil {
+				t.Fatalf("provider default rejected: %v", err)
+			}
+			for _, effort := range Levels {
+				if err := Validate(model, effort); err == nil {
+					t.Errorf("Validate(%q, %q) accepted unsupported reasoning effort", model, effort)
+				}
+			}
+		})
+	}
+}
