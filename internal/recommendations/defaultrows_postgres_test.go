@@ -708,3 +708,36 @@ func TestHighlyRatedReadsPastAStaleZeroCountPostgres(t *testing.T) {
 		t.Fatalf("highly rated = %v, want the movie and the new series", got)
 	}
 }
+
+// A profile that rated an episode has judged its series: the live default
+// rows, which hold series, leave the series out as the rows the worker builds
+// do, and a title rated directly leaves too.
+func TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tdefault-rated-episode-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	lib := newTestLibrary(t, pool, prefix+"lib")
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+
+	series := seedTitle(t, pool, prefix+"series-90", "series", lib, "rating_imdb = 9.0")
+	episode := prefix + "series-90-s1e1"
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Pilot')`, episode, series); err != nil {
+		t.Fatal(err)
+	}
+	ratedMovie := seedTitle(t, pool, prefix+"movie-88", "movie", lib, "rating_imdb = 8.8")
+	other := seedTitle(t, pool, prefix+"movie-80", "movie", lib, "rating_imdb = 8.0")
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 5), ($1, $2, $4, 4)`, userID, profile, episode, ratedMovie); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewReader(NewRepo(pool), nil, nil, nil)
+	filter := catalog.AccessFilter{UserID: userID, ProfileID: profile, AllowedLibraryIDs: []int{lib}}
+	row, err := r.GetSection(ctx, userID, profile, SectionKindTopRated, "", 60, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || !slices.Equal(itemIDs(row.Items), []string{other}) {
+		t.Fatalf("highly rated = %+v, want only the title the profile has not rated", row)
+	}
+}

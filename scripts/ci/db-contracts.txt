@@ -246,6 +246,7 @@
 # media types of personal rows.
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
 ./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
 ./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
 ./internal/recommendations TestGenreSamplerIsRatingLedPostgres
 ./internal/recommendations TestGetItemQualityRatingsPostgres

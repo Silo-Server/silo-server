@@ -241,12 +241,22 @@ func (s *SignalReader) BuildExclusionSet(ctx context.Context, ratings ratedItemL
 	for i, rating := range rated {
 		ratedIDs[i] = rating.MediaItemID
 	}
+	canonical, err := s.canonicalRatedItemIDs(ctx, ratedIDs)
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(excluded, canonical)
+	return excluded, nil
+}
+
+// canonicalRatedItemIDs resolves the IDs of rated titles to the canonical IDs
+// rows hold: a rated episode stands for its series, as a watched one does.
+func (s *SignalReader) canonicalRatedItemIDs(ctx context.Context, ratedIDs []string) (map[string]struct{}, error) {
 	canonical, err := s.repo.ResolveCanonicalItemIDSet(ctx, ratedIDs)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rated item IDs: %w", err)
 	}
-	maps.Copy(excluded, canonical)
-	return excluded, nil
+	return canonical, nil
 }
 
 // AbandonedItemIDs returns the canonical IDs of the titles the profile

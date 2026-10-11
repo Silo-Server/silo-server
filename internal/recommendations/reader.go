@@ -623,14 +623,19 @@ func (rr *rowRead) defaultRows(ctx context.Context, limit int) ([]ForYouRow, err
 // defaultRow reads one live default row, RecTypeTopRated or
 // RecTypeRecentlyAdded, leaving out the profile's exclusion set and every
 // title it rated in the query, so the row fills past them rather than losing
-// them to the filter afterwards.
+// them to the filter afterwards. The row holds series, so a rated episode
+// leaves out its series, as it does from the rows the worker builds.
 func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForYouRow, error) {
 	excluded, err := rr.exclusionSet(ctx)
 	if err != nil {
 		return ForYouRow{}, err
 	}
 	if rr.excludedIDs == nil {
-		rated, err := rr.reader.repo.ListRatedItemIDs(ctx, rr.userID, rr.profileID)
+		ratedIDs, err := rr.reader.repo.ListRatedItemIDs(ctx, rr.userID, rr.profileID)
+		if err != nil {
+			return ForYouRow{}, err
+		}
+		rated, err := rr.reader.signalReader().canonicalRatedItemIDs(ctx, ratedIDs)
 		if err != nil {
 			return ForYouRow{}, err
 		}
@@ -638,7 +643,11 @@ func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForY
 		for id := range excluded {
 			rr.excludedIDs = append(rr.excludedIDs, id)
 		}
-		rr.excludedIDs = append(rr.excludedIDs, rated...)
+		for id := range rated {
+			if _, dup := excluded[id]; !dup {
+				rr.excludedIDs = append(rr.excludedIDs, id)
+			}
+		}
 	}
 	items, err := rr.reader.repo.ListDefaultRowItems(ctx, rr.access, kind, rr.excludedIDs, limit)
 	if err != nil {
