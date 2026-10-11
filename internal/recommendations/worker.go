@@ -816,8 +816,12 @@ func (w *Worker) ensureGlobalRows(ctx context.Context, store globalRowCache) {
 		res.GlobalRows, res.GlobalFailures = w.cacheGlobalRows(ctx, store, cacheExpiry(time.Now()))
 		return res, nil
 	}}, false)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrJobRunning), errors.Is(err, ErrJobRunningElsewhere):
 		slog.InfoContext(ctx, "global recommendation rows not built at startup", "component", "recommendations", "reason", err)
+	default:
+		slog.WarnContext(ctx, "global recommendation rows could not be built at startup", "component", "recommendations", "error", err)
 	}
 }
 
