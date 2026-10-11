@@ -11,12 +11,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -90,8 +93,9 @@ type Issuer struct {
 // ownership transfers lock them, before the link. A promotion, an ownership
 // move or an email change that commits first is judged here. A promotion of
 // the account, an ownership move to it, or an email change that commits later
-// deletes the link in its own transaction.
-func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time) error {
+// deletes the link in its own transaction. The audit row names the delivery
+// and expiry only, never the link or its digest.
+func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time, delivery Delivery) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin password reset link: %w", err)
@@ -161,9 +165,17 @@ func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, token
 	if tag.RowsAffected() == 0 {
 		return ErrNotEligible
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordResetLinkCreated, auditmutation.TargetUser,
+		strconv.Itoa(userID), http.StatusCreated, auditmutation.Changes(nil, map[string]any{
+			"delivery": string(delivery), "expires_at": expiresAt.UTC().Format(time.RFC3339),
+		}))
+	if err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit password reset link: %w", err)
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return nil
 }
 
@@ -268,8 +280,14 @@ func (r *Repository) Complete(ctx context.Context, tokenHash, newPassword string
 	if err != nil {
 		return nil, err
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordResetCompleted, auditmutation.TargetUser,
+		strconv.Itoa(userID), http.StatusOK, auditmutation.SecretChanged(auditmutation.FieldPassword))
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit password reset: %w", err)
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return user, nil
 }
