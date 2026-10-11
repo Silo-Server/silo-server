@@ -158,7 +158,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	stubInputStart(t, -0.25, nil)
 	previous := loadVerifiedKeyframeIndex
 	verifiedLoads := 0
-	loadVerifiedKeyframeIndex = func(string) (keyframes.Index, error) { verifiedLoads++; return verified, nil }
+	loadVerifiedKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { verifiedLoads++; return verified, nil }
 	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
 
 	rebuilt := plannedOpts()
@@ -175,6 +175,36 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	fresh.OutputDir = t.TempDir()
 	if plan := resolveCopyPlan(t.Context(), fresh); plan != nil || verifiedLoads != 1 {
 		t.Fatalf("a first start planned (%v) or waited for the check (%d loads)", plan != nil, verifiedLoads)
+	}
+}
+
+// A rebuild whose request goes away during the keyframe check records nothing,
+// so the next rebuild plans instead of following a fallback.
+func TestResolveCopyPlanLeavesNoRecordWhenTheRebuildIsCanceled(t *testing.T) {
+	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	previous := loadVerifiedKeyframeIndex
+	loadVerifiedKeyframeIndex = func(ctx context.Context, _ string) (keyframes.Index, error) {
+		if err := ctx.Err(); err != nil {
+			return keyframes.Index{}, err
+		}
+		return verified, nil
+	}
+	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
+
+	rebuilt := plannedOpts()
+	rebuilt.OutputDir = t.TempDir()
+	rebuilt.Reconstructed = true
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	if plan := resolveCopyPlan(gone, rebuilt); plan != nil {
+		t.Fatal("planned without the keyframe check")
+	}
+	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a canceled rebuild left a plan record: %v", err)
+	}
+	if plan := resolveCopyPlan(t.Context(), rebuilt); plan == nil {
+		t.Fatal("the next rebuild didn't plan")
 	}
 }
 
@@ -488,7 +518,7 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 	dir := t.TempDir()
 	// Planned sessions use a fully checked index; check it now rather than
 	// in the background.
-	if _, err := keyframes.LoadVerified(source); err != nil {
+	if _, err := keyframes.LoadVerified(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 

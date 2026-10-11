@@ -43,7 +43,8 @@ type copySegmentPlan struct {
 }
 
 // loadKeyframeIndex reads a source's keyframe index, and
-// loadVerifiedKeyframeIndex waits for its full check; tests replace both.
+// loadVerifiedKeyframeIndex waits for its full check, stopping when ctx is
+// done; tests replace both.
 var (
 	loadKeyframeIndex         = keyframes.Load
 	loadVerifiedKeyframeIndex = keyframes.LoadVerified
@@ -82,13 +83,14 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan 
 	}
 	load := loadKeyframeIndex
 	if opts.Reconstructed {
+		load = func(path string) (keyframes.Index, error) { return loadVerifiedKeyframeIndex(ctx, path) }
 		// A rebuilt session that lost its plan record (a clean shutdown
 		// removes the output directory) may already have served the planned
 		// playlist. The plan follows from the verified index alone, so wait
 		// for the check here rather than fall back to FFmpeg's playlist,
 		// which a player holding the planned one can't follow. Once the
-		// check has run, the index is cached.
-		load = loadVerifiedKeyframeIndex
+		// check has run, the index is cached. The check stops if the
+		// rebuild's request goes away (see resolveCopyPlan).
 	}
 	idx, err := load(opts.InputPath)
 	if err != nil {
@@ -174,6 +176,12 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	// playlist. A probe cut short by the caller plans nothing, and that
 	// session serves FFmpeg's playlist.
 	plan := planCopySegments(ctx, opts)
+	if plan == nil && opts.Reconstructed && ctx.Err() != nil {
+		// The rebuild's request went away during the keyframe check. Its
+		// outcome says nothing about the file, so don't record it:
+		// StartTranscode abandons this rebuild, and the next one plans.
+		return nil
+	}
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations, rec.Keyframes, rec.FirstKey = plan.durations, plan.keyframes, plan.firstKey

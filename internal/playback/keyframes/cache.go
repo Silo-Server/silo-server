@@ -2,8 +2,10 @@ package keyframes
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -60,16 +62,17 @@ var verifySlots = make(chan struct{}, 1)
 // cache. A file without a usable index, including any that isn't Matroska or
 // WebM or is malformed, gets ErrNoIndex.
 func Load(path string) (Index, error) {
-	return load(path, false)
+	return load(context.Background(), path, false)
 }
 
 // LoadVerified is Load that runs the full check itself instead of in the
-// background.
-func LoadVerified(path string) (Index, error) {
-	return load(path, true)
+// background. The check stops when ctx is done, and a stopped check isn't
+// cached.
+func LoadVerified(ctx context.Context, path string) (Index, error) {
+	return load(ctx, path, true)
 }
 
-func load(path string, wait bool) (Index, error) {
+func load(ctx context.Context, path string, wait bool) (Index, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return Index{}, err
@@ -86,7 +89,7 @@ func load(path string, wait bool) (Index, error) {
 	}
 
 	if wait {
-		idx, err := VerifyMatroska(f, info.Size())
+		idx, err := VerifyMatroska(contextReaderAt{ctx: ctx, r: f}, info.Size())
 		if err != nil && transient(err) {
 			return Index{}, err
 		}
@@ -118,7 +121,21 @@ func load(path string, wait bool) (Index, error) {
 // transient reports an error reading the file, which says nothing lasting
 // about it: a later playback tries again. Anything else describes the file.
 func transient(err error) bool {
-	return errors.As(err, new(*fs.PathError))
+	return errors.As(err, new(*fs.PathError)) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// contextReaderAt stops a full check once its caller has gone: every read
+// fails with the context's error.
+type contextReaderAt struct {
+	ctx context.Context
+	r   io.ReaderAt
+}
+
+func (c contextReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.ReadAt(p, off)
 }
 
 // settle turns a lasting failure into ErrNoIndex: the file isn't Matroska, is
