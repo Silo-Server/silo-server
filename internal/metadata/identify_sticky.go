@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -28,6 +29,7 @@ import (
 // is asserted on itemRepo; *catalog.ItemRepository satisfies it.
 type metadataIdentityChoiceRepo interface {
 	MarkIdentityChosen(ctx context.Context, contentID string) error
+	ClearIdentityChoice(ctx context.Context, contentID string) error
 	IdentityChosen(ctx context.Context, contentID string) (bool, error)
 }
 
@@ -56,17 +58,38 @@ func collectLocalIdentityHints(ctx context.Context, chain []Provider, query Sear
 // recordIdentityChoice marks the item as identified by an admin. It runs
 // before the Identify changes anything, so a failed mark fails the Identify
 // with the item untouched and a retry is safe; the moves that follow carry the
-// mark to the item's new content ID.
-func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID string) error {
+// mark to the item's new content ID. The returned undo, for an Identify that
+// fails after the mark, clears the mark from the item's current content ID
+// unless the item was already marked, so a failed choice is never recorded.
+func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID string) (undo func(currentID string), err error) {
+	noop := func(string) {}
 	repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
 	if !ok || contentID == "" {
-		return nil
+		return noop, nil
+	}
+	wasChosen, err := repo.IdentityChosen(ctx, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("reading the Identify choice: %w", err)
 	}
 	if err := repo.MarkIdentityChosen(ctx, contentID); err != nil {
-		return fmt.Errorf("recording the Identify choice: %w", err)
+		return nil, fmt.Errorf("recording the Identify choice: %w", err)
 	}
-	return nil
+	if wasChosen {
+		return noop, nil
+	}
+	return func(currentID string) {
+		// The Identify may have failed because ctx was canceled.
+		clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), identityChoiceUndoTimeout)
+		defer cancel()
+		if err := repo.ClearIdentityChoice(clearCtx, currentID); err != nil {
+			slog.ErrorContext(ctx, "metadata: could not clear the choice of a failed Identify; a manual refresh may keep the old identity over a conflicting .nfo", "component", "metadata",
+				"content_id", currentID, "error", err)
+		}
+	}, nil
 }
+
+// identityChoiceUndoTimeout bounds clearing the mark of a failed Identify.
+const identityChoiceUndoTimeout = 10 * time.Second
 
 // localIdentityConflict reports whether a pipeline run in mode must leave the
 // local provider out because the IDs its files declare name a different

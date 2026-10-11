@@ -12,8 +12,9 @@
 -- Without .nfo files or sidecar art the provider finds nothing and changes
 -- nothing.
 --
--- Every chain row's order and on/off state is kept first, so the Down can put
--- back exactly what admins had, including libraries that had NFO on.
+-- Every chain row's order and on/off state is kept before and after the
+-- change, so the Down can put back what admins had, including libraries that
+-- had NFO on, without undoing edits made after the upgrade.
 CREATE TABLE local_metadata_default_on_chain_backup (
     media_folder_id integer NOT NULL,
     plugin_installation_id integer NOT NULL,
@@ -21,9 +22,12 @@ CREATE TABLE local_metadata_default_on_chain_backup (
     content_level text NOT NULL,
     priority integer NOT NULL,
     enabled boolean NOT NULL,
+    up_priority integer,
+    up_enabled boolean,
     PRIMARY KEY (media_folder_id, plugin_installation_id, capability_id, content_level)
 );
 INSERT INTO local_metadata_default_on_chain_backup
+    (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled)
 SELECT media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled
 FROM library_provider_chains;
 
@@ -59,10 +63,19 @@ WHERE c.media_folder_id = ranked.media_folder_id
   AND c.content_level = ranked.content_level
   AND c.priority <> ranked.position;
 
+UPDATE local_metadata_default_on_chain_backup b
+SET up_priority = c.priority, up_enabled = c.enabled
+FROM library_provider_chains c
+WHERE c.media_folder_id = b.media_folder_id
+  AND c.plugin_installation_id = b.plugin_installation_id
+  AND c.capability_id = b.capability_id
+  AND c.content_level = b.content_level;
+
 -- +goose Down
--- Restores the opt-in default and each chain row this migration found to the
--- order and on/off state it had. Builtin NFO rows added since (new libraries,
--- the startup sync) go back to the old default, off.
+-- Restores the opt-in default and puts each chain row this migration changed
+-- back to the order and on/off state it had, unless it was edited after the
+-- upgrade. Builtin NFO rows added since (new libraries, the startup sync) go
+-- back to the old default, off.
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'false'::jsonb)
 FROM plugin_installations pi
@@ -76,7 +89,9 @@ FROM local_metadata_default_on_chain_backup b
 WHERE c.media_folder_id = b.media_folder_id
   AND c.plugin_installation_id = b.plugin_installation_id
   AND c.capability_id = b.capability_id
-  AND c.content_level = b.content_level;
+  AND c.content_level = b.content_level
+  AND c.priority = b.up_priority
+  AND c.enabled = b.up_enabled;
 
 UPDATE library_provider_chains c
 SET enabled = false

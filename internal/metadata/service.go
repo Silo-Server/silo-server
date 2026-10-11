@@ -2440,7 +2440,7 @@ func (s *MetadataService) mergeAndPersist(
 	seasons []SeasonResult,
 	episodes []EpisodeResult,
 	contentType string,
-) (*ProcessResult, error) {
+) (_ *ProcessResult, retErr error) {
 	// Quarantined IDs are unsafe for deduplication, canonical ID derivation, and
 	// persistence regardless of whether this is a new item or a refresh.
 	for key := range accumulator.quarantinedProviderIDKeys {
@@ -2513,11 +2513,18 @@ func (s *MetadataService) mergeAndPersist(
 	}
 	// Record the admin's choice before anything below can move the item: a
 	// rename or merge carries the mark along, and a failure here leaves the
-	// item where the admin found it, so retrying the Identify is safe.
+	// item where the admin found it, so retrying the Identify is safe. If the
+	// Identify fails later, the mark comes off again (identify_sticky.go).
 	if req.Mode == ModeIdentify && contentID != "" {
-		if err := s.recordIdentityChoice(ctx, contentID); err != nil {
+		undo, err := s.recordIdentityChoice(ctx, contentID)
+		if err != nil {
 			return nil, err
 		}
+		defer func() {
+			if retErr != nil {
+				undo(contentID)
+			}
+		}()
 	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.

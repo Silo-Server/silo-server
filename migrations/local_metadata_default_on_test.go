@@ -8,8 +8,9 @@ import (
 // Turning local metadata on by default enables the built-in NFO rows of
 // existing chains, including ones the startup sync appended disabled and last,
 // moves them to the front, and keeps the other providers' order. Rolling back
-// puts every row it found back as it was, including an NFO row an admin had
-// turned on, and turns off NFO rows added since.
+// puts every row it changed back as it was, including an NFO row an admin had
+// turned on, leaves rows an admin edited after the upgrade alone, and turns
+// off NFO rows added since.
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -42,7 +43,7 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 	}
 	chains := func() []row {
 		t.Helper()
-		rows, err := tx.Query(t.Context(), `SELECT media_folder_id, capability_id, priority, enabled FROM library_provider_chains ORDER BY media_folder_id, content_level, priority`)
+		rows, err := tx.Query(t.Context(), `SELECT media_folder_id, capability_id, priority, enabled FROM library_provider_chains ORDER BY media_folder_id, content_level, priority, capability_id`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +67,6 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		return enabled
 	}
 
-	before := chains()
 	const migration = "20261011201709_local_metadata_default_on"
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, false))
 	if !defaultEnabled() {
@@ -82,15 +82,24 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
 	}
 
-	// A library created after the upgrade seeds NFO on.
+	// After the upgrade: a new library seeds NFO on, an admin turns on TMDB
+	// in library 11, and another turns NFO off in library 13.
 	migrationExec(t, tx, `INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
-    (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true)`)
+    (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true);
+UPDATE library_provider_chains SET enabled = true WHERE media_folder_id = 11 AND capability_id = 'tmdb';
+UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AND capability_id = 'nfo';`)
 
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	if defaultEnabled() {
 		t.Error("nfo default_enabled not turned off on rollback")
 	}
-	want = append(before, row{14, "nfo", 0, false}, row{14, "tmdb", 1, true})
+	want = []row{
+		{10, "tmdb", 0, true}, {10, "nfo", 1, false},
+		{11, "tvdb", 0, true}, {11, "nfo", 2, false}, {11, "tmdb", 2, true},
+		{12, "nfo", 0, false}, {12, "tmdb", 1, true},
+		{13, "nfo", 0, false}, {13, "tmdb", 0, true},
+		{14, "nfo", 0, false}, {14, "tmdb", 1, true},
+	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)
 	}

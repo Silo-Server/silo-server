@@ -21,6 +21,18 @@ func (r *ItemRepository) MarkIdentityChosen(ctx context.Context, contentID strin
 	return nil
 }
 
+// ClearIdentityChoice removes the Identify mark, for an Identify that failed
+// after recording it.
+func (r *ItemRepository) ClearIdentityChoice(ctx context.Context, contentID string) error {
+	if _, err := r.pool.Exec(ctx,
+		`UPDATE media_items SET identity_chosen_at = NULL WHERE content_id = $1`,
+		contentID,
+	); err != nil {
+		return fmt.Errorf("clearing identity choice for %s: %w", contentID, err)
+	}
+	return nil
+}
+
 // IdentityChosen reports whether an admin chose the item's identity with
 // Identify. A missing item reports false.
 func (r *ItemRepository) IdentityChosen(ctx context.Context, contentID string) (bool, error) {

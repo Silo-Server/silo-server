@@ -15,10 +15,18 @@ import (
 // real GetByID never loads credits, so tests that care seed them here.
 type localPipelineItemRepo struct {
 	*fakeItemRepo
-	mu      sync.Mutex
-	people  map[string][]models.ItemPerson
-	chosen  map[string]bool
-	markErr error
+	mu        sync.Mutex
+	people    map[string][]models.ItemPerson
+	chosen    map[string]bool
+	markErr   error
+	upsertErr error
+}
+
+func (r *localPipelineItemRepo) Upsert(ctx context.Context, item *models.MediaItem) error {
+	if r.upsertErr != nil {
+		return r.upsertErr
+	}
+	return r.fakeItemRepo.Upsert(ctx, item)
 }
 
 func newLocalPipelineHarness() (*testHarness, *localPipelineItemRepo) {
@@ -41,6 +49,13 @@ func (r *localPipelineItemRepo) MarkIdentityChosen(_ context.Context, contentID 
 		return r.markErr
 	}
 	r.chosen[contentID] = true
+	return nil
+}
+
+func (r *localPipelineItemRepo) ClearIdentityChoice(_ context.Context, contentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.chosen, contentID)
 	return nil
 }
 
@@ -555,5 +570,28 @@ func TestIdentify_FailedChoiceRecordLeavesItemUnchanged(t *testing.T) {
 	}
 	if item.Title != "Heat" || item.TmdbID != "949" {
 		t.Errorf("item = %q tmdb %q, want it unchanged", item.Title, item.TmdbID)
+	}
+}
+
+// An Identify that fails after recording the choice takes the mark off again,
+// unless the item already carried one from an earlier Identify.
+func TestIdentify_FailedWriteRemovesOnlyItsOwnChoice(t *testing.T) {
+	for _, alreadyChosen := range []bool{false, true} {
+		h, repo := newLocalPipelineHarness()
+		ctx := context.Background()
+		seedMovieItem(t, h, "movie:tmdb:949", "Heat", 1995)
+		h.itemRepo.items["movie:tmdb:949"].TmdbID = "949"
+		repo.chosen["movie:tmdb:949"] = alreadyChosen
+		repo.upsertErr = errors.New("connection reset")
+
+		remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Collateral", Year: 2004, ProviderIDs: map[string]string{"tmdb": "1538"}}}
+		if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+			ContentID: "movie:tmdb:949", ProviderIDs: map[string]string{"tmdb": "1538"}, Language: "en", Mode: ModeIdentify,
+		}, []Provider{remote}); err == nil {
+			t.Fatal("Identify succeeded although the item write failed")
+		}
+		if got := repo.chosen["movie:tmdb:949"]; got != alreadyChosen {
+			t.Errorf("already chosen %v: choice after the failed Identify = %v, want %v", alreadyChosen, got, alreadyChosen)
+		}
 	}
 }
