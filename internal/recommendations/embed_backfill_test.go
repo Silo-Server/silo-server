@@ -571,6 +571,39 @@ func TestEmbedMissingHoldsBackRefusedInputs(t *testing.T) {
 	}
 }
 
+// An embeddings reset deletes the lock on every server, and each server's
+// record of refused inputs was made under the old lock, so the next catch-up
+// pass on any server retries them instead of holding them back until the
+// nightly run.
+func TestEmbedMissingRetriesRefusedInputsAfterTheLockChanges(t *testing.T) {
+	calls := 0
+	store := newFakeEmbeddingStore("bad-1")
+	store.lock = &EmbeddingLock{BaseURL: "http://embed.test", Model: backfillTestModel, SourceDimensions: 8, StorageDimensions: CanonicalEmbeddingDimensions}
+	client := refusingEmbedder(func(text string) bool { return text == "bad-1" }, &calls)
+	refused := newRefusedEmbedInputs()
+	run := func() EmbedCounts {
+		t.Helper()
+		calls = 0
+		b := newTestBackfill(store, client, nil)
+		b.refused = refused
+		if err := b.run(context.Background(), false); err != nil {
+			t.Fatal(err)
+		}
+		return b.counts
+	}
+
+	if counts := run(); counts.Skipped != 1 {
+		t.Fatalf("first pass: counts=%+v", counts)
+	}
+	if counts := run(); counts.Skipped != 0 || calls != 0 {
+		t.Fatalf("second pass under the same lock: counts=%+v calls=%d; want bad-1 held back", counts, calls)
+	}
+	store.lock = nil // an embeddings reset on another server
+	if counts := run(); counts.Skipped != 1 || calls == 0 {
+		t.Fatalf("pass after the reset: counts=%+v calls=%d; want bad-1 retried", counts, calls)
+	}
+}
+
 func TestBackfillRunThatStoresNothingFails(t *testing.T) {
 	calls := 0
 	store := newFakeEmbeddingStore(testIDs("item-", 12)...)

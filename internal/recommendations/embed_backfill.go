@@ -133,11 +133,15 @@ func (e *Engine) newBackfill() *embedBackfill {
 // refused at every length, with a hash of that text. Pass 1 skips an item
 // while its text still hashes the same, so the catch-up pass does not resend
 // a refused text every few minutes. EmbedAll clears the record first and
-// retries them all. The record is held in memory: each server's Engine keeps
-// its own, and a restart clears it. A nil record remembers nothing.
+// retries them all, and so does any run that finds a different embedding
+// lock than the record was made under, such as none after an embeddings
+// reset. The record is held in memory: each server's Engine keeps its own,
+// and a restart clears it. A nil record remembers nothing.
 type refusedEmbedInputs struct {
 	mu    sync.Mutex
 	texts map[string][sha256.Size]byte
+	// lock is the embedding lock the record was made under; nil for none.
+	lock *EmbeddingLock
 }
 
 func newRefusedEmbedInputs() *refusedEmbedInputs {
@@ -172,6 +176,27 @@ func (r *refusedEmbedInputs) remove(itemID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.texts, itemID)
+}
+
+// useLock clears the record when lock differs from the one it was made
+// under: an embeddings reset, or a model change, makes every refusal worth
+// retrying. lock is nil when none is stored.
+func (r *refusedEmbedInputs) useLock(lock *EmbeddingLock) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sameLock := r.lock == nil && lock == nil || r.lock != nil && lock != nil && *r.lock == *lock
+	if sameLock {
+		return
+	}
+	clear(r.texts)
+	r.lock = nil
+	if lock != nil {
+		saved := *lock
+		r.lock = &saved
+	}
 }
 
 func (r *refusedEmbedInputs) reset() {
@@ -263,9 +288,11 @@ type embedBackfill struct {
 }
 
 func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
-	if err := checkEmbeddingLockConfig(ctx, b.db, b.baseURL, b.model); err != nil {
+	lock, err := checkEmbeddingLockConfig(ctx, b.db, b.baseURL, b.model)
+	if err != nil {
 		return err
 	}
+	b.refused.useLock(lock)
 	// The vectors stored are committed, however the run ends.
 	defer b.markSignalsStale(context.WithoutCancel(ctx))
 	if includeTextStale {
@@ -677,15 +704,15 @@ func checkStorableVector(vector []float32) error {
 
 // checkEmbeddingLockConfig fails when an embedding lock exists for another
 // base URL or model.
-func checkEmbeddingLockConfig(ctx context.Context, store embeddingLockReader, baseURL, model string) error {
+func checkEmbeddingLockConfig(ctx context.Context, store embeddingLockReader, baseURL, model string) (*EmbeddingLock, error) {
 	lock, err := store.GetEmbeddingLock(ctx)
 	if err != nil {
-		return fmt.Errorf("load embedding lock: %w", err)
+		return nil, fmt.Errorf("load embedding lock: %w", err)
 	}
 	if lock == nil {
-		return nil
+		return nil, nil
 	}
-	return lock.ValidateConfig(baseURL, model)
+	return lock, lock.ValidateConfig(baseURL, model)
 }
 
 // runStopError returns the error that ends the run after a failed embed call,

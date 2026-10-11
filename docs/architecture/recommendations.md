@@ -98,8 +98,9 @@ the run, and the refusals since the last stored vector or test count as
 failures that the next run retries, not as refused inputs. Each
 server remembers in memory the items it saw refused, with a hash of their
 text, and its catch-up passes skip them until the text changes; the nightly
-or a manual embedding run clears the record and retries them, and so does a
-restart. A lock that conflicts with the configuration fails every run,
+or a manual embedding run clears the record and retries them, and so do a
+restart and a run that finds a different embedding lock than the record was
+made under (an embeddings reset deletes the lock on every server). A lock that conflicts with the configuration fails every run,
 including the catch-up pass every 15 minutes, until an administrator resets
 embeddings or restores the settings.
 
