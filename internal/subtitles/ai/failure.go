@@ -12,6 +12,10 @@ import (
 // errSourceMissing reports a source track index the file no longer has.
 var errSourceMissing = errors.New("source track not found")
 
+// errAudioRequest marks an error returned by a transcription request, so a
+// provider "too large" answer can be told apart from one for a text request.
+var errAudioRequest = errors.New("transcription request")
+
 // ErrNoSpeech reports an audio track in which transcription found no speech.
 var ErrNoSpeech = errors.New("no speech recognized in the audio track")
 
@@ -27,6 +31,7 @@ const (
 	failureKeyRejected    = "The AI provider rejected the server's credentials. Ask a server administrator to check AI Services."
 	failureModelNotFound  = "The AI provider doesn't recognize the configured model. Ask a server administrator to check AI Services."
 	failureAudioTooLarge  = "The AI provider rejected the audio as too large. Ask a server administrator to lower Audio per request in AI Services."
+	failureTextTooLarge   = "The AI provider rejected the subtitle text as too large. Ask a server administrator to lower Subtitle lines per request in AI Services."
 	failureRateLimited    = "The AI provider is limiting requests right now. Try again in a few minutes."
 	failureUnavailable    = "The AI provider is unavailable right now. Try again later."
 	failureRejected       = "The AI provider rejected the request. Ask a server administrator to check AI Services."
@@ -45,7 +50,7 @@ const (
 
 var publicFailureReasons = map[string]bool{
 	failureGeneric: true, failureBilling: true, failureKeyRejected: true, failureModelNotFound: true,
-	failureAudioTooLarge: true, failureRateLimited: true, failureUnavailable: true, failureRejected: true,
+	failureAudioTooLarge: true, failureTextTooLarge: true, failureRateLimited: true, failureUnavailable: true, failureRejected: true,
 	failureTimeout: true, failureUnreachable: true, failureUnusableOutput: true, failureNoSpeech: true,
 	failureNoAudio: true, failureSourceText: true, failureSourceMissing: true,
 }
@@ -61,7 +66,12 @@ func failureReason(kind JobKind, err error) string {
 	case llm.FailureNotFound:
 		return failureModelNotFound
 	case llm.FailureTooLarge:
-		return failureAudioTooLarge
+		// A transcribe_translate job also sends text, so the request that
+		// failed, not the job kind, names the setting to lower.
+		if errors.Is(err, errAudioRequest) {
+			return failureAudioTooLarge
+		}
+		return failureTextTooLarge
 	case llm.FailureRateLimited:
 		return failureRateLimited
 	case llm.FailureUnavailable:
