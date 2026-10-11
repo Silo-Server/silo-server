@@ -93,7 +93,8 @@ Count the served cards, in every row of `getForYouMain`, `listForYouRows`,
   `user_state.played`;
 - **favorited:** in `listFavorites`, including taste-seed picks, or flagged
   `user_state.is_favorite`;
-- **rated low:** rated 1 or 2 in `listRatings` (`GET /api/v2/ratings`);
+- **rated:** rated at all in `listRatings` (`GET /api/v2/ratings`), since rows
+  leave out every title the profile rated, not only those it rated 1 or 2;
 - **not accessible:** answered `404` by `getCatalogItem`
   (`GET /api/v2/catalog/items/{id}`) for the profile, or rated above the
   profile's `max_content_rating` (`listProfiles`);

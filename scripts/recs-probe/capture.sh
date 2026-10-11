@@ -112,17 +112,17 @@ for pid in "${profiles[@]}"; do
 	jq -r '"  discover rows with 10+ cards: \([.items[] | select((.items | length) >= 10)] | length)"' "$dir/discover.json"
 	jq -r --argjson rec "$rec_sections" '"  home sections: \([.sections[] | select(.section_type | IN($rec[])) | "\(.section_type)=\(.items | length)"] | join(", "))"' "$dir/home.json"
 
-	# Leakage: cards the profile finished, favorited or rated 1-2, by the
+	# Leakage: cards the profile finished, favorited or rated, by the
 	# card's own flags and by the captured history, favorites and ratings
 	# pages. A "+" marks a page with more entries than were captured.
 	jq -rs --slurpfile h "$dir/history.json" --slurpfile f "$dir/favorites.json" --slurpfile r "$dir/ratings.json" '
 		def more(p): "\(p.items | length)\(if p.page.has_more then "+" else "" end)";
 		([$h[0].items[] | select(.watch.completed == true) | .content_id] | unique) as $finished
 		| ([$f[0].items[].content_id] | unique) as $favorites
-		| ([$r[0].items[] | select(.rating <= 2) | .item_id] | unique) as $low
+		| ([$r[0].items[].item_id] | unique) as $rated
 		| "  leakage: finished=\([.[] | select(.card.content_id | IN($finished[]))] | length)"
 		+ " favorited=\([.[] | select(.card.content_id | IN($favorites[]))] | length)"
-		+ " rated_low=\([.[] | select(.card.content_id | IN($low[]))] | length)"
+		+ " rated=\([.[] | select(.card.content_id | IN($rated[]))] | length)"
 		+ " flagged_played=\([.[] | select(.card.user_state.played == true)] | length)"
 		+ " flagged_favorite=\([.[] | select(.card.user_state.is_favorite == true)] | length)"
 		+ " no_user_state=\([.[] | select(.card.user_state == null)] | length)"
