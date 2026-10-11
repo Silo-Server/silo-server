@@ -306,6 +306,28 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("still notices a video stall after the audio track has ended", async () => {
+    audioOutput.resumes = true;
+    audioOutput.state = "suspended";
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker, true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "audio-buffered", generation: worker.generation });
+    await settle();
+    await player.play();
+    // The audio runs out first; the clock carries on from wall time.
+    (player as unknown as { onWorklet(message: unknown): void }).onWorklet({
+      type: "drained",
+      generation: worker.generation,
+    });
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_read_failed" }),
+    );
+    player.destroy();
+  });
+
   it("hands a worker failure to the player once, with its classification", async () => {
     const onFailure = vi.fn();
     const { player, worker } = start(onFailure);

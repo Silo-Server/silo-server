@@ -727,7 +727,9 @@ export class EnginePlayer {
           this.shown = due;
         }
       }
-      if (!this.audio && this.shown) {
+      // Without audio, or once it has drained, the clock runs on wall time,
+      // so a video read that stops coming shows up only here.
+      if ((!this.audio || this.audioDrained) && this.shown) {
         const overdue =
           this.queue.length === 0 &&
           !this.videoEnded &&
