@@ -579,8 +579,9 @@ export class EnginePlayer {
         return;
       case "drained":
         this.audioDrained = true;
-        // Video longer than its audio keeps going on wall time.
-        if (!this.videoEnded) this.clock.detachAudio(!this.pausedValue && !this.seekingValue);
+        // Whatever video is left (still decoding, or decoded and queued) plays
+        // on wall time, which pause and seek can stop.
+        this.clock.detachAudio(!this.pausedValue && !this.seekingValue);
         return;
     }
   }

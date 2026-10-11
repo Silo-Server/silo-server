@@ -362,6 +362,41 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("stops the clock on pause once the audio has drained, even after decoding ended", async () => {
+    audioOutput.resumes = true;
+    audioOutput.state = "suspended";
+    audioOutput.contextTime = 0;
+    const { player, worker } = start();
+    await open(worker, true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "audio-buffered", generation: worker.generation });
+    await settle();
+    await player.play();
+    const worklet = player as unknown as { onWorklet(message: unknown): void };
+    worklet.onWorklet({
+      type: "clock",
+      generation: worker.generation,
+      contextTime: 0,
+      mediaTime: 0,
+      advancing: true,
+    });
+    // Decoding is done but pictures are still queued when the audio runs out.
+    for (const timestamp of [5, 5.04, 5.08]) {
+      worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(timestamp) });
+    }
+    worker.emit({ type: "video-ended", generation: worker.generation });
+    audioOutput.contextTime = 1;
+    worklet.onWorklet({ type: "drained", generation: worker.generation });
+    player.pause();
+    const paused = player.currentTime;
+    // The audio context keeps running; a paused player must not.
+    audioOutput.contextTime = 3;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(player.currentTime).toBe(paused);
+    audioOutput.contextTime = 0;
+    player.destroy();
+  });
+
   it("hands a worker failure to the player once, with its classification", async () => {
     const onFailure = vi.fn();
     const { player, worker } = start(onFailure);
