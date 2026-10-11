@@ -389,7 +389,13 @@ type unsupportedFileCall struct {
 
 type recordingUnsupportedFileRepo struct {
 	calls []unsupportedFileCall
+	added []unsupportedFileCall
 	err   error
+}
+
+func (r *recordingUnsupportedFileRepo) AddNew(_ context.Context, folderID int, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error {
+	r.added = append(r.added, unsupportedFileCall{folderID: folderID, startedAt: startedAt, groups: groups})
+	return r.err
 }
 
 func (r *recordingUnsupportedFileRepo) Replace(_ context.Context, folderID int, scopes []string, protectedPaths []string, unreadableEntries []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error {
@@ -474,9 +480,30 @@ func TestIngestRecordsUnsupportedFiles(t *testing.T) {
 func TestIngestLeavesUnsupportedFilesAloneWithoutAWalk(t *testing.T) {
 	folder := &models.MediaFolder{ID: 7, Type: "movies", Paths: []string{"/movies"}}
 
-	// The empty-root guard stops the scan before it trusts its walk.
+	// A file scan walks nothing.
 	repo := &recordingUnsupportedFileRepo{}
-	exec := &Executor{scanner: &settleStubScanner{result: &scanner.ScanResult{EmptyRootGuarded: true}}, matcher: &retryRecordingMatcher{}, now: time.Now}
+	exec := &Executor{scanner: &settleStubScanner{result: &scanner.ScanResult{}}, matcher: &retryRecordingMatcher{}, now: time.Now}
+	exec.SetUnsupportedFileRepository(repo)
+	if _, err := exec.IngestFile(t.Context(), folder, "/movies/Heat (1995)/Heat (1995).mkv"); err != nil {
+		t.Fatalf("ingest file: %v", err)
+	}
+	if len(repo.calls) != 0 || len(repo.added) != 0 {
+		t.Errorf("file scan recorded unsupported files: %+v %+v", repo.calls, repo.added)
+	}
+}
+
+// The empty-root guard stops a scan before cleanup, as when every movie in a
+// library was replaced by a disc image. The scan adds what it found, which
+// explains the empty library, and removes nothing.
+func TestIngestGuardedScanOnlyAddsUnsupportedFiles(t *testing.T) {
+	folder := &models.MediaFolder{ID: 7, Type: "movies", Paths: []string{"/movies"}}
+	repo := &recordingUnsupportedFileRepo{}
+	exec := &Executor{scanner: &settleStubScanner{result: &scanner.ScanResult{
+		EmptyRootGuarded: true,
+		UnsupportedFiles: []scanner.UnsupportedFile{
+			{Path: "/movies/Thief (1981)/Thief (1981).iso", Reason: scanner.UnsupportedReasonDiscImage},
+		},
+	}}, matcher: &retryRecordingMatcher{}, now: time.Now}
 	exec.SetUnsupportedFileRepository(repo)
 	if _, err := exec.IngestFolder(t.Context(), folder); err != nil {
 		t.Fatalf("ingest folder: %v", err)
@@ -484,13 +511,11 @@ func TestIngestLeavesUnsupportedFilesAloneWithoutAWalk(t *testing.T) {
 	if len(repo.calls) != 0 {
 		t.Errorf("guarded scan called Replace: %+v", repo.calls)
 	}
-
-	// A file scan walks nothing.
-	if _, err := exec.IngestFile(t.Context(), folder, "/movies/Heat (1995)/Heat (1995).mkv"); err != nil {
-		t.Fatalf("ingest file: %v", err)
+	want := []models.UnsupportedMediaFileGroup{
+		{MediaFolderID: 7, DirectoryPath: "/movies/Thief (1981)", Reason: scanner.UnsupportedReasonDiscImage, FileCount: 1, FileNames: []string{"Thief (1981).iso"}},
 	}
-	if len(repo.calls) != 0 {
-		t.Errorf("file scan called Replace: %+v", repo.calls)
+	if len(repo.added) != 1 || repo.added[0].folderID != 7 || fmt.Sprintf("%+v", repo.added[0].groups) != fmt.Sprintf("%+v", want) {
+		t.Fatalf("AddNew calls = %+v, want one for folder 7 with %+v", repo.added, want)
 	}
 }
 

@@ -52,6 +52,7 @@ type SkippedRootRepository interface {
 // type, for admins.
 type UnsupportedFileRepository interface {
 	Replace(ctx context.Context, folderID int, scopes []string, protectedPaths []string, unreadableEntries []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error
+	AddNew(ctx context.Context, folderID int, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error
 }
 
 // Result captures the outcome of a full ingest run for one scope.
@@ -612,11 +613,13 @@ func (e *Executor) reconcileSkippedRoots(
 // the part under its subtree. Rows the scanner protected (an unreachable or
 // suspect-empty root, a path it could not read) stay, as do rows a concurrent
 // scan refreshed after this one started. A scan stopped by the empty-root
-// guard or a file scan, which walks nothing, leaves the list alone. The list
-// is diagnostic, so a failure to write it is logged instead of failing the
-// scan.
+// guard skipped cleanup, so it only adds groups not stored yet: when a
+// library's files were all replaced by unsupported ones, those are why it
+// looks empty. A file scan, which walks nothing, leaves the list alone. The
+// list is diagnostic, so a failure to write it is logged instead of failing
+// the scan.
 func (e *Executor) recordUnsupportedFiles(ctx context.Context, folderID int, mode scopeMode, scopePath string, startedAt time.Time, scanResult *scanner.ScanResult) {
-	if e.unsupported == nil || scanResult == nil || scanResult.EmptyRootGuarded {
+	if e.unsupported == nil || scanResult == nil {
 		return
 	}
 	var scopes []string
@@ -629,7 +632,13 @@ func (e *Executor) recordUnsupportedFiles(ctx context.Context, folderID int, mod
 		return
 	}
 	groups := scanner.GroupUnsupportedFiles(folderID, scanResult.UnsupportedFiles)
-	if err := e.unsupported.Replace(ctx, folderID, scopes, scanResult.ProtectedPaths, scanResult.UnreadableEntries, startedAt, groups); err != nil {
+	var err error
+	if scanResult.EmptyRootGuarded {
+		err = e.unsupported.AddNew(ctx, folderID, startedAt, groups)
+	} else {
+		err = e.unsupported.Replace(ctx, folderID, scopes, scanResult.ProtectedPaths, scanResult.UnreadableEntries, startedAt, groups)
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "library ingest: recording unsupported files failed", "component", "libraryingest",
 			"folder_id", folderID,
 			"mode", mode,

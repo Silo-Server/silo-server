@@ -166,6 +166,30 @@ func (r *UnsupportedFileRepository) Replace(
 	})
 }
 
+// AddNew records the groups a scan found that are not stored yet and leaves
+// every stored row as it is. The empty-root guard stops a scan before cleanup,
+// so that scan neither refreshes nor removes what earlier scans recorded, but
+// the files it found still explain why the library looks empty.
+func (r *UnsupportedFileRepository) AddNew(ctx context.Context, folderID int, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	inserts := &pgx.Batch{}
+	for _, group := range groups {
+		inserts.Queue(`
+			INSERT INTO unsupported_media_files (
+				media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $6)
+			ON CONFLICT (media_folder_id, directory_path, reason) DO NOTHING
+		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
+	}
+	if err := r.pool.SendBatch(ctx, inserts).Close(); err != nil {
+		return fmt.Errorf("adding unsupported files for folder %d: %w", folderID, err)
+	}
+	return nil
+}
+
 // unsupportedFileSearchWhere is the search ListPage and Count share, so a
 // page and its total always agree on which rows match.
 const unsupportedFileSearchWhere = `$1 = '' OR strpos(lower(directory_path), lower($1)) > 0

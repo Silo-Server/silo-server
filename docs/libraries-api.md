@@ -28,8 +28,8 @@ VOBs, disc images, RealMedia, and streams in a Blu-ray or AVCHD disc folder. The
 entry per directory and reason, newest first by when each was first found, with the file
 count and up to 100 file names. A library scan replaces the library's entries and a subtree scan the entries
 under its subtree. Entries the scan could not verify (under an unreachable or suspect-empty
-root, or a path it could not read) are kept, as are entries another scan refreshed while it
-ran.
+root, or a path it could not read) are kept, as are entries a scan that started later wrote
+first. A scan the empty-root guard stops only adds entries it found that are not listed yet.
 
 The web administration page loads diagnostics when their section opens, except
 **Files Not Cataloged**, which loads with the page so its count shows while it is closed.
