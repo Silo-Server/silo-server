@@ -59,6 +59,7 @@ type LibraryHandler struct {
 	ScannedGroupRepo      *scanner.ScannedGroupRepository
 	GroupOverrideRepo     *scanner.MediaGroupOverrideRepository
 	ObservedLocationRepo  *scanner.ObservedLocationRepository
+	UnsupportedFileRepo   *scanner.UnsupportedFileRepository
 	SectionRepo           *sections.Repository
 	StoreProvider         userstore.UserStoreProvider
 	ArtworkStore          blobstore.Store
@@ -165,10 +166,12 @@ func NewLibraryHandler(
 	var scannedGroupRepo *scanner.ScannedGroupRepository
 	var groupOverrideRepo *scanner.MediaGroupOverrideRepository
 	var observedLocationRepo *scanner.ObservedLocationRepository
+	var unsupportedFileRepo *scanner.UnsupportedFileRepository
 	if pool != nil {
 		scannedGroupRepo = scanner.NewScannedGroupRepository(pool)
 		groupOverrideRepo = scanner.NewMediaGroupOverrideRepository(pool)
 		observedLocationRepo = scanner.NewObservedLocationRepository(pool)
+		unsupportedFileRepo = scanner.NewUnsupportedFileRepository(pool)
 	}
 	return &LibraryHandler{
 		folderRepo:           folderRepo,
@@ -179,6 +182,7 @@ func NewLibraryHandler(
 		ScannedGroupRepo:     scannedGroupRepo,
 		GroupOverrideRepo:    groupOverrideRepo,
 		ObservedLocationRepo: observedLocationRepo,
+		UnsupportedFileRepo:  unsupportedFileRepo,
 		appCtx:               ctx,
 	}
 }
@@ -969,6 +973,7 @@ func scanRunResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		resp.Unchanged = result.ScanResult.Unchanged
 		resp.Missing = result.ScanResult.Missing
 		resp.MissingSkippedProtected = result.ScanResult.MissingSkippedProtected
+		resp.UnsupportedFiles = len(result.ScanResult.UnsupportedFiles)
 		resp.FilesDeleted = result.ScanResult.FilesDeleted
 		resp.MembershipsRemoved = result.ScanResult.MembershipsRemoved
 		resp.ItemsDeleted = result.ScanResult.ItemsDeleted

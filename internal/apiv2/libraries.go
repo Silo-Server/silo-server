@@ -318,6 +318,38 @@ type SkippedRootCollection struct {
 	Total int `json:"total" doc:"Skipped roots matching the filter across every page" example:"1"`
 }
 
+// UnsupportedFileGroup is the files of one directory that scans found but do
+// not catalog, for one reason.
+type UnsupportedFileGroup struct {
+	LibraryID     ID       `json:"library_id" example:"1"`
+	LibraryName   string   `json:"library_name" example:"Movies"`
+	DirectoryPath string   `json:"directory_path" example:"/media/movies/Ronin (1998)/VIDEO_TS"`
+	Reason        string   `json:"reason" enum:"dvd_vob,disc_image,realmedia,disc_stream" doc:"Why the files are not cataloged: DVD VOB files, disc images, RealMedia files, or streams in a Blu-ray or AVCHD disc folder" example:"dvd_vob"`
+	Message       string   `json:"message" doc:"The reason, worded for an administrator" example:"DVD VOB files are not cataloged; remux the DVD title to a single file"`
+	FileCount     int      `json:"file_count" minimum:"1" example:"6"`
+	FileNames     []string `json:"file_names" maxItems:"100" doc:"The files' names in name order, at most 100; file_count counts them all" example:"[\"VIDEO_TS.VOB\",\"VTS_01_1.VOB\"]"`
+	FirstSeenAt   Instant  `json:"first_seen_at" example:"2026-01-02T03:04:05.678Z"`
+	LastSeenAt    Instant  `json:"last_seen_at" doc:"The last scan that found the files" example:"2026-01-02T03:04:05.678Z"`
+}
+
+// UnsupportedFileListInput is the listUnsupportedFiles query.
+type UnsupportedFileListInput struct {
+	LimitParam
+	Query  string `query:"q" doc:"Substring over directory path, reason, library name, or a file name in file_names, which lists the first 100 names in a directory"`
+	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
+}
+
+// UnsupportedFileCollectionOutput is the listUnsupportedFiles response.
+type UnsupportedFileCollectionOutput struct {
+	Body UnsupportedFileCollection
+}
+
+// UnsupportedFileCollection is the named envelope the contract carries.
+type UnsupportedFileCollection struct {
+	Collection[UnsupportedFileGroup]
+	Total int `json:"total" doc:"Directories matching the filter across every page" example:"1"`
+}
+
 // StaleMediaID is a provider identifier a provider no longer resolves.
 type StaleMediaID struct {
 	ContentID   string  `json:"content_id" example:"movie:heat-1995"`
@@ -571,6 +603,7 @@ const (
 	opListUnmatchedItems       = "listUnmatchedItems"
 	opListStaleIDs             = "listStaleIds"
 	opListSkippedRoots         = "listSkippedRoots"
+	opListUnsupportedFiles     = "listUnsupportedFiles"
 	tiebreakerContentID        = "content_id"
 	locationBodyLibraryID      = locationBody + ".library_id"
 	locationQueryLibraryID     = "query.library_id"
@@ -645,6 +678,11 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/skipped-roots", opListSkippedRoots, "libraries",
 		"Page roots the scanner skipped, across libraries.")), func(ctx context.Context, in *SkippedRootListInput) (*SkippedRootCollectionOutput, error) {
 		return reg.listSkippedRoots(ctx, cursors, in)
+	})
+
+	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/unsupported-files", opListUnsupportedFiles, "libraries",
+		"Page the files library scans found but do not catalog because of their type, one entry per directory and reason, newest first by when each was first found.")), func(ctx context.Context, in *UnsupportedFileListInput) (*UnsupportedFileCollectionOutput, error) {
+		return reg.listUnsupportedFiles(ctx, cursors, in)
 	})
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/stale-ids", opListStaleIDs, "libraries",
@@ -1363,6 +1401,45 @@ func (reg *Registry) listSkippedRoots(ctx context.Context, cursors *Cursors, in 
 		})
 	}
 	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: Paginated(items, next), Total: total}}, nil
+}
+
+func (reg *Registry) listUnsupportedFiles(ctx context.Context, cursors *Cursors, in *UnsupportedFileListInput) (*UnsupportedFileCollectionOutput, error) {
+	svc, p := reg.libraryAdmin()
+	if p != nil {
+		return nil, p
+	}
+	userID, p := actingUserID(ctx)
+	if p != nil {
+		return nil, p
+	}
+	scope := CursorScope{OperationID: opListUnsupportedFiles, Security: strconv.Itoa(userID), Filter: strings.TrimSpace(in.Query), Sort: "first_seen_at", Tiebreaker: "library_id,directory_path,reason"}
+	offset, p := decodeOffset(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
+	}
+	views, total, err := svc.ListUnsupportedFiles(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
+	if err != nil {
+		return nil, libraryProblem(err)
+	}
+	views, next, p := offsetPage(cursors, scope, len(views), in.Limit, offset, views)
+	if p != nil {
+		return nil, p
+	}
+	items := make([]UnsupportedFileGroup, 0, len(views))
+	for _, v := range views {
+		items = append(items, UnsupportedFileGroup{
+			LibraryID:     IDFromInt(int64(v.LibraryID)),
+			LibraryName:   v.LibraryName,
+			DirectoryPath: v.DirectoryPath,
+			Reason:        v.Reason,
+			Message:       v.Message,
+			FileCount:     v.FileCount,
+			FileNames:     v.FileNames,
+			FirstSeenAt:   NewInstant(v.FirstSeenAt),
+			LastSeenAt:    NewInstant(v.LastSeenAt),
+		})
+	}
+	return &UnsupportedFileCollectionOutput{Body: UnsupportedFileCollection{Collection: Paginated(items, next), Total: total}}, nil
 }
 
 func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {

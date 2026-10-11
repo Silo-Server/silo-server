@@ -227,6 +227,19 @@ func (f *fakeLibraryAdmin) ListSkippedRoots(_ context.Context, search string, li
 	return all[min(offset, len(all)):min(offset+limit, len(all))], len(all), nil
 }
 
+func (f *fakeLibraryAdmin) ListUnsupportedFiles(_ context.Context, search string, limit, offset int) ([]handlers.UnsupportedFileView, int, error) {
+	if f.err != nil {
+		return nil, 0, f.err
+	}
+	f.lastSearch, f.lastLimit, f.lastOffset = search, limit, offset
+	all := []handlers.UnsupportedFileView{
+		{LibraryID: 1, LibraryName: "Movies", DirectoryPath: "/media/movies/Ronin (1998)/VIDEO_TS", Reason: "dvd_vob", Message: "DVD VOB files are not cataloged; remux the DVD title to a single file", FileCount: 2, FileNames: []string{"VIDEO_TS.VOB", "VTS_01_1.VOB"}, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()},
+		{LibraryID: 1, LibraryName: "Movies", DirectoryPath: "/media/movies/Manhunter (1986)", Reason: "realmedia", Message: "RealMedia files are not cataloged", FileCount: 1, FileNames: []string{"Manhunter (1986).rmvb"}, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()},
+		{LibraryID: 2, LibraryName: "Shows", DirectoryPath: "/media/tv/Show/Season 01/BDMV/STREAM", Reason: "disc_stream", Message: "Blu-ray and AVCHD disc folders (BDMV/STREAM) are not cataloged; remux the disc title to a single file", FileCount: 2, FileNames: []string{"00000.m2ts", "00001.m2ts"}, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()},
+	}
+	return all[min(offset, len(all)):min(offset+limit, len(all))], len(all), nil
+}
+
 func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, int, error) {
 	if f.err != nil {
 		return nil, 0, f.err
@@ -734,6 +747,41 @@ func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/libraries/stale-ids/movie:heat-1995/rematch", "", bearer(memberToken)), TypePermissionDenied)
 	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to clear IDs"}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/libraries/stale-ids/movie:heat-1995/rematch", "", bearer(adminToken)), TypeInternalError)
+}
+
+func TestListUnsupportedFiles(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/libraries/unsupported-files?limit=2&q=movies", "", bearer(adminToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	var first rootPage
+	decodeJSON(t, rec.Body, &first)
+	if len(first.Items) != 2 || !first.Page.HasMore || first.Total != 3 {
+		t.Fatalf("first = %s", rec.Body.String())
+	}
+	item := first.Items[0]
+	if string(item["library_id"]) != `"1"` || string(item["directory_path"]) != `"/media/movies/Ronin (1998)/VIDEO_TS"` ||
+		string(item["reason"]) != `"dvd_vob"` || string(item["message"]) != `"DVD VOB files are not cataloged; remux the DVD title to a single file"` ||
+		string(item["file_count"]) != `2` || string(item["file_names"]) != `["VIDEO_TS.VOB","VTS_01_1.VOB"]` ||
+		string(item["first_seen_at"]) != `"2026-01-02T03:04:05.678Z"` || string(item["last_seen_at"]) != `"2026-01-02T03:04:05.678Z"` {
+		t.Fatalf("item = %s", rec.Body.String())
+	}
+	if fake.lastLimit != 3 || fake.lastOffset != 0 || fake.lastSearch != "movies" {
+		t.Fatalf("seam limit %d offset %d search %q", fake.lastLimit, fake.lastOffset, fake.lastSearch)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/libraries/unsupported-files?limit=2&q=movies&cursor="+first.Page.NextCursor, "", bearer(adminToken))
+	var second rootPage
+	decodeJSON(t, rec.Body, &second)
+	if len(second.Items) != 1 || second.Page.HasMore || string(second.Items[0]["reason"]) != `"disc_stream"` || fake.lastOffset != 2 {
+		t.Fatalf("second = %s offset %d", rec.Body.String(), fake.lastOffset)
+	}
+	// The cursor is bound to the search filter.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unsupported-files?limit=2&q=x&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unsupported-files", "", bearer(memberToken)), TypePermissionDenied)
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to list unsupported files"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unsupported-files", "", bearer(adminToken)), TypeInternalError)
 }
 
 func TestListUnmatchedItems(t *testing.T) {
