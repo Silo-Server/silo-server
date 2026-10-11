@@ -177,6 +177,9 @@ func TestCreateAdminNeedsOwner(t *testing.T) {
 }
 
 func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
+	// An admin that inherits the profile limit; the v1 body reports it as 5.
+	inheritingAdmin := adminAccount()
+	inheritingAdmin.MaxProfiles = nil
 	for _, tc := range []struct {
 		name, method, body string
 		target             models.User
@@ -194,6 +197,8 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
 		{"admin changes own policy", http.MethodPut, `{"download_transcode_allowed":false}`, adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin saves self with its policy unchanged", http.MethodPut, `{"email":"new@example.test","max_streams":null}`, adminAccount(), testAdminID, http.StatusOK},
+		{"admin saves self re-sending the profile limit it read", http.MethodPut, `{"email":"new@example.test","max_profiles":5}`, inheritingAdmin, testAdminID, http.StatusOK},
+		{"admin changes own inherited profile limit", http.MethodPut, `{"max_profiles":3}`, inheritingAdmin, testAdminID, http.StatusForbidden},
 		{"owner limits admin", http.MethodPut, `{"max_streams":2}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"provider-only admin sets own password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), testAdminID, http.StatusForbidden},
 		{"owner sets a provider-only admin's password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), scopedKeyTestOwnerID, http.StatusOK},
@@ -413,6 +418,36 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 		tc.serve(h, rec, req)
 		if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || store.created || store.changed {
 			t.Errorf("%s: status = %d body %s, store touched %v", tc.name, rec.Code, rec.Body.String(), store.created || store.changed)
+		}
+	}
+}
+
+// A v1 client that sends back the profile limit it read leaves an inheriting
+// account inheriting; a different limit becomes its override.
+func TestV1UpdateUserKeepsInheritedProfileLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantSet bool
+	}{
+		{"re-sent limit", `{"email":"new@example.test","max_profiles":5}`, false},
+		{"new limit", `{"max_profiles":3}`, true},
+	} {
+		target := userAccount()
+		target.MaxProfiles = nil
+		repo := &scopedKeyUserRepo{user: &target}
+		h := &AdminHandler{userRepo: repo}
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/9", strings.NewReader(tc.body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "9")
+		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: scopedKeyTestOwnerID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
+		rec := httptest.NewRecorder()
+		h.HandleUpdateUser(rec, req)
+		if rec.Code != http.StatusOK || repo.updated == nil {
+			t.Fatalf("%s: status = %d (body %s), updated %v", tc.name, rec.Code, rec.Body.String(), repo.updated != nil)
+		}
+		if repo.updated.MaxProfiles.Set != tc.wantSet {
+			t.Errorf("%s: max_profiles set = %v, want %v", tc.name, repo.updated.MaxProfiles.Set, tc.wantSet)
 		}
 	}
 }

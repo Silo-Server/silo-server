@@ -72,7 +72,9 @@ an access group created without a value gets 5. `effective_policy.max_profiles` 
 the limit that profile creation enforces: an account at its limit gets
 `409 profile_limit_reached`, and profiles it already has above a lowered limit are
 kept. The bridge v1 body has no inherit state for this field, so its
-`max_profiles` reports the limit that applies, and a v1 update stores an override.
+`max_profiles` reports the limit that applies. A v1 update stores an override,
+except that sending back the inherited limit an account reported leaves it
+inheriting.
 
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional

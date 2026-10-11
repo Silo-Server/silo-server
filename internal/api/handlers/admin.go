@@ -1053,6 +1053,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 	revoked := false
 	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
+		if err := h.keepInheritedProfileLimit(r.Context(), current, &updateInput); err != nil {
+			return false, err
+		}
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1100,6 +1103,25 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, toAdminUserResponse(user, updatedGroupPolicy))
+}
+
+// keepInheritedProfileLimit drops a v1 max_profiles equal to the limit that
+// applies to an account that inherits it. The frozen v1 body reports that
+// limit rather than an inherit state, so a client that sends back what it read
+// would otherwise pin the inherited limit as an override and, for an admin
+// editing its own account, be refused for changing its access policy.
+func (h *AdminHandler) keepInheritedProfileLimit(ctx context.Context, current *models.User, input *models.UpdateUserInput) error {
+	if !input.MaxProfiles.Set || input.MaxProfiles.Value == nil || current.MaxProfiles != nil {
+		return nil
+	}
+	group, err := h.groupPolicyFor(ctx, current)
+	if err != nil {
+		return err
+	}
+	if *input.MaxProfiles.Value == access.ApplyGroupPolicy(current, group).MaxProfiles {
+		input.MaxProfiles = models.Optional[int]{}
+	}
+	return nil
 }
 
 // HandleDeleteUser handles DELETE /admin/users/{id}.
