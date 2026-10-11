@@ -53,9 +53,10 @@ func collectLocalIdentityHints(ctx context.Context, chain []Provider, query Sear
 	return out
 }
 
-// recordIdentityChoice marks the item as identified by an admin. The item is
-// already written; a failed mark fails the Identify so the admin retries it,
-// which is safe, instead of losing the choice silently.
+// recordIdentityChoice marks the item as identified by an admin. It runs
+// before the Identify changes anything, so a failed mark fails the Identify
+// with the item untouched and a retry is safe; the moves that follow carry the
+// mark to the item's new content ID.
 func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID string) error {
 	repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
 	if !ok || contentID == "" {

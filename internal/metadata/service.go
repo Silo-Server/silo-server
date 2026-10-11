@@ -2511,6 +2511,14 @@ func (s *MetadataService) mergeAndPersist(
 	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
 		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
 	}
+	// Record the admin's choice before anything below can move the item: a
+	// rename or merge carries the mark along, and a failure here leaves the
+	// item where the admin found it, so retrying the Identify is safe.
+	if req.Mode == ModeIdentify && contentID != "" {
+		if err := s.recordIdentityChoice(ctx, contentID); err != nil {
+			return nil, err
+		}
+	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2756,11 +2764,6 @@ func (s *MetadataService) mergeAndPersist(
 	}
 	contentID = persistedContentID
 	item.ContentID = contentID
-	if req.Mode == ModeIdentify {
-		if err := s.recordIdentityChoice(ctx, contentID); err != nil {
-			return nil, err
-		}
-	}
 	unlockProviderDedup()
 	providerDedupReleased = true
 	if handleArtwork {

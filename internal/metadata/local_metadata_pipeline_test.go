@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -14,9 +15,10 @@ import (
 // real GetByID never loads credits, so tests that care seed them here.
 type localPipelineItemRepo struct {
 	*fakeItemRepo
-	mu     sync.Mutex
-	people map[string][]models.ItemPerson
-	chosen map[string]bool
+	mu      sync.Mutex
+	people  map[string][]models.ItemPerson
+	chosen  map[string]bool
+	markErr error
 }
 
 func newLocalPipelineHarness() (*testHarness, *localPipelineItemRepo) {
@@ -35,6 +37,9 @@ func (r *localPipelineItemRepo) GetPeople(_ context.Context, contentID string) (
 func (r *localPipelineItemRepo) MarkIdentityChosen(_ context.Context, contentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.markErr != nil {
+		return r.markErr
+	}
 	r.chosen[contentID] = true
 	return nil
 }
@@ -526,5 +531,29 @@ func TestInitialMatch_StoredItemSkipsNFOForAnotherTitle(t *testing.T) {
 	}
 	if nfo.searchCalls != 0 || nfo.metadataCalls != 0 {
 		t.Errorf("NFO consulted: search=%d metadata=%d, want 0", nfo.searchCalls, nfo.metadataCalls)
+	}
+}
+
+// Identify records the choice before it changes the item, so when that write
+// fails the item is left as it was and the admin can retry.
+func TestIdentify_FailedChoiceRecordLeavesItemUnchanged(t *testing.T) {
+	h, repo := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:949", "Heat", 1995)
+	h.itemRepo.items["movie:tmdb:949"].TmdbID = "949"
+	repo.markErr = errors.New("connection reset")
+
+	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Collateral", Year: 2004, ProviderIDs: map[string]string{"tmdb": "1538"}}}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID: "movie:tmdb:949", ProviderIDs: map[string]string{"tmdb": "1538"}, Language: "en", Mode: ModeIdentify,
+	}, []Provider{remote}); err == nil {
+		t.Fatal("Identify succeeded although recording the choice failed")
+	}
+	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:949")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.Title != "Heat" || item.TmdbID != "949" {
+		t.Errorf("item = %q tmdb %q, want it unchanged", item.Title, item.TmdbID)
 	}
 }
