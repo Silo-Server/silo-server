@@ -1077,10 +1077,9 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (stal
 	}
 
 	slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
-	for _, p := range stale {
-		if ctx.Err() != nil {
-			return res, nil
-		}
+	// A sweep cut short by shutdown leaves the rest marked for the next one.
+	for i := 0; i < len(stale) && ctx.Err() == nil; i++ {
+		p := stale[i]
 		key := profileRefreshKey(p.UserID, p.ProfileID)
 		if !w.claimProfileRefresh(key) {
 			res.Queued++ // already queued or refreshing on this server

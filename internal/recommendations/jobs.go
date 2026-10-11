@@ -140,8 +140,9 @@ func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, er
 		return nil, false, err
 	}
 	return func() {
-		if err := l.lock.ReleaseAlso(context.Background(), key); err != nil {
-			slog.Warn("releasing recommendation lock failed", "component", "recommendations", "lock", key, "error", err)
+		releaseCtx := context.WithoutCancel(ctx)
+		if err := l.lock.ReleaseAlso(releaseCtx, key); err != nil {
+			slog.WarnContext(releaseCtx, "releasing recommendation lock failed", "component", "recommendations", "lock", key, "error", err)
 		}
 	}, true, nil
 }

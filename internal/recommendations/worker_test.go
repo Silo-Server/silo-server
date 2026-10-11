@@ -810,7 +810,7 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("claim failed")
 	}
-	w.runProfileRefresh(t.Context(), nil, 7, "p")
+	_ = w.runProfileRefresh(t.Context(), nil, 7, "p")
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("a deferred refresh kept its pending key")
 	}
