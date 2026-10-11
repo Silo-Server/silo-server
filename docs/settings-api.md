@@ -1028,7 +1028,10 @@ process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
-requires a public S3 bucket because local artwork storage is available.
+requires a public S3 bucket because local artwork storage is available. It
+governs provider artwork only: local sidecar artwork found next to media files
+is copied into artwork storage and served whatever its value, because clients
+cannot load it any other way.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

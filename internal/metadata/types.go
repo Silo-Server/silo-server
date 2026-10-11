@@ -538,4 +538,8 @@ type EpisodeResult struct {
 	StillPath       string
 	StillSourcePath string
 	StillThumbhash  string
+
+	// stillFallback is the remote still a local one displaced while results
+	// merged; the episode shows it until the local copy is cached.
+	stillFallback string
 }

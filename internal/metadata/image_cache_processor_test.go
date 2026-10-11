@@ -31,16 +31,19 @@ type targetImageCacheJobs struct {
 	runningResults []bool
 	runningCalls   int
 	alwaysRunning  bool
+	localOnly      bool
 }
 
-func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
+func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string, localOnly bool) error {
 	f.retriedTarget = targetContentID
+	f.localOnly = localOnly
 	f.retryCalls++
 	return nil
 }
 
-func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, _ int) ([]*models.MetadataImageCacheJob, error) {
+func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, localOnly bool, _ int) ([]*models.MetadataImageCacheJob, error) {
 	f.claimedTarget = targetContentID
+	f.localOnly = f.localOnly && localOnly
 	var jobs []*models.MetadataImageCacheJob
 	if f.targetCalls < len(f.targetClaims) {
 		jobs = f.targetClaims[f.targetCalls]

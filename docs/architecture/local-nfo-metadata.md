@@ -377,14 +377,42 @@ Caching and refresh:
   clamping reads the parent directory). A replaced image rotates the key; the
   stale hashed prefix is deleted after a successful re-cache, and item
   deletion trims local paths to the content prefix.
-- The processor confines each read to the owning library's `media_folders`
-  roots: a lexical check on the logical path, then a symlink-resolving re-check
-  (both path and roots are resolved, so a legitimately symlinked root stays
-  valid while an intermediate directory symlink escaping a root is rejected).
-  Missing/unreadable/out-of-root and structurally-unusable (non-regular,
-  over-cap) paths are stable failures with a long retry deferral; recovery is
-  refresh-driven — the provider-artwork backfill sweep deliberately skips
-  `file://` sources.
+- The process that discovered the sidecar copies it
+  (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
+  processes run refreshes and the image cache, and a refresh can only discover
+  a file it can read, so that process sees the library mount. The refresh hands
+  its local slots (item, season, episode; the copier takes any target type, and
+  a person photo carries the owning item's content ID as `series_id` for root
+  confinement) to `ImageCacheProcessor.CopyLocalArtwork`, which queues the jobs
+  behind a 10-minute discovery hold that other drains respect and copies them
+  on two background workers per process, claiming each job by slot. Refreshes
+  never wait for a copy. A slot that does not fit the in-memory backlog waits
+  out the hold, after which any drain copies it.
+- The queue keeps local jobs for retries, and any server may claim one. The
+  processor confines each read to the owning library's `media_folders` roots:
+  a lexical check on the logical path, then a symlink-resolving re-check (both
+  path and roots are resolved, so a legitimately symlinked root stays valid
+  while an intermediate directory symlink escaping a root is rejected). When
+  the re-check or the read fails, the processor probes the roots holding the
+  file through `internal/rootcheck`. If none is present on this server
+  (missing, unreadable, unresponsive, or an empty mount point), the job goes
+  back to the queue for 10 minutes without counting an attempt, for a server
+  that has the mount; a manual refresh on such a server reports its artwork as
+  still pending. Otherwise missing/unreadable/out-of-root and
+  structurally-unusable (non-regular, over-cap) paths are stable failures with
+  a long retry deferral; recovery is refresh-driven — the provider-artwork
+  backfill sweep deliberately skips `file://` sources.
+- Until the copy lands, a slot keeps serving the copy it already has. With
+  nothing cached, it serves the best remote image the refresh found: for items
+  the best remote candidate by the `applyBestImages` rules, for seasons and
+  episodes the first remote poster or still that the local one displaced while
+  provider results merged. The slot's source stays the local file, so the
+  copy replaces the stand-in through the source-matched update. Locked artwork
+  gets no stand-in.
+- `metadata.cache_images` governs remote artwork only. With it off, local art
+  is still selected, copied, and served: the drain claims local jobs only, a
+  manual refresh waits for local jobs only, and the provider-artwork backfill
+  stays off.
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.
@@ -434,12 +462,8 @@ sits in the chain.
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
   another language sees the same local art. A slot whose local copy is not
-  cached yet still serves its earlier art, which a localized image may
-  replace.
-
-**Deployment constraint:** the host running the metadata image-cache processor
-must mount the media libraries at the same paths as the scanner/metadata
-worker, otherwise local artwork jobs fail until the mount is present.
+  cached yet still serves its earlier art or remote stand-in, which a
+  localized image may replace.
 
 ### Artwork and photos an NFO names
 

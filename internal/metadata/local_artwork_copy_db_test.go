@@ -1,0 +1,321 @@
+package metadata
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// localArtworkTestStore is the real queue with the target-row reads answered
+// as if every job's target still names its source and holds no cached copy,
+// so the tests need no catalog rows.
+type localArtworkTestStore struct {
+	*ImageCacheJobRepository
+}
+
+func (s localArtworkTestStore) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
+	return job.SourcePath, nil
+}
+
+func (s localArtworkTestStore) CurrentTargetCachedPath(context.Context, *models.MetadataImageCacheJob) (string, error) {
+	return "", nil
+}
+
+// recordingArtworkTargets records every source-matched artwork update, from
+// any of the processor's target types. Copies run on pool goroutines.
+type recordingArtworkTargets struct {
+	mu      sync.Mutex
+	updates map[string]string // "<target type>:<id>:<image type>" -> cached path
+}
+
+func newRecordingArtworkTargets() *recordingArtworkTargets {
+	return &recordingArtworkTargets{updates: make(map[string]string)}
+}
+
+func (r *recordingArtworkTargets) record(key, cachedPath string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updates[key] = cachedPath
+	return true, nil
+}
+
+func (r *recordingArtworkTargets) get(key string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.updates[key]
+}
+
+type recordingItemTargets struct{ *recordingArtworkTargets }
+
+func (r recordingItemTargets) UpdateArtworkIfSourceMatches(_ context.Context, contentID, imageType, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetItem+":"+contentID+":"+imageType, cachedPath)
+}
+
+type recordingSeasonTargets struct{ *recordingArtworkTargets }
+
+func (r recordingSeasonTargets) UpdateArtworkIfSourceMatches(_ context.Context, contentID, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetSeason+":"+contentID+":"+ImageCacheImagePoster, cachedPath)
+}
+
+type recordingEpisodeTargets struct{ *recordingArtworkTargets }
+
+func (r recordingEpisodeTargets) UpdateStillIfSourceMatches(_ context.Context, contentID, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetEpisode+":"+contentID+":"+ImageCacheImageStill, cachedPath)
+}
+
+type recordingPersonTargets struct{ *recordingArtworkTargets }
+
+func (r recordingPersonTargets) UpdatePhotoIfSourceMatches(_ context.Context, personID int64, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetPerson+":"+strconv.FormatInt(personID, 10)+":"+ImageCacheImageProfile, cachedPath)
+}
+
+// syncByteImageCacher is a goroutine-safe byte cacher that builds keys the way
+// the real cacher does.
+type syncByteImageCacher struct {
+	fakeImageCacher
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *syncByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req CacheImageRequest) (*CacheImageResult, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return &CacheImageResult{
+		BasePath: fmt.Sprintf("%s/%s/%s/%s/%s", req.ProviderID, req.ContentType, req.ContentID, req.KeyDiscriminator, ImageTypeToString(req.ImageType)),
+		Ext:      ".webp",
+	}, nil
+}
+
+func newLocalArtworkDBProcessor(pool *pgxpool.Pool, roots []string) (*ImageCacheProcessor, *recordingArtworkTargets, *syncByteImageCacher) {
+	targets := newRecordingArtworkTargets()
+	cacher := &syncByteImageCacher{}
+	p := NewImageCacheProcessorWithTargets(localArtworkTestStore{NewImageCacheJobRepository(pool)}, cacher, nil, ImageCacheProcessorTargets{
+		Items:    recordingItemTargets{targets},
+		Seasons:  recordingSeasonTargets{targets},
+		Episodes: recordingEpisodeTargets{targets},
+		People:   recordingPersonTargets{targets},
+	})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: roots})
+	return p, targets, cacher
+}
+
+type localArtworkJobRow struct {
+	status        string
+	attempts      int
+	lastError     string
+	nextAttemptIn time.Duration
+}
+
+func readLocalArtworkJob(t *testing.T, pool *pgxpool.Pool, targetType, targetID, imageType string) localArtworkJobRow {
+	t.Helper()
+	var row localArtworkJobRow
+	var seconds float64
+	if err := pool.QueryRow(context.Background(), `
+		SELECT status, attempt_count, last_error, EXTRACT(EPOCH FROM next_attempt_at - NOW())
+		FROM metadata_image_cache_jobs
+		WHERE target_type = $1 AND target_content_id = $2 AND image_type = $3 AND target_language = ''
+	`, targetType, targetID, imageType).Scan(&row.status, &row.attempts, &row.lastError, &seconds); err != nil {
+		t.Fatalf("read %s %s %s job: %v", targetType, targetID, imageType, err)
+	}
+	row.nextAttemptIn = time.Duration(seconds * float64(time.Second))
+	return row
+}
+
+func cleanupLocalArtworkJobs(t *testing.T, pool *pgxpool.Pool, scope string) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM metadata_image_cache_jobs WHERE target_content_id LIKE $1 || '%' OR series_id = $1
+		`, scope)
+	})
+}
+
+func writeSidecar(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("sidecar "+path), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+	return LocalImageSourceURL(path, info.Size(), info.ModTime())
+}
+
+// TestLocalArtworkCopiedOnDiscoveryDB pins copy on discovery: the process
+// that discovered item, season, episode and person artwork copies it, other
+// drains cannot take the jobs during the discovery hold, and every job ends
+// succeeded with the cached copy written to its slot.
+func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := context.Background()
+	seriesID := fmt.Sprintf("series:local-copy-%d", time.Now().UnixNano())
+	cleanupLocalArtworkJobs(t, pool, seriesID)
+	const personID = "987654321"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM metadata_image_cache_jobs WHERE target_type = 'person' AND target_content_id = $1`, personID)
+	})
+
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	season, episode := 1, 1
+	seasonID, episodeID := seriesID+"-s1", seriesID+"-s1e1"
+	inputs := []EnqueueImageCacheJobInput{
+		{TargetType: ImageCacheTargetItem, TargetContentID: seriesID, SeriesID: seriesID, ContentType: "series",
+			ImageType: ImageCacheImagePoster, SourcePath: writeSidecar(t, filepath.Join(show, "poster.jpg"))},
+		{TargetType: ImageCacheTargetSeason, TargetContentID: seasonID, SeriesID: seriesID, ContentType: "series",
+			ImageType: ImageCacheImagePoster, SeasonNumber: &season, SourcePath: writeSidecar(t, filepath.Join(show, "Season 01", "poster.jpg"))},
+		{TargetType: ImageCacheTargetEpisode, TargetContentID: episodeID, SeriesID: seriesID, ContentType: "series",
+			ImageType: ImageCacheImageStill, SeasonNumber: &season, EpisodeNumber: &episode,
+			SourcePath: writeSidecar(t, filepath.Join(show, "Season 01", "Show S01E01-thumb.jpg"))},
+		// A person photo found in the series folder: SeriesID names the
+		// content whose library roots confine the read.
+		{TargetType: ImageCacheTargetPerson, TargetContentID: personID, SeriesID: seriesID, ContentType: "person",
+			ImageType: ImageCacheImageProfile, SourcePath: writeSidecar(t, filepath.Join(show, ".actors", "Jane_Doe.jpg"))},
+	}
+	for i := range inputs {
+		inputs[i].ProviderID = imageCacheLocalProviderID
+		inputs[i].ProviderContentID = seriesID
+	}
+
+	t.Run("held from other drains", func(t *testing.T) {
+		repo := NewImageCacheJobRepository(pool)
+		queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1])
+		if err != nil || len(queued) != 1 {
+			t.Fatalf("enqueueHeldLocalJobs = %d queued, %v; want 1", len(queued), err)
+		}
+		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, seriesID, ImageCacheImagePoster); got.status != ImageCacheStatusQueued ||
+			got.nextAttemptIn < localArtworkDiscoveryHold-time.Minute {
+			t.Fatalf("held job = %+v, want queued behind the %s discovery hold", got, localArtworkDiscoveryHold)
+		}
+		if jobs, err := repo.claimDueForTarget(ctx, "other-server", seriesID, false, 10); err != nil || len(jobs) != 0 {
+			t.Fatalf("another drain claimed %d held jobs (%v), want none", len(jobs), err)
+		}
+		job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server")
+		if err != nil || job == nil || job.LockedBy != "discovering-server" {
+			t.Fatalf("discovering claim = %+v, %v; want the held job", job, err)
+		}
+		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
+			t.Fatalf("requeue: %v", err)
+		}
+	})
+
+	t.Run("copied by the discovering process", func(t *testing.T) {
+		p, targets, cacher := newLocalArtworkDBProcessor(pool, []string{root})
+		// Remote caching off changes nothing for local art.
+		p.SetEnabled(false)
+		if err := p.CopyLocalArtwork(ctx, inputs); err != nil {
+			t.Fatalf("CopyLocalArtwork: %v", err)
+		}
+		p.waitLocalArtworkCopies()
+
+		for _, in := range inputs {
+			got := readLocalArtworkJob(t, pool, in.TargetType, in.TargetContentID, in.ImageType)
+			if got.status != ImageCacheStatusSucceeded || got.attempts != 0 {
+				t.Errorf("%s job = %+v, want succeeded on the first attempt", in.TargetType, got)
+			}
+			key := in.TargetType + ":" + in.TargetContentID + ":" + in.ImageType
+			if cached := targets.get(key); !strings.HasPrefix(cached, "local/") {
+				t.Errorf("%s slot cached path = %q, want a local/ copy", key, cached)
+			}
+		}
+		if cacher.calls != len(inputs) {
+			t.Errorf("copies = %d, want %d", cacher.calls, len(inputs))
+		}
+
+		// Rediscovering the unchanged files queues nothing to copy again.
+		if err := p.CopyLocalArtwork(ctx, inputs); err != nil {
+			t.Fatalf("CopyLocalArtwork again: %v", err)
+		}
+		p.waitLocalArtworkCopies()
+		if cacher.calls != len(inputs) {
+			t.Errorf("copies after rediscovery = %d, want still %d", cacher.calls, len(inputs))
+		}
+	})
+}
+
+// TestLocalArtworkRetriesWithoutLibraryRootDB pins how a claimer that cannot
+// serve a local job records it. A server missing the library root (absent, or
+// an empty mount point) releases the job without counting an attempt and
+// without the week-long stable-failure delay. A file missing under a root the
+// server does see stays a stable failure, and confinement still rejects a
+// symlink escaping the root.
+func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := context.Background()
+
+	run := func(t *testing.T, roots []string, source string) localArtworkJobRow {
+		t.Helper()
+		contentID := fmt.Sprintf("movie:local-root-%d", time.Now().UnixNano())
+		cleanupLocalArtworkJobs(t, pool, contentID)
+		repo := NewImageCacheJobRepository(pool)
+		if err := repo.Enqueue(ctx, EnqueueImageCacheJobInput{
+			TargetType: ImageCacheTargetItem, TargetContentID: contentID, SeriesID: contentID,
+			ContentType: "movie", ImageType: ImageCacheImagePoster, SourcePath: source,
+		}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		jobs, err := repo.claimDueForTarget(ctx, "mountless-server", contentID, false, 1)
+		if err != nil || len(jobs) != 1 {
+			t.Fatalf("claim = %d jobs, %v; want 1", len(jobs), err)
+		}
+		p, _, _ := newLocalArtworkDBProcessor(pool, roots)
+		p.processClaimedJobs(ctx, "mountless-server", jobs, 1)
+		return readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster)
+	}
+	assertDeferred := func(t *testing.T, got localArtworkJobRow) {
+		t.Helper()
+		if got.status != ImageCacheStatusQueued || got.attempts != 0 ||
+			!strings.Contains(got.lastError, "library root not available on this server") ||
+			got.nextAttemptIn < imageCacheRootUnavailableRetry-time.Minute || got.nextAttemptIn > imageCacheRootUnavailableRetry+time.Minute {
+			t.Fatalf("job = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRetry)
+		}
+	}
+	assertStableFailure := func(t *testing.T, got localArtworkJobRow, wantError string) {
+		t.Helper()
+		if got.status != ImageCacheStatusQueued || got.attempts != 1 || !strings.Contains(got.lastError, wantError) ||
+			got.nextAttemptIn < imageCacheDeferredRetry-time.Hour {
+			t.Fatalf("job = %+v, want one attempt counted, %q, and the %s stable-failure delay", got, wantError, imageCacheDeferredRetry)
+		}
+	}
+
+	t.Run("root absent on this server", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "unmounted")
+		assertDeferred(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"))
+	})
+
+	t.Run("root is an empty mount point", func(t *testing.T) {
+		root := t.TempDir()
+		assertDeferred(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"))
+	})
+
+	t.Run("file missing under a present root", func(t *testing.T) {
+		root := t.TempDir()
+		writeSidecar(t, filepath.Join(root, "Other", "poster.jpg"))
+		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"), "local image missing")
+	})
+
+	t.Run("symlink escaping a present root", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		writeSidecar(t, filepath.Join(outside, "poster.jpg"))
+		if err := os.Symlink(outside, filepath.Join(root, "Film")); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"), "outside library roots")
+	})
+}
