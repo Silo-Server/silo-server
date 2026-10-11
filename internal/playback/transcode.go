@@ -3058,6 +3058,22 @@ func (s *TranscodeSession) WaitError() error {
 }
 
 // Opts returns the TranscodeOpts used to create this session (for testing).
+// SegmentAt returns the segment that holds positionSeconds of the stream: the
+// planned segment for a keyframe-planned session, whose segments vary in
+// length, else the fixed-length one.
+func (s *TranscodeSession) SegmentAt(positionSeconds float64) int {
+	if positionSeconds <= 0 {
+		return 0
+	}
+	if s.copyPlan != nil {
+		return s.copyPlan.segmentAt(positionSeconds)
+	}
+	if d := s.Opts().SegmentDuration; d > 0 {
+		return int(positionSeconds / float64(d))
+	}
+	return 0
+}
+
 func (s *TranscodeSession) Opts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()

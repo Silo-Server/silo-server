@@ -243,6 +243,19 @@ func (p *copySegmentPlan) restartSeekSeconds(n int) float64 {
 	return max(p.keyframes[p.restartKeyframe(n)]-p.keyframes[0], 0)
 }
 
+// segmentAt returns the planned segment holding playlist time seconds; a
+// time past the end is in the last segment.
+func (p *copySegmentPlan) segmentAt(seconds float64) int {
+	start := 0.0
+	for n, d := range p.durations {
+		if seconds < start+d {
+			return n
+		}
+		start += d
+	}
+	return len(p.durations) - 1
+}
+
 // restartKeyframe is the keyframe a run started for segment n aims its seek
 // at: the one before the segment's first, or the first keyframe for a run
 // from the start. FFmpeg's seek lands there or earlier, never later.

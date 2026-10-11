@@ -75,8 +75,28 @@ type copyGroupRun struct {
 	broken         bool
 }
 
+// newCopyGroupAssembler starts a session's assembly. Planned segments already
+// in dir are left from a process that died without cleaning up (a rebuilt
+// session reuses the directory). Their run's timeline and audio recipe aren't
+// known here, so they could neither be lined up with new runs nor dropped when
+// the audio changes; remove them, and the first run assembles them again.
 func newCopyGroupAssembler(dir string, plan *copySegmentPlan) *copyGroupAssembler {
+	removeInheritedSegments(dir)
 	return &copyGroupAssembler{dir: dir, plan: plan, assembled: make([]bool, len(plan.durations))}
+}
+
+func removeInheritedSegments(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		var n int
+		if _, err := fmt.Sscanf(name, "seg_%05d.m4s", &n); err == nil && name == plannedSegmentName(n) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
 }
 
 // startRun begins a new FFmpeg run for startSegment and returns the file

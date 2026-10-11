@@ -690,3 +690,52 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 		t.Fatalf("assembled stream doesn't decode cleanly (%v): %s", err, out)
 	}
 }
+
+// A position maps to the planned segment that holds it, whose lengths follow
+// the keyframes rather than the segment duration.
+func TestCopySegmentPlanSegmentAt(t *testing.T) {
+	p := &copySegmentPlan{durations: []float64{1.5, 5.3, 2.2, 3.7}}
+	for _, tc := range []struct {
+		seconds float64
+		want    int
+	}{{0, 0}, {1.49, 0}, {1.5, 1}, {6.0, 1}, {6.8, 2}, {9.0, 3}, {100, 3}} {
+		if got := p.segmentAt(tc.seconds); got != tc.want {
+			t.Errorf("segmentAt(%v) = %d, want %d", tc.seconds, got, tc.want)
+		}
+	}
+
+	// A fixed-length estimate would put 6.0s in segment 3 of 2s segments,
+	// two past the planned segment that holds it.
+	planned := &TranscodeSession{copyPlan: p, opts: TranscodeOpts{SegmentDuration: 2}}
+	if got := planned.SegmentAt(6.0); got != 1 {
+		t.Fatalf("planned SegmentAt(6.0) = %d, want 1", got)
+	}
+	plain := &TranscodeSession{opts: TranscodeOpts{SegmentDuration: 2}}
+	if got := plain.SegmentAt(6.0); got != 3 {
+		t.Fatalf("SegmentAt(6.0) = %d, want 3", got)
+	}
+}
+
+// Planned segments a dead process left behind are removed when a session's
+// assembly starts; other files stay.
+func TestNewCopyGroupAssemblerRemovesInheritedSegments(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"seg_00000.m4s", "seg_00007.m4s", "init.mp4", copyPlanRecordFile, "seg_7.m4s"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newCopyGroupAssembler(dir, evenPlan())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, e := range entries {
+		left = append(left, e.Name())
+	}
+	slices.Sort(left)
+	if want := []string{"init.mp4", copyPlanRecordFile, "seg_7.m4s"}; !slices.Equal(left, slices.Sorted(slices.Values(want))) {
+		t.Fatalf("left %v, want %v", left, want)
+	}
+}
