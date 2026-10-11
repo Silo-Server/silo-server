@@ -117,6 +117,16 @@ func TestSharedRecentlyAddedMergesTVEventsWithMoviesDB(t *testing.T) {
 	if got, want := fetchIn(configured, []int{moviesID}), []string{"movie:" + movieID}; !slices.Equal(got, want) {
 		t.Fatalf("configured row in movie scope = %v, want %v", got, want)
 	}
+
+	// As in the plain query, the configured libraries and the caller's scope
+	// are separate membership checks: a movie that is also in the configured
+	// books library stays on a row configured for shows and books when the
+	// caller's scope is shows and movies.
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, movieID, booksID, base.Add(time.Minute))
+	configured = fmt.Sprintf(`{"filter_library_ids":[%d,%d]}`, showsID, booksID)
+	if got, want := fetchIn(configured, []int{showsID, moviesID}), []string{"episode:" + episodeID, "movie:" + movieID}; !slices.Equal(got, want) {
+		t.Fatalf("row configured for shows and books in shows+movies scope = %v, want %v", got, want)
+	}
 }
 
 func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
@@ -246,27 +256,22 @@ func TestMergeRecentlyAddedInterleavesAndReportsLeftover(t *testing.T) {
 	}
 }
 
-func TestMixedRecentRequestedLibraries(t *testing.T) {
+func TestScopeTVLibraries(t *testing.T) {
 	tests := []struct {
-		name       string
-		configured []int
-		scope      []int
-		want       []int
-		wantOK     bool
+		name  string
+		tv    []int
+		scope []int
+		want  []int
 	}{
-		{"no config, every library", nil, nil, nil, true},
-		{"no config, caller scope", nil, []int{3, 5}, []int{3, 5}, true},
-		{"config, every library", []int{3, 5}, nil, []int{3, 5}, true},
-		{"config narrowed by caller", []int{3, 5, 7}, []int{5}, []int{5}, true},
-		{"config and caller disjoint", []int{3}, []int{5}, nil, false},
-		{"caller sees nothing", []int{3}, []int{}, nil, false},
-		{"no config, caller sees nothing", nil, []int{}, nil, false},
+		{"every library", []int{3, 5}, nil, []int{3, 5}},
+		{"narrowed by caller", []int{3, 5, 7}, []int{5, 9}, []int{5}},
+		{"disjoint", []int{3}, []int{5}, []int{}},
+		{"caller sees nothing", []int{3}, []int{}, []int{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := mixedRecentRequestedLibraries(tt.configured, tt.scope)
-			if ok != tt.wantOK || !slices.Equal(got, tt.want) {
-				t.Fatalf("mixedRecentRequestedLibraries = %v %v, want %v %v", got, ok, tt.want, tt.wantOK)
+			if got := scopeTVLibraries(tt.tv, tt.scope); !slices.Equal(got, tt.want) {
+				t.Fatalf("scopeTVLibraries = %v, want %v", got, tt.want)
 			}
 		})
 	}

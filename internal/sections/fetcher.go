@@ -2414,9 +2414,12 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	if cfgFilters.FilterType != "" {
 		return nil, 0, false, nil
 	}
-	requested, ok := mixedRecentRequestedLibraries(cfgFilters.LibraryIDs(), libraryIDs)
-	if !ok {
-		return nil, 0, false, nil
+	requested := cfgFilters.LibraryIDs()
+	if len(requested) == 0 {
+		if libraryIDs != nil && len(libraryIDs) == 0 {
+			return nil, 0, false, nil
+		}
+		requested = append([]int(nil), libraryIDs...)
 	}
 	videoOnly := len(recentlyAddedMediaTypes(s.Config)) > 0
 	split, err := catalog.SplitRecentLibraries(ctx, f.pool, requested, videoOnly, filter)
@@ -2434,7 +2437,7 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	// Each side reads one card past the page. A series in both a TV library
 	// and a mixed library appears on both sides, so only the merged, deduped
 	// set can tell whether a card exists beyond the page.
-	tvItems, _, err := f.fetchRecentTVItems(ctx, split.TV, limit+1, filter)
+	tvItems, _, err := f.fetchRecentTVItems(ctx, scopeTVLibraries(split.TV, libraryIDs), limit+1, filter)
 	if err != nil {
 		return nil, 0, true, err
 	}
@@ -2467,27 +2470,22 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	return merged, total, true, nil
 }
 
-// mixedRecentRequestedLibraries returns the libraries a mixed recently-added
-// row may read: the section's configured libraries limited to the caller's
-// scope, matching the plain query's buildLibraryScope. A nil caller scope means
-// every library, and an empty result with ok=true means every enabled library.
-// ok is false when the two scopes share no library; the plain query then
-// serves the row.
-func mixedRecentRequestedLibraries(configured, scope []int) (requested []int, ok bool) {
-	switch {
-	case scope != nil && len(scope) == 0:
-		return nil, false
-	case len(configured) == 0:
-		return append([]int(nil), scope...), true
-	case scope == nil:
-		return append([]int(nil), configured...), true
+// scopeTVLibraries limits a mixed row's TV libraries to the caller's scope
+// (nil means every library). The other libraries' query checks the caller's
+// scope as a separate membership test, but the TV event query reads only the
+// libraries it is given, so a series in a configured TV library outside the
+// scope is left out even when it also belongs to a library in scope.
+func scopeTVLibraries(tv, scope []int) []int {
+	if scope == nil {
+		return tv
 	}
-	for _, id := range configured {
-		if slices.Contains(scope, id) && !slices.Contains(requested, id) {
-			requested = append(requested, id)
+	scoped := make([]int, 0, len(tv))
+	for _, id := range tv {
+		if slices.Contains(scope, id) {
+			scoped = append(scoped, id)
 		}
 	}
-	return requested, len(requested) > 0
+	return scoped
 }
 
 // fetchRecentTVItems loads the newest arrival-grouped TV cards from the given
