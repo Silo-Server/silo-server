@@ -23,14 +23,15 @@ import (
 // target's accumulated poster is not local, and keeps the first remote poster
 // beside a local one for localization rows (SeasonResult.remotePosterPath).
 func preferLocalSeasonPoster(target *SeasonResult, source SeasonResult) {
+	sourceLocal := isLocalImageSourcePath(source.PosterPath)
+	targetLocal := isLocalImageSourcePath(target.PosterPath)
 	switch {
-	case isLocalImageSourcePath(source.PosterPath) && !isLocalImageSourcePath(target.PosterPath):
+	case sourceLocal && !targetLocal:
 		if target.PosterPath != "" {
 			target.remotePosterPath, target.remotePosterThumbhash = target.PosterPath, target.PosterThumbhash
 		}
 		target.PosterPath, target.PosterThumbhash = source.PosterPath, source.PosterThumbhash
-	case isLocalImageSourcePath(target.PosterPath) && source.PosterPath != "" &&
-		!isLocalImageSourcePath(source.PosterPath) && target.remotePosterPath == "":
+	case targetLocal && !sourceLocal && source.PosterPath != "" && target.remotePosterPath == "":
 		target.remotePosterPath, target.remotePosterThumbhash = source.PosterPath, source.PosterThumbhash
 	}
 }
