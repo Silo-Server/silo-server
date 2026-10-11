@@ -2,7 +2,6 @@ package playback
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -220,9 +219,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// a codec the probe could not name. Default selection skips such tracks,
 	// so this one was chosen explicitly or the file has no other. Retrying
 	// cannot help; choosing another track can.
-	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks[input.AudioTrackIndex]) {
+	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
 		message := TerminalAudioTrackUndecodableMessageV3
-		if !slices.ContainsFunc(file.AudioTracks, AudioTrackDecodable) {
+		if !AnyAudioTrackDecodable(file.AudioTracks, file.CodecAudio) {
 			message = TerminalNoDecodableAudioMessageV3
 		}
 		return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, message, false)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
@@ -71,9 +70,9 @@ func planSpeech(file *models.MediaFile, subtitleLanguage string) (speechPlan, er
 
 func audioStreamFor(tracks []models.AudioTrack, language string) int {
 	if want, err := subtitles.NormalizeLanguageCode(language); err == nil && want != "" {
-		anyDecodable := slices.ContainsFunc(tracks, playback.AudioTrackDecodable)
+		anyDecodable := playback.AnyAudioTrackDecodable(tracks, "")
 		for i, t := range tracks {
-			if anyDecodable && !playback.AudioTrackDecodable(t) {
+			if anyDecodable && !playback.AudioTrackDecodable(tracks, i, "") {
 				continue
 			}
 			if got, err := subtitles.NormalizeLanguageCode(t.Language); err == nil && got == want {

@@ -92,9 +92,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 	if primaryCodec == "" && len(file.AudioTracks) > 0 {
 		primaryCodec = normalizeCodecV3(file.AudioTracks[0].Codec)
 	}
-	defaultIndex := preparedDefaultAudioIndex(file.AudioTracks, audioTrackIndex)
+	defaultIndex := preparedDefaultAudioIndex(file, audioTrackIndex)
 	for i, track := range file.AudioTracks {
-		if !AudioTrackDecodable(track) {
+		if !AudioTrackDecodable(file.AudioTracks, i, file.CodecAudio) {
 			continue
 		}
 		codec := PreparedAudioAAC
@@ -139,11 +139,11 @@ func (p *PreparedTracks) allAudioCopied() bool {
 	return true
 }
 
-func preparedDefaultAudioIndex(tracks []models.AudioTrack, requested int) int {
-	if requested >= 0 && requested < len(tracks) && AudioTrackDecodable(tracks[requested]) {
+func preparedDefaultAudioIndex(file *models.MediaFile, requested int) int {
+	if requested >= 0 && requested < len(file.AudioTracks) && AudioTrackDecodable(file.AudioTracks, requested, file.CodecAudio) {
 		return requested
 	}
-	return SelectAudioTrack(tracks, "", nil)
+	return SelectAudioTrack(file.AudioTracks, "", nil)
 }
 
 // preparedMP4AudioCodecs lists audio codecs FFmpeg's MP4 muxer stores without

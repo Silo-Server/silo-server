@@ -50,6 +50,7 @@ func TestPlanPlaybackV3RefusesUndecodableAudioTrack(t *testing.T) {
 func TestPlanPlaybackV3RefusesFileWithoutDecodableAudio(t *testing.T) {
 	file := undecodableAudioFixtureFileV3()
 	file.AudioTracks = file.AudioTracks[:1]
+	file.CodecAudio = "" // the scanner found no named audio codec to record
 	result := PlanPlaybackV3(PlannerInputV3{Request: validStartRequestV3(), RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Terminal == nil || result.Terminal.Reason != TerminalAudioConversionUnsupportedV3 || result.Terminal.Retryable || result.Terminal.Message != TerminalNoDecodableAudioMessageV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
@@ -64,5 +65,22 @@ func TestPlanPlaybackV3RefusesUndecodableAudioOnlyTrack(t *testing.T) {
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
 	if result.Terminal == nil || result.Terminal.Reason != TerminalAudioConversionUnsupportedV3 || result.Terminal.Retryable {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// Older rows recorded only the file-level audio codec. Their codec-less tracks
+// are missing metadata, not streams FFmpeg cannot decode.
+func TestPlanPlaybackV3KeepsTracksWithoutRecordedCodecs(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.AudioTracks[0].Codec = ""
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal != nil || result.Plan == nil {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if plan := PlanPreparedTracks(file, "aac", -1); len(plan.Audio) != 1 || !plan.Audio[0].Default {
+		t.Fatalf("prepared audio = %+v, want the track kept", plan.Audio)
 	}
 }

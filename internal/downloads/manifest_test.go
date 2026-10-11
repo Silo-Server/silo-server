@@ -291,15 +291,50 @@ func TestManifestDescribesArtifactWithoutUndecodableAudio(t *testing.T) {
 		t.Fatalf("selected = %v, want source track 2 at output 1", m.SelectedAudioTrackIndex)
 	}
 
-	// With no decodable track the prepared file carries no audio.
+	// A re-probe that names the skipped track's codec changes the layout the
+	// current plan describes; the frozen file cannot be mapped through it.
+	frozen := m.AudioTracks
+	b.artifact = func(context.Context, string) (*Artifact, error) {
+		return &Artifact{
+			ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+			AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion, PreparedAudioTracks: frozen,
+		}, nil
+	}
+	// The viewer chose the E-AC-3 track, now source 1; positionally it would
+	// land on the frozen commentary track, which shares its language.
+	reprobed := []models.AudioTrack{
+		{Codec: "av3a", Channels: 6, Language: "zh", Default: true},
+		{Codec: "eac3", Channels: 6, Language: "en"},
+		{Codec: "aac", Channels: 2, Language: "en", Title: "Commentary"},
+	}
+	selected = 1
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = reprobed
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = reprobed
+	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !reflect.DeepEqual(m.AudioTracks, frozen) || m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 0 {
+		t.Fatalf("audio tracks = %+v selected %v, want the frozen inventory with its default", m.AudioTracks, m.SelectedAudioTrackIndex)
+	}
+
+	// With no decodable track the prepared file carries no audio, and the
+	// scanner found no named audio codec to record for the file.
+	b.artifact = func(context.Context, string) (*Artifact, error) {
+		return &Artifact{
+			ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+			AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+		}, nil
+	}
 	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio[:1]
+	b.fileRepo.(fakeFileResolver).file.CodecAudio = ""
 	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio[:1]
 	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(m.AudioTracks) != 0 || m.SelectedAudioTrackIndex != nil {
-		t.Fatalf("audio tracks = %+v selected %v, want none", m.AudioTracks, m.SelectedAudioTrackIndex)
+	if len(m.AudioTracks) != 0 || m.SelectedAudioTrackIndex != nil || m.CodecAudio != "" {
+		t.Fatalf("audio tracks = %+v selected %v codec %q, want none", m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio)
 	}
 }
 

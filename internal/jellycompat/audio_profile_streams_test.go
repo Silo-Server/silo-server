@@ -168,7 +168,7 @@ func TestBuildPlaybackSourceUndecodableAudioTrack(t *testing.T) {
 	}
 
 	source = h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1)}, true)
-	if source.SupportsDirectStream || source.SupportsTranscoding || source.CanBurnSubtitle || source.HLSRemux || source.TranscodeAudio {
+	if source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding || source.CanBurnSubtitle || source.HLSRemux || source.TranscodeAudio {
 		t.Fatalf("undecodable selection offers a server route: %+v", source)
 	}
 }

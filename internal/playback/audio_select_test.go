@@ -1,6 +1,7 @@
 package playback_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -321,9 +322,30 @@ func TestSelectAudioTrackWithNoDecodableTrackKeepsOrdinaryChoice(t *testing.T) {
 }
 
 func TestAudioTrackDecodable(t *testing.T) {
-	for codec, want := range map[string]bool{"": false, " Unknown ": false, "eac3": true, "aac": true, "truehd": true} {
-		if got := playback.AudioTrackDecodable(models.AudioTrack{Codec: codec}); got != want {
-			t.Errorf("AudioTrackDecodable(%q) = %v, want %v", codec, got, want)
+	tests := []struct {
+		name      string
+		codecs    []string
+		fileCodec string
+		want      []bool
+	}{
+		{name: "named codecs", codecs: []string{"eac3", "aac", " TrueHD "}, fileCodec: "eac3", want: []bool{true, true, true}},
+		{name: "ffprobe text unknown", codecs: []string{" Unknown ", "aac"}, fileCodec: "aac", want: []bool{false, true}},
+		{name: "unnamed beside a named track", codecs: []string{"", "eac3"}, fileCodec: "eac3", want: []bool{false, true}},
+		{name: "no audio codec named anywhere", codecs: []string{"", ""}, want: []bool{false, false}},
+		{name: "older rows without per-track codecs", codecs: []string{"", ""}, fileCodec: "aac", want: []bool{true, true}},
+	}
+	for _, tt := range tests {
+		tracks := make([]models.AudioTrack, len(tt.codecs))
+		for i, codec := range tt.codecs {
+			tracks[i].Codec = codec
+		}
+		for i, want := range tt.want {
+			if got := playback.AudioTrackDecodable(tracks, i, tt.fileCodec); got != want {
+				t.Errorf("%s: AudioTrackDecodable(track %d) = %v, want %v", tt.name, i, got, want)
+			}
+		}
+		if got, want := playback.AnyAudioTrackDecodable(tracks, tt.fileCodec), slices.Contains(tt.want, true); got != want {
+			t.Errorf("%s: AnyAudioTrackDecodable = %v, want %v", tt.name, got, want)
 		}
 	}
 }

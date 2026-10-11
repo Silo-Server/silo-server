@@ -382,7 +382,7 @@ func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.Medi
 	if len(tracks) == 0 {
 		if file != nil {
 			// No source track was decodable, so the prepared file has no audio.
-			m.AudioTracks, m.SelectedAudioTrackIndex = nil, nil
+			m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio = nil, nil, ""
 		}
 		return
 	}
@@ -396,9 +396,12 @@ func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.Medi
 	}
 	m.CodecAudio = tracks[fileDefault].Codec
 	if selected := m.SelectedAudioTrackIndex; selected != nil && file != nil && *selected >= 0 && *selected < len(file.AudioTracks) {
+		// The frozen inventory records no source positions, so the current
+		// plan supplies them. A plan of a different length means the source
+		// was re-probed into another layout and cannot be mapped.
 		plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
 		output := slices.IndexFunc(plan.Audio, func(track playback.PreparedAudioTrack) bool { return track.SourceIndex == *selected })
-		if output >= 0 && output < len(tracks) && file.AudioTracks[*selected].Language == tracks[output].Language {
+		if output >= 0 && len(plan.Audio) == len(tracks) && file.AudioTracks[*selected].Language == tracks[output].Language {
 			m.SelectedAudioTrackIndex = &output
 			return
 		}
