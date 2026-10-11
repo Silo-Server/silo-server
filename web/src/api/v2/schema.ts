@@ -17265,7 +17265,7 @@ export interface components {
     AdminRecommendationsStatus: {
       /**
        * Format: date-time
-       * @description When the newest cached recommendation row was written. Absent when nothing is cached.
+       * @description When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached.
        */
       cache_refreshed_at?: string;
       cowatch: components["schemas"]["AdminRecommendationJobStatus"];

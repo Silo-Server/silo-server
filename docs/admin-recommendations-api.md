@@ -39,7 +39,9 @@ quotes a base URL. Embedding settings take effect after a restart, so a saved
 but not yet applied change does not show here; the embedding connection check
 reports it instead. `cache_refreshed_at` is when the newest cached
 recommendation row was written, by the cache job or a profile refresh; it is
-absent when nothing is cached.
+absent when nothing is cached. Profile refreshes keep it recent even while the
+cache job fails, so it does not show job health; `recommendations.last_run`
+does.
 
 ## Triggers
 

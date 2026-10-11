@@ -668,9 +668,11 @@ export default function AdminRecommendations() {
               lastRun={status.recommendations.last_run}
               lastPartialRun={status.recommendations.last_partial_run}
               partialRunLabel="Last startup build"
+              // Profile refreshes also write rows, so this is not job health;
+              // the last run above is.
               note={
                 status.cache_refreshed_at
-                  ? `Cache refreshed ${formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at}`
+                  ? `Newest cached row written ${formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at}`
                   : undefined
               }
               onTrigger={() => triggerRecommendations.mutate()}

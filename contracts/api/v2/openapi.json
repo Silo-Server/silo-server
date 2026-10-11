@@ -14033,7 +14033,7 @@
         "additionalProperties": false,
         "properties": {
           "cache_refreshed_at": {
-            "description": "When the newest cached recommendation row was written. Absent when nothing is cached.",
+            "description": "When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",

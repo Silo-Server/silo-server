@@ -47,7 +47,7 @@ type AdminRecommendationsStatus struct {
 	Cowatch          AdminRecommendationJobStatus `json:"cowatch"`
 	Recommendations  AdminRecommendationJobStatus `json:"recommendations"`
 	LockConflict     string                       `json:"lock_conflict" doc:"Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not."`
-	CacheRefreshedAt *Instant                     `json:"cache_refreshed_at,omitempty" doc:"When the newest cached recommendation row was written. Absent when nothing is cached."`
+	CacheRefreshedAt *Instant                     `json:"cache_refreshed_at,omitempty" doc:"When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached."`
 }
 type AdminRecommendationsStatusOutput struct{ Body AdminRecommendationsStatus }
 type AdminRecommendationStarted struct {

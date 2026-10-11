@@ -230,7 +230,7 @@ describe("AdminRecommendations", () => {
     });
   });
 
-  it("shows each job's last run, the cache refresh time and a lock conflict", async () => {
+  it("shows each job's last run, the newest cached row and a lock conflict", async () => {
     const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
     mocks.useRecommendationsStatus.mockReturnValue({
       data: statusWith({
@@ -272,7 +272,7 @@ describe("AdminRecommendations", () => {
     expect(text).toContain("recommendations reset required: embedding model changed");
     expect(text).toContain("Last run completed 1h ago");
     expect(text).toContain("No finished run recorded");
-    expect(text).toContain("Cache refreshed 5m ago");
+    expect(text).toContain("Newest cached row written 5m ago");
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Embeddings were created with model "a", not "b".',
     );
