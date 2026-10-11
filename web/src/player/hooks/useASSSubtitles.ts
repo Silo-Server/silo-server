@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type JASSUB from "jassub";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
 import { isASSCodec } from "../utils/subtitleCodecs";
@@ -34,6 +34,8 @@ interface ASSFillState {
   instance: JASSUB;
   /** Track content before any Fill margin inset. */
   baseContent: string;
+  /** The fallback font family forced onto the script, if one was. */
+  fallbackFamily?: string;
   /** Inset currently loaded into the renderer. */
   inset: ASSMarginInset;
   /** JASSUB's own render-resolution settings, restored in Fit. */
@@ -94,11 +96,14 @@ export function useASSSubtitles(
   isDetached: boolean,
   streamOriginSeconds: number,
   subtitleDelayMs: number,
-  onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
+  // "refreshing" is a reload of the track on screen for new timing: its
+  // current events stay up meanwhile, so it is not announced as loading.
+  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "error") => void,
   videoFit: VideoFitMode = "contain",
   coverCrop: CoverCrop = NO_COVER_CROP,
   // Bumped when the server retimed the active track behind an unchanged URL
-  // (subtitle sync or a timing reset); changing it reloads the track.
+  // (subtitle sync or a timing reset); changing it swaps the track's script
+  // in the running renderer.
   cueRevision = 0,
 ): { isActive: boolean } {
   const onLoadStateRef = useRef(onLoadState);
@@ -111,6 +116,13 @@ export function useASSSubtitles(
   const fillRef = useRef<ASSFillState | null>(null);
   const syncedFitRef = useRef(videoFit);
   const jassubImportRef = useRef<Promise<typeof JASSUB> | null>(null);
+  // The track and cue revision the running renderer was built from, and
+  // whether it finished loading: a retime swaps the script only then.
+  const cueRevisionRef = useRef(cueRevision);
+  cueRevisionRef.current = cueRevision;
+  const builtRef = useRef<{ url: string; revision: number; ready: boolean } | null>(null);
+  // Bumped to rebuild the renderer when a script swap cannot be made.
+  const [rebuild, setRebuild] = useState(0);
   // Effective JASSUB time offset. JASSUB renders the ASS event matching
   // `video.currentTime + timeOffset`, so an event at source time S appears
   // at video time S - timeOffset. `streamOriginSeconds` accounts for HLS
@@ -155,6 +167,8 @@ export function useASSSubtitles(
     async function initJASSUB(signal: AbortSignal, progress: () => void) {
       if (!video || cancelled) return;
       onLoadStateRef.current?.("loading");
+      const built = { url: activeUrl!, revision: cueRevisionRef.current, ready: false };
+      builtRef.current = built;
 
       // Lazy-load JASSUB module (only once).
       if (!jassubImportRef.current) {
@@ -271,6 +285,7 @@ export function useASSSubtitles(
       const fill: ASSFillState = {
         instance,
         baseContent: renderedSubContent,
+        fallbackFamily: fallbackFont && fallbackFontData ? fallbackFont.family : undefined,
         inset: initialInset,
         prescaleFactor: instance.prescaleFactor,
         prescaleHeightLimit: instance.prescaleHeightLimit,
@@ -290,6 +305,7 @@ export function useASSSubtitles(
         () => jassubRef.current === instance,
       );
       if (!cancelled && !signal.aborted && jassubRef.current === instance) {
+        built.ready = true;
         onLoadStateRef.current?.("ready");
       }
     }
@@ -341,7 +357,45 @@ export function useASSSubtitles(
     // videoRef is a stable ref object. streamOriginSeconds is read from
     // streamOriginRef inside the async function to always get the latest value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, cueRevision]);
+  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, rebuild]);
+
+  // A retime of the track on screen (subtitle sync, a timing reset) loads the
+  // corrected script into the running renderer: the current events stay up
+  // until it is in, and nothing is announced. A renderer still loading, or a
+  // swap that fails, rebuilds instead.
+  useEffect(() => {
+    const built = builtRef.current;
+    if (!activeUrl || !built || built.url !== activeUrl || built.revision === cueRevision) return;
+    const fill = fillRef.current;
+    if (!built.ready || !fill || jassubRef.current !== fill.instance) {
+      setRebuild((n) => n + 1);
+      return;
+    }
+    built.revision = cueRevision;
+    const { instance } = fill;
+    const controller = new AbortController();
+    onLoadStateRef.current?.("refreshing");
+    void (async () => {
+      try {
+        const response = await fetch(activeUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        if (controller.signal.aborted || jassubRef.current !== instance) return;
+        const content = fill.fallbackFamily ? forceASSFontFamily(text, fill.fallbackFamily) : text;
+        fill.baseContent = content;
+        fill.inset = fillInset(content, videoFitRef.current, coverCropRef.current);
+        await instance.renderer.setTrack(applyASSMarginInset(content, fill.inset));
+        if (!controller.signal.aborted && jassubRef.current === instance) {
+          onLoadStateRef.current?.("ready");
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error("[useASSSubtitles] Unable to load retimed subtitles:", err);
+        setRebuild((n) => n + 1);
+      }
+    })();
+    return () => controller.abort();
+  }, [activeUrl, cueRevision]);
 
   // Update JASSUB's time offset when either the media timeline remaps or
   // the user nudges subtitle sync. Avoids destroying and recreating the

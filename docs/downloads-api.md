@@ -112,9 +112,13 @@ The ordered preset ladder is:
 original > 20mbps > 10mbps > 5mbps > 2mbps > 1mbps
 ```
 
-Series and season batch requests are original-quality only. If some episodes do
-not have a local file, the batch response includes them in `skipped` rather than
-failing the whole batch.
+Series and season batch requests and series monitors accept any value in
+`quality_presets` when the capability reports `bulk_quality` and
+`monitor_quality` (§3); before those flags, they were original-quality only.
+The server resolves the preset against each episode's own file, as for a single
+download. Episodes without a local file, and episodes the preset cannot be
+prepared for (for example a 4K source when 4K transcoding is off), are listed in
+`skipped` rather than failing the whole batch.
 
 ### Metadata included offline
 
@@ -244,7 +248,10 @@ Response:
   "bounded_manifests": true,
   "subscription_reads": true,
   "subscription_mutations": true,
-  "bounded_subscription_sync": true
+  "bounded_subscription_sync": true,
+  "bulk_quality": true,
+  "monitor_quality": true,
+  "preparation_progress": true
 }
 ```
 
@@ -263,6 +270,9 @@ Response:
 | `ordered_status`         | Revision-bound status reporting (§4.3) is available.                              |
 | `file_delivery`          | The native byte routes (§4.5) are available.                                      |
 | `bounded_creation`       | The full native creation flow (§4.1) is available.                                |
+| `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
+| `bulk_quality`           | Series and season batches (§4.1) accept any of `quality_presets`. Without it, send `original`. |
+| `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
 | `bounded_manifests`      | Bounded manifest and batch-manifest operations (§4.6, §4.7) are available.         |
 | `subscription_reads`     | Subscription reads (§8.3) are available.                                          |
 | `subscription_mutations` | Subscription create/patch/delete (§8.1, §8.3) are available.                       |
@@ -300,7 +310,7 @@ Request body:
 | `episode_id`    | string | Episode content id for an episode download.                                  |
 | `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
-| `series`        | bool   | `true` means download every episode of `content_id` at original quality.     |
+| `series`        | bool   | `true` means download every episode of `content_id` at `quality`.            |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; negative values are rejected with `400`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
 | `caps`          | object | Device decode capabilities. Important for `original` compatibility fallback. |
 | `batch_id`      | string | Client-selected batch identity for a series/season traversal.                |
@@ -441,7 +451,12 @@ optional `season_number` (zero selects Specials). It returns one bounded page:
 The `limit` query defaults to 50 and is capped at 100 examined episodes. Keep batch,
 content, season, quality and device/profile identity unchanged while following
 `page.next_cursor` through the `cursor` query, and continue through empty `items`
-while `page.has_more` is true. Bulk quality remains original only.
+while `page.has_more` is true.
+
+A batch with a bitrate `quality` registers prepared rows that start `preparing`,
+like a single prepared download. An episode the preset cannot reach is listed in
+`skipped` with reason `quality_unavailable`, next to `no_file` for an episode
+without a local file.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion or terminal status, revision and previous batch membership. Use
@@ -641,11 +656,12 @@ Invalid refs return `422 validation_failed`. Current content access is checked
 before asset delivery, and downloaded-subtitle ownership must match the entry's
 media file.
 
-A `downloaded` subtitle is delivered with its stored timing correction applied,
-so its bytes change when an admin or an automatic sync adjusts the timing. Its
-response carries `Cache-Control: private, no-cache` and a strong `ETag` that
-changes with the subtitle's revision; send it back in `If-None-Match` to get
-`304 Not Modified` while the bytes are unchanged.
+A `downloaded` or `external` subtitle is delivered with its timing correction
+applied, so its bytes change when someone syncs or adjusts its timing (and an
+`external` one also when the file on disk changes). Its response carries
+`Cache-Control: private, no-cache` and a strong `ETag` that changes with the
+delivered bytes; send it back in `If-None-Match` to get `304 Not Modified`
+while they are unchanged.
 
 ### 4.10 Direct download
 
@@ -718,6 +734,24 @@ server version.
 | `created_at`          | string | RFC3339.                                                               |
 | `completed_at`        | string | Present once completed.                                                |
 | `status_event_at`     | string | Latest accepted client status event for the current revision.          |
+| `preparation`         | object | Listed `preparing` entries only, when the capability reports `preparation_progress`. See below. |
+
+`preparation` says where a preparing entry's file is in the server's preparation
+queue:
+
+| Field               | Type   | Notes                                                                                  |
+| ------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `state`             | string | `queued`, `running`, `retrying` (an attempt failed; the job waits out its backoff), or `paused` (an administrator paused the job; it isn't claimed until resumed). |
+| `queue_position`    | int    | While `queued`: 1-based place among every queued preparation on the server, in claim order. |
+| `progress`          | number | While `running` and the encode keeps reporting it: encoded fraction, 0 to 1. Omitted once reports stop for 30 seconds. |
+| `remaining_seconds` | int    | While `running`: estimated seconds left at the encode's reported speed.               |
+
+`GET /api/v2/downloads` attaches it; other answers that return an entry do not.
+Each server node refreshes these values at most every 5 seconds, so polling more
+often than that returns the same numbers.
+It is absent when the job has already finished or failed but the entry's status
+has not caught up, and when progress cannot be read; a client then shows a plain
+preparing state.
 
 Managed lifecycle:
 
@@ -846,11 +880,13 @@ Notes:
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
   refresh the media file and manifest.
-- `subtitles[].revision` is present only on downloaded (`downloaded:{id}`)
-  subtitles. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change, such as a timing correction. When a refreshed
-  manifest shows a different value than the one stored with the cached file,
-  re-fetch that subtitle.
+- `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
+  external (`external:{index}`) subtitles; an external subtitle that cannot be
+  read has none. It is an opaque string that changes whenever that subtitle's
+  delivered bytes can change: a timing correction, or an external file edited
+  on disk. When a refreshed manifest shows a different value than the one
+  stored with the cached file, re-fetch that subtitle. An external subtitle's
+  `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as
   "not set."
 
@@ -966,6 +1002,7 @@ POST /api/v2/downloads/subscriptions
 | `season_numbers`    | int[]  | Required for `specific_seasons`.                                                    |
 | `delete_watched`    | bool   | Client deletes finished episodes; sync skips episodes the profile has finished.     |
 | `max_storage_bytes` | int64  | `0` means unlimited. Client-enforced hard cap; server soft-gates auto-registration. |
+| `quality`           | string | Optional, `original` by default. One of `quality_presets`; needs `monitor_quality`. |
 
 The response is the persisted monitor with its `etag` validator. If this device
 already monitors that series, its current options and paused state are returned
@@ -1007,6 +1044,14 @@ A `delete_watched` monitor also skips episodes whose progress for the profile is
 `completed`, the same flag the client reads before deleting a finished episode. If
 the progress lookup fails, sync registers without this filter rather than failing.
 
+A monitor with a bitrate `quality` registers prepared rows that start `preparing`.
+Sync resolves the preset for each episode's file without device `caps`, so an
+episode the preset cannot be prepared for is not registered and does not count
+toward `registered`. Prepared rows count toward the account's concurrent download
+limit until they are ready, so one sync registers at most as many prepared
+episodes as the account has free slots; the rest register on a later sync. An
+episode whose capability check fails for now is also left for a later sync.
+
 ### 8.3 List, get, update, delete
 
 ```http
@@ -1029,6 +1074,10 @@ unchanged and an explicit null is rejected:
 { "mode": "specific_seasons", "season_numbers": [2, 3], "active": true }
 ```
 
+Changing `quality` applies to episodes registered from then on; downloads already
+registered keep the quality they were created with. A changed `quality` is checked
+against the account's transcode permission; sending the stored value again is not.
+
 Edits preserve the future cutoff and re-anchor latest-season selection only under
 the shared mode-change rules. Delete stops monitoring, retains already-registered
 downloads and forgets the episodes deleted while it existed, so a new monitor for the
@@ -1044,6 +1093,7 @@ Subscription shape:
   "target_season": 4,
   "delete_watched": true,
   "max_storage_bytes": 21474836480,
+  "quality": "original",
   "active": true,
   "created_at": "2026-06-19T16:00:00Z",
   "updated_at": "2026-06-19T16:00:00Z"
@@ -1062,6 +1112,7 @@ files or existing download rows.
 1. Call `GET /api/v2/capabilities/downloads` and offer only `quality_presets`.
 2. User picks Download: `POST /api/v2/downloads` with `quality`, `caps`, profile, and device headers.
 3. If the row is `preparing`, poll `GET /api/v2/downloads` or listen on events (see 9.4) until `ready`.
+   Show its `preparation` while waiting: the queue position, or the encode's progress and time left.
 4. Fetch and store `GET /api/v2/downloads/{id}/manifest`.
 5. Fetch and store all `artwork_urls` and `subtitles[].fetch_url` assets.
 6. Download `GET /api/v2/downloads/{id}/file` with Range/background support.
@@ -1249,7 +1300,7 @@ For a single movie or episode:
 For series or season download:
 
 1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, and
-   `quality: "original"`.
+   the chosen `quality` (`original` unless the capability reports `bulk_quality`).
 2. Persist each returned row under the shared `batch_id`.
 3. Record `skipped` entries for user-visible diagnostics.
 4. Fetch `GET /api/v2/downloads/batches/{batch_id}/manifests` after rows are ready, or
@@ -1514,7 +1565,7 @@ operations use:
 | 412  | `precondition_failed`    | A stale `If-Match` validator.                                             |
 | 429  | `rate_limited`           | Concurrent download cap or period quota hit.                              |
 | 500  | `internal_error`         | Unexpected server error.                                                  |
-| 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a non-original bulk quality, or a missing prepare pipeline. |
+| 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a quality the server cannot prepare, or a missing prepare pipeline. |
 | 503  | `dependency_unavailable` | Downloads, offline assets, series monitoring, or capability discovery is temporarily unavailable; retry the same request. |
 
 Access denials intentionally surface as `404` on manifest, artwork, subtitle, and
@@ -1582,6 +1633,29 @@ re-read the list) and `download_preparation.progress` (`{id, progress}`); its
 subscription snapshot is `null`. FFmpeg output for every attempt, on the API host
 or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
 `playback_session_id`. None of this changes the client-facing download contract.
+
+### Pausing and canceling preparation (admin)
+
+A paused job keeps its queued status and claim position; `paused_at` hides it
+from the claim query until an administrator resumes it. Pausing a running job
+returns it to its queued status, clears its lease and live state, and refunds
+the attempt. The lost lease fences the worker out: an encode on the replica that
+handled the request is canceled at once, and one on another replica stops at its
+next heartbeat (within about 40 seconds). The row keeps an unowned
+`lease_expires_at` one lease length (two minutes) ahead, and `ClaimNext` waits it
+out even if the job is resumed sooner, because a second attempt would share the
+first one's local output path.
+
+Canceling deletes the job row and fails its `preparing` downloads with
+`Canceled by an administrator` in one transaction, then publishes the usual
+`download` user-state event for each. A running attempt stops the same way as a
+pause; remote attempt bytes go through the orphan cleanup queue, which treats a
+locator whose row is gone as abandoned, and a local encode that finishes after
+its row was deleted removes its own file. Each job writes to a path that includes
+its id, so a job created after a cancel never shares a path with the canceled
+encode. A download linked to the job while the cancel committed fails the same
+way, when its link is confirmed or at the next queue reconciliation. Clients see
+an ordinary failed download and can request it again, which queues a new job.
 
 ### Progress sync ordering
 

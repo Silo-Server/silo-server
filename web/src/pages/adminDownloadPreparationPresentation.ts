@@ -1,4 +1,8 @@
-import type { AdminDownloadPreparation } from "@/api/v2/adminDownloadPreparations";
+import type {
+  AdminDownloadPreparation,
+  AdminDownloadPreparationAction,
+  AdminDownloadPreparationActionResult,
+} from "@/api/v2/adminDownloadPreparations";
 import { formatChannels, formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 
 export type PreparationState = AdminDownloadPreparation["state"];
@@ -7,6 +11,7 @@ export const PREPARATION_STATES: readonly PreparationState[] = [
   "running",
   "queued",
   "retrying",
+  "paused",
   "failed",
 ];
 
@@ -19,11 +24,21 @@ const STATE_META: Record<PreparationState, PreparationStateMeta> = {
   running: { label: "Encoding", swatchClass: "bg-primary" },
   queued: { label: "Queued", swatchClass: "bg-muted-foreground/50" },
   retrying: { label: "Retrying", swatchClass: "bg-warning" },
+  paused: { label: "Paused", swatchClass: "bg-muted-foreground/25" },
   failed: { label: "Failed (24 h)", swatchClass: "bg-destructive" },
 };
 
 export function preparationStateMeta(state: PreparationState): PreparationStateMeta {
   return STATE_META[state];
+}
+
+/** Whether a job can be paused: it is unfinished and not paused yet. */
+export function canPausePreparation(p: AdminDownloadPreparation): boolean {
+  return p.state === "running" || p.state === "queued" || p.state === "retrying";
+}
+
+export function canResumePreparation(p: AdminDownloadPreparation): boolean {
+  return p.state === "paused";
 }
 
 /** The running verb: a remux copies streams, so it is not "encoding". */
@@ -260,4 +275,79 @@ export function preparationSearchText(p: AdminDownloadPreparation): string {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function jobs(n: number): string {
+  return `${n.toLocaleString()} ${n === 1 ? "job" : "jobs"}`;
+}
+
+const ACTION_PAST: Record<AdminDownloadPreparationAction, string> = {
+  pause: "Paused",
+  resume: "Resumed",
+  cancel: "Canceled",
+};
+
+/** One sentence per outcome of an action, e.g. "Paused 3 jobs. Skipped 1 job that failed." */
+export function summarizePreparationAction(
+  action: AdminDownloadPreparationAction,
+  results: readonly AdminDownloadPreparationActionResult[],
+): string {
+  const count = (outcome: AdminDownloadPreparationActionResult["outcome"]) =>
+    results.filter((r) => r.outcome === outcome).length;
+  const applied = count("applied");
+  const unchanged = count("unchanged");
+  const notApplicable = count("not_applicable");
+  const notFound = count("not_found");
+  const parts: string[] = [];
+  if (applied > 0) parts.push(`${ACTION_PAST[action]} ${jobs(applied)}.`);
+  if (unchanged > 0) {
+    parts.push(
+      action === "pause"
+        ? `${jobs(unchanged)} ${unchanged === 1 ? "was" : "were"} already paused.`
+        : `${jobs(unchanged)} ${unchanged === 1 ? "wasn't" : "weren't"} paused.`,
+    );
+  }
+  if (notApplicable > 0) parts.push(`Skipped ${jobs(notApplicable)} that failed.`);
+  if (notFound > 0) {
+    parts.push(`${jobs(notFound)} had already finished or been canceled.`);
+  }
+  return parts.join(" ") || "Nothing changed.";
+}
+
+export interface CancelPreparationsPrompt {
+  title: string;
+  description: string;
+  confirmLabel: string;
+}
+
+/** Confirmation copy for canceling jobs, naming what the requesters lose. */
+export function cancelPreparationsPrompt(
+  targets: readonly AdminDownloadPreparation[],
+): CancelPreparationsPrompt {
+  const waiting = targets.reduce(
+    (sum, t) => sum + t.requesters.filter((r) => r.status === "preparing").length,
+    0,
+  );
+  const encoding = targets.some((t) => t.state === "running");
+  const description = [
+    encoding ? "Encoding stops and its progress is lost." : "",
+    waiting > 0
+      ? `${waiting.toLocaleString()} waiting ${waiting === 1 ? "download fails" : "downloads fail"} with "Canceled by an administrator". Users can download again later, which starts a new job.`
+      : `No downloads are waiting on ${targets.length === 1 ? "this job" : "these jobs"}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (targets.length > 1) {
+    return {
+      title: `Cancel ${jobs(targets.length)}?`,
+      description,
+      confirmLabel: `Cancel ${jobs(targets.length)}`,
+    };
+  }
+  const name = targets[0] ? preparationCompactTitle(targets[0]) : "";
+  if (targets[0]?.state === "failed") {
+    return { title: `Remove the failed job for ${name}?`, description, confirmLabel: "Remove" };
+  }
+  return { title: `Cancel preparing ${name}?`, description, confirmLabel: "Cancel job" };
 }

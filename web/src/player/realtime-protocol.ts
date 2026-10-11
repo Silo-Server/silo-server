@@ -26,6 +26,7 @@ export type PlaybackRealtimeEventName =
   | "markers_updated"
   | "subtitle_ready"
   | "subtitle_timing_changed"
+  | "subtitle_sync_updated"
   | "subtitle_translation_started"
   | "subtitle_translation_cues"
   | "subtitle_translation_completed"
@@ -112,16 +113,55 @@ export interface PlaybackSubtitleReadyPayload {
 }
 
 /**
- * Sent to every session of a file after a stored subtitle is retimed (an
- * automatic sync was applied or its timing was reset). The track's stream URL
- * already serves the new timing, so a player showing it fetches the cues again.
+ * Sent to every session of a file after one of its subtitles (stored or a
+ * sidecar file) is retimed: a sync was applied, or its timing was set or
+ * reset. The track's stream URL already serves the new timing, so a player
+ * showing it fetches the cues again.
  */
 export interface PlaybackSubtitleTimingChangedPayload {
   session_id: string;
   file_id: number;
-  subtitle_id: number;
+  /** The track's `sync_key`. */
+  sync_key: string;
+  /** The stored subtitle's ID; absent for a sidecar. */
+  subtitle_id?: number;
   /** See {@link PlaybackSubtitleReadyPayload.track}. */
   track?: SubtitleInventoryItemV3;
+}
+
+export interface PlaybackSubtitleSyncTiming {
+  offset_ms: number;
+  scale: number;
+}
+
+/** A sync job's state, in the shape of the native API's `SubtitleSyncJobState`. */
+export interface PlaybackSubtitleSyncJob {
+  id: string;
+  status: "pending" | "running" | "synced" | "already_synced" | "no_match" | "failed";
+  trigger: "auto" | "manual";
+  phase?: "queued" | "analyzing" | "matching";
+  progress?: number;
+  failure?: "subtitle_changed" | "no_audio" | "unavailable" | "error";
+  confidence: number | null;
+  result?: PlaybackSubtitleSyncTiming;
+  created_at: string;
+  finished_at: string | null;
+}
+
+/**
+ * Sent to every session of a file as a sync job of one of its subtitles is
+ * queued, runs, and ends. A synced job has applied its result already;
+ * `subtitle_timing_changed` follows.
+ */
+export interface PlaybackSubtitleSyncUpdatedPayload {
+  session_id: string;
+  file_id: number;
+  /** The track's `sync_key`. */
+  sync_key: string;
+  subtitle_id?: number;
+  /** The subtitle's correction after this step. */
+  timing: PlaybackSubtitleSyncTiming;
+  job: PlaybackSubtitleSyncJob;
 }
 
 /** One translated subtitle cue pushed during a live translation (media seconds). */
@@ -192,6 +232,10 @@ export type PlaybackRealtimeEventEnvelope =
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_timing_changed";
       payload: PlaybackSubtitleTimingChangedPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_sync_updated";
+      payload: PlaybackSubtitleSyncUpdatedPayload;
     })
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "subtitle_translation_started";
@@ -366,7 +410,8 @@ function isSubtitleInventoryItem(value: unknown): value is SubtitleInventoryItem
     isOptionalString(value.language) &&
     isOptionalString(value.label) &&
     isOptionalString(value.url) &&
-    isOptionalString(value.font_bundle_url)
+    isOptionalString(value.font_bundle_url) &&
+    isOptionalString(value.sync_key)
   );
 }
 
@@ -393,8 +438,65 @@ function isSubtitleTimingChangedPayload(
     isRecord(value) &&
     typeof value.session_id === "string" &&
     typeof value.file_id === "number" &&
-    typeof value.subtitle_id === "number" &&
+    typeof value.sync_key === "string" &&
+    (value.subtitle_id === undefined || typeof value.subtitle_id === "number") &&
     isOptionalSubtitleInventoryItem(value.track)
+  );
+}
+
+/**
+ * Reads a subtitle_timing_changed payload. A server from before sidecar sync
+ * (an older API server during a rolling upgrade) names only a stored
+ * subtitle's `subtitle_id`; its sync key is derived from that.
+ */
+function subtitleTimingChangedPayload(value: unknown): PlaybackSubtitleTimingChangedPayload | null {
+  if (isSubtitleTimingChangedPayload(value)) return value;
+  if (isRecord(value) && value.sync_key === undefined && typeof value.subtitle_id === "number") {
+    const legacy = { ...value, sync_key: `stored-${value.subtitle_id}` };
+    return isSubtitleTimingChangedPayload(legacy) ? legacy : null;
+  }
+  return null;
+}
+
+function isSubtitleSyncTiming(value: unknown): value is PlaybackSubtitleSyncTiming {
+  return isRecord(value) && typeof value.offset_ms === "number" && typeof value.scale === "number";
+}
+
+const SUBTITLE_SYNC_STATUSES = new Set([
+  "pending",
+  "running",
+  "synced",
+  "already_synced",
+  "no_match",
+  "failed",
+]);
+
+function isSubtitleSyncJob(value: unknown): value is PlaybackSubtitleSyncJob {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.status === "string" &&
+    SUBTITLE_SYNC_STATUSES.has(value.status) &&
+    typeof value.trigger === "string" &&
+    isOptionalString(value.phase) &&
+    (value.progress === undefined || typeof value.progress === "number") &&
+    isOptionalString(value.failure) &&
+    (value.confidence === null || typeof value.confidence === "number") &&
+    (value.result === undefined || isSubtitleSyncTiming(value.result)) &&
+    typeof value.created_at === "string" &&
+    (value.finished_at === null || typeof value.finished_at === "string")
+  );
+}
+
+function isSubtitleSyncUpdatedPayload(value: unknown): value is PlaybackSubtitleSyncUpdatedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.sync_key === "string" &&
+    (value.subtitle_id === undefined || typeof value.subtitle_id === "number") &&
+    isSubtitleSyncTiming(value.timing) &&
+    isSubtitleSyncJob(value.job)
   );
 }
 
@@ -515,10 +617,13 @@ export function parsePlaybackRealtimeMessage(
           payload: value.payload,
         };
       }
-      if (
-        value.name === "subtitle_timing_changed" &&
-        isSubtitleTimingChangedPayload(value.payload)
-      ) {
+      if (value.name === "subtitle_timing_changed") {
+        const payload = subtitleTimingChangedPayload(value.payload);
+        if (payload) {
+          return { type: "event", session_id: value.session_id, name: value.name, payload };
+        }
+      }
+      if (value.name === "subtitle_sync_updated" && isSubtitleSyncUpdatedPayload(value.payload)) {
         return {
           type: "event",
           session_id: value.session_id,

@@ -38,6 +38,25 @@ export function isBitmapCodec(codec: string | undefined): boolean {
 }
 
 /**
+ * Whether selecting the track on the web makes the server burn it into the
+ * video. The web player declares `embedded_bitmap` (client-context-v3.ts), so
+ * the server serves embedded PGS as a `.sup` sidecar that usePGSSubtitles
+ * draws; other bitmap tracks, and any track the server publishes as
+ * `burn_in_only`, need the server. Watch-detail tracks carry no delivery
+ * yet, so the codec and source decide for them.
+ */
+export function subtitleNeedsBurnIn(track: {
+  codec?: string;
+  source?: "external" | "embedded" | "downloaded";
+  burn_in_only?: boolean;
+}): boolean {
+  if (track.burn_in_only === true) return true;
+  if (!isBitmapCodec(track.codec)) return false;
+  const drawnByPlayer = isPGSCodec(track.codec) && (track.source ?? "embedded") === "embedded";
+  return !drawnByPlayer;
+}
+
+/**
  * Returns a human-readable format label for display in the subtitle menu,
  * or null if the codec is unknown/unset.
  */

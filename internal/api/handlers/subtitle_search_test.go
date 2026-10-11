@@ -422,6 +422,9 @@ func (m *handlerMockSubtitleRepo) UpdateDownloadedSubtitle(_ context.Context, id
 	if update.ContentSHA256 != "" {
 		sub.ContentSHA256 = update.ContentSHA256
 	}
+	if update.Timing != nil {
+		sub.Timing = *update.Timing
+	}
 	sub.Revision++
 	copy := *sub
 	return &copy, nil

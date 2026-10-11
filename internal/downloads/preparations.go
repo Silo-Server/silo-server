@@ -18,6 +18,7 @@ const (
 	PreparationRunning  = "running"
 	PreparationQueued   = "queued"
 	PreparationRetrying = "retrying" // failed an attempt, waiting out its backoff
+	PreparationPaused   = "paused"   // an administrator paused it; never claimed until resumed
 	PreparationFailed   = "failed"
 )
 
@@ -69,6 +70,7 @@ type Preparation struct {
 	StartedAt           *time.Time
 	CompletedAt         *time.Time
 	NextRetryAt         *time.Time
+	PausedAt            *time.Time
 	Progress            *ArtifactProgress
 	ProgressUnavailable bool
 
@@ -92,6 +94,7 @@ type PreparationCounts struct {
 	Running      int
 	Queued       int
 	Retrying     int
+	Paused       int
 	FailedRecent int
 }
 
@@ -119,11 +122,14 @@ func NewPreparationReader(pool *pgxpool.Pool, profileNames ProfileNamesFunc) *Pr
 // Available reports whether the reader can serve lists.
 func (r *PreparationReader) Available() bool { return r != nil && r.pool != nil }
 
-// The unready predicate matches download_artifacts_unready_idx.
+// The unready predicate matches download_artifacts_unready_idx. A running job
+// whose lease expired is queued again, as the claim query treats it.
 const preparationStatesCTE = `WITH listed AS (
 	SELECT a.*,
-	       CASE WHEN a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') THEN 'running'
+	       CASE WHEN a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
+	                 AND (a.lease_expires_at IS NULL OR a.lease_expires_at >= now()) THEN 'running'
 	            WHEN a.status = 'failed' THEN 'failed'
+	            WHEN a.paused_at IS NOT NULL THEN 'paused'
 	            WHEN a.next_retry_at > now() THEN 'retrying'
 	            ELSE 'queued' END AS state
 	FROM download_artifacts a
@@ -132,7 +138,8 @@ const preparationStatesCTE = `WITH listed AS (
 )`
 
 // List returns running jobs first, then jobs waiting to retry, the queue in
-// claim order, and recent failures, newest first; at most limit items.
+// claim order, paused jobs in claim order, and recent failures, newest first;
+// at most limit items.
 func (r *PreparationReader) List(ctx context.Context, limit int) (*PreparationList, error) {
 	if !r.Available() {
 		return nil, fmt.Errorf("preparation reader is not configured")
@@ -158,6 +165,8 @@ func (r *PreparationReader) List(ctx context.Context, limit int) (*PreparationLi
 			out.Counts.Queued = count
 		case PreparationRetrying:
 			out.Counts.Retrying = count
+		case PreparationPaused:
+			out.Counts.Paused = count
 		case PreparationFailed:
 			out.Counts.FailedRecent = count
 		}
@@ -186,6 +195,7 @@ func (r *PreparationReader) List(ctx context.Context, limit int) (*PreparationLi
 	       l.worker_kind, l.worker_node_id, l.worker_name,
 	       l.attempts, l.max_attempts, l.error_message, l.created_at, l.started_at, l.completed_at,
 	       CASE WHEN l.state = 'retrying' THEN l.next_retry_at END,
+	       CASE WHEN l.state = 'paused' THEN l.paused_at END,
 	       l.progress_encoded_seconds, l.progress_duration_seconds, l.progress_speed, l.progress_updated_at,
 	       l.progress_unavailable
 	FROM ranked l
@@ -193,8 +203,8 @@ func (r *PreparationReader) List(ctx context.Context, limit int) (*PreparationLi
 	LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 	LEFT JOIN episodes e ON e.content_id = mf.episode_id
 	LEFT JOIN media_items series_mi ON series_mi.content_id = e.series_id
-	ORDER BY CASE l.state WHEN 'running' THEN 0 WHEN 'retrying' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END,
-	         CASE l.state WHEN 'running' THEN l.started_at WHEN 'retrying' THEN l.next_retry_at WHEN 'queued' THEN l.created_at END,
+	ORDER BY CASE l.state WHEN 'running' THEN 0 WHEN 'retrying' THEN 1 WHEN 'queued' THEN 2 WHEN 'paused' THEN 3 ELSE 4 END,
+	         CASE l.state WHEN 'running' THEN l.started_at WHEN 'retrying' THEN l.next_retry_at WHEN 'queued' THEN l.created_at WHEN 'paused' THEN l.created_at END,
 	         l.completed_at DESC NULLS LAST, l.id
 	LIMIT $2`, window, limit)
 	if err != nil {
@@ -219,7 +229,7 @@ func (r *PreparationReader) List(ctx context.Context, limit int) (*PreparationLi
 			&p.ToneMapMode, &p.ToneMapSourceKind, &p.AllAudioTracks,
 			&p.WorkerKind, &p.WorkerNodeID, &p.WorkerName,
 			&p.Attempts, &p.MaxAttempts, &p.ErrorMessage, &p.CreatedAt, &p.StartedAt, &p.CompletedAt,
-			&p.NextRetryAt,
+			&p.NextRetryAt, &p.PausedAt,
 			&encoded, &duration, &speed, &progressAt,
 			&p.ProgressUnavailable,
 		); err != nil {

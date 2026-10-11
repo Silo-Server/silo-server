@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -170,6 +170,9 @@ type ManifestBuilder struct {
 	subs             SubtitleSource
 	fileRepo         FileResolver
 	MarkerPopulation MarkerPopulationService
+	// externalTimings applies sidecar timing corrections to the revisions
+	// and sizes of external subtitles; nil describes them as they are on disk.
+	externalTimings subtitles.ExternalTimingLookup
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
@@ -403,9 +406,18 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 
 	if file != nil {
 		for i, ext := range file.ExternalSubtitles {
+			// The revision follows the delivered bytes: the file on disk and
+			// its timing correction. An unreadable sidecar is still listed;
+			// fetching it reports the error.
 			var size int64
-			if info, statErr := os.Stat(ext.Path); statErr == nil {
-				size = info.Size()
+			var revision string
+			if data, err := playback.LoadExternalSubtitleRaw(ext.Path); err == nil {
+				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), data)
+				if timingErr != nil {
+					slog.WarnContext(ctx, "download sidecar timing lookup failed", "file_id", file.ID, "error", timingErr)
+				} else {
+					size, revision = int64(len(timed)), rev
+				}
 			}
 			out = append(out, OfflineSubtitle{
 				Language:        ext.Language,
@@ -416,6 +428,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 				External:        true,
 				FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
 				FileSize:        size,
+				Revision:        revision,
 			})
 		}
 		if prepared != nil && prepared.TrackRecipeVersion != "" {

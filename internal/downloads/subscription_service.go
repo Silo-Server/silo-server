@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -190,15 +191,19 @@ func (s *Service) syncSubscription(ctx context.Context, sub *Subscription) (int,
 	if err != nil {
 		return 0, err
 	}
-	var registered int
-	err = s.subRepo.WithLocked(ctx, current.UserID, current.ProfileID, current.DeviceID, current.ID, func(locked *Subscription, tx pgx.Tx) error {
-		if !locked.Active || !locked.UpdatedAt.Equal(current.UpdatedAt) {
-			return nil
-		}
-		registered, err = s.registerSubscriptionItems(ctx, locked, items, managedRegistryStore{tx})
-		return err
+	plan, err := s.planMonitorEntries(ctx, current, items)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.registerMonitorPlan(ctx, current, plan, func(register func(*Subscription, pgx.Tx) error) error {
+		return s.subRepo.WithLocked(ctx, current.UserID, current.ProfileID, current.DeviceID, current.ID, func(locked *Subscription, tx pgx.Tx) error {
+			if !locked.Active || !locked.UpdatedAt.Equal(current.UpdatedAt) {
+				return nil
+			}
+			return register(locked, tx)
+		})
 	})
-	return registered, err
+	return len(rows), err
 }
 
 // subscriptionEpisodeItems preserves scope, the delete_watched filter and
@@ -279,30 +284,178 @@ func (s *Service) dropWatchedEpisodes(ctx context.Context, sub *Subscription, ep
 	return kept, nil
 }
 
-// registerSubscriptionItems registers each item as a ready original managed
-// entry under the monitor's batch, inside the monitor lock (repo is the lock's
-// transaction). Before applying the storage cap it skips items the device
-// already holds (their bytes already count toward the device's usage) and
-// episodes the device deleted while monitored (see Repository.DeleteManaged),
-// so neither consumes the budget. Unlike the interactive ensureManaged path it
-// does NOT consume the QuantityLimiter — the subscription is the
-// authorization. Returns only the NEWLY registered count: the sync response's
-// "registered" is documented as new episodes, so a steady-state sync must
-// report 0, not the full in-scope set.
-func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscription, items []managedItem, repo managedRegistrationRepository) (int, error) {
-	if len(items) == 0 {
-		return 0, nil
+// monitorEntry is what a monitor registers for one item: its quality decision
+// and where its bytes come from (see managedRowSource).
+type monitorEntry struct {
+	decision   QualityDecision
+	status     string
+	size       int64
+	artifactID string
+}
+
+func managedItemKey(it managedItem) ManagedEntryKey {
+	return ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+}
+
+// monitorPlan is what a monitor sync would register, before any file is
+// prepared: the items in order and each one's quality decision.
+type monitorPlan struct {
+	items     []managedItem
+	decisions map[ManagedEntryKey]QualityDecision
+	// prepared reports that some items need a prepared file.
+	prepared bool
+}
+
+// planMonitorEntries decides, before any lock, what each item would register
+// as. An original monitor registers every item's source file. A bitrate
+// monitor resolves each episode's quality (one the preset cannot reach is left
+// out) and keeps only the episodes that look registrable now. Doing this
+// outside the locks keeps capability probes off their connections.
+func (s *Service) planMonitorEntries(ctx context.Context, sub *Subscription, items []managedItem) (monitorPlan, error) {
+	plan := monitorPlan{items: items, decisions: make(map[ManagedEntryKey]QualityDecision, len(items))}
+	quality := SubscriptionQuality(sub.Quality)
+	if quality == QualityOriginal || len(items) == 0 {
+		for _, it := range items {
+			plan.decisions[managedItemKey(it)] = originalDecision()
+		}
+		return plan, nil
 	}
+	cfg, user, err := s.downloadConfigForUser(ctx, sub.UserID, sub.DeviceID)
+	if err != nil {
+		return monitorPlan{}, err
+	}
+	items, decisions, _, err := s.resolveItemDecisions(ctx, quality, user, cfg, playback.ClientCapabilities{}, sub.DeviceID, items, true)
+	if err != nil {
+		return monitorPlan{}, err
+	}
+	// A read outside the lock: the locked registration repeats it, so an
+	// episode registered meanwhile only costs a reused artifact lookup.
+	store := managedRegistryStore{s.repo.pool}
 	keys := make([]ManagedEntryKey, len(items))
 	for i, it := range items {
-		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+		keys[i] = managedItemKey(it)
 	}
-	candidates, err := repo.MonitorEntriesToRegister(ctx, sub, keys)
+	candidates, err := store.MonitorEntriesToRegister(ctx, sub, keys)
 	if err != nil {
-		return 0, err
+		return monitorPlan{}, err
 	}
 	fresh := make([]managedItem, 0, len(candidates))
 	for i, it := range items {
+		if candidates[keys[i]] {
+			fresh = append(fresh, it)
+			plan.decisions[keys[i]] = decisions[i]
+			plan.prepared = plan.prepared || decisions[i].RequiresArtifact
+		}
+	}
+	plan.items = s.capItemsToStorage(ctx, sub, fresh, store)
+	return plan, nil
+}
+
+// registerMonitorPlan registers plan's items as the monitor's managed entries.
+// withLocked takes and checks the monitor lock, then calls register with the
+// locked row and its transaction. A plan with prepared files also holds the
+// account's quota lock from counting free concurrent download slots until its
+// rows commit, so concurrent syncs of the account's monitors share the slots;
+// only that many prepared episodes register, and the rest wait for a later
+// sync, once earlier encodes finish.
+func (s *Service) registerMonitorPlan(ctx context.Context, sub *Subscription, plan monitorPlan, withLocked func(register func(*Subscription, pgx.Tx) error) error) ([]*Download, error) {
+	var rows []*Download
+	register := func(ctx context.Context, items []managedItem) error {
+		entries := make(map[ManagedEntryKey]monitorEntry, len(items))
+		for _, it := range items {
+			decision := plan.decisions[managedItemKey(it)]
+			status, size, artifactID, err := s.managedRowSource(ctx, it, decision)
+			if err != nil {
+				return err
+			}
+			entries[managedItemKey(it)] = monitorEntry{decision: decision, status: status, size: size, artifactID: artifactID}
+		}
+		return withLocked(func(locked *Subscription, tx pgx.Tx) error {
+			var err error
+			rows, err = s.registerSubscriptionItems(ctx, locked, plan.items, entries, managedRegistryStore{tx})
+			return err
+		})
+	}
+	var err error
+	if plan.prepared {
+		err = s.repo.WithUserQuotaLock(ctx, sub.UserID, func(ctx context.Context) error {
+			// A monitor edited or paused since planning registers nothing:
+			// check before queueing encodes no row would link to. The locked
+			// registration checks again.
+			current, err := s.subRepo.GetByID(ctx, sub.ID, sub.UserID, sub.ProfileID, sub.DeviceID)
+			if err != nil {
+				return err
+			}
+			if !current.Active || !current.UpdatedAt.Equal(sub.UpdatedAt) {
+				return register(ctx, nil)
+			}
+			slots, err := s.limiter.FreeConcurrentSlots(ctx, sub.UserID)
+			if err != nil {
+				return err
+			}
+			ready := func(it managedItem) bool {
+				d := plan.decisions[managedItemKey(it)]
+				return s.artifacts.readyArtifact(ctx, it.file, d.DeliveryFormat, d.PrepareTarget)
+			}
+			return register(ctx, paceToSlots(plan.items, plan.decisions, slots, ready))
+		})
+	} else {
+		err = register(ctx, plan.items)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.confirmRegistered(ctx, rows)
+	return rows, nil
+}
+
+// paceToSlots keeps items in order, dropping each one that needs a file still
+// to be prepared once slots of them are kept. An item whose prepared file is
+// already ready registers ready and takes no slot. slots < 0 means no cap.
+func paceToSlots(items []managedItem, decisions map[ManagedEntryKey]QualityDecision, slots int, ready func(managedItem) bool) []managedItem {
+	kept := make([]managedItem, 0, len(items))
+	for _, it := range items {
+		if decisions[managedItemKey(it)].RequiresArtifact && !ready(it) {
+			if slots == 0 {
+				continue
+			}
+			slots--
+		}
+		kept = append(kept, it)
+	}
+	return kept
+}
+
+// registerSubscriptionItems registers the items registerMonitorPlan readied
+// as managed entries under the monitor's batch, inside the monitor lock (repo
+// is the lock's transaction). Before applying the storage cap it skips items
+// the device already holds (their bytes already count toward the device's
+// usage) and episodes the device deleted while monitored (see
+// Repository.DeleteManaged), so neither consumes the budget. Unlike the
+// interactive ensureManaged path it does NOT consume the QuantityLimiter — the
+// subscription is the authorization, and registerMonitorPlan paces prepared
+// episodes. Returns only the NEWLY registered rows: the sync response's
+// "registered" is documented as new episodes, so a steady-state sync must
+// report 0, not the full in-scope set. registerMonitorPlan confirms the rows
+// once the lock's transaction commits.
+func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscription, items []managedItem, entries map[ManagedEntryKey]monitorEntry, repo managedRegistrationRepository) ([]*Download, error) {
+	ready := make([]managedItem, 0, len(items))
+	keys := make([]ManagedEntryKey, 0, len(items))
+	for _, it := range items {
+		if _, ok := entries[managedItemKey(it)]; ok {
+			ready = append(ready, it)
+			keys = append(keys, managedItemKey(it))
+		}
+	}
+	if len(ready) == 0 {
+		return nil, nil
+	}
+	candidates, err := repo.MonitorEntriesToRegister(ctx, sub, keys)
+	if err != nil {
+		return nil, err
+	}
+	fresh := make([]managedItem, 0, len(candidates))
+	for i, it := range ready {
 		if candidates[keys[i]] {
 			fresh = append(fresh, it)
 		}
@@ -310,14 +463,23 @@ func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscripti
 	fresh = s.capItemsToStorage(ctx, sub, fresh, repo)
 	toInsert := make([]*Download, 0, len(fresh))
 	for _, it := range fresh {
-		d, err := buildManagedOriginal(sub.UserID, sub.ProfileID, sub.DeviceID, it, originalDecision(), sub.ID)
+		e := entries[managedItemKey(it)]
+		d, err := buildManagedEntry(sub.UserID, sub.ProfileID, sub.DeviceID, it, e.decision, sub.ID, e.status, e.size, e.artifactID)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		toInsert = append(toInsert, d)
 	}
-	rows, err := repo.CreateManagedEntriesBatch(ctx, toInsert)
-	return len(rows), err
+	return repo.CreateManagedEntriesBatch(ctx, toInsert)
+}
+
+// confirmRegistered reconciles committed monitor rows linked to an artifact
+// with missing-output recovery (see confirmArtifactLink): recovery cannot see
+// a row until its transaction commits.
+func (s *Service) confirmRegistered(ctx context.Context, rows []*Download) {
+	for _, row := range rows {
+		s.confirmIfLinked(ctx, row)
+	}
 }
 
 // capItemsToStorage trims items so registering them keeps the device under the
@@ -394,11 +556,16 @@ func (s *Service) prepareSubscription(ctx context.Context, userID int, req Subsc
 	if s.subRepo == nil {
 		return nil, ErrSubscriptionsUnavailable
 	}
-	if _, _, err := s.downloadConfigForUser(ctx, userID, req.DeviceID); err != nil {
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, req.DeviceID)
+	if err != nil {
 		return nil, err
 	}
 	if req.ProfileID == "" || req.DeviceID == "" {
 		return nil, ErrProfileRequired
+	}
+	quality, err := s.validateMonitorQuality(ctx, req.Quality, user, cfg, req.DeviceID)
+	if err != nil {
+		return nil, err
 	}
 	if !ValidSubMode(req.Mode) {
 		return nil, ErrInvalidSubscriptionMode
@@ -440,6 +607,7 @@ func (s *Service) prepareSubscription(ctx context.Context, userID int, req Subsc
 		SeasonNumbers:   normalizeSeasons(req.Mode, req.SeasonNumbers),
 		DeleteWatched:   req.DeleteWatched,
 		MaxStorageBytes: req.MaxStorageBytes,
+		Quality:         quality,
 		Active:          true,
 	}
 	if req.Mode == SubModeLatestSeason {
@@ -475,6 +643,9 @@ func (s *Service) applySubscriptionPatch(ctx context.Context, sub *Subscription,
 	}
 	if patch.MaxStorageBytes != nil {
 		sub.MaxStorageBytes = *patch.MaxStorageBytes
+	}
+	if patch.Quality != nil {
+		sub.Quality = *patch.Quality
 	}
 	if patch.Active != nil {
 		sub.Active = *patch.Active

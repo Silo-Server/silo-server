@@ -518,3 +518,42 @@ it("keeps a slowly progressing ASS extraction alive beyond 30 seconds", async ()
     vi.useRealTimers();
   }
 });
+
+describe("useASSSubtitles retime", () => {
+  it("swaps a retimed script into the running renderer without reloading", async () => {
+    const script = (start: string) =>
+      `[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Text\nDialogue: 0,${start},0:00:12.00,Default,Hi\n`;
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(script("0:00:10.00")));
+    vi.stubGlobal("fetch", fetchMock);
+    const states: string[] = [];
+    const { rerender } = renderHook(
+      ({ revision }) =>
+        useASSSubtitles(
+          makeVideoRef(),
+          [germanTrack],
+          6,
+          false,
+          0,
+          0,
+          (state) => states.push(state),
+          "contain",
+          undefined,
+          revision,
+        ),
+      { initialProps: { revision: 0 } },
+    );
+    await waitFor(() => expect(states.at(-1)).toBe("ready"));
+    states.length = 0;
+
+    fetchMock.mockResolvedValue(mockFetchResponse(script("0:00:11.50")));
+    rerender({ revision: 1 });
+    await waitFor(() => expect(states.at(-1)).toBe("ready"));
+    // One renderer throughout: the corrected script replaces the old one in
+    // place, and the reload is not announced as loading.
+    expect(instances).toHaveLength(1);
+    expect(instances[0]!.renderer.setTrack).toHaveBeenLastCalledWith(
+      expect.stringContaining("0:00:11.50"),
+    );
+    expect(states).toEqual(["refreshing", "ready"]);
+  });
+});

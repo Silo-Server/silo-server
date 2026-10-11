@@ -142,6 +142,9 @@ type Download struct {
 	UpdatedAt         time.Time
 	CompletedAt       *time.Time
 	StatusEventAt     *time.Time // timestamp of the last accepted client status event
+	// Preparation is set only on preparing rows read through ListPage; it is
+	// not stored on the row.
+	Preparation *PreparationStatus
 }
 
 // SkippedDownload explains why a bulk series/season request did not create a

@@ -797,6 +797,7 @@ var guardedWithoutLegacyRow = map[string]string{
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
 	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1128,6 +1129,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 var mutationWithoutLegacyRow = map[string]string{
 	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
 	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
+	"startSubtitleSync":                    "V2-only sync of a stored subtitle or a sidecar (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that reaches the same timing.",
+	"setSubtitleTiming":                    "V2-only timing correction of a stored subtitle or a sidecar, guarded by If-Match; replaying the same timing after success answers 412 and changes nothing.",
 	"deleteAccountIdentity":                "V2-only external sign-in (OIDC/LDAP) identity disconnect: v1 had no linked identities to manage. It deletes one identity of the caller's account by id, so a replay after success finds nothing and answers 404, leaving the same state.",
 	"createAdminUserIdentity":              "V2-only administrator link of an account to an external sign-in identity: v1 had no identity management. The identity key and the one-identity-per-provider rule are unique, so a replay is refused with 409 and cannot link twice.",
 	"deleteAdminUserIdentity":              "V2-only administrator unlink of an external sign-in identity: v1 had no identity management. A replay after success finds nothing and answers 404, leaving the same state.",
@@ -1158,6 +1161,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",
 	"requestPasswordReset":                 "V2-only self-service password reset request (issue #1443): v1 had no reset links. A replay inside the per-account cooldown changes nothing; after it, the replay replaces the link and sends another email, so it is non-retryable.",
 	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
+	"pauseAdminDownloadPreparations":       "V2-only pause of offline-download preparation jobs: v1 had no preparation controls. A replay finds the jobs already paused and reports unchanged, leaving the same state.",
+	"resumeAdminDownloadPreparations":      "V2-only resume of paused preparation jobs: v1 had no preparation controls. A replay finds the jobs no longer paused and reports unchanged, leaving the same state.",
+	"cancelAdminDownloadPreparations":      "V2-only cancellation of preparation jobs: v1 had no preparation controls. A replay finds the jobs gone and reports not_found; the waiting downloads were already failed by the first call.",
 	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
 	"createThemeSongPlayback":              "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":          "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",

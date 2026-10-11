@@ -63,6 +63,7 @@ type SubtitleSearchHandler struct {
 	mediaResolver  SubtitleMediaResolver
 	FileAuthorizer *MediaFileAuthorizer
 	sync           SubtitleSyncService
+	external       ExternalTimingStore
 }
 
 // NewSubtitleSearchHandler creates a new SubtitleSearchHandler.

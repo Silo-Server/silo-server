@@ -118,3 +118,33 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 		t.Fatalf("oversize %d", rec.Code)
 	}
 }
+
+func TestSubscriptionMutationQuality(t *testing.T) {
+	svc := &fakeSubscriptionMutations{row: syntheticDownloadSubscription()}
+	deps := pilotDeps(nil, nil)
+	deps.DownloadSubscriptionMutations = svc
+	h := newTestHandler(t, deps)
+	device := with(with(bearer(memberToken), "X-Profile-Id", "p-owner"), "X-Silo-Device-Id", "device-one")
+	path := Prefix + "/downloads/subscriptions"
+	rec := do(t, h, "POST", path, `{"series_id":"series","mode":"future","delete_watched":false,"max_storage_bytes":0,"quality":"10mbps"}`, device)
+	// The synthetic row predates monitor quality, so it reads as original.
+	if rec.Code != 200 || svc.request.Quality != "10mbps" || !strings.Contains(rec.Body.String(), `"quality":"original"`) {
+		t.Fatalf("create %d %s %+v", rec.Code, rec.Body.String(), svc.request)
+	}
+	if rec = do(t, h, "POST", path, `{"series_id":"series","mode":"future","delete_watched":false,"max_storage_bytes":0,"quality":"4mbps"}`, device); rec.Code != 422 {
+		t.Fatalf("unknown preset %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, "PATCH", path+"/monitor", `{"quality":"5mbps"}`, with(device, "If-Match", downloadSubscriptionOf(svc.row).ETag))
+	if rec.Code != 200 || svc.patch.Quality == nil || *svc.patch.Quality != "5mbps" {
+		t.Fatalf("patch %d %s %+v", rec.Code, rec.Body.String(), svc.patch)
+	}
+	if rec = do(t, h, "PATCH", path+"/monitor", `{"quality":null}`, with(device, "If-Match", rec.Header().Get("ETag"))); rec.Code != 400 {
+		t.Fatalf("null quality %d %s", rec.Code, rec.Body.String())
+	}
+	for err, code := range map[error]int{downloads.ErrInvalidQuality: 400, downloads.ErrTranscodeDisabled: 403, downloads.ErrDownloadNotAllowed: 403, downloads.ErrQualityUnavailable: 501} {
+		svc.err = err
+		if rec = do(t, h, "POST", path, `{"series_id":"series","mode":"future","delete_watched":false,"max_storage_bytes":0,"quality":"5mbps"}`, device); rec.Code != code {
+			t.Fatalf("%v: %d %s", err, rec.Code, rec.Body.String())
+		}
+	}
+}

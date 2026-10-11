@@ -17,24 +17,34 @@ type DownloadRegistryService interface {
 	Delete(context.Context, int, string, string, string) error
 }
 type DownloadEntry struct {
-	ID                ID       `json:"id"`
-	ContentID         string   `json:"content_id"`
-	EpisodeID         string   `json:"episode_id,omitempty"`
-	BatchID           ID       `json:"batch_id,omitempty"`
-	DeviceID          ID       `json:"device_id,omitempty"`
-	MediaFileID       ID       `json:"media_file_id"`
-	FileSize          int64    `json:"file_size"`
-	BytesSent         int64    `json:"bytes_sent"`
-	Kind              string   `json:"kind"`
-	Status            string   `json:"status"`
-	Quality           string   `json:"quality"`
-	EffectiveQuality  string   `json:"effective_quality"`
-	DeliveryFormat    string   `json:"delivery_format"`
-	TargetBitrateKbps int      `json:"target_bitrate_kbps"`
-	Revision          int      `json:"revision"`
-	CreatedAt         Instant  `json:"created_at"`
-	CompletedAt       *Instant `json:"completed_at,omitempty"`
-	StatusEventAt     *Instant `json:"status_event_at,omitempty" doc:"Latest accepted client status event time for this revision."`
+	ID                ID                   `json:"id"`
+	ContentID         string               `json:"content_id"`
+	EpisodeID         string               `json:"episode_id,omitempty"`
+	BatchID           ID                   `json:"batch_id,omitempty"`
+	DeviceID          ID                   `json:"device_id,omitempty"`
+	MediaFileID       ID                   `json:"media_file_id"`
+	FileSize          int64                `json:"file_size"`
+	BytesSent         int64                `json:"bytes_sent"`
+	Kind              string               `json:"kind"`
+	Status            string               `json:"status"`
+	Quality           string               `json:"quality"`
+	EffectiveQuality  string               `json:"effective_quality"`
+	DeliveryFormat    string               `json:"delivery_format"`
+	TargetBitrateKbps int                  `json:"target_bitrate_kbps"`
+	Revision          int                  `json:"revision"`
+	CreatedAt         Instant              `json:"created_at"`
+	CompletedAt       *Instant             `json:"completed_at,omitempty"`
+	StatusEventAt     *Instant             `json:"status_event_at,omitempty" doc:"Latest accepted client status event time for this revision."`
+	Preparation       *DownloadPreparation `json:"preparation,omitempty" doc:"How far the server has got preparing the file. Present on listed preparing entries when the capability reports preparation_progress."`
+}
+
+// DownloadPreparation is a preparing entry's place in the server's
+// preparation queue, or its running encode's progress.
+type DownloadPreparation struct {
+	State            string   `json:"state" enum:"queued,running,retrying,paused" doc:"retrying: an attempt failed and the job waits out its backoff. paused: an administrator paused the job; it isn't claimed until resumed."`
+	QueuePosition    int      `json:"queue_position,omitempty" minimum:"1" doc:"1-based place among every queued preparation on this server; present only while queued."`
+	Progress         *float64 `json:"progress,omitempty" minimum:"0" maximum:"1" doc:"Encoded fraction, once a running encode reports it."`
+	RemainingSeconds *int     `json:"remaining_seconds,omitempty" minimum:"0" doc:"Estimated seconds left at the encode's reported speed."`
 }
 type DownloadEntryOutput struct{ Body DownloadEntry }
 type DownloadRegistryOutput struct{ Body Collection[DownloadEntry] }
@@ -78,6 +88,13 @@ type DownloadCapability struct {
 	SeasonDownload       bool                    `json:"season_download"`
 	SeriesMonitoring     bool                    `json:"series_monitoring"`
 	MonitoringModes      []string                `json:"monitoring_modes"`
+	// BulkQuality: season and series creation accepts any of quality_presets,
+	// skipping episodes the preset cannot be prepared for. MonitorQuality:
+	// monitors store a quality and register episodes in it.
+	BulkQuality    bool `json:"bulk_quality"`
+	MonitorQuality bool `json:"monitor_quality"`
+	// PreparationProgress: listed preparing entries carry `preparation`.
+	PreparationProgress bool `json:"preparation_progress"`
 }
 
 // DownloadQualityOption describes one quality preset. bitrate_kbps and
@@ -116,6 +133,9 @@ func downloadEntryOf(row *downloads.Download) DownloadEntry {
 	}
 	if row.StatusEventAt != nil {
 		out.StatusEventAt = new(NewInstant(*row.StatusEventAt))
+	}
+	if p := row.Preparation; p != nil {
+		out.Preparation = &DownloadPreparation{State: p.State, QueuePosition: p.QueuePosition, Progress: p.Progress, RemainingSeconds: p.RemainingSeconds}
 	}
 	return out
 }
@@ -224,6 +244,9 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.SubscriptionMutations = reg.deps.DownloadSubscriptionMutations != nil
 		out.BoundedCreation = reg.deps.DownloadCreation != nil
 		out.BoundedSubscriptionSync = reg.deps.DownloadSubscriptionSync != nil
+		out.BulkQuality = out.BoundedCreation
+		out.MonitorQuality = out.SubscriptionMutations
+		out.PreparationProgress = true
 		if reg.deps.DownloadProxyDelivery != nil {
 			out.ProxyDelivery = reg.deps.DownloadProxyDelivery()
 		}

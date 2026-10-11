@@ -47,6 +47,7 @@ const (
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
 	EventSubtitleTimingChanged       = "subtitle_timing_changed"
+	EventSubtitleSyncUpdated         = "subtitle_sync_updated"
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"

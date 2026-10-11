@@ -193,11 +193,11 @@ describe("ProvidersSettings", () => {
       ]),
     });
     const group = screen.getByRole("group", { name: "Subtitle sync" });
-    const auto = within(group).getByRole("switch", { name: /Sync new subtitles automatically/ });
+    const auto = within(group).getByRole("switch", { name: /Sync subtitles automatically/ });
     expect(auto).toBeChecked();
     expect(
       within(group).getByText(
-        "Aligns downloaded and uploaded subtitles to the video's audio. Fixes subtitles cut for a different release.",
+        "Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release.",
       ),
     ).toBeInTheDocument();
     expect(

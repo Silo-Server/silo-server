@@ -388,6 +388,8 @@ jobs:
   # is missing, skipped or failing, so a PR that turns a pinned budget into an
   # N+1 fails here. It is a job of its own so it adds no time to go-test, and
   # because the full schema needs pgvector, which go-test's image lacks.
+  # The long external sign-in suite has its own database job below so it can
+  # run beside these pins instead of extending this job's critical path.
   go-db-pins:
     name: Go DB pins
     needs: select
@@ -441,15 +443,52 @@ jobs:
       - name: Test device sign-in against Postgres
         run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
 
-      # External sign-in: account resolution and linking, the local-password
-      # policy, the OAuth flow store across nodes (a completion code opens its
-      # session only when redeemed), the provider re-check (and
-      # the provider chain a device approval inherits), the one-provider
-      # binding rule (and the network provider beside it), network identity
-      # sign-in and linking, compatibility sign-in routing, the Owner rules on admin
-      # identity link and unlink, and the admin guards that keep a break-glass
-      # account while local sign-in is off. The break-glass guards run first:
-      # they skip on a database that already holds a break-glass account.
+  # External sign-in tests are isolated from the query pins because several of
+  # them intentionally create and mutate the same account state. Keeping them
+  # in one fresh database preserves their ordering while allowing the long
+  # suite to run in parallel with the query-budget job above.
+  go-db-auth:
+    name: Go DB external auth
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: db-auth
+
+      # A throwaway key: it only has to pass the bootstrap length check, and
+      # nothing encrypted with it outlives the job.
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+
+      # Account resolution and linking, the local-password policy, the OAuth
+      # flow store across nodes, provider re-checks, network identity sign-in
+      # and linking, compatibility routing, and the Owner and break-glass
+      # identity guards. The break-glass guards run first because they skip on
+      # a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
           go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
@@ -604,7 +643,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, web, web-test]
+    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
     runs-on: ubuntu-latest
     steps:
       - name: Check out the CI tools from main

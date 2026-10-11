@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -73,9 +72,18 @@ type Service struct {
 	lister      SubtitleLister
 	files       MediaFileResolver
 	notifier    Notifier // optional
-	ffmpegPath  string
-	logger      *slog.Logger
-	runner      *jobrunner.Runner
+	// externalTimings applies sidecar timing corrections to sidecar sources;
+	// optional.
+	externalTimings subtitles.ExternalTimingLookup
+	ffmpegPath      string
+	logger          *slog.Logger
+	runner          *jobrunner.Runner
+}
+
+// SetExternalTimings makes a sidecar source carry its timing correction, as
+// a stored source does. Call it before Recover.
+func (s *Service) SetExternalTimings(timings subtitles.ExternalTimingLookup) {
+	s.externalTimings = timings
 }
 
 // UpdateConfig swaps the service config. Safe for concurrent use; running
@@ -677,7 +685,8 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if !isParsableTextFormat(ext.Format) {
 			return nil, "", fmt.Errorf("%w: external %s", ErrSourceUnsupported, ext.Format)
 		}
-		data, err := os.ReadFile(ext.Path)
+		// Translate the corrected timing clients see, so the output inherits it.
+		data, err := playback.LoadExternalSubtitle(ctx, s.externalTimings, file.ID, ext)
 		if err != nil {
 			return nil, "", fmt.Errorf("read external subtitle: %w", err)
 		}

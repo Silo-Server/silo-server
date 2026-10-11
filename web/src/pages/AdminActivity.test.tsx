@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   restart: vi.fn(),
   preparations: undefined as AdminDownloadPreparationList | undefined,
   preparationsRefetch: vi.fn(),
+  preparationAction: vi.fn(),
+  toastSuccess: vi.fn(),
   logParams: [] as unknown[],
 }));
 
@@ -29,6 +31,14 @@ vi.mock("@/hooks/queries/admin/downloadPreparations", () => ({
     isError: false,
     refetch: mocks.preparationsRefetch,
   }),
+  useAdminDownloadPreparationAction: () => ({
+    mutate: mocks.preparationAction,
+    isPending: false,
+    variables: undefined,
+  }),
+}));
+vi.mock("sonner", () => ({
+  toast: { success: mocks.toastSuccess, info: vi.fn(), error: vi.fn() },
 }));
 vi.mock("@/components/realtimeEventsContext", () => ({
   useRealtimeEvents: () => ({ connectionState: "live" }),
@@ -302,6 +312,123 @@ describe("download preparation tab", () => {
       limit: 12,
     });
     expect(screen.getByText(/No FFmpeg output for this job yet/)).toBeInTheDocument();
+  });
+
+  it("pauses, resumes and cancels one job from its row", () => {
+    mocks.preparationAction.mockImplementation(
+      (
+        { ids }: { ids: string[] },
+        options: { onSuccess: (results: { id: string; outcome: string }[]) => void },
+      ) => options.onSuccess(ids.map((id) => ({ id, outcome: "applied" }))),
+    );
+    mocks.preparations = makePreparationList([
+      makePreparation(),
+      makePreparation({
+        id: "art-p",
+        state: "paused",
+        progress: undefined,
+        media_title: "Paused One",
+        paused_at: new Date().toISOString(),
+      }),
+    ]);
+    renderActivity("/admin/activity?view=preparations");
+
+    expect(screen.getByRole("button", { name: /Paused\s*1/ })).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: "Pause Paused One" })).toHaveLength(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "Pause Example Movie" })[0]!);
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "pause", ids: ["art-1"] },
+      expect.anything(),
+    );
+    expect(mocks.toastSuccess).toHaveBeenLastCalledWith("Paused 1 job.");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Resume Paused One" })[0]!);
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "resume", ids: ["art-p"] },
+      expect.anything(),
+    );
+
+    // Cancel asks first and names what the requester loses.
+    fireEvent.click(screen.getAllByRole("button", { name: "Cancel Example Movie" })[0]!);
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/Encoding stops and its progress is lost/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 waiting download fails/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel job" }));
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "cancel", ids: ["art-1"] },
+      expect.anything(),
+    );
+  });
+
+  it("acts on the selected jobs in bulk", () => {
+    mocks.preparationAction.mockReset();
+    mocks.preparations = makePreparationList([
+      makePreparation(),
+      makePreparation({
+        id: "art-q",
+        state: "queued",
+        progress: undefined,
+        media_title: "Queued One",
+      }),
+      makePreparation({
+        id: "art-f",
+        state: "failed",
+        progress: undefined,
+        media_title: "Failed One",
+        requesters: [],
+      }),
+    ]);
+    renderActivity("/admin/activity?view=preparations");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all shown jobs" }));
+    const toolbar = screen.getByRole("toolbar", { name: "Selected preparation jobs" });
+    expect(within(toolbar).getByText("3 selected")).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: /Resume/ })).toBeDisabled();
+
+    // A failed job cannot be paused, so it is left out of the pause.
+    fireEvent.click(within(toolbar).getByRole("button", { name: /Pause 2/ }));
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "pause", ids: ["art-1", "art-q"] },
+      expect.anything(),
+    );
+
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Cancel 3" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Cancel 3 jobs?")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel 3 jobs" }));
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "cancel", ids: ["art-1", "art-q", "art-f"] },
+      expect.anything(),
+    );
+
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Clear selection" }));
+    expect(
+      screen.queryByRole("toolbar", { name: "Selected preparation jobs" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("acts only on selected jobs the filters show", () => {
+    mocks.preparationAction.mockReset();
+    mocks.preparations = makePreparationList([
+      makePreparation(),
+      makePreparation({
+        id: "art-q",
+        state: "queued",
+        progress: undefined,
+        media_title: "Queued One",
+      }),
+    ]);
+    renderActivity("/admin/activity?view=preparations");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all shown jobs" }));
+    fireEvent.click(screen.getByRole("button", { name: /Queued\s*1/ }));
+    const toolbar = screen.getByRole("toolbar", { name: "Selected preparation jobs" });
+    expect(within(toolbar).getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(within(toolbar).getByRole("button", { name: /Pause 1/ }));
+    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
+      { action: "pause", ids: ["art-q"] },
+      expect.anything(),
+    );
   });
 
   it("refreshes streams and preparations together", () => {

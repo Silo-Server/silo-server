@@ -1571,6 +1571,18 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// Check for external subtitles first.
 	for i, sub := range file.ExternalSubtitles {
 		if externalSubtitleRouteIndex(file, i) == trackIndex {
+			// A sidecar's timing correction can change behind the same URL.
+			w.Header().Set("Cache-Control", "private, no-cache")
+			if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
+				data, err := playback.LoadExternalSubtitle(r.Context(), h.ExternalTimings, file.ID, sub)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
+					return
+				}
+				h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
+				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat)
+				return
+			}
 			// Serve ASS/SSA as raw data when requested.
 			if requestedFormat == "ass" && playback.IsASS(sub.Format) {
 				data, readErr := os.ReadFile(sub.Path)
@@ -1622,28 +1634,8 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// The correction can change behind the same URL.
 			w.Header().Set("Cache-Control", "private, no-cache")
-
-			// Serve downloaded ASS/SSA as raw data when requested.
-			if requestedFormat == "ass" && playback.IsASS(string(dl.Format)) {
-				h.deliverSubtitle(w, r, "ass", data)
-				return
-			}
-			if requestedFormat == "srt" && subtitleCanServeSRT(string(dl.Format)) {
-				h.deliverSubtitle(w, r, requestedFormat, data)
-				return
-			}
-			// If already VTT, serve directly.
-			if dl.Format == subtitles.FormatVTT {
-				h.deliverSubtitle(w, r, "vtt", data)
-				return
-			}
-
-			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
-			if convErr != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
-				return
-			}
-			h.deliverSubtitle(w, r, "vtt", vttData)
+			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
+			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat)
 			return
 		}
 	}

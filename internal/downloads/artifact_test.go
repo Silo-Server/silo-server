@@ -566,10 +566,15 @@ func hdrDownloadTestFile() *models.MediaFile {
 }
 
 func TestArtifactOutputPathDeterministic(t *testing.T) {
-	p1 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef")
-	p2 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef")
+	p1 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
+	p2 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
 	if p1 != p2 {
 		t.Fatalf("output path not deterministic: %q != %q", p1, p2)
+	}
+	// A later job for the same recipe, such as one created after a cancel,
+	// never shares a path with the job it replaces.
+	if other := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-2"); other == p1 {
+		t.Fatalf("two jobs share output path %q", p1)
 	}
 	if !strings.HasPrefix(p1, "/var/artifacts/") || !strings.HasSuffix(p1, ".mp4") {
 		t.Fatalf("unexpected output path %q", p1)

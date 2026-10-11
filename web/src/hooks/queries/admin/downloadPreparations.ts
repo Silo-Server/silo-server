@@ -1,9 +1,11 @@
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
 import {
   adminDownloadPreparationsKey,
   listAdminDownloadPreparations,
+  runAdminDownloadPreparationAction,
+  type AdminDownloadPreparationAction,
   type AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 
@@ -27,6 +29,27 @@ export function useAdminDownloadPreparations() {
     },
     enabled: context !== null,
     staleTime: ADMIN_DOWNLOAD_PREPARATIONS_STALE_TIME,
+  });
+}
+
+/**
+ * Pauses, resumes or cancels preparation jobs, then re-reads the list. The
+ * realtime channel announces each change too; the re-read covers a missed
+ * event and settles the list for the caller's toast.
+ */
+export function useAdminDownloadPreparationAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, ids }: { action: AdminDownloadPreparationAction; ids: string[] }) => {
+      const context = captureProfileRequestContext();
+      if (!context) throw new StaleApiRequestContextError();
+      return runAdminDownloadPreparationAction(context, action, ids);
+    },
+    retry: false,
+    onSettled: () =>
+      queryClient.invalidateQueries({
+        queryKey: adminDownloadPreparationsKey(captureProfileRequestContext()),
+      }),
   });
 }
 
