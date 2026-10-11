@@ -42,6 +42,31 @@ func TestRefreshTerminalOAuthErrorsRequireSignIn(t *testing.T) {
 	}
 }
 
+func TestLateUnauthorizedPreservesTerminalRefreshState(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "verified", IDToken: "validated-hint", AccessToken: "in-flight-access", RefreshToken: "old-refresh", Scopes: planScope, ExpiresAt: time.Now().Add(-time.Minute)}}})
+	service := NewService(store)
+	calls := 0
+	service.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return response(http.StatusBadRequest, map[string]string{"error": oauthInvalidGrant}), nil
+	})
+	if _, err := service.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) {
+		t.Fatalf("terminal refresh did not require sign-in: %v", err)
+	}
+	// Another node receives the first 401 for a token sent before that refresh.
+	if err := NewService(store).RejectToken(t.Context(), "in-flight-access", false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := service.Status(t.Context())
+	if err != nil || !state.Accounts[0].NeedsLogin || state.Accounts[0].Connected {
+		t.Fatalf("delayed 401 restored terminal credentials: %+v, %v", state, err)
+	}
+	if _, err := service.BearerToken(t.Context()); !errors.Is(err, ErrSignInRequired) || calls != 1 {
+		t.Fatalf("delayed 401 retried a terminal refresh token: %v, calls=%d", err, calls)
+	}
+}
+
 func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 	for _, test := range []struct {
 		name, body string

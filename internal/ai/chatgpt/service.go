@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -334,11 +335,11 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return tokens, &transientTokenError{}
+		return tokens, &transientProviderError{}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode < 600) {
-		return tokens, &transientTokenError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
+		return tokens, &transientProviderError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 	if resp.StatusCode == 400 || resp.StatusCode == 401 {
 		var problem struct {
@@ -355,7 +356,7 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 			case oauthInvalidGrant, "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused":
 				return tokens, ErrSignInRequired
 			case oauthTemporarilyUnavailable, "server_error":
-				return tokens, &transientTokenError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
+				return tokens, &transientProviderError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
 			default:
 				return tokens, ErrProvider
 			}
@@ -455,7 +456,8 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		c.LoginResult = loginFailed
 		c.LoginFirstConnection = false
 		if completionErr != nil {
-			if pending.ClientID == "" && errors.Is(completionErr, errInvalidAuthorizationGrant) &&
+			_, temporaryIdentityFailure := errors.AsType[*transientProviderError](completionErr)
+			if pending.ClientID == "" && (errors.Is(completionErr, errInvalidAuthorizationGrant) || (tokens.AccessToken != "" && temporaryIdentityFailure)) &&
 				!slices.ContainsFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID }) {
 				// The callback issued a registration, but no identity was verified.
 				// Retain only its ID so a fresh authorization can reuse it.
@@ -648,7 +650,7 @@ func (s *Service) RejectToken(ctx context.Context, rejected string, needsLogin b
 			a := &c.Accounts[i]
 			a.AccessToken = ""
 			a.ExpiresAt = time.Time{}
-			a.NeedsLogin = needsLogin
+			a.NeedsLogin = a.NeedsLogin || needsLogin
 		}
 		return nil
 	})
@@ -687,6 +689,23 @@ type identityClaims struct {
 }
 
 func (s *Service) verifyIDToken(ctx context.Context, raw, clientID, nonce string) (*identityClaims, error) {
+	for attempt := range 3 {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(&transientProviderError{}, err)
+		}
+		claims, err := s.verifyIDTokenOnce(ctx, raw, clientID, nonce)
+		temporary, retry := errors.AsType[*transientProviderError](err)
+		if !retry || attempt == 2 {
+			return claims, err
+		}
+		if !waitProviderRetry(ctx, attempt, temporary.retryAfter) {
+			return nil, errors.Join(err, ctx.Err())
+		}
+	}
+	return nil, ErrProvider
+}
+
+func (s *Service) verifyIDTokenOnce(ctx context.Context, raw, clientID, nonce string) (*identityClaims, error) {
 	d, err := s.discovery(ctx)
 	if err != nil {
 		return nil, err
@@ -729,13 +748,22 @@ func (s *Service) getJSON(ctx context.Context, endpoint, token string, out any) 
 	}
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return ErrProvider
+		return &transientProviderError{}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode < 600) {
+		return &transientProviderError{retryAfter: tokenRetryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrSignInRequired
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out) != nil {
+	if resp.StatusCode != http.StatusOK {
+		return ErrProvider
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); err != nil {
+		if _, networkFailure := errors.AsType[net.Error](err); errors.Is(err, io.ErrUnexpectedEOF) || networkFailure {
+			return &transientProviderError{}
+		}
 		return ErrProvider
 	}
 	return nil

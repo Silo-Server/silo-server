@@ -52,11 +52,17 @@ identity hints, without access or refresh tokens. Reconnect reuses the issued
 client ID and requests consent; ordinary reconnects do not force consent. A
 declined re-consent attempt preserves an existing usable account.
 
-An initial authorization-code `invalid_grant` retains only the issued client ID
-after callback state validation. It stores no identity or inference credentials.
+Discovery and signing-key reads retry transient network failures and HTTP 429 or
+5xx responses within the completion deadline. Retry delays that cannot fit the
+remaining budget return immediately. Authorization-code exchanges are never
+retried, and invalid metadata or identity proofs stop verification.
+
+An initial authorization-code `invalid_grant`, or an accepted exchange whose
+identity reads remain unavailable, retains only the issued client ID after
+callback state validation. It stores no identity or inference credentials.
 Retry reuses that ID and binds its first verified subject only after successful
-identity validation. Other identity failures and superseded attempts cannot create
-registrations.
+identity validation. Invalid identity proofs and superseded attempts cannot
+create registrations.
 
 The complete bundle lives under `ai.chatgpt.credentials` in the encrypted
 settings store, including host ID, per-account registration, identity, tokens,
@@ -113,7 +119,8 @@ sign-in identity remains authoritative during refresh; optional refresh ID
 tokens are not used. Only the documented unusable-token errors (`invalid_grant`,
 `invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
 `refresh_token_invalidated`, and `refresh_token_reused`) mark the account as
-needing login. Other, empty, and malformed OAuth errors leave it retryable.
+needing login. A delayed rejection of its old access token cannot clear that
+requirement. Other, empty, and malformed OAuth errors leave it retryable.
 Refresh makes up to three attempts for transport failures, HTTP 429 or 5xx, and
 documented temporary OAuth failures inside the serialized rotation operation.
 Backoff honors `Retry-After` within the independent deadline. Exhaustion preserves

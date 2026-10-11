@@ -9,10 +9,10 @@ import (
 )
 
 // Keep retry classification private; provider response bodies may contain secrets.
-type transientTokenError struct{ retryAfter time.Duration }
+type transientProviderError struct{ retryAfter time.Duration }
 
-func (*transientTokenError) Error() string { return ErrProvider.Error() }
-func (*transientTokenError) Unwrap() error { return ErrProvider }
+func (*transientProviderError) Error() string { return ErrProvider.Error() }
+func (*transientProviderError) Unwrap() error { return ErrProvider }
 
 func tokenRetryAfter(value string) time.Duration {
 	if delay, err := time.ParseDuration(value + "s"); err == nil && delay > 0 {
@@ -24,6 +24,21 @@ func tokenRetryAfter(value string) time.Duration {
 	return 0
 }
 
+func waitProviderRetry(ctx context.Context, attempt int, retryAfter time.Duration) bool {
+	delay := max(time.Second<<attempt, retryAfter)
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+		return false
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // Refresh stays serialized and bounded by the independent rotation deadline.
 // Authorization-code exchanges are consumed once and never use this retry path.
 func (s *Service) refreshExchange(ctx context.Context, form url.Values) (tokenResponse, error) {
@@ -32,20 +47,12 @@ func (s *Service) refreshExchange(ctx context.Context, form url.Values) (tokenRe
 			return tokenResponse{}, errors.Join(ErrProvider, err)
 		}
 		tokens, err := s.exchange(ctx, form)
-		temporary, retry := errors.AsType[*transientTokenError](err)
+		temporary, retry := errors.AsType[*transientProviderError](err)
 		if !retry || attempt == 2 {
 			return tokens, err
 		}
-		delay := max(time.Second<<attempt, temporary.retryAfter)
-		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
-			return tokens, err
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return tokenResponse{}, errors.Join(ErrProvider, ctx.Err())
-		case <-timer.C:
+		if !waitProviderRetry(ctx, attempt, temporary.retryAfter) {
+			return tokens, errors.Join(err, ctx.Err())
 		}
 	}
 	return tokenResponse{}, ErrProvider
