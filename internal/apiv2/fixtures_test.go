@@ -1758,10 +1758,15 @@ func fixtureCases() []fixtureCase {
 }
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
-// first sections, and the include_items bound.
+// first sections, the include_items bound, and the capability document that
+// advertises it.
 func homeLayoutItemsFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
+		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
 		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
 			scenario: "The home layout with the cards of its first section, artwork presigned at the requested size.",
 			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&image_size=medium", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
