@@ -536,6 +536,20 @@ it("doesn't ask a signed-out approver to sign in for a remote-playback request",
   expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
 });
 
+it("offers a phone the Silo app for a remote-playback request", async () => {
+  auth.user = null;
+  lookups = [{ ...remotePlayback, server_id: "3f2a9d5e-6b1c" }];
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+  );
+  mount("/activate?code=48217730");
+  const app = await screen.findByRole("link", { name: "Open in the Silo app" });
+  expect(app.getAttribute("href")).toBe(
+    `silo://device?server=3f2a9d5e-6b1c&url=${encodeURIComponent(window.location.origin)}&code=48217730`,
+  );
+  expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
+});
+
 it.each(["approved", "consumed"])(
   "says a remote-playback request the app %s was approved there, not that a TV signed in",
   async (status) => {

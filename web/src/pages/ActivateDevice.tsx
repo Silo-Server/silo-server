@@ -437,6 +437,13 @@ function ActivateDeviceRequest() {
                       The TV plays with the profile chosen in the app instead of signing in, so this
                       page can&apos;t approve it.
                     </p>
+                    {appLink ? (
+                      <Button asChild className="w-full">
+                        <a href={appLink}>
+                          <Smartphone aria-hidden="true" /> Open in the Silo app
+                        </a>
+                      </Button>
+                    ) : null}
                     {user && !isImpersonating ? (
                       <>
                         {actionError ? (
