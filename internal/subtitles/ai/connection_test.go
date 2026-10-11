@@ -33,7 +33,7 @@ func TestDisconnectedTextProviderRejectsTranslationAndPreservesASR(t *testing.T)
 	repo := &finishedJobRepo{finished: make(chan JobStatus, 1)}
 	cfg := Config{Configured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}
 	svc := NewService(t.Context(), cfg, repo, nil, stubTranscriber{}, nil, nil, nilFileResolver{}, nil, "", nil, nil)
-	if svc.Enabled() || !svc.TranscribeEnabled() {
+	if svc.Enabled(t.Context()) || !svc.TranscribeEnabled() {
 		t.Fatal("disconnected text provider changed ASR readiness or advertised translation")
 	}
 	for _, kind := range []JobKind{JobKindTranslate, JobKindTranscribeTranslate} {

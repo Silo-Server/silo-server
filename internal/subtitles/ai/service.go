@@ -137,8 +137,8 @@ func NewService(
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool {
-	cfg, _ := s.translationConfig(context.Background())
+func (s *Service) Enabled(ctx context.Context) bool {
+	cfg, _ := s.translationConfig(ctx)
 	return cfg.TranslateReady()
 }
 

@@ -151,11 +151,11 @@ type MetadataAIStatusView struct {
 
 // Status reports whether metadata AI translation is configured and the
 // viewer-facing on-view mode; a nil handler is the clean negative.
-func (h *MetadataAIHandler) Status() MetadataAIStatusView {
+func (h *MetadataAIHandler) Status(ctx context.Context) MetadataAIStatusView {
 	if h == nil || h.service == nil {
 		return MetadataAIStatusView{OnView: metadataAIOnViewOff}
 	}
-	return MetadataAIStatusView{Enabled: h.service.Enabled(), OnView: h.service.OnViewMode()}
+	return MetadataAIStatusView{Enabled: h.service.Enabled(ctx), OnView: h.service.OnViewMode(ctx)}
 }
 
 // TranslateOnView queues the viewer-facing description translation of the

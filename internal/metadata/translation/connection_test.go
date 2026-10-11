@@ -21,7 +21,7 @@ func TestDisconnectedProviderRejectsAllMetadataEnqueuePaths(t *testing.T) {
 	content := seriesContent()
 	content.missing = 1
 	svc := NewService(t.Context(), cfg, repo, content, &fakeLocs{}, (&upperChat{}).fn, nil, nil)
-	if svc.Enabled() || svc.OnViewMode() != "off" {
+	if svc.Enabled(t.Context()) || svc.OnViewMode(t.Context()) != "off" {
 		t.Fatal("disconnected text provider advertised as available")
 	}
 	if _, err := svc.Enqueue(t.Context(), JobRequest{ContentID: "series1", TargetLanguage: "fr"}); !errors.Is(err, ErrNotConfigured) {

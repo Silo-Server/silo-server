@@ -102,8 +102,8 @@ func NewService(
 }
 
 // Enabled reports whether metadata translation can currently run.
-func (s *Service) Enabled() bool {
-	cfg, _ := s.translationConfig(context.Background())
+func (s *Service) Enabled(ctx context.Context) bool {
+	cfg, _ := s.translationConfig(ctx)
 	return cfg.Ready()
 }
 
@@ -217,8 +217,8 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 }
 
 // OnViewMode exposes the viewer-triggered translation mode for status probes.
-func (s *Service) OnViewMode() string {
-	cfg, _ := s.translationConfig(context.Background())
+func (s *Service) OnViewMode(ctx context.Context) string {
+	cfg, _ := s.translationConfig(ctx)
 	return cfg.OnViewMode()
 }
 
