@@ -2,11 +2,12 @@ import type { FailureV3 } from "../protocol-v3";
 import type { VideoFitMode } from "../types";
 import { EngineAudioOutput } from "./audioOutput";
 import { EngineClock } from "./clock";
-import type {
-  EngineMediaInfo,
-  PageToWorkerMessage,
-  WorkerToPageMessage,
-  WorkletToPageMessage,
+import {
+  ENGINE_READ_FAILED,
+  type EngineMediaInfo,
+  type PageToWorkerMessage,
+  type WorkerToPageMessage,
+  type WorkletToPageMessage,
 } from "./protocol";
 import {
   browserMapsToSDR,
@@ -22,7 +23,8 @@ const TIMEUPDATE_INTERVAL_MS = 250;
 const PROGRESS_INTERVAL_MS = 1_000;
 /** Frames this close to the clock are due now. */
 const PRESENT_AHEAD_SECONDS = 0.005;
-const STARTUP_TIMEOUT_MS = 20_000;
+/** How long a start or a seek may take to become playable before it fails. */
+const READINESS_TIMEOUT_MS = 20_000;
 /** While the tab is hidden, due frames are still released at this cadence. */
 const HIDDEN_TICK_MS = 100;
 /** Video further behind the clock than this on return to the tab is re-synced. */
@@ -129,7 +131,7 @@ export class EnginePlayer {
 
   private frameRequest = 0;
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
-  private startupTimer: ReturnType<typeof setTimeout> | null = null;
+  private readinessTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTimeupdate = 0;
   private lastProgress = 0;
   private callbacks = new Map<number, VideoFrameRequestCallback>();
@@ -301,6 +303,12 @@ export class EnginePlayer {
     this.seekingValue = true;
     this.endedValue = false;
     this.ready = Math.min(this.ready, 1);
+    // A read that never answers (a node gone, a half-open connection) would
+    // otherwise leave the seek pending for good. Reported as a read failure,
+    // it reconnects once the stream has played.
+    this.armReadinessDeadline(() =>
+      this.fail(ENGINE_READ_FAILED, "The browser engine could not resume after a seek in time."),
+    );
     this.dispatch("seeking");
     this.beginGeneration(target);
     this.dispatch("timeupdate");
@@ -342,15 +350,14 @@ export class EnginePlayer {
       this.fail(ENGINE_PAGE_FAILURES.worker, event.message || "The decode worker failed.");
     // Runs until the position is playable, not just until the first picture:
     // audio that never arrives would otherwise hold playback with no failure.
-    this.startupTimer = setTimeout(() => {
-      if (this.ready >= 4) return;
+    this.armReadinessDeadline(() =>
       this.fail(
         ENGINE_PAGE_FAILURES.startup,
         this.ready < 2
           ? "The browser engine showed no picture in time."
           : "The browser engine had no audio to play in time.",
-      );
-    }, STARTUP_TIMEOUT_MS);
+      ),
+    );
     this.post({ type: "open", source: this.source });
   }
 
@@ -359,7 +366,7 @@ export class EnginePlayer {
     this.disposed = true;
     cancelAnimationFrame(this.frameRequest);
     if (this.hiddenTimer !== null) clearInterval(this.hiddenTimer);
-    if (this.startupTimer !== null) clearTimeout(this.startupTimer);
+    this.clearReadinessDeadline();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.resizeObserver.disconnect();
     this.classObserver.disconnect();
@@ -544,6 +551,21 @@ export class EnginePlayer {
         if (!this.videoEnded) this.clock.detachAudio(!this.pausedValue && !this.seekingValue);
         return;
     }
+  }
+
+  /** Calls `onExpire` unless the position becomes playable in time. */
+  private armReadinessDeadline(onExpire: () => void): void {
+    this.clearReadinessDeadline();
+    this.readinessTimer = setTimeout(() => {
+      this.readinessTimer = null;
+      if (this.ready < 4) onExpire();
+    }, READINESS_TIMEOUT_MS);
+  }
+
+  private clearReadinessDeadline(): void {
+    if (this.readinessTimer === null) return;
+    clearTimeout(this.readinessTimer);
+    this.readinessTimer = null;
   }
 
   private beginGeneration(position: number): void {
@@ -731,10 +753,7 @@ export class EnginePlayer {
     const audioReady = !this.audio || this.audioBuffered || this.audioEnded || this.videoEnded;
     if (!audioReady) return;
     this.ready = 4;
-    if (this.startupTimer !== null) {
-      clearTimeout(this.startupTimer);
-      this.startupTimer = null;
-    }
+    this.clearReadinessDeadline();
     if (this.seekingValue) {
       this.seekingValue = false;
       this.dispatch("timeupdate");

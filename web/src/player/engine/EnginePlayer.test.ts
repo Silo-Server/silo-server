@@ -231,6 +231,30 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("fails a seek that never becomes playable as a read failure", async () => {
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+
+    // A seek that completes clears the deadline.
+    player.seek(5);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(5) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    // A seek whose reads never answer fails over instead of seeking forever.
+    player.seek(30);
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(player.seeking).toBe(true);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_read_failed" }),
+    );
+    player.destroy();
+  });
+
   it("finishes a seek past the last frame and then ends", async () => {
     const { player, worker } = start();
     await open(worker);
