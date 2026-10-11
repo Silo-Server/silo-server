@@ -201,7 +201,7 @@ const (
 func registerRecommendations(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/because-watched/{item_id}", "listBecauseWatched", "recommendations",
-		"Cards recommended because the acting profile watched the item, minus what it has watched or rated low.")), reg.listBecauseWatched)
+		"Cards recommended because the acting profile watched the item, minus what it has watched or rated.")), reg.listBecauseWatched)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/discover", "getDiscover", "recommendations",
 		"The Discover page: the acting profile's recommendation rows with their cards, blended with upcoming airings.")), reg.getDiscover)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/main", "getForYouMain", "recommendations",

@@ -195,12 +195,12 @@ type fakeReaderRepo struct {
 	// defaultCalls records each read of one.
 	defaults     map[string][]ScoredItem
 	defaultCalls []defaultRowCall
-	// disliked holds the titles the profile rated low.
-	disliked []string
+	// rated holds the titles the profile rated.
+	rated []string
 }
 
-func (f *fakeReaderRepo) ListDislikedItemIDs(context.Context, int, string) ([]string, error) {
-	return f.disliked, nil
+func (f *fakeReaderRepo) ListRatedItemIDs(context.Context, int, string) ([]string, error) {
+	return f.rated, nil
 }
 
 type defaultRowCall struct {

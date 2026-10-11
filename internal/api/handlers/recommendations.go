@@ -274,7 +274,7 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 // filterRecommendations removes watched items and low-rated items from the list.
 func (h *RecommendationsHandler) filterRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
 	items = h.excludeWatchedRecommendations(ctx, userID, profileID, items)
-	return h.excludeLowRatedRecommendations(ctx, userID, profileID, items)
+	return h.excludeRatedRecommendations(ctx, userID, profileID, items)
 }
 
 func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
@@ -309,7 +309,9 @@ func (h *RecommendationsHandler) watchedItemIDSet(ctx context.Context, userID in
 	return h.signals.WatchedItemIDSet(ctx, userID, profileID)
 }
 
-func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
+// excludeRatedRecommendations drops every title the profile rated, as the
+// recommendation rows do.
+func (h *RecommendationsHandler) excludeRatedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
 	if len(items) == 0 || h.ratingsRepo == nil {
 		return items
 	}
@@ -326,7 +328,7 @@ func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Cont
 
 	filtered := make([]recommendations.ScoredItem, 0, len(items))
 	for _, item := range items {
-		if rating, ok := ratings[item.MediaItemID]; ok && rating <= recommendations.DislikedRatingMax {
+		if _, rated := ratings[item.MediaItemID]; rated {
 			continue
 		}
 		filtered = append(filtered, item)

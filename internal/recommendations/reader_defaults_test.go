@@ -46,12 +46,12 @@ func watchedStore(ids ...string) fakeSignalProvider {
 
 // A new profile on a server that has cached nothing, with recommendations
 // disabled (no refresher), still gets the default rows on Discover, queried
-// without the titles it watched or rated low.
+// without the titles it watched or rated, liked or not.
 func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 	repo := &fakeReaderRepo{defaults: map[string][]ScoredItem{
-		RecTypeTopRated:      scored("watched", "disliked", "rated-1", "rated-2"),
+		RecTypeTopRated:      scored("watched", "disliked", "liked", "top-1", "top-2"),
 		RecTypeRecentlyAdded: scored("recent-1", "watched"),
-	}, disliked: []string{"disliked"}}
+	}, rated: []string{"disliked", "liked"}}
 	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
 
 	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
@@ -61,15 +61,15 @@ func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 	if got, want := rowLabels(rows), []string{highlyRatedLabel, recentlyAddedLabel}; !slices.Equal(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
-	if got := rowItems(rows, highlyRatedLabel); !slices.Equal(got, []string{"rated-1", "rated-2"}) {
+	if got := rowItems(rows, highlyRatedLabel); !slices.Equal(got, []string{"top-1", "top-2"}) {
 		t.Fatalf("highly rated = %v", got)
 	}
 	if rows[0].Type != RecTypeTopRated || rows[1].Type != RecTypeRecentlyAdded {
 		t.Fatalf("row types = %q, %q", rows[0].Type, rows[1].Type)
 	}
 	for _, call := range repo.defaultCalls {
-		if !slices.Equal(call.exclude, []string{"disliked", "watched"}) || call.limit != CacheCandidateLimit {
-			t.Fatalf("%s queried with exclude=%v limit=%d, want the watched and the disliked title and a full pool", call.kind, call.exclude, call.limit)
+		if !slices.Equal(call.exclude, []string{"disliked", "liked", "watched"}) || call.limit != CacheCandidateLimit {
+			t.Fatalf("%s queried with exclude=%v limit=%d, want the watched and the rated titles and a full pool", call.kind, call.exclude, call.limit)
 		}
 	}
 }

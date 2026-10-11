@@ -9835,7 +9835,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Cards recommended because the acting profile watched the item, minus what it has watched or rated low. */
+    /** Cards recommended because the acting profile watched the item, minus what it has watched or rated. */
     get: operations["listBecauseWatched"];
     put?: never;
     post?: never;

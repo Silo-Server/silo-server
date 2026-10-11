@@ -181557,7 +181557,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cards recommended because the acting profile watched the item, minus what it has watched or rated low.",
+        "summary": "Cards recommended because the acting profile watched the item, minus what it has watched or rated.",
         "tags": [
           "recommendations"
         ],
