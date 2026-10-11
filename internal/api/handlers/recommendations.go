@@ -42,12 +42,15 @@ type recommendationsReader interface {
 
 // RecommendationsHandler handles recommendation API endpoints.
 type RecommendationsHandler struct {
-	engine              recommendationsEngine
-	reader              recommendationsReader
-	storeProvider       userstore.UserStoreProvider
-	ratingsRepo         *catalog.RatingsRepo
-	recsRepo            *recommendations.Repo
-	signals             *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
+	engine        recommendationsEngine
+	reader        recommendationsReader
+	storeProvider userstore.UserStoreProvider
+	ratingsRepo   *catalog.RatingsRepo
+	recsRepo      *recommendations.Repo
+	signals       *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
+	// exclusionSet returns the canonical titles the profile's built rows
+	// leave out (SignalReader.BuildExclusionSet); nil without recsRepo.
+	exclusionSet        func(ctx context.Context, userID int, profileID string) (map[string]struct{}, error)
 	accessibleIDs       accessibleItemIDFilter
 	cardsRepo           discoverCardsRepo // nil without recsRepo
 	enabled             bool
@@ -94,6 +97,13 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 	}
 	if recsRepo != nil {
 		h.signals = recommendations.NewSignalReader(recsRepo, storeProvider)
+		h.exclusionSet = func(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+			// A nil *RatingsRepo in the interface would be called; pass none.
+			if ratingsRepo == nil {
+				return h.signals.BuildExclusionSet(ctx, nil, userID, profileID, h.nowFn())
+			}
+			return h.signals.BuildExclusionSet(ctx, ratingsRepo, userID, profileID, h.nowFn())
+		}
 		h.accessibleIDs = recsRepo
 		h.cardsRepo = recsRepo
 	}

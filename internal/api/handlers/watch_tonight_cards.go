@@ -329,6 +329,10 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 	}
 
 	poolSize := discoverCandidatePoolSize(limit, len(genres))
+	// The candidate queries are limited, so the titles the profile's rows
+	// leave out are excluded in them: removed afterwards, they would leave a
+	// short or empty page.
+	excludeIDs = h.withProfileExclusions(ctx, userID, profileID, excludeIDs)
 	var embedding []float32
 	if !h.engineUnavailable() {
 		var err error
@@ -383,6 +387,26 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
 
 	return recommendationCardItems(candidates, excludeIDs), isCold, nil
+}
+
+// withProfileExclusions returns excludeIDs, the titles the client already
+// showed, together with the canonical titles the profile's built rows leave
+// out: watched, favorited, rated and abandoned ones, an episode standing for
+// its series. When that set cannot be read it returns excludeIDs, and
+// filterRecommendations still removes watched and rated titles afterwards.
+func (h *RecommendationsHandler) withProfileExclusions(ctx context.Context, userID int, profileID string, excludeIDs map[string]struct{}) map[string]struct{} {
+	if h.exclusionSet == nil || profileID == "" {
+		return excludeIDs
+	}
+	excluded, err := h.exclusionSet(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "WatchTonightCards: exclusion set unavailable", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return excludeIDs
+	}
+	merged := make(map[string]struct{}, len(excluded)+len(excludeIDs))
+	maps.Copy(merged, excluded)
+	maps.Copy(merged, excludeIDs)
+	return merged
 }
 
 func recommendationCardItems(candidates []recommendations.ScoredItem, excludeIDs map[string]struct{}) []mergedItem {

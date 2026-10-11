@@ -216,3 +216,46 @@ func TestDiscoverCardsFallBackToTheLiveRecentlyAddedRow(t *testing.T) {
 		t.Fatalf("Recently Added read with exclude=%v limit=%d", repo.recentExclude, repo.recentLimit)
 	}
 }
+
+// The live Recently Added fallback is limited in SQL, so the profile's
+// excluded titles (watched, favorited, rated) go into the query with the
+// shown ones. Removed only afterwards, they would leave a cold profile a
+// short page, and a favorite would come back as a recommendation.
+func TestDiscoverCardsExcludeTheProfilesTitlesInTheQuery(t *testing.T) {
+	repo := &fakeCardsRepo{recent: []recommendations.ScoredItem{
+		{MediaItemID: "favorite", Score: 5}, {MediaItemID: "watched", Score: 4}, {MediaItemID: "shown", Score: 3},
+		{MediaItemID: "newest", Score: 2}, {MediaItemID: "older", Score: 1},
+	}}
+	h := &RecommendationsHandler{cardsRepo: repo, enabled: false}
+	h.exclusionSet = func(_ context.Context, userID int, profileID string) (map[string]struct{}, error) {
+		if userID != 7 || profileID != "p1" {
+			t.Fatalf("exclusion set read for %d/%s", userID, profileID)
+		}
+		return map[string]struct{}{"favorite": {}, "watched": {}}, nil
+	}
+	merged, _, err := h.buildDiscoverCards(t.Context(), 7, "p1", catalog.AccessFilter{}, nil, map[string]struct{}{"shown": {}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range merged {
+		ids = append(ids, m.scored.MediaItemID)
+	}
+	if !slices.Equal(repo.recentExclude, []string{"favorite", "shown", "watched"}) {
+		t.Fatalf("Recently Added read with exclude=%v, want the shown and the profile's excluded titles", repo.recentExclude)
+	}
+	if !slices.Equal(ids, []string{"newest", "older"}) {
+		t.Fatalf("cards = %v, want only eligible titles", ids)
+	}
+
+	// Without the set, the shown titles are still left out.
+	h.exclusionSet = func(context.Context, int, string) (map[string]struct{}, error) {
+		return nil, errors.New("signals unavailable")
+	}
+	if _, _, err := h.buildDiscoverCards(t.Context(), 7, "p1", catalog.AccessFilter{}, nil, map[string]struct{}{"shown": {}}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(repo.recentExclude, []string{"shown"}) {
+		t.Fatalf("Recently Added read with exclude=%v after the set failed, want the shown title", repo.recentExclude)
+	}
+}
