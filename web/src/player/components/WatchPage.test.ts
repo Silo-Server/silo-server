@@ -98,6 +98,8 @@ function playbackSession(
     connectionStatus: "connected",
     connectionErrorTitle: null,
     connectionError: null,
+    browserEngine: null,
+    nativeOriginalSupport: { containers: [], videoCodecs: [], audioCodecs: [] },
     switchVersion: vi.fn(),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
