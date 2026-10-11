@@ -173,12 +173,19 @@ func probeWithRunner(
 	dolbyVisionUnsettled := false
 	trackingRunner := func(commandCtx context.Context, name string, args ...string) ([]byte, error) {
 		output, err := run(commandCtx, name, args...)
+		// The Dolby Vision smoke is optional, so while the whole probe still
+		// has time, its own deadline is just another unsettled failure; it
+		// must not discard the standard kinds that already passed.
+		if err != nil && dolbyVisionSmokeCommand(args) && ctx.Err() == nil {
+			if !hasToken(output, "option 'apply_dovi'") {
+				dolbyVisionUnsettled = true
+			}
+			return output, err
+		}
 		if commandErr := commandCtx.Err(); commandErr != nil {
 			transientErr = errors.Join(transientErr, commandErr)
 		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			transientErr = errors.Join(transientErr, err)
-		} else if err != nil && dolbyVisionSmokeCommand(args) && !hasToken(output, "option 'apply_dovi'") {
-			dolbyVisionUnsettled = true
 		}
 		return output, err
 	}

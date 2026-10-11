@@ -708,46 +708,58 @@ func TestProbeRefusedDolbyVisionSmokeStaysCached(t *testing.T) {
 }
 
 // TestProbeTransientDolbyVisionSmokeFailureRetries verifies that a Dolby
-// Vision smoke failing for any reason other than a refused apply_dovi option
-// is retried after probeUnsettledDolbyVisionTTL instead of being cached as
-// unsupported.
+// Vision smoke failing for any reason other than a refused apply_dovi option,
+// including its own command deadline, keeps the standard kinds and is retried
+// after probeUnsettledDolbyVisionTTL instead of being cached as unsupported.
 func TestProbeTransientDolbyVisionSmokeFailureRetries(t *testing.T) {
-	resetProbeCache(t)
-	now := time.Unix(100, 0)
-	calls, dolbyVisionFailures := 0, 1
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		calls++
-		if len(args) > 0 && args[len(args)-1] == "-filters" {
-			return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n"), nil
-		}
-		if len(args) > 0 && args[len(args)-1] == "-encoders" {
-			return []byte("libx264"), nil
-		}
-		if strings.Contains(strings.Join(args, " "), "apply_dovi=1") && dolbyVisionFailures > 0 {
-			dolbyVisionFailures--
-			return []byte("Device creation failed: -12."), errors.New("exit status 1")
-		}
-		return nil, nil
+	tests := []struct {
+		name   string
+		output []byte
+		err    error
+	}{
+		{name: "device busy", output: []byte("Device creation failed: -12."), err: errors.New("exit status 1")},
+		{name: "own deadline", err: context.DeadlineExceeded},
 	}
-	probe := func() Capabilities {
-		t.Helper()
-		got, err := probeCached(t.Context(), "/ffmpeg-dovi-busy", BackendSoftware, "", runner, func() time.Time { return now })
-		if err != nil {
-			t.Fatalf("probe error = %v", err)
-		}
-		return got
-	}
-	if got := probe(); got.Supports(ModeSoftware, SourceDolbyVision) || !got.Supports(ModeSoftware, SourcePQ) {
-		t.Fatalf("first capabilities = %#v, want PQ without Dolby Vision", got)
-	}
-	firstCalls := calls
-	now = now.Add(probeUnsettledDolbyVisionTTL - time.Second)
-	probe()
-	if calls != firstCalls {
-		t.Fatalf("probe reran before the unsettled Dolby Vision TTL: calls = %d, want %d", calls, firstCalls)
-	}
-	now = now.Add(2 * time.Second)
-	if got := probe(); !got.Supports(ModeSoftware, SourceDolbyVision) {
-		t.Fatalf("retried capabilities = %#v, want Dolby Vision once the smoke passes", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetProbeCache(t)
+			now := time.Unix(100, 0)
+			calls, dolbyVisionFailures := 0, 1
+			runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				calls++
+				if len(args) > 0 && args[len(args)-1] == "-filters" {
+					return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n"), nil
+				}
+				if len(args) > 0 && args[len(args)-1] == "-encoders" {
+					return []byte("libx264"), nil
+				}
+				if strings.Contains(strings.Join(args, " "), "apply_dovi=1") && dolbyVisionFailures > 0 {
+					dolbyVisionFailures--
+					return tt.output, tt.err
+				}
+				return nil, nil
+			}
+			probe := func() Capabilities {
+				t.Helper()
+				got, err := probeCached(t.Context(), "/ffmpeg-dovi-busy", BackendSoftware, "", runner, func() time.Time { return now })
+				if err != nil {
+					t.Fatalf("probe error = %v", err)
+				}
+				return got
+			}
+			if got := probe(); got.Supports(ModeSoftware, SourceDolbyVision) || !got.Supports(ModeSoftware, SourcePQ) {
+				t.Fatalf("first capabilities = %#v, want PQ without Dolby Vision", got)
+			}
+			firstCalls := calls
+			now = now.Add(probeUnsettledDolbyVisionTTL - time.Second)
+			probe()
+			if calls != firstCalls {
+				t.Fatalf("probe reran before the unsettled Dolby Vision TTL: calls = %d, want %d", calls, firstCalls)
+			}
+			now = now.Add(2 * time.Second)
+			if got := probe(); !got.Supports(ModeSoftware, SourceDolbyVision) {
+				t.Fatalf("retried capabilities = %#v, want Dolby Vision once the smoke passes", got)
+			}
+		})
 	}
 }
