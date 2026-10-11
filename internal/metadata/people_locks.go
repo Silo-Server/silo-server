@@ -21,10 +21,11 @@ var _ metadataItemPeopleRepo = (*catalog.ItemRepository)(nil)
 // exactly one of its Cast and Crew locks is set. The item row carries no
 // credits, and the persist step replaces the stored set wholesale with the
 // merged one, so the locked group would be lost: this loads the stored locked
-// group into existing so the merge keeps it. The unlocked group behaves as it
-// does without a lock: replaced by the incoming one, or kept as stored when
-// the providers sent none. When the credits cannot be read, the returned
-// locks hold both groups and the credits stay as stored.
+// group into existing so the merge keeps it. The unlocked group is replaced
+// by the incoming one, or kept as stored when the providers sent none for it.
+// (Without either lock a replace merge takes the incoming credits wholesale,
+// as before.) When the credits cannot be read, the returned locks hold both
+// groups and the credits stay as stored.
 func (s *MetadataService) peopleLocksForMerge(ctx context.Context, contentID string, locked []MetadataField, existing, incoming *MetadataResult) []MetadataField {
 	castLocked, crewLocked := isFieldLocked(locked, FieldCast), isFieldLocked(locked, FieldCrew)
 	if castLocked == crewLocked || len(existing.People) > 0 {
