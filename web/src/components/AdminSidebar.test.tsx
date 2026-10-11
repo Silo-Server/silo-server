@@ -111,6 +111,14 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("/admin/settings?tab=");
   });
 
+  it("includes a Sections link in the content navigation", () => {
+    const markup = renderSidebar();
+
+    expect(markup).toContain('href="/admin/sections"');
+    expect(markup).toContain(">Sections<");
+    expect(markup).not.toContain('href="/admin/home-rows"');
+  });
+
   it("hides Policy navigation when the editor capability is unavailable", () => {
     mockUsePolicyCapability.mockReturnValueOnce({
       data: {

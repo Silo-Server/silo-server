@@ -273,3 +273,38 @@ func TestJWT_ApplePushDisplayTokenIsProfileScopedAndLongLived(t *testing.T) {
 		t.Fatal("expected error without profile")
 	}
 }
+
+func TestJWT_DirectDownloadLinkTokenIsFileAndProfileScoped(t *testing.T) {
+	svc := newTestJWTService()
+
+	admin := 7
+	token, expiresAt, err := svc.GenerateDirectDownloadLinkToken(42, "user", "sess-1", "profile-1", &admin, 99)
+	if err != nil {
+		t.Fatalf("GenerateDirectDownloadLinkToken() error: %v", err)
+	}
+	claims, err := svc.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypeDirectDownloadLink {
+		t.Fatalf("token_type = %q, want %q", claims.TokenType, auth.TokenTypeDirectDownloadLink)
+	}
+	if claims.UserID != 42 || claims.SessionID != "sess-1" || claims.ProfileID != "profile-1" || claims.FileID != 99 ||
+		claims.ImpersonatorUserID == nil || *claims.ImpersonatorUserID != 7 {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if exp := claims.ExpiresAt.Time; expiresAt.After(exp) || exp.Sub(expiresAt) > 2*time.Second {
+		t.Fatalf("expires_at %v, token exp %v", expiresAt, exp)
+	}
+	if remaining := time.Until(expiresAt); remaining > auth.DirectDownloadLinkTTL || remaining < auth.DirectDownloadLinkTTL-time.Minute {
+		t.Fatalf("lifetime = %v, want about %v", remaining, auth.DirectDownloadLinkTTL)
+	}
+	for _, tc := range []struct {
+		session, profile string
+		file             int
+	}{{"", "profile-1", 99}, {"sess-1", "", 99}, {"sess-1", "profile-1", 0}} {
+		if _, _, err := svc.GenerateDirectDownloadLinkToken(42, "user", tc.session, tc.profile, nil, tc.file); err == nil {
+			t.Fatalf("expected error for %+v", tc)
+		}
+	}
+}

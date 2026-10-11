@@ -24,8 +24,9 @@ import (
 // body, so it cannot express "actor P changed key K for profile Q". Persisting
 // these needs its own table and migration.
 const (
-	settingsAuditMsg       = "settings changed for another profile"
-	settingsAuditActionSet = "set"
+	settingsAuditMsg         = "settings changed for another profile"
+	settingsAuditActionSet   = "set"
+	settingsAuditActionClear = "clear"
 )
 
 // logComponentKey is the structured-log attribute every handler in this package
@@ -42,8 +43,10 @@ type settingsAuditRecord struct {
 	TargetUserID int
 	ClientFamily string
 	DeviceID     string
-	Key          string
-	Scope        string
+	// LibraryID names the library page a page-layout record addresses.
+	LibraryID string
+	Key       string
+	Scope     string
 }
 
 // auditSettingsForOther emits the record when, and only when, the actor is
@@ -76,6 +79,9 @@ func auditSettingsForOther(ctx context.Context, record settingsAuditRecord) {
 	}
 	if record.DeviceID != "" {
 		attrs = append(attrs, "device_id", record.DeviceID)
+	}
+	if record.LibraryID != "" {
+		attrs = append(attrs, "library_id", record.LibraryID)
 	}
 	slog.InfoContext(ctx, settingsAuditMsg, attrs...)
 }

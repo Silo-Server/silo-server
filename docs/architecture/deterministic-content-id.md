@@ -150,10 +150,11 @@ replacement — keep the full provider-ID set indexed.
 | ---- | ------- | ------- |
 | Derivation core | `internal/contentid/contentid.go` | `ForMovie`/`ForSeries`/`ForSeason`/`ForEpisode`/`ForLocal`, `SeriesIDFromContentID`, `IsProviderAnchored`/`IsLocal`, `SchemeVersion`, frozen precedence, normalization. |
 | Generation wiring | `internal/metadata/service.go` | `deriveLogicalContentID`/`deriveSeasonContentID`/`deriveEpisodeContentID` replace `idgen.NextID()` at every mint site (skeleton, provider-match, explicit/implicit seasons, episodes, scanner fallback). |
-| Re-ID on match | `internal/metadata/canonicalize.go` | Promotes a `local-` placeholder to its deterministic id at first confirmed match. |
+| Re-ID on match | `internal/metadata/canonicalize.go` | Promotes a `local-` placeholder to its deterministic id at first confirmed match, and moves a corrected match to the id its new identity derives. |
 | Hot query | `internal/catalog/history_source.go` | Watch-history `display_id` resolves the show via the string transform for anchored episodes; skips the `episodes_pkey` probe. |
 | Value-remap migration | `migrations/sql/20260612130000_deterministic_content_id.sql` | Collision-safe Sonyflake → structured remap across the whole reference graph + `COLLATE "C"`, with rollback. |
 | Online re-ID migration | `migrations/sql/20260614120000_content_id_online_reid.sql` | Adds `silo_rename_content_id` + `ON UPDATE CASCADE` to the content-id FK family. |
+| Bulk re-ID function | `migrations/sql/20261004211822_add_bulk_content_id_rename.sql` | Adds `silo_rename_content_ids(from[], to[])`, which moves a series and its children in one pass, and makes `silo_rename_content_id` a wrapper around it. |
 
 ### Generation: determinism at scan time
 
@@ -196,10 +197,42 @@ rest of mergeAndPersist runs with the corrected id
 
 The guard is a single `IsLocal` prefix check, so tagged content and all refreshes
 pay nothing; the promotion is self-healing (a partial run re-runs on the next
-match). The rename primitive `silo_rename_content_id` reuses the migration's
-catalog-driven column enumeration so the two stay in lockstep.
-`ON UPDATE CASCADE` only fires when a `content_id` actually changes (essentially
-never outside this promotion), so there is no steady-state cost.
+match). The rename primitive `silo_rename_content_ids` reuses the migration's
+catalog-driven column enumeration so the two stay in lockstep;
+`silo_rename_content_id` is a single-pair wrapper around it.
+`ON UPDATE CASCADE` only fires when a `content_id` actually changes (at this
+promotion and at a corrected-match re-anchor), so there is no steady-state cost.
+
+### Re-anchor on a corrected match
+
+An item matched to the wrong title sits on that title's id, for example
+`series-tvdb-73244` for a show that is really `series-tvdb-78107`. Left there,
+the real `73244` show would merge into it when it is scanned in. So the same
+gate re-anchors a provider-anchored item when its identity is corrected: an
+Identify whose choice rejects the provider ID the item is anchored on
+(`identityChoiceCorrects`), or a manual refresh after an NFO `<uniqueid>` fix.
+An Identify that confirms or extends the match, or only replaces an anchor
+already recorded as stale (no other title can claim a dead ID), keeps the id,
+as does every scheduled refresh.
+
+A re-anchored series takes along the season and episode ids composed from its
+old anchor (`episode-tvdb-73244-1-2` becomes `episode-tvdb-78107-1-2`) in the
+same transaction, so the old anchor's show can mint them again. Children on
+Sonyflake ids keep them. A child whose new id is already taken by another
+series moves to a fresh Sonyflake id, and the move is logged; it never stays in
+the old anchor's namespace.
+
+Per-user rows outlive a deleted item, so a profile can already hold a row on a
+new id. `silo_rename_content_ids` merges such a row instead of failing the move:
+watch progress keeps the newer row, and every other unique-keyed table keeps
+the row already on the new id, the same policies `internal/catalog/reattribute`
+applies to a merge.
+
+When the corrected id already belongs to an item, the series merges into it
+instead (`rebindItemToExistingItem`). Episode state moves to the target episode
+with the same season and episode number. A wrong-anchor episode the target
+lacks moves its state to the id the target composes for it, which the target's
+episode takes when a scan creates it.
 
 ### The migration
 

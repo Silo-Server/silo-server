@@ -23,7 +23,8 @@ type OperationalDispatch struct {
 // single transaction — a crash afterwards delays channel sends instead of dropping
 // them, because the retry workers recover pending outbox rows — then realtime
 // and channel dispatch run post-commit. Returns nil when the delivery deduped
-// away (the partial unique indexes make operational notices idempotent).
+// away (the partial unique indexes make operational notices idempotent), or
+// when it names a catalog item (SeriesID) the recipient may not open now.
 //
 // Targets are the recipient profile's on the recipient's account: profile ids
 // repeat across accounts (every account from before profiles has one named
@@ -33,11 +34,30 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 	if s == nil {
 		return nil, nil
 	}
+	var recipient *recipientAccess
+	if delivery.SeriesID != nil && *delivery.SeriesID != "" {
+		// The resolver reads through the pool, so resolve before the
+		// transaction holds a connection; canOpen below reuses the result.
+		recipient = newRecipientAccess(s.scopes)
+		if _, err := recipient.scope(ctx, delivery.UserID, delivery.ProfileID); err != nil {
+			return nil, err
+		}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin operational dispatch tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if recipient != nil {
+		allowed, err := recipient.canOpen(ctx, tx, delivery.UserID, delivery.ProfileID, *delivery.SeriesID, 0)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, nil
+		}
+	}
 
 	inserted, err := s.Deliveries.BulkInsert(ctx, tx, []Delivery{delivery})
 	if err != nil {

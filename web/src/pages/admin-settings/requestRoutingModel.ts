@@ -787,11 +787,12 @@ function traceMisses(
   return keys.map((key) => traceMissSentence(key, conditions, ctx));
 }
 
-/** What a matching rule did: "decides HD", "decides HD and 4K", "decides 4K: none". */
+/** What a matching rule did: "decides HD", "decides HD and 4K", "decides HD: none", "decides 4K: none". */
 function traceDecision(rule: Pick<RequestRoutePreviewRule, "hd" | "uhd">): string {
   const parts: string[] = [];
   if (rule.hd === "sends" && rule.uhd === "sends") return "decides HD and 4K";
   if (rule.hd === "sends") parts.push("decides HD");
+  if (rule.hd === "skips") parts.push("decides HD: none");
   if (rule.uhd === "sends") parts.push("decides 4K");
   if (rule.uhd === "skips") parts.push("decides 4K: none");
   if (parts.length > 0) return parts.join(" · ");

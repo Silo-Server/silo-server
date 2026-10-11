@@ -9,7 +9,12 @@ import (
 )
 
 type UserLibraryService interface {
-	ListUserLibraries(context.Context, int) ([]handlers.UserLibraryView, error)
+	ListUserLibraries(ctx context.Context, userID int, includeHidden bool) ([]handlers.UserLibraryView, error)
+}
+
+// UserLibraryListInput is the listUserLibraries request.
+type UserLibraryListInput struct {
+	IncludeHidden bool `query:"include_hidden" doc:"Also list libraries the profile hid itself (ui.disabled_library_ids), for a screen that shows them again. Without an account, profile, or policy library limit they are listed either way. Navigation should omit it and filter by the setting" example:"false"`
 }
 
 type UserLibrary struct {
@@ -29,7 +34,8 @@ type UserLibraryCapabilitiesOutput struct {
 }
 type UserLibraryCapabilitiesOutputBody struct {
 	Capability
-	Available bool `json:"available"`
+	Available             bool `json:"available"`
+	SupportsIncludeHidden bool `json:"supports_include_hidden" doc:"Whether listUserLibraries accepts include_hidden" example:"true"`
 }
 
 func registerUserLibraries(reg *Registry) {
@@ -39,13 +45,14 @@ func registerUserLibraries(reg *Registry) {
 	Register(reg, operation("/user/libraries/capabilities", "getUserLibraryCapabilities"), func(_ context.Context, _ *CapabilityInput) (*UserLibraryCapabilitiesOutput, error) {
 		out := new(UserLibraryCapabilitiesOutput)
 		out.Body.Available = reg.deps.UserLibraries != nil
+		out.Body.SupportsIncludeHidden = out.Body.Available
 		return out, nil
 	})
-	Register(reg, operation("/user/libraries", "listUserLibraries"), func(ctx context.Context, _ *struct{}) (*UserLibraryListOutput, error) {
+	Register(reg, operation("/user/libraries", "listUserLibraries"), func(ctx context.Context, in *UserLibraryListInput) (*UserLibraryListOutput, error) {
 		if reg.deps.UserLibraries == nil {
 			return nil, unavailable("user libraries")
 		}
-		views, err := reg.deps.UserLibraries.ListUserLibraries(ctx, claimsFrom(ctx).UserID)
+		views, err := reg.deps.UserLibraries.ListUserLibraries(ctx, claimsFrom(ctx).UserID, in.IncludeHidden)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

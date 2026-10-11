@@ -82,8 +82,8 @@ configuration tags. Successful deletion returns no validator.
 
 ## Personal key management
 
-Personal key management operates on the login account, without requiring a household
-profile.
+Personal key management operates on the login account. Listing, revocation, and scope
+discovery do not require a household profile; creation acts through one (see below).
 
 | Method | Path | Result |
 |---|---|---|
@@ -95,7 +95,16 @@ profile.
 Listing, creation, and revocation require JWT authentication; API-key credentials
 receive `403`. Creation also requires a server admin account: a regular account's
 login session receives `403` and no key is created. Body validation runs first, so
-an invalid body still answers `422`. Any account can still list and revoke keys it
+an invalid body still answers `422`.
+
+A key skips every profile's PIN, so creation also requires the household manager:
+the admin acts through the account's primary profile (`X-Profile-Id`), with
+`X-Profile-Token` from `verifyProfilePIN` when that profile has a PIN. Another
+profile on the admin's account receives `403 permission_denied`; a primary profile
+without its token receives `403 profile_verification_required`. A request without
+`X-Profile-Id` may create a key only while no profile on the account has a PIN,
+a maturity limit, or library restrictions; otherwise it receives
+`403 permission_denied`. Any account can still list and revoke keys it
 already owns. Scope discovery retains its availability to unscoped API keys.
 Creation and revocation retain the demo restriction; listing and scope discovery
 do not. An unavailable store reports
@@ -144,4 +153,8 @@ cursor pagination, and does not use `ETag`/`If-Match` preconditions. Those route
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
 against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
-an admin account; v1 refuses anyone else with `403 forbidden` before reading the body.
+an admin account acting through its primary profile, as described under
+[Personal key management](#personal-key-management); v1 refuses anyone else with
+`403 forbidden` before reading the body. Applying the primary-profile rule to v1 is a
+critical bridge fix: before it, a child profile on an admin account could mint a key
+and use it to open PIN-protected profiles.

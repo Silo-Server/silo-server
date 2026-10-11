@@ -124,7 +124,7 @@ describe("buildStartRequestV3", () => {
     expect(
       buildStartRequestV3({ ...startBase, extraClientFeatures: VIDEO_CLIENT_FEATURES_V3 })
         .client_features,
-    ).toEqual(["playback_plan_v3", "plan_invalidated_v1"]);
+    ).toEqual(["playback_plan_v3", "plan_invalidated_v1", "marker_thumbnails_v1"]);
     expect(buildStartRequestV3(startBase).client_features).toEqual(["playback_plan_v3"]);
   });
 
@@ -206,7 +206,7 @@ describe("buildReplanRequestV3", () => {
         operation: "failure_recovery",
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
       }).client_features,
-    ).toEqual(["playback_plan_v3", "plan_invalidated_v1"]);
+    ).toEqual(["playback_plan_v3", "plan_invalidated_v1", "marker_thumbnails_v1"]);
   });
 
   it("names a new audio track by index alone", () => {

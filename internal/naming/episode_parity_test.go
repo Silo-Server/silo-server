@@ -155,6 +155,20 @@ func TestEpisodeNamingRangeTitleSuffix(t *testing.T) {
 	}
 }
 
+func TestAirDateTitleSuffix(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"Jeopardy! (1984) - 2026-04-24 - Jamie Ding Zach Pollock.mkv", "Jamie Ding Zach Pollock"},
+		{"The.Daily.Show.2024.02.15.Guest.Name.mkv", "Guest.Name"},
+		{"Show 2024_02_15_Guest_Name.mkv", "Guest_Name"},
+		{"Show - 2026-04-24.mkv", ""},
+		{"Show - S01E02 - Arrival.mkv", ""},
+	} {
+		if got := AirDateTitleSuffix(filepath.Join("Show", "Season 2026", tc.name)); got != tc.want {
+			t.Errorf("%q: suffix = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestEpisodeNamingDoesNotTreatReleaseIDsAsRanges(t *testing.T) {
 	for _, name := range []string{"the_simpsons-s02e01_18536", "Show S01E01_1234", "Show S01E01-1080p", "Show S01E01 The 6-10 to Lubbock"} {
 		token, _ := parseEpisodeToken(name, nil, true, true)

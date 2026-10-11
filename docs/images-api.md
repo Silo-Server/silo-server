@@ -108,6 +108,7 @@ GET /api/v2/images/capabilities
   "allowed": true,
   "param": "image_size",
   "season_list_artwork_param": "include_artwork",
+  "episode_still_provenance": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
     "poster": { "small": 300, "medium": 500, "large": 780 },
@@ -172,6 +173,17 @@ season selectors; clients that render season posters should keep the default. Se
 the [season-list contract](catalog-api.md#season-list-artwork) for the full
 response semantics.
 
+## Episode still provenance
+
+`"episode_still_provenance": true` means the server can say whether an episode
+image is the episode's own still: `poster_is_episode_still` and
+`backdrop_is_episode_still` on catalog cards and details, and
+`still_is_episode_still` on episode rows. Responses carry these fields only where
+the server knows the image's source; an absent field means unknown, even when the
+capability is true. Clients that hide unwatched episode stills use them to keep
+series and season artwork visible. See
+[episode spoiler protection](catalog-api.md#episode-spoiler-protection).
+
 ## Jellyfin compatibility
 
 The Jellyfin-protocol surface maps its own `MaxWidth`/`MaxHeight`/`FillWidth`/
@@ -193,3 +205,17 @@ The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
 `include_artwork` with `400 invalid_include_artwork`. Those paths are frozen, and Silo
 1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
 `client_upgrade_required` problem code. Build against `/api/v2`.
+
+### Marker thumbnail lifecycle
+
+Marker preview state is stored separately from embedded chapters. Served keys
+share the protected chapter-image namespace, using
+`chapter-images/{file_id}/marker-{occurrence_sha256}-{image_sha256}/w{width}.webp`.
+The occurrence digest includes the file identity, path and exact kind/start/end;
+the image digest makes uploads immutable even after worker lock loss.
+
+The chapter-image URL resolver and collector also recognize marker references.
+A database trigger clears stale marker metadata on file/range changes and queues
+displaced images atomically, with at least 48 hours of grace and any later issued
+URL deadline preserved. File deletion retains the existing namespace cleanup.
+Width replacement keeps the previous image usable until the new image commits.

@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Scissors,
   RotateCcw,
+  Shuffle,
   Tags,
   UsersRound,
   Hand,
@@ -175,6 +176,9 @@ export interface ActionBarLink {
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
+  canAddToCollection?: boolean;
+  /** The item's title, named by Add to collection. */
+  itemTitle?: string;
   watchTogether?: ActionBarWatchTogether;
   /** Replaces the Play action. */
   primaryAction?: ActionBarPrimaryAction;
@@ -226,6 +230,8 @@ export interface ActionBarProps {
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
   onRequestSeasons?: () => void;
+  /** Shuffles this series' or season's episodes. */
+  onShuffle?: () => void;
   rating?: number | null;
   onRatingChange?: (rating: number | null) => void;
   qualityPreference?: string | null;
@@ -248,6 +254,8 @@ export interface ActionBarProps {
 export default function ActionBar({
   compactMobile = false,
   contentId,
+  canAddToCollection = true,
+  itemTitle,
   watchTogether,
   primaryAction,
   secondaryActions,
@@ -286,6 +294,7 @@ export default function ActionBar({
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
+  onShuffle,
   rating,
   onRatingChange,
   audioSelectionMode = "auto",
@@ -564,7 +573,12 @@ export default function ActionBar({
     items[nextIndex]?.focus({ preventScroll: true });
   };
   const hasOverflowActions = Boolean(
-    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles || onRequestSeasons,
+    restartHref ||
+    onShuffle ||
+    onToggleWatchlist ||
+    onDownload ||
+    onSearchSubtitles ||
+    onRequestSeasons,
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
   const hasMetadataActions = Boolean(
@@ -575,7 +589,7 @@ export default function ActionBar({
     hasOverflowActions ||
     hasAdminActions ||
     hasMetadataActions ||
-    Boolean(contentId) ||
+    Boolean(contentId && canAddToCollection) ||
     (compactMobile && Boolean(onToggleFavorite || onRatingChange)) ||
     Boolean(watchTogether);
 
@@ -795,6 +809,12 @@ export default function ActionBar({
                   )}
                 </div>
               )}
+              {onShuffle && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onShuffle}>
+                  <Shuffle className="size-4" />
+                  Shuffle
+                </DetailOverflowMenuItem>
+              )}
               {restartHref && (
                 <DetailOverflowMenuItem
                   closeMenu={closeOverflowMenu}
@@ -810,7 +830,7 @@ export default function ActionBar({
                   {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
                 </DetailOverflowMenuItem>
               )}
-              {contentId && (
+              {contentId && canAddToCollection && (
                 <DetailOverflowMenuItem
                   closeMenu={closeOverflowMenu}
                   onAction={() => setAddToCollectionOpen(true)}
@@ -1029,11 +1049,12 @@ export default function ActionBar({
             isPending={isRedetectingMarkers}
           />
         )}
-        {contentId && (
+        {contentId && canAddToCollection && (
           <AddToCollectionDialog
             open={addToCollectionOpen}
             onOpenChange={setAddToCollectionOpen}
             mediaItemId={contentId}
+            itemTitle={itemTitle}
           />
         )}
       </div>

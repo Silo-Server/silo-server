@@ -36,7 +36,7 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 			t.Fatal("undescribed worker registration", route.Listener, route.Method, route.Path)
 		}
 	}
-	if count != 49 || len(described) != 49 {
+	if count != 50 || len(described) != 50 {
 		t.Fatal("retained inventory drift", count, len(described))
 	}
 }

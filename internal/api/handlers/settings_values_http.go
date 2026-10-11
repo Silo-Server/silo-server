@@ -38,7 +38,7 @@ func (h *SettingValuesHandler) identityRequestFrom(r *http.Request, key string) 
 		LibraryID:       query.Get("library_id"),
 		SeriesID:        query.Get("series_id"),
 		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.UserRepo, h.ProfileTokens, profileID)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
 		},
 	}
 }
@@ -249,7 +249,7 @@ func (h *SettingValuesHandler) effectiveQueryFrom(r *http.Request, keys []string
 		LibraryIDs:      parseIntCSV(query.Get("library_ids")),
 		SeriesIDs:       splitCSV(query.Get("series_ids")),
 		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.UserRepo, h.ProfileTokens, profileID)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
 		},
 	}
 }
@@ -356,40 +356,6 @@ func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) 
 		return nil, false
 	}
 	return def, true
-}
-
-// registerWritingDevice refreshes the device registry from the request's
-// declared device after a canonical device-scope write.
-func (h *SettingValuesHandler) registerWritingDevice(
-	ctx context.Context, store userstore.UserStore, profileID string, device DeviceMetadata,
-) {
-	if profileID == "" || device.DeviceID == "" {
-		return
-	}
-	if h.deviceSeen != nil {
-		key := profileID + "\x00" + device.DeviceID
-		if _, seen := h.deviceSeen.Get(key); seen {
-			return
-		}
-		h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		return
-	}
-	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-	}); err != nil {
-		slog.WarnContext(ctx, "failed to register device after canonical write",
-			"component", "api",
-			"profile_id", profileID,
-			"device_id", device.DeviceID,
-			"error", err,
-		)
-	}
 }
 
 func (h *SettingValuesHandler) effectiveResponses(

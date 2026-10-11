@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -223,7 +224,19 @@ type attemptRun struct {
 // input first (see probe.go), then reads it through a concat list when its
 // container seeks to keyframes. Otherwise it reads one keyframes-only window
 // and picks the samples from its keyframes.
+//
+// Sheets read through a list that comes back empty because the decoder
+// dropped keyframes as duplicates are read again as that window. One decoder serves every
+// entry of a list, and nothing resets it between them: an HEVC CRA keyframe
+// after a jump takes a picture order count derived from the previous
+// sample's, and when that count matches a picture still in the decoder's
+// buffer, the decoder drops the keyframe ("Duplicate POC in a sequence").
+// Open-GOP encodes then lose most of their samples on every run. A window
+// decodes its keyframes in order, so their counts stay consistent. A list
+// that is empty for another reason, such as a truncated or damaged file,
+// still fails.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
+	var listFailure *AttemptError
 	if !req.Samples.ReadThrough || (req.Sheets != nil && req.Sheets.UseInputAspect) {
 		header := &inputHeaderParser{}
 		if failure := a.exec(req, probeArgs(req.Input), nil, nil, header.line); failure != nil {
@@ -243,10 +256,15 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 			a.sheetsGraph = graph
 		}
 		if !req.Samples.ReadThrough && header.info.seeksToKeyframes() {
-			if req.Sheets != nil {
-				return a.sheets(req, req.Samples.Seconds, header.info.StartSeconds)
+			if req.Sheets == nil {
+				return a.decode(req, header.info.StartSeconds)
 			}
-			return a.decode(req, header.info.StartSeconds)
+			duplicates := false
+			result, failure := a.sheets(req, req.Samples.Seconds, header.info.StartSeconds, watchDuplicatePOC(&duplicates))
+			if failure == nil || failure.Reason != ReasonEmpty || !duplicates {
+				return result, failure
+			}
+			listFailure = failure
 		}
 	}
 	window := sampledWindow(req.Samples.Seconds)
@@ -254,7 +272,24 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	windowReq.Samples = nil
 	windowReq.Window = &window
 	if req.Sheets != nil {
-		return a.sheets(windowReq, req.Samples.Seconds, 0)
+		duplicates := false
+		result, failure := a.sheets(windowReq, req.Samples.Seconds, 0, watchDuplicatePOC(&duplicates))
+		if listFailure == nil {
+			return result, failure
+		}
+		// Keyframes a whole picture order count cycle apart collide in a
+		// window too, since skipped pictures do not advance the count. The
+		// window would then give later samples the last keyframe it kept and
+		// count them as decoded, so it fails instead.
+		if failure == nil && duplicates {
+			result, failure = Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonEmpty, Err: errors.New("ffmpeg dropped keyframes as duplicates in the window too")}
+		}
+		// A window that fails too reports its own failure, whose reason and
+		// log describe the latest read, and names the list's in its error.
+		if failure != nil {
+			failure.Err = fmt.Errorf("%w (after the list run: %w)", failure.Err, listFailure.Err)
+		}
+		return result, failure
 	}
 	result, failure := a.decode(windowReq, 0)
 	if failure != nil {
@@ -317,9 +352,24 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 	return result, nil
 }
 
+// duplicatePOCMessage is what ffmpeg's HEVC decoder logs when it drops a
+// picture whose picture order count matches one still in its buffer. Other
+// undecodable pictures, such as a damaged stretch of the file, log only
+// "Skipping invalid undecodable NALU" and do not send a list to the window.
+const duplicatePOCMessage = "Duplicate POC in a sequence"
+
+// watchDuplicatePOC returns a log handler that sets *seen once ffmpeg logs
+// duplicatePOCMessage.
+func watchDuplicatePOC(seen *bool) func(string) {
+	return func(line string) {
+		*seen = *seen || strings.Contains(line, duplicatePOCMessage)
+	}
+}
+
 // sheets runs a Sheets request for the sample times, reading req's list
 // (with inpoints offset by inputStart) or window, and tiles the frames.
-func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Result, *AttemptError) {
+// logHandlers also read ffmpeg's log.
+func (a attemptRun) sheets(req Request, times []float64, inputStart float64, logHandlers ...func(string)) (Result, *AttemptError) {
 	var packetTimingPath string
 	if req.Window != nil {
 		dir, err := os.MkdirTemp("", "silo-sheets-*")
@@ -338,7 +388,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Re
 		offset = req.Window.StartSeconds
 	}
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
-	if failure := a.exec(req, args, stdinBytes, assembler, assembler.line); failure != nil {
+	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}
 	if packetTimingPath != "" {

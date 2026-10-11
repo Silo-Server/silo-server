@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { sectionTypeLabel } from "@/lib/sectionTypes";
+import { rowKindLabel } from "@/lib/homeRows/catalog";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
 import { matchRecipePreset, type RecipeCatalogResponse } from "@/lib/recipes";
@@ -35,7 +35,7 @@ export function recipeLabel(
       if (label) return label;
     }
   }
-  return sectionTypeLabel(type);
+  return rowKindLabel(type);
 }
 
 function continueTypeLabel(config?: Record<string, unknown>): string | null {
@@ -244,8 +244,10 @@ export function SortableSectionCardRow({
   disabled?: boolean;
   catalog?: RecipeCatalogResponse;
   onToggleHidden: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  /** Omit to leave the row without an edit button. */
+  onEdit?: () => void;
+  /** Omit to leave the row without a delete button. */
+  onDelete?: () => void;
   actions?: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -297,30 +299,34 @@ export function SortableSectionCardRow({
           <SectionSummaryBadges section={section} catalog={catalog} showVisibility />
         </div>
         <div className="text-muted-foreground text-[13px]">
-          {sectionTypeLabel(section.sectionType)} . {section.itemLimit} items
+          {rowKindLabel(section.sectionType)} . {section.itemLimit} items
         </div>
       </div>
       {actions}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 w-8 p-0"
-        aria-label={`Edit ${section.title}`}
-        disabled={disabled}
-        onClick={onEdit}
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0"
-        aria-label={`Delete ${section.title}`}
-        disabled={disabled}
-        onClick={onDelete}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      {onEdit ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          aria-label={`Edit ${section.title}`}
+          disabled={disabled}
+          onClick={onEdit}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+      {onDelete ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0"
+          aria-label={`Delete ${section.title}`}
+          disabled={disabled}
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
     </div>
   );
 }

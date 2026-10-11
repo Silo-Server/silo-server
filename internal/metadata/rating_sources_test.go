@@ -274,7 +274,7 @@ func TestRefreshPersistsRatingSources(t *testing.T) {
 		wantReplace  bool
 		wantWholeSet bool
 	}{
-		{name: "scheduled refresh fills empty", mode: ModeScheduledRefresh, wantUpsert: true},
+		{name: "scheduled refresh replaces reported sources", mode: ModeScheduledRefresh, wantUpsert: true, wantReplace: true},
 		{name: "manual refresh replaces", mode: ModeManualRefresh, wantUpsert: true, wantReplace: true},
 		{name: "identify replaces the whole set", mode: ModeIdentify, wantUpsert: true, wantWholeSet: true},
 		{name: "rating lock skips the write", mode: ModeManualRefresh, locked: []int{int(FieldRating)}},
@@ -386,5 +386,31 @@ func TestRatingsFromStructGatesRottenTomatoesOnTheDeclaration(t *testing.T) {
 	declared := ratingsFromStruct(ratings, map[string]struct{}{models.RatingSourceRTCritic: {}})
 	if declared != (Ratings{IMDB: 8.1, TMDB: 7.6, RTCritic: 93}) {
 		t.Fatalf("with rt_critic declared = %+v, want the critic score kept and the audience score dropped", declared)
+	}
+}
+
+// The bulk enrichment pass carries one provider's answer, so it must only fill
+// rating sources the item lacks. Overwriting would let MDBList's copy of a
+// source replace the one the refresh chain chose.
+func TestEnrichmentPassOnlyFillsRatingSources(t *testing.T) {
+	const contentID = "movie:tmdb:42"
+	h := newTestHarness()
+	repo := &fakeRatingSourceRepo{}
+	h.service.ratingSourceRepo = repo
+	seedMovieItem(t, h, contentID, "Title", 2018)
+
+	result := &MetadataResult{
+		HasMetadata:   true,
+		RatingSources: map[string]RatingSource{models.RatingSourceTMDB: {Score: 76, Votes: 30}},
+	}
+	candidate := enrichmentCandidate{ContentID: contentID, Type: "movie", ProviderIDs: map[string]string{"tmdb": "42"}}
+	if err := h.service.persistEnrichment(context.Background(), candidate, "mdblist", result); err != nil {
+		t.Fatalf("persistEnrichment() error = %v", err)
+	}
+	if len(repo.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(repo.upserts))
+	}
+	if got := repo.upserts[0]; got.replace || got.wholeSet {
+		t.Fatalf("enrichment upsert replace=%v wholeSet=%v, want a fill-empty write", got.replace, got.wholeSet)
 	}
 }

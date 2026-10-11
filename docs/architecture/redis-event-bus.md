@@ -21,9 +21,36 @@ own connection to the name it gives Redis:
 | --- | --- |
 | `redis://host:6379` or `redis://host:6379/0` | `silo:admin` |
 | `redis://host:6379/3` | `silo:admin@db3` |
+| `redis://sentinel-1:26379/3?master_name=mymaster` | `silo:admin@db3` |
+
+The number is the one the bus's connection selects. A `redis.db` setting with a
+value replaces the number in a saved `redis.url`, so a saved
+`redis://host:6379/3` with `redis.db` 5 gives `silo:admin@db5`. `REDIS_URL`
+supplies the whole connection, and a process started with it does not apply
+`redis.db`.
 
 Installs that share one Redis server on different database numbers then keep
 both their keys and their events apart.
+
+## Subscriptions behind Sentinel
+
+A URL with a `master_name` parameter names a Sentinel deployment, and the bus
+connects to the master Sentinel names. go-redis sends commands to a new master
+on the next connection it opens. It moves a subscription only when that
+subscription's connection breaks, and a master that freezes or drops off the
+network leaves the connection open. The bus would then publish to the new
+master and keep listening to the old one.
+
+For a Sentinel URL the bus reads each subscription itself, in
+`listenToMaster`. Every receive has a 10 second deadline, and a ping every 3
+seconds makes a healthy master answer within it. When the deadline passes,
+go-redis drops the connection, and the bus redials until it has a connection
+to the master Sentinel names, on which go-redis subscribes again. Redis
+pub/sub does not replay, so events published while a subscription is between
+masters do not reach that node.
+
+A single-server URL keeps go-redis's `pubsub.Channel()`. There is no other
+server to move to.
 
 ## Invariants
 
@@ -43,3 +70,18 @@ both their keys and their events apart.
 - Keep every Redis channel name under `silo:`. A Redis ACL user can be granted
   channels by pattern (`&silo:*`), and a node that is refused a subscription
   exits at startup.
+- A Sentinel subscription has to notice a silent master by itself. Read
+  through `pubsub.Channel()`, it stays on a master that froze for as long as
+  the connection stays open.
+- The redial of a Sentinel subscription runs outside the receive deadline and
+  under a context that `Close` ends. Inside the deadline, a Sentinel lookup
+  slower than the deadline is taken for a silent server and never completes.
+  Without the context, `Close` waits for the redial of each subscription in
+  turn. With it, `Close` waits for the attempt in flight, which go-redis does
+  not interrupt.
+- A Sentinel URL keeps its read timeout. A redial has no deadline of its own,
+  so the read timeout is what ends a handshake with a frozen master. Without
+  one the redial never returns and holds the subscription's lock, which
+  `Close` needs.
+- `Subscribe` refuses a subscription once `Close` has begun. `Close` takes the
+  list of subscriptions once, and one added later would never be closed.

@@ -11,9 +11,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // APIKeyStore is the storage the API key endpoints need. It is an interface
@@ -38,6 +40,32 @@ type APIKeyHandler struct {
 	// Owners, when set, keeps other admins from minting, revoking or
 	// retiering keys on the server Owner's account.
 	Owners ownerTargetChecker
+	// Stores and ProfileTokens hold personal key creation to the household
+	// manager (canManageHouseholdAs). A key skips profile PIN verification, so
+	// minting one from a child profile would hand that profile every other
+	// profile on the account. Without Stores creation fails closed;
+	// ProfileTokens verifies a PIN-locked primary on v1.
+	Stores        userstore.UserStoreProvider
+	ProfileTokens *access.ProfileTokenService
+}
+
+// MayCreatePersonalAPIKey reports whether the caller acting as
+// activeProfileID may mint a personal API key: only the household manager may,
+// which on an admin account is the acting admin. verify confirms a PIN-locked
+// primary profile and returns access.ErrProfileUnverified when it is not.
+// The admin-role check stays with the callers, which run it first.
+func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profileID string) error) (bool, error) {
+	if h.Stores == nil {
+		return false, nil
+	}
+	store, err := h.Stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	if verify == nil {
+		verify = func(string) error { return access.ErrProfileUnverified }
+	}
+	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
 }
 
 // checkOwnerAccount refuses the admin key operations on the Owner's account
@@ -181,6 +209,20 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	// still see and revoke keys it already owns.
 	if claims.Role != models.RoleAdmin {
 		writeError(w, http.StatusForbidden, "forbidden", "Only server admins can create API keys")
+		return
+	}
+	// The admin acts only through the account's primary profile, verified
+	// when it has a PIN; a child profile on the admin's account may not mint
+	// a key that would skip every profile's PIN.
+	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profileID string) error {
+		return verifyProfileToken(r, h.Stores, h.ProfileTokens, profileID)
+	})
+	if err != nil {
+		writeProfileManagementPermissionError(w, err)
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "forbidden", "Creating API keys requires the account's primary profile")
 		return
 	}
 

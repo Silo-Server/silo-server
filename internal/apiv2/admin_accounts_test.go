@@ -66,6 +66,9 @@ func (f *fakeAdminAccounts) TransferAdminOwnership(_ context.Context, id int) er
 	return f.transferErr
 }
 func (f *fakeAdminAccounts) ImpersonateAdminAccount(context.Context, int, string, string) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
 	if f.allowImpersonation {
 		return handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 7, Username: "sample", Role: "user"}}, nil
 	}
@@ -194,6 +197,14 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	if profiles.Code != 200 || !strings.Contains(profiles.Body.String(), `"id":"profile-1"`) {
 		t.Fatal(profiles.Code, profiles.Body.String())
 	}
+}
+
+func TestAdminImpersonationRevokedSource(t *testing.T) {
+	deps := requestDeps(fixtureRequests())
+	accounts := fixtureAdminAccounts()
+	accounts.err = auth.ErrSessionRevoked
+	deps.AdminAccounts = accounts
+	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, Prefix+"/admin/users/7/impersonate", "", actingRequestAdmin), TypeAuthenticationRequired)
 }
 
 // TestAdminUserIPLocation classifies each address the way stream location

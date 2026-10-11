@@ -136,7 +136,13 @@ type OfflineManifest struct {
 		Poster   string `json:"poster,omitempty"`
 		Backdrop string `json:"backdrop,omitempty"`
 		Logo     string `json:"logo,omitempty"`
+		// SeriesPoster is v2-only; see SeriesPosterThumbhash.
+		SeriesPoster string `json:"-"`
 	} `json:"artwork_urls"`
+	// An episode's poster is its still, so episode manifests also name the
+	// parent series poster for series-level offline screens. Only the v2
+	// manifest carries the series poster; the frozen v1 manifest omits it.
+	SeriesPosterThumbhash string `json:"-"`
 
 	Container               string              `json:"container"`
 	CodecVideo              string              `json:"codec_video"`
@@ -195,6 +201,17 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 	return b.build(ctx, dl, filter, nil, true)
 }
 
+// episodeSeriesID returns the parent series of an episode entry, or "" for
+// anything else. Series extras and manga chapters also carry a SeriesID, so
+// the entry's EpisodeID decides. The manifest's series_poster and the artwork
+// route that serves it both use this rule.
+func episodeSeriesID(dl *Download, detail *catalog.ItemDetail) string {
+	if dl.EpisodeID == "" {
+		return ""
+	}
+	return detail.SeriesID
+}
+
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
@@ -205,13 +222,13 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	file := b.lookupFile(ctx, dl.MediaFileID)
 	var seriesDetail *catalog.ItemDetail
-	if dl.EpisodeID != "" && detail.SeriesID != "" {
-		if cached, ok := seriesCache[detail.SeriesID]; ok {
+	if seriesID := episodeSeriesID(dl, detail); seriesID != "" {
+		if cached, ok := seriesCache[seriesID]; ok {
 			seriesDetail = cached
-		} else if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
+		} else if sd, err := b.detail.GetItemDetail(ctx, seriesID, filter); err == nil {
 			seriesDetail = sd
 			if seriesCache != nil {
-				seriesCache[detail.SeriesID] = sd
+				seriesCache[seriesID] = sd
 			}
 		}
 	}
@@ -259,6 +276,12 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	if detail.LogoURL != "" {
 		m.ArtworkURLs.Logo = artworkProxyURL(dl.ID, "logo")
+	}
+	if seriesDetail != nil {
+		m.SeriesPosterThumbhash = seriesDetail.PosterThumbhash
+		if seriesDetail.PosterURL != "" {
+			m.ArtworkURLs.SeriesPoster = artworkProxyURL(dl.ID, "series_poster")
+		}
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {

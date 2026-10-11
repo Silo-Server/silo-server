@@ -6,15 +6,26 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
+import {
+  PERSONAL_STATE_WRITE_TIMEOUT_MS,
+  personalStateMutationOptions,
+} from "./personalStateWrites";
 
 export function useToggleWatchlist(itemId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...personalStateMutationOptions,
     mutationFn: (currentlyInWatchlist: boolean) =>
       currentlyInWatchlist
-        ? v2("DELETE /api/v2/watchlist/{item_id}", { path: { item_id: itemId } })
-        : v2("PUT /api/v2/watchlist/{item_id}", { path: { item_id: itemId } }),
+        ? v2("DELETE /api/v2/watchlist/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          })
+        : v2("PUT /api/v2/watchlist/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          }),
     onMutate: async (currentlyInWatchlist: boolean) => {
       await cancelItemDetailQueries(queryClient, itemId);
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({

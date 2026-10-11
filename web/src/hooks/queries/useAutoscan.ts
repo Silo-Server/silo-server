@@ -1,10 +1,11 @@
 import {
+  autoscanSourceObservation,
   nextAutoscanSourceObservation,
   observedAutoscanSource,
 } from "./admin/autoscanSourceObservation";
 import { readAdminAutoscanEvents, type AutoscanEventQuery } from "@/api/v2/adminAutoscanEvents";
 import { readAdminAutoscanScans, type AutoscanScanQuery } from "@/api/v2/adminAutoscanScans";
-import { v2 } from "@/api/v2/request";
+import { V2ProblemError, v2 } from "@/api/v2/request";
 import { readAdminAutoscanRewrites } from "@/api/v2/adminAutoscanRewrites";
 import { readAdminAutoscanAvailableSources } from "@/api/v2/adminAutoscanAvailableSources";
 import { readAdminAutoscanConnections } from "@/api/v2/adminAutoscanConnections";
@@ -13,7 +14,14 @@ import {
   readAdminAutoscanStatus,
 } from "@/api/v2/adminAutoscanInspection";
 import { readAdminAutoscanSources } from "@/api/v2/adminAutoscanSources";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useIsFetching,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   captureProfileRequestContext,
@@ -360,17 +368,46 @@ export function useDeleteAutoscanConnection() {
 
 // --- Sources ---
 
-export function useAutoscanSources() {
+/** The source list's cache key under one profile authority. */
+function autoscanSourcesKey(profileContext: ProfileRequestContextSnapshot | null) {
+  return [
+    ...adminKeys.autoscanSources(),
+    profileContext?.serverOrigin,
+    profileContext?.authContextVersion,
+    profileContext?.profileId,
+    profileContext?.profileTokenGeneration,
+  ];
+}
+
+/**
+ * Put a write's readback into the cached source list, so every view (the list
+ * row, a reopened edit dialog) shows it before the follow-up read lands. An
+ * entry the cache already holds from a newer observation is kept.
+ */
+function storeAutoscanSourceReadback(
+  queryClient: QueryClient,
+  profileContext: ProfileRequestContextSnapshot,
+  source: AutoscanSource,
+) {
+  queryClient.setQueryData<AutoscanSource[]>(autoscanSourcesKey(profileContext), (list) =>
+    list?.map((cached) =>
+      cached.id === source.id &&
+      autoscanSourceObservation(source) > autoscanSourceObservation(cached)
+        ? source
+        : cached,
+    ),
+  );
+}
+
+/**
+ * The source list. With `enabled: false` the hook only observes whatever the
+ * cache holds and never starts a read itself.
+ */
+export function useAutoscanSources({ enabled = true }: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: [
-      ...adminKeys.autoscanSources(),
-      profileContext?.serverOrigin,
-      profileContext?.authContextVersion,
-      profileContext?.profileId,
-      profileContext?.profileTokenGeneration,
-    ],
-    enabled: profileContext !== null,
+    queryKey: autoscanSourcesKey(profileContext),
+    enabled: enabled && profileContext !== null,
     queryFn: async () => {
       if (!profileContext) throw new StaleApiRequestContextError();
       const observation = nextAutoscanSourceObservation();
@@ -418,9 +455,11 @@ type SourceWriteCallbacks = {
   onSuccess?: (source: AutoscanSource) => void;
   onError?: (error: Error) => void;
 };
+const autoscanSourceWriteKey = ["admin", "autoscan", "source-write"] as const;
 function useAutoscanSourceWrite(create: boolean) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: autoscanSourceWriteKey,
     retry: false,
     mutationFn: async (intent: SourceWriteIntent): Promise<AutoscanSource> => {
       const { profileContext, body, id } = intent;
@@ -450,26 +489,48 @@ function useAutoscanSourceWrite(create: boolean) {
           });
       if (!isCapturedProfileAuthorityActive(profileContext))
         throw new StaleApiRequestContextError();
-      return {
-        ...result,
-        poll_interval_seconds: result.poll_interval_seconds ?? null,
-        last_run_at: result.last_run_at ?? null,
-        last_error: result.last_error ?? null,
-      };
+      return observedAutoscanSource(
+        {
+          ...result,
+          poll_interval_seconds: result.poll_interval_seconds ?? null,
+          last_run_at: result.last_run_at ?? null,
+          last_error: result.last_error ?? null,
+        },
+        nextAutoscanSourceObservation(),
+      );
     },
-    onSuccess: (_result, intent) => {
+    onSuccess: (result, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      // The next edit starts from the saved source even if it opens before
+      // the follow-up read lands.
+      if (!create) storeAutoscanSourceReadback(queryClient, intent.profileContext, result);
       queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
       toast.success(create ? "Autoscan source created" : "Autoscan source saved");
     },
-    onError: (_error, intent) => {
-      if (isCapturedProfileAuthorityActive(intent.profileContext))
-        toast.error(
+    onError: (error, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      // A validation refusal is a definite answer: nothing was written. Show
+      // the server's reason instead of the uncertain-outcome message.
+      const rejection = sourceWriteRejection(error);
+      toast.error(
+        rejection ??
           "Source write could not be confirmed. Refresh sources before another explicit submission.",
-        );
+      );
     },
   });
 }
+/**
+ * The server's reason when it refused a source write as invalid. A refusal by
+ * the source rules carries one fixed detail and no field errors; a schema
+ * failure says "see errors", so the first field's detail is used instead.
+ */
+function sourceWriteRejection(error: unknown): string | null {
+  if (!(error instanceof V2ProblemError) || error.status !== 422) return null;
+  const detail = error.problem.detail;
+  if (detail && !/see errors/i.test(detail)) return detail;
+  return error.problem.errors?.find((e) => e.detail)?.detail || detail || null;
+}
+
 function sourceWriteCallbacks(
   intent: SourceWriteIntent,
   options?: SourceWriteCallbacks,
@@ -521,6 +582,22 @@ export function useUpdateAutoscanSource(profileContext = captureProfileRequestCo
     mutateAsync: ({ id, body }: { id: string; body: AutoscanSourceInput }) =>
       mutation.mutateAsync(captureSourceWrite(body, profileContext, id)),
   };
+}
+
+/**
+ * True while a source's stored state may be about to change under a row: the
+ * source list is being read, or a create/update for this source is in flight.
+ * A row's quick action replaces the whole source from the row's snapshot, so
+ * it must wait; otherwise it could overwrite a newer edit with older values.
+ */
+export function useAutoscanSourceBusy(sourceId: string): boolean {
+  const reading = useIsFetching({ queryKey: adminKeys.autoscanSources() });
+  const writing = useIsMutating({
+    mutationKey: autoscanSourceWriteKey,
+    predicate: (mutation) =>
+      (mutation.state.variables as SourceWriteIntent | undefined)?.id === sourceId,
+  });
+  return reading > 0 || writing > 0;
 }
 
 export type AutoscanSourceDeleteIntent = {
@@ -607,13 +684,52 @@ type WebhookCallbacks = {
   onSuccess?: (source: AutoscanSource) => void;
   onError?: (error: Error) => void;
 };
+/**
+ * Per-source state shared by every view of a webhook URL (the list row and the
+ * edit dialog). `pending` is set while a create/rotate is in flight;
+ * `failedObservation` is the observation number reserved when one failed
+ * without a confirmed outcome. While either applies, no view may offer the
+ * cached URL — the secret may already be dead.
+ */
+type AutoscanWebhookUncertainty = { pending: boolean; failedObservation?: number };
+
+export const autoscanWebhookUncertainKey = (sourceId: string) =>
+  ["admin", "autoscan", "webhook-uncertain", sourceId] as const;
+
+/**
+ * Whether a view of this source's webhook URL must hide it: a change is in
+ * flight, or one failed and no successful source read has started since. List
+ * reads reserve their observation number before dispatch, so a read already in
+ * flight when the change failed does not count. A failed read keeps the URL
+ * hidden; the next successful one, from any trigger, shows the current URL.
+ */
+export function useAutoscanWebhookUncertain(sourceId: string): boolean {
+  const { data: state } = useQuery<AutoscanWebhookUncertainty | null>({
+    queryKey: autoscanWebhookUncertainKey(sourceId),
+    queryFn: () => null,
+    enabled: false,
+    initialData: null,
+    staleTime: Infinity,
+  });
+  const failedObservation = state?.failedObservation;
+  // Only an unconfirmed failure needs a fresh read; otherwise just observe.
+  const { data: sources } = useAutoscanSources({ enabled: failedObservation !== undefined });
+  if (state?.pending) return true;
+  if (failedObservation === undefined) return false;
+  const current = sources?.find((source) => source.id === sourceId);
+  return autoscanSourceObservation(current) <= failedObservation;
+}
+
 function useAutoscanWebhookLifecycle(
   action: "create" | "rotate",
   profileContext: ProfileRequestContextSnapshot | null,
 ) {
   const queryClient = useQueryClient();
+  const setUncertainty = (id: string, state: AutoscanWebhookUncertainty | null) =>
+    queryClient.setQueryData(autoscanWebhookUncertainKey(id), state);
   const mutation = useMutation({
     retry: false,
+    onMutate: (intent: AutoscanWebhookIntent) => setUncertainty(intent.id, { pending: true }),
     mutationFn: async (intent: AutoscanWebhookIntent): Promise<AutoscanSource> => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
@@ -636,20 +752,40 @@ function useAutoscanWebhookLifecycle(
         throw new StaleApiRequestContextError();
       return observedAutoscanSource(source, nextAutoscanSourceObservation());
     },
-    onSuccess: (_result, intent) => {
-      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+    onSuccess: (result, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) {
+        setUncertainty(intent.id, null);
+        return;
+      }
+      // Every view reads the URL from the list, so the new one goes there
+      // before the uncertainty clears; otherwise a view that did not run the
+      // change would offer the replaced (revoked) URL until the re-read lands.
+      storeAutoscanSourceReadback(queryClient, intent.profileContext, result);
+      setUncertainty(intent.id, null);
       queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
       toast.success(
         action === "create"
           ? "Webhook endpoint created or already configured"
-          : "Webhook endpoint rotated. Refresh and copy the current URL to your provider.",
+          : "Webhook URL rotated. Copy the new URL into Sonarr or Radarr; the old one no longer works.",
       );
     },
     onError: (_error, intent) => {
-      if (isCapturedProfileAuthorityActive(intent.profileContext))
-        toast.error(
-          "Webhook change could not be confirmed. Refresh source state before another explicit submission.",
-        );
+      // After a profile switch every view re-reads its sources under the new
+      // authority anyway; this request must not touch that cache.
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) {
+        setUncertainty(intent.id, null);
+        return;
+      }
+      // The change may have landed. Only a source read that starts after this
+      // failure tells every view which URL is current again.
+      setUncertainty(intent.id, {
+        pending: false,
+        failedObservation: nextAutoscanSourceObservation(),
+      });
+      void queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+      toast.error(
+        "Webhook change could not be confirmed. Refresh source state before another explicit submission.",
+      );
     },
   });
   const submit = (intent: AutoscanWebhookIntent, options?: WebhookCallbacks) =>
@@ -835,6 +971,10 @@ export function useAutoscanScans(params: AutoscanScanQuery = {}) {
 
 export function useTriggerAutoscan() {
   const queryClient = useQueryClient();
+  const refreshPollState = () => {
+    queryClient.invalidateQueries({ queryKey: adminKeys.autoscanStatus() });
+    queryClient.invalidateQueries({ queryKey: ["admin", "autoscan", "events"] });
+  };
   const mutation = useMutation({
     retry: false,
     mutationFn: async (authority: ProfileRequestContextSnapshot) => {
@@ -851,14 +991,24 @@ export function useTriggerAutoscan() {
       toast.success(
         "Autoscan poll started on this server process. Check activity for source outcomes.",
       );
-      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanStatus() });
-      queryClient.invalidateQueries({ queryKey: ["admin", "autoscan", "events"] });
+      refreshPollState();
     },
-    onError: (_error, authority) => {
-      if (isCapturedProfileAuthorityActive(authority))
-        toast.error(
-          "Autoscan start could not be confirmed. Check task and activity state before running again.",
+    onError: (error, authority) => {
+      if (!isCapturedProfileAuthorityActive(authority)) return;
+      // The server refuses a start while this process is already polling. That
+      // is a known state, not an uncertain outcome. The running poll may be a
+      // scheduled one, which skips sources polled within their interval, so
+      // the admin is told to press again once it finishes.
+      if (isAutoscanAlreadyRunning(error)) {
+        toast.info(
+          "A poll is already running and may skip recently polled sources. Press Run now again when it finishes to poll every source.",
         );
+        refreshPollState();
+        return;
+      }
+      toast.error(
+        "Autoscan start could not be confirmed. Check task and activity state before running again.",
+      );
     },
   });
   return {
@@ -869,4 +1019,14 @@ export function useTriggerAutoscan() {
       mutation.mutate(authority);
     },
   };
+}
+
+/**
+ * Whether a trigger was refused because the poll task is already running on
+ * this process: a `conflict` problem is the trigger's only documented 409.
+ */
+function isAutoscanAlreadyRunning(error: unknown): boolean {
+  return (
+    error instanceof V2ProblemError && error.status === 409 && error.problemType === "conflict"
+  );
 }

@@ -25,7 +25,7 @@ func TestFetchMDBListEntriesDoesNotDialPrivateHosts(t *testing.T) {
 	t.Parallel()
 
 	transport := &countingRoundTripper{}
-	svc := NewService(nil, nil, nil, &http.Client{Transport: transport}, slog.New(slog.DiscardHandler))
+	svc := NewService(nil, nil, nil, nil, &http.Client{Transport: transport}, slog.New(slog.DiscardHandler))
 
 	_, err := svc.fetchMDBListEntries(context.Background(), "http://127.0.0.1:8096/", 0)
 	if !errors.Is(err, collectionutil.ErrMDBListURL) {

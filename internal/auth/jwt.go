@@ -33,6 +33,9 @@ type Claims struct {
 	// JWT sessions and unscoped keys. Never serialized into issued JWTs —
 	// it only exists on claims built for API-key requests.
 	APIKeyScopes []string `json:"-"`
+	// FileID is the one media file a direct-download link token authorizes;
+	// zero on every other token type.
+	FileID int `json:"file_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -47,7 +50,18 @@ const (
 	// calls, so an expired short-lived access token no longer degrades every
 	// push to generic text.
 	TokenTypeApplePushDisplay = "apple_push_display"
+	// TokenTypeDirectDownloadLink is a short-lived credential for one media
+	// file and one profile. A profile-scoped API request mints it, and only
+	// the direct-download byte routes accept it, as their `dl` query
+	// parameter, so a browser navigation that cannot send headers still
+	// carries the selected profile's limits.
+	TokenTypeDirectDownloadLink = "direct_download_link"
 )
+
+// DirectDownloadLinkTTL bounds how long a direct-download link may start a
+// transfer. It is checked when the request arrives; a transfer that started in
+// time may run longer.
+const DirectDownloadLinkTTL = 5 * time.Minute
 
 // IsOwnLoginSession reports whether the claims come from the account's own
 // login session: not an API key, not a sessionless token and not an
@@ -158,6 +172,38 @@ func (j *JWTService) GenerateApplePushDisplayToken(
 		return "", time.Time{}, err
 	}
 	return token, time.Now().Add(ttl), nil
+}
+
+// GenerateDirectDownloadLinkToken creates a DirectDownloadLinkTTL token
+// authorizing fileID for one profile of a login session. The session must
+// still be valid when the link is used, so revoking it revokes the link.
+func (j *JWTService) GenerateDirectDownloadLinkToken(
+	userID int, role, sessionID, profileID string, impersonatorUserID *int, fileID int,
+) (string, time.Time, error) {
+	if sessionID == "" {
+		return "", time.Time{}, fmt.Errorf("%w: session is required", ErrInvalidToken)
+	}
+	if profileID == "" {
+		return "", time.Time{}, fmt.Errorf("%w: profile is required", ErrInvalidToken)
+	}
+	if fileID <= 0 {
+		return "", time.Time{}, fmt.Errorf("%w: file is required", ErrInvalidToken)
+	}
+	// Never later than the token's own exp, which is truncated to seconds
+	// from a slightly later clock reading.
+	expiresAt := time.Now().Add(DirectDownloadLinkTTL).Truncate(time.Second)
+	token, err := j.generateToken(Claims{
+		UserID:             userID,
+		Role:               role,
+		SessionID:          sessionID,
+		ProfileID:          profileID,
+		ImpersonatorUserID: impersonatorUserID,
+		FileID:             fileID,
+	}, TokenTypeDirectDownloadLink, DirectDownloadLinkTTL)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token, expiresAt, nil
 }
 
 func (j *JWTService) generateAccessToken(claims Claims) (string, error) {

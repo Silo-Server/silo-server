@@ -13,8 +13,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
 // excludedPrefixes are paths that should not be logged. The admin log
@@ -42,13 +44,10 @@ var streamPrefixes = []string{
 // LogContext is a mutable holder stored in context BEFORE auth middleware.
 // Auth middleware populates it, and the activity log middleware reads it
 // after the handler chain completes.
-type LogContext struct {
-	UserID             *int
-	ImpersonatorUserID *int
-	SessionID          string
-}
+type LogContext = auditmutation.LogContext
 
-type logContextKey struct{}
+var SetLogContext = auditmutation.SetLogContext
+var GetLogContext = auditmutation.GetLogContext
 
 // PlaybackLogContext is a mutable holder for playback-specific correlation.
 // Handlers update it once they know the playback session ID, and both the
@@ -58,17 +57,6 @@ type PlaybackLogContext struct {
 }
 
 type playbackLogContextKey struct{}
-
-// SetLogContext stores a LogContext pointer in the request context.
-func SetLogContext(ctx context.Context, lc *LogContext) context.Context {
-	return context.WithValue(ctx, logContextKey{}, lc)
-}
-
-// GetLogContext retrieves the LogContext from the request context.
-func GetLogContext(ctx context.Context) *LogContext {
-	lc, _ := ctx.Value(logContextKey{}).(*LogContext)
-	return lc
-}
 
 func SetPlaybackLogContext(ctx context.Context, lc *PlaybackLogContext) context.Context {
 	return context.WithValue(ctx, playbackLogContextKey{}, lc)
@@ -83,8 +71,8 @@ func GetPlaybackLogContext(ctx context.Context) *PlaybackLogContext {
 // to the given Writer. It wraps ResponseWriter to capture the status code.
 // It stores a mutable LogContext in the request context that downstream auth
 // middleware can populate with user info.
-func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
-	return NewFilteredMiddleware(w, nodeID, nil)
+func NewMiddleware(w Writer, nodeID string, hubs ...*logstream.Hub) func(http.Handler) http.Handler {
+	return NewFilteredMiddleware(w, nodeID, nil, hubs...)
 }
 
 // NewFilteredMiddleware is NewMiddleware for a router that also serves requests
@@ -93,7 +81,7 @@ func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
 // matching the pattern rather than the raw path keeps the filter independent
 // of any path rewriting the router does. A nil skipRoute records every request
 // NewMiddleware would.
-func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern string) bool) func(http.Handler) http.Handler {
+func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern string) bool, hubs ...*logstream.Hub) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -132,6 +120,12 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				r = r.WithContext(ctx)
 			}
 
+			lc.Request, lc.NodeID, lc.Started = r, nodeID, start
+			if len(hubs) > 0 {
+				lc.Publish = func(entry AuditEntry) {
+					_, _ = logstream.PublishAppends(hubs[0], logstream.StreamAudit, []AuditEntry{entry})
+				}
+			}
 			next.ServeHTTP(wrapped, r)
 
 			pathPattern := path
@@ -163,6 +157,13 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
 
+			// Domain rows already persisted atomically; avoid a second success
+			// row for the same operation. Preserve a later HTTP failure separately.
+			for _, committed := range lc.Committed {
+				if committed.StatusCode == wrapped.status {
+					return
+				}
+			}
 			w.Write(entry)
 		})
 	}

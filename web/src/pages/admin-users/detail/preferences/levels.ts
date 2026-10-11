@@ -5,12 +5,13 @@ import type {
   AdminSettingScope,
   AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
-import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 import {
-  defaultValueToString,
-  formatSettingValue,
-  getSettingDefinition,
-} from "@/lib/settingsDisplay";
+  resolutionOrderFor,
+  resolveInheritedValue,
+  type InheritedValue,
+  variesScopePhrase,
+} from "@/lib/inheritedSettingValue";
+import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 
 /**
  * The Preferences tab's "levels": the places a setting can be stored for an
@@ -295,20 +296,7 @@ export function identityOf(entry: AdminUserSettingEntry): AdminSettingIdentity {
  * none) the app default. `raw` is that value in the string form the controls
  * edit, so writing it as a new setting's start changes nothing.
  */
-export interface ReplacedValue {
-  /** The profile name when the profile stores the value, else null (app default). */
-  profileName: string | null;
-  /**
-   * Set when an app-family, device, or library setting can come between this
-   * level and the value named here, so on some devices it replaces that
-   * instead. The page can't tell which: the server doesn't infer a device's
-   * app family, and a library or series level spans devices.
-   */
-  orVaries?: "app family" | "device" | "library";
-  /** Display form, or null when this build has no definition to name a default. */
-  display: string | null;
-  raw: string;
-}
+export type ReplacedValue = InheritedValue;
 
 const LEVEL_SCOPE: Record<LevelKind, AdminSettingScope> = {
   account: "account",
@@ -317,12 +305,6 @@ const LEVEL_SCOPE: Record<LevelKind, AdminSettingScope> = {
   client: "profile_client",
   library: "profile_library",
   series: "profile_series",
-};
-
-const VARYING_SCOPES: Partial<Record<string, NonNullable<ReplacedValue["orVaries"]>>> = {
-  profile_client: "app family",
-  profile_device: "device",
-  profile_library: "library",
 };
 
 /**
@@ -337,44 +319,21 @@ export function replacedValue(
   profileEntries: readonly AdminUserSettingEntry[],
   profileAllEntries: readonly AdminUserSettingEntry[] = profileEntries,
 ): ReplacedValue {
-  const order = (SETTING_DEFINITIONS as Record<string, { resolutionOrder: readonly string[] }>)[key]
-    ?.resolutionOrder ?? ["profile", "default"];
+  const order = resolutionOrderFor(key);
   const at = order.indexOf(LEVEL_SCOPE[level.kind]);
-  const below = at >= 0 ? order.slice(at + 1) : ["profile", "default"];
-  let orVaries: ReplacedValue["orVaries"];
-  for (const scope of below) {
-    if (scope === "profile" && level.kind !== "profile" && level.kind !== "account") {
-      const stored = profileEntries.find((entry) => entry.key === key);
-      if (stored) {
-        return {
-          profileName: level.profileName,
-          display: formatSettingValue(key, stored.value),
-          raw: stored.value,
-          ...(orVaries ? { orVaries } : {}),
-        };
-      }
-    }
-    const varies = VARYING_SCOPES[scope];
-    if (
-      varies &&
-      !orVaries &&
-      profileAllEntries.some((entry) => entry.key === key && entry.scope === scope)
-    ) {
-      orVaries = varies;
-    }
-    if (scope === "default") break;
-  }
-  const definition = getSettingDefinition(key);
-  if (!definition) return { profileName: null, display: null, raw: "" };
-  const raw = defaultValueToString(definition);
-  const extra = orVaries ? { orVaries } : {};
-  // A structured default (a menu layout, a remembered view) has no short form.
-  if (definition.type === "object") return { profileName: null, display: null, raw, ...extra };
-  return { profileName: null, display: formatSettingValue(key, raw), raw, ...extra };
+  return resolveInheritedValue({
+    key,
+    scopes: at >= 0 ? order.slice(at + 1) : ["profile", "default"],
+    profileName: level.kind === "profile" || level.kind === "account" ? null : level.profileName,
+    profileEntries,
+    profileAllEntries,
+  });
 }
 
 function variesSuffix(replaced: ReplacedValue): string {
-  return replaced.orVaries ? `, or a ${replaced.orVaries} setting where one applies` : "";
+  return replaced.orVaries
+    ? `, or ${variesScopePhrase(replaced.orVaries)} setting where one applies`
+    : "";
 }
 
 /** "Replaces Main: English", "Replaces app default: Off". */

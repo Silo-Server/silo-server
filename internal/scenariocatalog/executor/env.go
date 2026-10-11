@@ -677,7 +677,8 @@ func (e *Env) mustProfile(userID int, p userstore.Profile) {
 
 func (e *Env) mintProfileToken(u *models.User, profileID string) string {
 	token, _, err := e.profileTok.Mint(access.ProfileTokenClaims{
-		UserID: u.ID, SessionID: e.sessions[userName(u)], ProfileID: profileID, PolicyRevision: e.currentRevision(u.ID),
+		UserID: u.ID, SessionID: e.sessions[userName(u)], ProfileID: profileID,
+		PINRevision: e.currentPINRevision(u.ID, profileID), PolicyRevision: e.currentRevision(u.ID),
 	})
 	if err != nil {
 		e.t.Fatalf("scenario executor: profile token: %v", err)
@@ -689,6 +690,14 @@ func (e *Env) currentRevision(userID int) int64 {
 	var rev int64
 	if err := e.pool.QueryRow(e.ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, userID).Scan(&rev); err != nil {
 		e.t.Fatalf("scenario executor: policy revision: %v", err)
+	}
+	return rev
+}
+
+func (e *Env) currentPINRevision(userID int, profileID string) int64 {
+	var rev int64
+	if err := e.pool.QueryRow(e.ctx, `SELECT pin_revision FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, profileID).Scan(&rev); err != nil {
+		e.t.Fatalf("scenario executor: profile pin revision: %v", err)
 	}
 	return rev
 }

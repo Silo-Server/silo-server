@@ -1080,7 +1080,7 @@ func (h *OAuthHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(OAuthCompletionCookieName); err == nil {
 		browser = cookie.Value
 	}
-	completion, err := h.Complete(r.Context(), req.Code, "", browser)
+	completion, err := h.Complete(WithClientDevice(r.Context(), r.Header), req.Code, "", browser)
 	if err != nil {
 		if errors.Is(err, ErrOAuthCodeRequired) {
 			http.Error(w, "code required", http.StatusBadRequest)

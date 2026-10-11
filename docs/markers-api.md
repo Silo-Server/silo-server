@@ -4,7 +4,11 @@ The v2 marker API reads effective file markers and updates manual markers. Each
 operation applies the existing file, library, item, episode-parent, and extra-parent
 access policy. Reads require authentication. Writes also require `marker_edit`
 permission and pass the demo and viewer-access gates. Profile context remains
-optional; supplying a profile applies its access restrictions.
+optional; supplying a profile applies its access restrictions. When any profile
+on the account is PIN-protected or access-restricted, reads and writes without
+`X-Profile-Id` are refused with `422 validation_failed` at
+`header.x-profile-id`, so account scope cannot bypass those limits. API keys are
+exempt.
 
 ## Provider modes and storage
 
@@ -39,7 +43,16 @@ Existing installations retain their configured marker mode, which accepts `off`,
   background synchronization. Request leases, failures, and quota cooldowns are
   still shared through the database. Previously stored markers remain available.
 
-Both paths honor provider priority, manual edits, and provider quota limits.
+Both paths honor provider priority, manual edits and deletions, and provider quota limits.
+
+A manual deletion removes every occurrence of that kind for the selected file.
+The empty range retains manual provenance: provider lookups, local detection,
+rescans, and file-identity changes cannot restore it. An explicit manual set
+adds the kind again. Other marker kinds are unchanged.
+
+Manual writes require a Movie or Series library, including their mixed-library
+variants. Unsupported library kinds return `422 validation_failed` without
+changing markers, contributing them, or emitting a playback update.
 
 Local detection finds episode intros and end credits, and movie end credits on
 a best-effort basis: from chapters and the picture near the end, never intros.
@@ -157,3 +170,27 @@ The legacy v1 adapter shares the manual writer path and retains its wire format.
 Jellyfin does not expose these manual editing routes. Its MediaSegments response
 returns each occurrence separately, with credits represented as `Outro`.
 The generated OpenAPI document is the authoritative v2 schema and error contract.
+
+### Marker preview images (v2)
+
+The `marker_thumbnails_v1` playback capability advertises optional `thumbnail_url`,
+`thumbnail_thumbhash` and `thumbnail_capture_seconds` fields on effective marker
+occurrences in watch and marker reads. Absent images omit these fields. Capture
+seconds equal the occurrence's start; navigation continues to use its unchanged
+start/end bounds. Embedded chapter images remain a separate inventory.
+
+The existing per-library chapter-thumbnail setting controls both chapter and
+marker extraction. Marker-only files are eligible. Effective occurrences include
+manual, provider and legacy ranges, including repeated kinds. Extraction uses
+the existing hardware, execution-mode, HDR, width and retry policies. A failed
+preview never prevents marker navigation or playback. Internal image metadata
+is bound to the file identity and exact occurrence; concurrent edits cannot
+publish a stale frame. The frozen v1 responses do not gain preview fields.
+
+On-demand provider ranges remain ephemeral. When the library enables previews,
+lookup queues thumbnails from the effective ranges and stores only opaque
+occurrence identities and image/retry metadata. Worker snapshots expire after
+15 minutes; after expiry or an API replica restart, a new on-demand lookup is
+required to generate or resize provider-only previews. Background scans do not
+fetch providers or persist their navigation ranges. A newer lookup or a manual
+range edit fences extraction results from the previous snapshot.

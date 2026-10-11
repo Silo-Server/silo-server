@@ -185,9 +185,11 @@ describe("sidebar collapse CSS", () => {
     expect(css).toMatch(/:root \{\s*--app-sidebar-offset: 0px;/);
   });
 
-  it("compensates the banner on the same breakpoint that moves its margin", () => {
-    // `html[data-text-scale]` re-bases rem, so 64rem and 1024px diverge at large
-    // text. The compensation must follow `--app-sidebar-offset`'s own query.
+  it("moves the offset and the banner compensation on the sidebar's own breakpoint", () => {
+    // Layout shows the sidebar at Tailwind's `lg` (64rem), and a rem media query
+    // follows the browser's default font size. A px breakpoint kept the offset
+    // while a larger browser font had already hidden the sidebar (#1816). The
+    // compensation must follow the query that moves the margin it compensates.
     const nearestQueryBefore = (needle: string) => {
       const at = css.indexOf(needle);
       expect(at, `missing: ${needle}`).toBeGreaterThan(-1);
@@ -195,11 +197,11 @@ describe("sidebar collapse CSS", () => {
       return css.slice(queryAt, css.indexOf("{", queryAt)).trim();
     };
 
-    expect(nearestQueryBefore("--app-sidebar-offset: 64px")).toBe("@media (min-width: 1024px)");
+    expect(nearestQueryBefore("--app-sidebar-offset: 64px")).toBe("@media (min-width: 64rem)");
     expect(
       nearestQueryBefore(
         ':root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])',
       ),
-    ).toBe("@media (min-width: 1024px)");
+    ).toBe("@media (min-width: 64rem)");
   });
 });

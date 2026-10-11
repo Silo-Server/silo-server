@@ -16,18 +16,27 @@ func RequireProfile(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		profileID := r.Header.Get("X-Profile-Id")
 		if profileID == "" {
-			recordDenialReason(w, ReasonProfileHeaderRequired)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(errorResponse{
-				Error:   "bad_request",
-				Message: "X-Profile-Id header is required",
-			})
+			writeProfileHeaderRequired(w)
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), profileKey, profileID)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// codeBadRequest is the v1 error code of a malformed or incomplete request.
+const codeBadRequest = "bad_request"
+
+// writeProfileHeaderRequired writes the v1 400 a route answers when it needs
+// an X-Profile-Id the request did not send.
+func writeProfileHeaderRequired(w http.ResponseWriter) {
+	recordDenialReason(w, ReasonProfileHeaderRequired)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   codeBadRequest,
+		Message: "X-Profile-Id header is required",
 	})
 }
 

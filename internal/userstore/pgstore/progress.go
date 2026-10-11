@@ -745,7 +745,7 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 }
 
 // ListCompletedProgressSince compares on the raw column so
-// idx_uwp_profile_completed serves it as a range scan: a row's whole-second
+// idx_uwp_profile_completed_cursor serves it as a range scan: a row's whole-second
 // updated_at is after a bound exactly when the column is at least the bound's
 // next whole second.
 func (s *PostgresUserStore) ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
@@ -797,9 +797,9 @@ func (s *PostgresUserStore) ListProgressPage(ctx context.Context, profileID, sta
 // series_id → media_items (a plain media_items join would miss them); the
 // optional library predicate hits media_item_libraries. With
 // `ORDER BY updated_at DESC`, the completed branch's `completed = TRUE` keeps
-// idx_uwp_profile_completed in play and the in_progress branch's
+// idx_uwp_profile_completed_cursor in play and the in_progress branch's
 // `position_seconds > 0` keeps idx_uwp_profile_resumable in play, while the
-// EXISTS sub-selects ride idx_item_libraries_content. The filter is coarse
+// EXISTS sub-selects ride media_item_libraries_pkey. The filter is coarse
 // (callers re-check access/parental exclusions over the hydrated rows), and an
 // empty types slice with a nil libraryID degrades to the plain status listing.
 func (s *PostgresUserStore) ListProgressFiltered(ctx context.Context, profileID, status string, types []string, libraryID *int, limit, offset int) ([]userstore.WatchProgress, error) {
@@ -1395,7 +1395,7 @@ func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query
 		`+completedHistoryVisibleSQL+`
 		GROUP BY h.media_item_id
 		ORDER BY h.media_item_id ASC`,
-		s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs,
+		profilePlanArgs(s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing completed history items: %w", err)
