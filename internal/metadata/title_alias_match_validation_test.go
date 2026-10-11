@@ -21,6 +21,8 @@ type aliasProvider struct {
 	partial map[string]bool
 	// noMetadata marks IDs whose detail response has HasMetadata false.
 	noMetadata map[string]bool
+	// years overrides the detail response's year per ID (default 2023).
+	years map[string]int
 
 	mu          sync.Mutex
 	detailCalls []string
@@ -50,6 +52,9 @@ func (p *aliasProvider) GetMetadata(_ context.Context, req MetadataRequest) (*Me
 		Year:                 2023,
 		ProviderIDs:          map[string]string{"tmdb": req.ProviderIDs["tmdb"]},
 		TitleAliasesComplete: !p.partial[req.ProviderIDs["tmdb"]],
+	}
+	if year, ok := p.years[req.ProviderIDs["tmdb"]]; ok {
+		result.Year = year
 	}
 	for _, alias := range p.aliases[req.ProviderIDs["tmdb"]] {
 		result.TitleAliases = append(result.TitleAliases, TitleAlias{Title: alias})
@@ -250,7 +255,7 @@ func TestValidateMatchByProviderTitleAliases(t *testing.T) {
 			provider := &aliasProvider{slug: slug, aliases: tt.aliases, detailErr: tt.detailErr, idErrs: tt.idErrs}
 			candidates := NormalizeCandidates(results, "movie")
 
-			winner, errs := validateMatchByProviderTitleAliases(context.Background(), tt.hints, candidates, []Provider{provider}, "en")
+			winner, errs := validateMatchByProviderTitleAliases(context.Background(), tt.hints, candidates, []Provider{provider}, "en", nil)
 			gotID := ""
 			if winner != nil {
 				gotID = winner.ProviderIDs["tmdb"]
@@ -278,7 +283,7 @@ func TestValidateMatchByProviderTitleAliasesSkipsConflictingIDs(t *testing.T) {
 	candidates[0].ConflictingProviderIDKeys = []string{"tmdb"}
 
 	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
 	if winner != nil || provider.detailCallCount() != 0 {
 		t.Fatalf("winner = %v, detail calls = %d; want no fetch for a candidate with conflicting IDs", winner, provider.detailCallCount())
 	}
@@ -293,7 +298,7 @@ func TestValidateMatchByProviderTitleAliasesAsksEverySourceProvider(t *testing.T
 	candidates[0].Sources = []string{"tvdb", "tmdb"}
 
 	winner, errs := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tvdb, tmdb}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tvdb, tmdb}, "en", nil)
 	if winner == nil || len(errs) != 0 {
 		t.Fatalf("winner = %v, errs = %v; want the second source to confirm the title", winner, errs)
 	}
@@ -313,7 +318,7 @@ func TestValidateMatchByProviderTitleAliasesIgnoresTitleOnlyNFOCandidate(t *test
 	}, "movie")
 
 	winner, errs := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
 	if winner == nil || winner.ProviderIDs["tmdb"] != "919207" || len(errs) != 0 {
 		t.Fatalf("winner = %v, errs = %v; want 919207 confirmed despite the NFO candidate", winner, errs)
 	}
@@ -334,7 +339,7 @@ func TestValidateMatchByProviderTitleAliasesLeavesConflictingRivalUnresolved(t *
 	}
 
 	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match while a conflicting rival is unresolved", winner.ProviderIDs)
 	}
@@ -354,7 +359,7 @@ func TestValidateMatchByProviderTitleAliasesNeedsCompleteRivalTitles(t *testing.
 	}, "movie")
 
 	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match while a rival's titles are incomplete", winner.ProviderIDs)
 	}
@@ -363,7 +368,7 @@ func TestValidateMatchByProviderTitleAliasesNeedsCompleteRivalTitles(t *testing.
 	lone := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, partial: map[string]bool{"919207": true}}
 	winner, _ = validateMatchByProviderTitleAliases(context.Background(),
 		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{lone}, "en")
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{lone}, "en", nil)
 	if winner == nil {
 		t.Fatalf("want a lone result confirmed by a partial list that contains the title")
 	}
@@ -432,7 +437,7 @@ func TestValidateMatchByProviderTitleAliasesNeedsEverySourceToRuleOutRival(t *te
 	}
 
 	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tmdb, tvdb}, "en")
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tmdb, tvdb}, "en", nil)
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match while one source's list for the rival is partial", winner.ProviderIDs)
 	}
@@ -445,7 +450,7 @@ func TestValidateMatchByProviderTitleAliasesIgnoresMetadataNegativeResponses(t *
 	// A response without metadata can't confirm a candidate, even with the title.
 	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, noMetadata: map[string]bool{"919207": true}}
 	winner, _ := validateMatchByProviderTitleAliases(context.Background(), hints,
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en")
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en", nil)
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match from a response without metadata", winner.ProviderIDs)
 	}
@@ -454,7 +459,7 @@ func TestValidateMatchByProviderTitleAliasesIgnoresMetadataNegativeResponses(t *
 	provider = &aliasProvider{slug: "tmdb", aliases: map[string][]string{"222": {"首尔之春"}}, noMetadata: map[string]bool{"111": true}}
 	winner, _ = validateMatchByProviderTitleAliases(context.Background(), hints,
 		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023)}, "movie"),
-		[]Provider{provider}, "en")
+		[]Provider{provider}, "en", nil)
 	if winner != nil {
 		t.Fatalf("winner = %v, want no match while a rival's response has no metadata", winner.ProviderIDs)
 	}
@@ -497,5 +502,38 @@ func TestInitialMatchChecksEveryAlternateIdentityForAliases(t *testing.T) {
 	}
 	if item.TmdbID != "919207" {
 		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
+	}
+}
+
+func TestValidateMatchByProviderTitleAliasesRequiresDetailYearToAgree(t *testing.T) {
+	t.Parallel()
+	// The search dated 919207 to 2023, but its details say 2019.
+	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, years: map[string]int{"919207": 2019}}
+	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en", nil)
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match when the details contradict the year", winner.ProviderIDs)
+	}
+}
+
+func TestValidateMatchByProviderTitleAliasesSharesBudgetAcrossCalls(t *testing.T) {
+	t.Parallel()
+	hints := &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}
+	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"333": {"首尔之春"}}}
+	budget := maxTitleAliasValidationCandidates
+
+	// The first identity's two results don't list the title and spend two checks.
+	first := NormalizeCandidates([]SearchResult{seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023)}, "movie")
+	if winner, _ := validateMatchByProviderTitleAliases(context.Background(), hints, first, []Provider{provider}, "en", &budget); winner != nil {
+		t.Fatalf("first call winner = %v, want none", winner.ProviderIDs)
+	}
+	// The second identity has two results but only one check left.
+	second := NormalizeCandidates([]SearchResult{seoulSpringSearchResult("333", 2023), seoulSpringSearchResult("444", 2023)}, "movie")
+	if winner, _ := validateMatchByProviderTitleAliases(context.Background(), hints, second, []Provider{provider}, "en", &budget); winner != nil {
+		t.Fatalf("second call winner = %v, want none once the budget is short", winner.ProviderIDs)
+	}
+	if got := provider.detailCallCount(); got != 2 || budget != 1 {
+		t.Fatalf("detail calls = %d, budget left = %d; want 2 and 1", got, budget)
 	}
 }

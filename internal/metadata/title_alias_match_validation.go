@@ -10,7 +10,8 @@ import (
 const (
 	// Only a handful of same-year results ever reach this path: a title the
 	// search scored as unrelated is rarely shared by many films from one year.
-	// More than this is too ambiguous to settle with a detail fetch each.
+	// More than this is too ambiguous to settle with a detail fetch each. The
+	// cap and the timeout cover one item across all of its identity attempts.
 	maxTitleAliasValidationCandidates = 3
 	titleAliasValidationTimeout       = 10 * time.Second
 )
@@ -23,6 +24,10 @@ const (
 // provider returned the right film. The provider's detail response lists the
 // alternative titles; an exact match there, with the same year, is the
 // provider confirming the folder's title.
+//
+// budget holds how many candidates the item may still check; each call spends
+// what it checks, and a call needing more than is left checks nothing. A nil
+// budget allows one full cap.
 //
 // It is positive-only and conservative: every same-year contender is checked
 // and exactly one must list the title. A rival counts as ruled out only when a
@@ -37,11 +42,16 @@ func validateMatchByProviderTitleAliases(
 	candidates []MatchCandidate,
 	providers []Provider,
 	language string,
+	budget *int,
 ) (*MatchCandidate, []error) {
 	if hints == nil || hints.Year == 0 || normalizeTitleForScoring(hints.Title) == "" || trustedHintIDsPresent(hints) {
 		return nil, nil
 	}
 
+	limit := maxTitleAliasValidationCandidates
+	if budget != nil {
+		limit = *budget
+	}
 	contenders := make([]MatchCandidate, 0, maxTitleAliasValidationCandidates)
 	for _, candidate := range candidates {
 		// Only a remote result can be an exact-title rival. A title-only NFO
@@ -63,13 +73,16 @@ func validateMatchByProviderTitleAliases(
 		if len(candidate.ConflictingProviderIDKeys) > 0 {
 			return nil, nil
 		}
-		if len(contenders) == maxTitleAliasValidationCandidates {
+		if len(contenders) == limit {
 			return nil, nil
 		}
 		contenders = append(contenders, candidate)
 	}
 	if len(contenders) == 0 {
 		return nil, nil
+	}
+	if budget != nil {
+		*budget -= len(contenders)
 	}
 
 	validationCtx, cancel := context.WithTimeout(ctx, titleAliasValidationTimeout)
@@ -129,8 +142,9 @@ func providerTitleAliasMatch(
 		if fetchErr != nil {
 			return "", false, fmt.Errorf("title alias validation via %s: %w", p.Slug(), fetchErr)
 		}
-		// A response without metadata is no answer, whatever fields it carries.
-		if result == nil || !result.HasMetadata {
+		// A response without metadata is no answer, whatever fields it carries,
+		// and one that dates the work to another year contradicts the search.
+		if result == nil || !result.HasMetadata || (result.Year != 0 && result.Year != hints.Year) {
 			unresolved = true
 			continue
 		}

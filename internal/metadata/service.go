@@ -1617,9 +1617,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// return, such as a regional release title, and the provider's details
 		// can confirm it. Check each identity's results in the order searched.
 		if !matched {
+			aliasCtx, cancelAlias := context.WithTimeout(ctx, titleAliasValidationTimeout)
+			aliasBudget := maxTitleAliasValidationCandidates
 			for _, attempt := range aliasAttempts {
 				aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
-					ctx, attempt.hints, attempt.candidates, itemChain, searchQuery.Language,
+					aliasCtx, attempt.hints, attempt.candidates, itemChain, searchQuery.Language, &aliasBudget,
 				)
 				providerMatchErrors = append(providerMatchErrors, aliasErrors...)
 				if aliasWinner != nil {
@@ -1631,6 +1633,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					break
 				}
 			}
+			cancelAlias()
 		}
 		trustedIDTypeMismatch := false
 		if !matched && len(candidates) == 0 && trustedHintIDsPresent(selectionHints) {
