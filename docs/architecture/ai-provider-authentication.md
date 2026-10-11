@@ -21,7 +21,9 @@ where the Silo server runs, including remote servers and containers.
 The browser binds connection mutations and their results to the initiating
 account, server, and profile authority. An authority change clears the dialog
 and its mutation state; a late response cannot reopen it or send the previous
-callback under a new session. The browser holds the pasted URL and authorization
+callback under a new session. Completion, selection, and disconnect refresh
+status, model catalogs, and viewer readiness even when an error follows a
+committed credential change. The browser holds the pasted URL and authorization
 link in memory, clears the dialog's state when it closes or sign-in ends, and
 discards unobserved login mutations without a cache retention period. It does
 not persist them to browser storage. Connection polling uses the attempt identifier to ignore another
@@ -33,9 +35,11 @@ paste does not consume the pending attempt.
 Silo generates PKCE S256, state, and OIDC nonce for each attempt. Initial
 registration uses `dynamic_agent_client`, `agent_name_hint=Silo`, and a stable
 installation host ID. Later attempts reuse the saved issued client ID. A
-returning callback cannot change the registration's verified subject. A retained
-validated ID token supplies `id_token_hint` on reconnect, paired with that
-registration's saved email. Disconnect clears the token hint. Authorization
+returning callback cannot change the registration's verified subject. Silo
+rejects a verified callback for another subject and attempts bounded revocation
+of its newly issued grant outside the settings transaction, preserving the saved
+account. A retained validated ID token supplies `id_token_hint` on reconnect,
+paired with that registration's saved email. Disconnect clears the token hint. Authorization
 URLs carrying it must not be logged.
 
 Silo durably consumes a valid pending attempt before exchanging the
@@ -48,9 +52,11 @@ When the initial token response omits scopes, Silo uses the requested scopes
 under RFC 6749 section 5.1. The resulting plan grant still requires a refresh token.
 
 A verified sign-in without plan permission retains a disabled registration and
-identity hints, without access or refresh tokens. Reconnect reuses the issued
-client ID and requests consent; ordinary reconnects do not force consent. A
-declined re-consent attempt preserves an existing usable account.
+identity hints, including its accepted access and refresh tokens so Disconnect
+can revoke the grant. The registration needs login and cannot serve inference,
+model-catalog requests, or account selection. Reconnect reuses the issued client
+ID and requests consent; ordinary reconnects do not force consent. A declined
+re-consent attempt preserves an existing usable account.
 
 Discovery and signing-key reads retry transient network failures and HTTP 429 or
 5xx responses within the completion deadline. Retry delays that cannot fit the
@@ -176,9 +182,11 @@ requests use `reasoning_effort`.
 The stream reader strips one leading UTF-8 BOM and accepts LF, CRLF, and CR
 line endings across transport reads, and buffers output until `response.completed`. Failed, incomplete,
 or truncated streams cannot publish partial translations. Account usage-limit
-errors terminate retries; temporary usage-check failures and streamed
-`server_error` failures use bounded backoff
-and retain credentials. An inference or model-catalog HTTP 401, or a streamed
+errors terminate retries; temporary usage-check failures, streamed
+`subscription_sharing_user_unavailable`, and `server_error` failures use bounded
+backoff and retain credentials. Rate-limit delays accept both seconds and HTTP
+dates in `Retry-After`, subject to request cancellation and deadlines.
+An inference or model-catalog HTTP 401, or a streamed
 `subscription_sharing_invalid_user` failure, invalidates only
 the rejected access token, then retries once with serialized token refresh. A
 second rejection marks that account as needing login. Comparing the rejected

@@ -19,6 +19,7 @@ import {
   useChatGPTModels,
 } from "./chatgpt";
 import { captureProfileRequestContext } from "@/api/client";
+import { adminAuthorityScope } from "@/api/v2/adminAuthority";
 import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
 import { metadataAIStatusKey, useMetadataAIStatus } from "../metadataAI";
 
@@ -375,9 +376,10 @@ it.each(["settings", "viewer capability"])(
 
 it.each([
   ["completion reconciliation", useCompleteChatGPTLogin],
+  ["selection token refresh", useSelectChatGPTAccount],
   ["disconnect cleanup", useDisconnectChatGPTAccount],
 ] as const)(
-  "refreshes viewer readiness when %s fails after deactivating the account",
+  "refreshes connection, models, and viewer readiness when %s fails after deactivating the account",
   async (_name, hook) => {
     const client = new QueryClient();
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -389,18 +391,42 @@ it.each([
       if (operation === "GET /api/v2/capabilities/metadata-ai") {
         return { state: ready ? "available" : "not_configured", on_view: "button" };
       }
+      if (operation === "GET /api/v2/admin/ai/chatgpt") {
+        return {
+          active_client_id: "fixture",
+          accounts: [{ client_id: "fixture", connected: ready, needs_login: !ready }],
+        };
+      }
+      if (operation === "GET /api/v2/admin/ai/chatgpt/models") {
+        if (!ready) throw new Error("sign-in required");
+        return { models: [{ id: "fixture-model", name: "Fixture model" }] };
+      }
       ready = false;
       throw failure;
     });
     const { result } = renderHook(
-      () => ({ capability: useMetadataAIStatus(), connection: hook() }),
+      () => ({
+        capability: useMetadataAIStatus(),
+        status: useChatGPTStatus(false),
+        models: useChatGPTModels("fixture", true),
+        connection: hook(),
+      }),
       { wrapper },
     );
     await waitFor(() => expect(result.current.capability.data?.enabled).toBe(true));
+    await waitFor(() => expect(result.current.status.data?.accounts[0]?.connected).toBe(true));
+    await waitFor(() => expect(result.current.models.data?.models[0]?.id).toBe("fixture-model"));
     await act(async () => {
       await expect(result.current.connection.mutateAsync("fixture")).rejects.toBe(failure);
     });
     await waitFor(() => expect(result.current.capability.data?.enabled).toBe(false));
+    await waitFor(() =>
+      expect(result.current.status.data?.accounts[0]).toMatchObject({
+        connected: false,
+        needs_login: true,
+      }),
+    );
+    await waitFor(() => expect(result.current.models.isError).toBe(true));
     expect(
       request.mock.calls.filter(
         ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
@@ -409,56 +435,73 @@ it.each([
   },
 );
 
-it.each(["authority changes before error", "authority changes during refresh", "refresh fails"])(
-  "preserves the request error when %s",
-  async (ending) => {
-    const client = new QueryClient();
-    const failure = new Error("cleanup failed after deactivation");
-    let rejectRequest!: (error: Error) => void;
-    request.mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectRequest = reject;
-        }),
-    );
-    let finishRefresh!: () => void;
-    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(() =>
-      ending === "refresh fails"
-        ? Promise.reject(new Error("capability unavailable"))
-        : new Promise<void>((resolve) => {
-            finishRefresh = resolve;
-          }),
-    );
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-    const { result, rerender } = renderHook(useDisconnectChatGPTAccount, { wrapper });
-    let pending!: Promise<unknown>;
-    act(() => {
-      pending = result.current.mutateAsync("fixture");
-    });
-    const rejected = expect(pending).rejects.toBe(failure);
-    await vi.waitFor(() => expect(rejectRequest).toBeTypeOf("function"));
-    if (ending === "authority changes before error") {
-      setProfileId("profile-b");
-      rerender();
+it.each([
+  "authority changes before error",
+  "authority changes during connection refresh",
+  "authority changes during viewer refresh",
+  "connection refresh fails",
+  "viewer refresh fails",
+])("preserves the request error when %s", async (ending) => {
+  const client = new QueryClient();
+  const authority = captureProfileRequestContext()!;
+  const failure = new Error("cleanup failed after deactivation");
+  let rejectRequest!: (error: Error) => void;
+  request.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRequest = reject;
+      }),
+  );
+  let finishRefresh!: () => void;
+  const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation((filter) => {
+    const refresh = filter?.queryKey === metadataAIStatusKey ? "viewer" : "connection";
+    if (ending === `${refresh} refresh fails`)
+      return Promise.reject(new Error("refresh unavailable"));
+    if (ending === `authority changes during ${refresh} refresh`) {
+      return new Promise<void>((resolve) => {
+        finishRefresh = resolve;
+      });
     }
-    act(() => rejectRequest(failure));
-    if (ending === "authority changes during refresh") {
+    return Promise.resolve();
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result, rerender } = renderHook(useDisconnectChatGPTAccount, { wrapper });
+  let pending!: Promise<unknown>;
+  act(() => {
+    pending = result.current.mutateAsync("fixture");
+  });
+  const rejected = expect(pending).rejects.toBe(failure);
+  await vi.waitFor(() => expect(rejectRequest).toBeTypeOf("function"));
+  if (ending === "authority changes before error") {
+    setProfileId("profile-b");
+    rerender();
+  }
+  await act(async () => {
+    rejectRequest(failure);
+    if (ending.startsWith("authority changes during")) {
       await vi.waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
       setProfileId("profile-b");
       rerender();
+      finishRefresh();
     }
-    await act(async () => {
-      if (ending === "authority changes during refresh") finishRefresh();
-      await rejected;
-    });
-    expect(invalidate).toHaveBeenCalledTimes(ending === "authority changes before error" ? 0 : 1);
-    if (ending !== "authority changes before error") {
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: metadataAIStatusKey, exact: true });
-    }
-  },
-);
+    await rejected;
+  });
+  const count =
+    ending === "authority changes before error"
+      ? 0
+      : ending === "authority changes during connection refresh"
+        ? 1
+        : 2;
+  expect(invalidate).toHaveBeenCalledTimes(count);
+  if (ending !== "authority changes before error") {
+    expect(invalidate.mock.calls[0]?.[0]?.queryKey).toContain(adminAuthorityScope(authority));
+  }
+  if (count === 2) {
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: metadataAIStatusKey, exact: true });
+  }
+});
 
 it("refreshes an expired Silo token while preserving the captured write authority", async () => {
   setRefreshToken("refresh-a");

@@ -397,6 +397,11 @@ func rateLimitBackoff(resp *http.Response, attempt int) time.Duration {
 		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
 			return time.Duration(secs) * time.Second
 		}
+		if deadline, err := http.ParseTime(ra); err == nil {
+			if wait := time.Until(deadline); wait > 0 {
+				return wait
+			}
+		}
 	}
 	wait := 10 * time.Second * (1 << attempt)
 	if wait > 60*time.Second {

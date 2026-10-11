@@ -426,6 +426,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 	var expiresAt time.Time
 	var claims *identityClaims
 	var completionErr error
+	var rejectedIdentity bool
 	if callback.Error != "" || callback.Code == "" || clientID == "" || clientID == dynamicClientID || (callback.ClientID != "" && callback.ClientID != clientID) {
 		completionErr = ErrIdentity
 	} else {
@@ -435,6 +436,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			expiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 			claims, completionErr = s.verifyIDToken(completionCtx, tokens.IDToken, clientID, pending.Nonce)
 			if completionErr == nil && pending.Subject != "" && claims.Subject != pending.Subject {
+				rejectedIdentity = true
 				completionErr = ErrIdentity
 			}
 		}
@@ -479,6 +481,7 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		i := slices.IndexFunc(c.Accounts, func(existing account) bool { return existing.ClientID == clientID })
 		if i >= 0 {
 			if c.Accounts[i].Subject != "" && c.Accounts[i].Subject != a.Subject {
+				rejectedIdentity = true
 				completionErr = ErrIdentity
 				return nil
 			}
@@ -514,6 +517,14 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		c.LoginResult = loginConnected
 		return nil
 	})
+	if rejectedIdentity && tokens.RefreshToken != "" {
+		// Revoke only the newly issued session for the verified wrong identity,
+		// after the settings transaction releases its lock. A lost browser or
+		// failed outcome commit must not skip the bounded cleanup attempt.
+		revocationCtx, cancelRevocation := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		s.revokeSession(revocationCtx, account{ClientID: clientID, RefreshToken: tokens.RefreshToken})
+		cancelRevocation()
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -96,6 +96,13 @@ function useConnectionWrite<TInput, TResult>(
       let result: TResult;
       try {
         result = await request(input, context);
+      } catch (error) {
+        if (isCapturedProfileAuthorityActive(context)) {
+          await qc.invalidateQueries({ queryKey: scopedConnectionKey(context) }).catch(() => {
+            // Preserve the request error if the connection refresh fails.
+          });
+        }
+        throw error;
       } finally {
         if (options.changesReadiness && isCapturedProfileAuthorityActive(context)) {
           // A failed write can still deactivate the account on the server.
