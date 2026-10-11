@@ -404,6 +404,72 @@ describe("MediaItemMenu trigger visibility", () => {
     });
   });
 
+  function renderTriggerMenu() {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+    return screen.getByRole("button", { name: "More actions" });
+  }
+
+  it("opens on a lone click from assistive technology before the menu mounts", async () => {
+    const trigger = renderTriggerMenu();
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // The trigger's wrapper cancels the click so the card link never sees it.
+    expect(fireEvent.click(trigger)).toBe(false);
+
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens on element.click() and closes on the next one", async () => {
+    const trigger = renderTriggerMenu();
+
+    act(() => trigger.click());
+    expect(await screen.findByRole("menu")).toBeTruthy();
+
+    act(() => trigger.click());
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for a pointer press followed by its click", async () => {
+    const trigger = renderTriggerMenu();
+
+    fireEvent.pointerDown(trigger, { pointerId: 4, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    // Some assistive technology pairs a pointerdown with a detail-0 click.
+    fireEvent.pointerDown(trigger, { pointerId: 5, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for Space and Enter", async () => {
+    const trigger = renderTriggerMenu();
+
+    trigger.focus();
+    await userEvent.keyboard(" ");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+  });
+
   it("still returns keyboard focus after a cancelled pointer press inside the menu", async () => {
     render(
       <MemoryRouter>

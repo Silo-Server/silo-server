@@ -1179,6 +1179,7 @@ export default function MediaItemMenu({
   const menuOpenRef = useRef(false);
   const lastMenuInteractionRef = useRef<MenuInteraction>(null);
   const pointerClosedMenuRef = useRef(false);
+  const pointerPressRef = useRef(false);
   const menuBaseId = useId();
   const triggerId = `${menuBaseId}-trigger`;
   const menuId = `${menuBaseId}-menu`;
@@ -1381,7 +1382,26 @@ export default function MediaItemMenu({
               lastMenuInteractionRef.current = "pointer";
               // Radix trigger semantics: only a plain primary press toggles.
               if (event.button !== 0 || event.ctrlKey) return;
+              pointerPressRef.current = true;
               changeMenuOpen(!menuOpenRef.current);
+            }}
+            onPointerCancel={() => {
+              pointerPressRef.current = false;
+            }}
+            onClick={(event) => {
+              // Screen readers and element.click() send a lone click. A click
+              // that follows a pointer press was already handled on
+              // pointerdown, and Enter/Space clicks are cancelled by the key
+              // handlers below.
+              const handledByPointer = pointerPressRef.current || event.detail > 0;
+              pointerPressRef.current = false;
+              if (handledByPointer) return;
+              lastMenuInteractionRef.current = "keyboard";
+              changeMenuOpen(!menuOpenRef.current);
+            }}
+            onKeyUp={(event) => {
+              // Space activates a button on keyup; keydown already toggled.
+              if (event.key === " ") event.preventDefault();
             }}
             onKeyDown={(event) => {
               lastMenuInteractionRef.current = "keyboard";
