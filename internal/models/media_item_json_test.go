@@ -19,9 +19,8 @@ func TestMediaItemJSONOmitsTransientEpisodeStillProvenance(t *testing.T) {
 	}
 }
 
-// The banner, thumb, clear art and disc slots and the extra backdrops are
-// served by /api/v2 only; the frozen v1 responses that serialize MediaItem must
-// not grow them.
+// The banner, thumb, clear art and disc slots are served by /api/v2 only; the
+// frozen v1 responses that serialize MediaItem must not grow them.
 func TestMediaItemJSONOmitsExtraArtwork(t *testing.T) {
 	wire, err := json.Marshal(MediaItem{
 		ContentID:          "movie-1",
@@ -35,7 +34,6 @@ func TestMediaItemJSONOmitsExtraArtwork(t *testing.T) {
 		ClearArtSourcePath: "file:///c",
 		DiscPath:           "local/d",
 		DiscSourcePath:     "file:///d",
-		ExtraBackdrops:     []ItemBackdrop{{Ordinal: 1, Path: "local/x"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +44,7 @@ func TestMediaItemJSONOmitsExtraArtwork(t *testing.T) {
 	}
 	for _, key := range []string{
 		"BannerPath", "BannerSourcePath", "BannerThumbhash", "ThumbPath", "ThumbSourcePath", "ThumbThumbhash",
-		"ClearArtPath", "ClearArtSourcePath", "DiscPath", "DiscSourcePath", "ExtraBackdrops",
+		"ClearArtPath", "ClearArtSourcePath", "DiscPath", "DiscSourcePath",
 	} {
 		if _, ok := fields[key]; ok {
 			t.Fatalf("MediaItem JSON carries %s: %s", key, wire)

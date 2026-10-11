@@ -22,59 +22,46 @@ type upstreamUserLibrary struct {
 }
 
 type upstreamListItem struct {
-	ContentID         string   `json:"content_id"`
-	Type              string   `json:"type"`
-	Title             string   `json:"title"`
-	SortTitle         string   `json:"sort_title,omitempty"`
-	OriginalLanguage  string   `json:"original_language,omitempty"`
-	Year              int      `json:"year"`
-	Genres            []string `json:"genres"`
-	ContentRating     string   `json:"content_rating"`
-	Status            string   `json:"status"`
-	RatingIMDB        *float64 `json:"rating_imdb"`
-	Overview          string   `json:"overview"`
-	PosterURL         string   `json:"poster_url"`
-	BackdropURL       string   `json:"backdrop_url"`
-	PosterPath        string   `json:"-"`
-	PosterThumbhash   string   `json:"-"`
-	BackdropPath      string   `json:"-"`
-	BackdropThumbhash string   `json:"-"`
-	LogoPath          string   `json:"-"`
-	StillPath         string   `json:"-"`
-	StillThumbhash    string   `json:"-"`
-	// Banner, thumb, clear art and disc art, and the backdrops after the
-	// primary: cached paths on the list path, presigned URLs on the detail
-	// path. They only decide which image tags an item advertises.
-	BannerPath         string                  `json:"-"`
-	ThumbPath          string                  `json:"-"`
-	ClearArtPath       string                  `json:"-"`
-	DiscPath           string                  `json:"-"`
-	BannerURL          string                  `json:"-"`
-	ThumbURL           string                  `json:"-"`
-	ClearArtURL        string                  `json:"-"`
-	DiscURL            string                  `json:"-"`
-	ExtraBackdropPaths []string                `json:"-"`
-	ExtraBackdropURLs  []string                `json:"-"`
-	UpdatedAt          time.Time               `json:"-"`
-	SeasonCount        *int                    `json:"season_count,omitempty"`
-	SeriesID           string                  `json:"series_id,omitempty"`
-	SeriesTitle        string                  `json:"series_title,omitempty"`
-	SeasonNumber       *int                    `json:"season_number,omitempty"`
-	EpisodeNumber      *int                    `json:"episode_number,omitempty"`
-	EpisodeCount       *int                    `json:"episode_count,omitempty"`
-	Runtime            int                     `json:"runtime,omitempty"`
-	AirDate            string                  `json:"air_date,omitempty"`
-	IsSpecials         bool                    `json:"is_specials,omitempty"`
-	LogoURL            string                  `json:"logo_url,omitempty"`
-	StillURL           string                  `json:"still_url,omitempty"`
-	Studios            []string                `json:"studios,omitempty"`
-	Countries          []string                `json:"countries,omitempty"`
-	Tagline            string                  `json:"tagline,omitempty"`
-	RatingTMDB         *float64                `json:"rating_tmdb,omitempty"`
-	ImdbID             string                  `json:"imdb_id,omitempty"`
-	TmdbID             string                  `json:"tmdb_id,omitempty"`
-	TvdbID             string                  `json:"tvdb_id,omitempty"`
-	UserData           *catalog.SeasonUserData `json:"user_data,omitempty"`
+	ContentID         string                  `json:"content_id"`
+	Type              string                  `json:"type"`
+	Title             string                  `json:"title"`
+	SortTitle         string                  `json:"sort_title,omitempty"`
+	OriginalLanguage  string                  `json:"original_language,omitempty"`
+	Year              int                     `json:"year"`
+	Genres            []string                `json:"genres"`
+	ContentRating     string                  `json:"content_rating"`
+	Status            string                  `json:"status"`
+	RatingIMDB        *float64                `json:"rating_imdb"`
+	Overview          string                  `json:"overview"`
+	PosterURL         string                  `json:"poster_url"`
+	BackdropURL       string                  `json:"backdrop_url"`
+	PosterPath        string                  `json:"-"`
+	PosterThumbhash   string                  `json:"-"`
+	BackdropPath      string                  `json:"-"`
+	BackdropThumbhash string                  `json:"-"`
+	LogoPath          string                  `json:"-"`
+	StillPath         string                  `json:"-"`
+	StillThumbhash    string                  `json:"-"`
+	UpdatedAt         time.Time               `json:"-"`
+	SeasonCount       *int                    `json:"season_count,omitempty"`
+	SeriesID          string                  `json:"series_id,omitempty"`
+	SeriesTitle       string                  `json:"series_title,omitempty"`
+	SeasonNumber      *int                    `json:"season_number,omitempty"`
+	EpisodeNumber     *int                    `json:"episode_number,omitempty"`
+	EpisodeCount      *int                    `json:"episode_count,omitempty"`
+	Runtime           int                     `json:"runtime,omitempty"`
+	AirDate           string                  `json:"air_date,omitempty"`
+	IsSpecials        bool                    `json:"is_specials,omitempty"`
+	LogoURL           string                  `json:"logo_url,omitempty"`
+	StillURL          string                  `json:"still_url,omitempty"`
+	Studios           []string                `json:"studios,omitempty"`
+	Countries         []string                `json:"countries,omitempty"`
+	Tagline           string                  `json:"tagline,omitempty"`
+	RatingTMDB        *float64                `json:"rating_tmdb,omitempty"`
+	ImdbID            string                  `json:"imdb_id,omitempty"`
+	TmdbID            string                  `json:"tmdb_id,omitempty"`
+	TvdbID            string                  `json:"tvdb_id,omitempty"`
+	UserData          *catalog.SeasonUserData `json:"user_data,omitempty"`
 	// DurationSeconds is the probed duration of the backing media file, 0 when
 	// unknown. Read-time only -- never persisted onto the item row, because one
 	// item can have several versions of different lengths.
@@ -83,6 +70,19 @@ type upstreamListItem struct {
 	// item. nil means unknown (the producing query did not check); the mapper
 	// then keeps the historical LocationType=FileSystem default.
 	HasMediaFiles *bool `json:"-"`
+	// Banner, thumb, clear art and disc art, and the backdrops after the
+	// primary: cached paths on the list path, presigned URLs on the detail
+	// path. They only decide which image tags an item advertises.
+	BannerPath         string   `json:"-"`
+	ThumbPath          string   `json:"-"`
+	ClearArtPath       string   `json:"-"`
+	DiscPath           string   `json:"-"`
+	BannerURL          string   `json:"-"`
+	ThumbURL           string   `json:"-"`
+	ClearArtURL        string   `json:"-"`
+	DiscURL            string   `json:"-"`
+	ExtraBackdropPaths []string `json:"-"`
+	ExtraBackdropURLs  []string `json:"-"`
 }
 
 type upstreamBrowseResponse struct {
