@@ -126,6 +126,7 @@ type Dependencies struct {
 	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
 	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
+	Downloads              DownloadServer         // serves /Items/{id}/Download; nil refuses every download
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver

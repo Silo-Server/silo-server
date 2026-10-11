@@ -30,7 +30,7 @@ func TestFetchRepositoryIndexPreservesPresentationAndRepositoryURL(t *testing.T)
 	defer server.Close()
 
 	service := NewCatalogService(nil, CatalogServiceOptions{HTTPClient: server.Client()})
-	index, err := service.fetchRepositoryIndex(t.Context(), server.URL)
+	index, err := service.fetchRepositoryIndex(t.Context(), server.URL, "the test catalog")
 	if err != nil {
 		t.Fatalf("fetchRepositoryIndex() error = %v", err)
 	}

@@ -540,3 +540,21 @@ for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
+
+### `marker_thumbnail_ready` (native v2, negotiated)
+
+Only playback attempts that opted into `marker_thumbnails_v1` at start receive
+this event. Its payload contains `session_id`, numeric `file_id`, `kind`,
+`start_seconds`, `end_seconds`, `thumbnail_url`, optional `thumbnail_thumbhash`,
+and `thumbnail_capture_seconds` (equal to marker start). It is sent only after
+durable, snapshot-fenced persistence and protected URL resolution.
+
+Consumers match the active session/file and exact kind/range before merging the
+image; they discard events for other versions or edited occurrences. Failed
+event delivery leaves the canonical v2 watch/marker read available. The existing
+`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+
+Marker thumbnail readiness uses the playback event bus to reach sessions on
+other API replicas. Each serving replica resolves a protected image URL and
+checks the session's negotiated feature before delivery. Subscribers do not
+rebroadcast events; retired image references cannot acquire new URLs.

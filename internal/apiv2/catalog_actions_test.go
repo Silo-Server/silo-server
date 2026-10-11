@@ -56,7 +56,7 @@ func (f *fakeCatalogActions) RequestTrailersRefresh(_ context.Context, userID in
 	return handlers.TrailerRefreshView{}, notFoundItem()
 }
 
-func (f *fakeCatalogActions) Status() handlers.MetadataAIStatusView {
+func (f *fakeCatalogActions) Status(context.Context) handlers.MetadataAIStatusView {
 	if !f.enabled {
 		return handlers.MetadataAIStatusView{OnView: "off"}
 	}

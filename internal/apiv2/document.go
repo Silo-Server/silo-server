@@ -610,6 +610,7 @@ func registerAll(reg *Registry) {
 	registerAdminSettingsInspection(reg)
 	registerAdminSettingsWrite(reg)
 	registerAdminSettingsChecks(reg)
+	registerChatGPT(reg)
 	registerAdminStorageTransition(reg)
 	registerAdminPluginCatalogSettings(reg)
 	registerAdminDiagnosticDownload(reg)

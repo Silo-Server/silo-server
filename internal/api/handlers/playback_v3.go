@@ -352,7 +352,7 @@ func (h *PlaybackHandler) localToneMapProbeTimeoutV3() time.Duration {
 // is exactly when the next read is slowest — while how long that node takes to
 // answer has not changed. Storing them together meant an invalidation dropped
 // the budget with the inventory and the refresh it triggered fell back to two
-// minutes, short of the ~136 seconds a two-device node legitimately asks for,
+// minutes, short of the ~151 seconds a two-device node legitimately asks for,
 // so protocol-v3 planning lost its inventory precisely after an invalidation.
 func (h *PlaybackHandler) remoteToneMapProbeTimeoutV3(nodeURL string) time.Duration {
 	nodeURL = nodepool.NormalizeNodeURL(nodeURL)
@@ -1608,6 +1608,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// subrip_sidecar_v1 is attempt-sticky, so dropping it here keeps it out
 		// of every later replan of this attempt too.
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureSubripSidecarV3)
+		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
 	}
 	timings.mark("decode_validate")
 	profileID := apimw.GetProfileID(r.Context())

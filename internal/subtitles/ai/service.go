@@ -137,7 +137,24 @@ func NewService(
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool { return s.config().TranslateReady() }
+func (s *Service) Enabled(ctx context.Context) bool {
+	cfg, _ := s.translationConfig(ctx)
+	return cfg.TranslateReady()
+}
+
+func (s *Service) translationConfig(ctx context.Context) (Config, *llm.Config) {
+	cfg := s.config()
+	if cfg.TextConfigSource == nil || !cfg.TranslateEnabled {
+		return cfg, nil
+	}
+	text, err := cfg.TextConfigSource(ctx)
+	if err != nil || !text.TextConfigured() {
+		cfg.TranslateEnabled = false
+		return cfg, nil
+	}
+	cfg.ChatModel = text.ChatModel
+	return cfg, new(text)
+}
 
 // TranscribeEnabled reports whether ASR subtitle generation can currently run.
 func (s *Service) TranscribeEnabled() bool {
@@ -159,6 +176,10 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	// Snapshot once so the job's model provenance is internally consistent
 	// even if the config reloads mid-enqueue.
 	cfg := s.config()
+	var textConfig *llm.Config
+	if req.Kind == JobKindTranslate || req.Kind == JobKindTranscribeTranslate {
+		cfg, textConfig = s.translationConfig(ctx)
+	}
 	jobModel := cfg.ChatModel
 	switch req.Kind {
 	case JobKindTranslate:
@@ -232,7 +253,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		return nil, err
 	}
 
-	s.dispatch(*job)
+	s.dispatch(*job, textConfig)
 	return job, nil
 }
 
@@ -277,8 +298,11 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 }
 
 // dispatch launches a bounded background goroutine to run the job.
-func (s *Service) dispatch(job Job) {
+func (s *Service) dispatch(job Job, textConfig *llm.Config) {
 	s.runner.Dispatch(job.ID, func(ctx context.Context) {
+		if textConfig != nil {
+			ctx = llm.WithTextConfig(ctx, *textConfig)
+		}
 		s.run(ctx, &job)
 	}, func(ctx context.Context) {
 		_ = s.repo.FailJob(ctx, job.ID, JobStatusCancelled, "cancelled before start")

@@ -224,6 +224,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/ai/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover AI reasoning controls and ChatGPT plan connections. */
+    get: operations["getAdminAICapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read ChatGPT account connection status without credentials. */
+    get: operations["getAdminChatGPTConnection"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt/accounts/{client_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke and clear an account's tokens while retaining its registration for reconnect. Report whether remote revocation was confirmed. */
+    delete: operations["disconnectAdminChatGPTAccount"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt/accounts/{client_id}/select": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Select a connected ChatGPT account for subsequent text AI requests. */
+    post: operations["selectAdminChatGPTAccount"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt/login": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start a ten-minute browser sign-in attempt for manual callback URL submission. Reconcile uncertain results through connection status. */
+    post: operations["startAdminChatGPTLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt/login/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Consume a one-time, state-checked OAuth callback from a pasted browser URL. Reconcile uncertain results through connection status before starting another attempt. */
+    post: operations["completeAdminChatGPTLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/ai/chatgpt/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List models available to a saved ChatGPT account, defaulting to the active account. */
+    get: operations["listAdminChatGPTModels"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/api-keys": {
     parameters: {
       query?: never;
@@ -12410,6 +12529,19 @@ export interface components {
       transcode_allowed?: boolean | null;
       username?: string;
     };
+    AdminAICapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      chatgpt_sign_in: boolean;
+      reasoning_levels: string[];
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
     AdminAPIKey: {
       /**
        * Format: date-time
@@ -15179,29 +15311,47 @@ export interface components {
       mode: "quick" | "complete";
     };
     AdminItemMetadataUpdate: {
+      /** @description Season or episode air date; null clears it */
       air_date?: string | null;
+      /** @description Null clears the stored time */
       air_time?: string | null;
+      /** @description IANA time zone; null clears it */
       air_timezone?: string | null;
       content_rating?: string | null;
       countries?: string[] | null;
       /** Format: int64 */
       episode_number?: number | null;
+      /** @description Null clears the stored date */
       first_air_date?: string | null;
       genres?: string[] | null;
       imdb_id?: string | null;
+      /** @description Null clears the stored date */
       last_air_date?: string | null;
       locked_fields?: number[] | null;
       networks?: string[] | null;
       original_title?: string | null;
       overview?: string | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any IMDb score a metadata plugin stored
+       */
       rating_imdb?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored
+       */
       rating_rt_audience?: number | null;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored
+       */
       rating_rt_critic?: number | null;
-      /** Format: double */
+      /**
+       * Format: double
+       * @description Null clears it, along with any TMDB score a metadata plugin stored
+       */
       rating_tmdb?: number | null;
+      /** @description Null clears the stored date */
       release_date?: string | null;
       /** Format: int64 */
       runtime?: number | null;
@@ -16206,6 +16356,11 @@ export interface components {
       source_bitrate_kbps: number | null;
       source_container?: string;
       source_video_codec?: string;
+      /**
+       * Format: int64
+       * @description Pixel height of the source's primary video track, so a client can tell a full-resolution transcode from a downscale even when source_video_resolution names a size class (a 3840x1600 file is 2160p). Absent when unknown.
+       */
+      source_video_height?: number;
       source_video_resolution?: string;
       /**
        * Format: date-time
@@ -16258,6 +16413,8 @@ export interface components {
       output_format: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Rows may carry source_video_height */
+      source_video_height: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -19978,6 +20135,8 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
+      /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
+      backdrop_is_episode_still?: boolean;
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -20021,6 +20180,8 @@ export interface components {
        * @description Resume position on a continue-watching card
        */
       position_seconds?: number;
+      /** @description Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable. */
+      poster_is_episode_still?: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -20119,6 +20280,8 @@ export interface components {
       air_time?: string;
       air_timezone?: string;
       audiobook?: components["schemas"]["AudiobookDetailExtension"];
+      /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
+      backdrop_is_episode_still?: boolean;
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -20202,6 +20365,8 @@ export interface components {
        * @description Resume position on a continue-watching card
        */
       position_seconds?: number;
+      /** @description Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable. */
+      poster_is_episode_still?: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -20567,6 +20732,47 @@ export interface components {
        * @example margin fossil quench hollow
        */
       new_password: string;
+    };
+    ChatGPTAccountStatus: {
+      client_id: string;
+      connected: boolean;
+      email: string;
+      needs_login: boolean;
+      plan_ineligible?: boolean;
+      usage_limited?: boolean;
+    };
+    ChatGPTCompleteInputBody: {
+      callback_url: string;
+    };
+    ChatGPTDisconnectOutputBody: {
+      revocation_confirmed: boolean;
+    };
+    ChatGPTLogin: {
+      attempt_id: string;
+      authorization_url: string;
+      callback_uri: string;
+      /** Format: date-time */
+      expires_at: string;
+    };
+    ChatGPTLoginInputBody: {
+      client_id?: string;
+    };
+    ChatGPTModel: {
+      id: string;
+      name: string;
+    };
+    ChatGPTModelsOutputBody: {
+      models: components["schemas"]["ChatGPTModel"][];
+    };
+    ChatGPTStatus: {
+      accounts: components["schemas"]["ChatGPTAccountStatus"][];
+      active_client_id: string;
+      attempt_id: string;
+      /** @description Whether the matching connected login outcome first activated this server's ChatGPT plan connection. */
+      login_first_connection?: boolean;
+      login_pending: boolean;
+      /** @enum {string} */
+      login_result: "idle" | "pending" | "connected" | "failed" | "expired";
     };
     ClientCapabilities: {
       audio_passthrough_codecs?: string[];
@@ -22698,6 +22904,8 @@ export interface components {
       runtime: number;
       /** Format: int64 */
       season_number: number;
+      /** @description Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable. */
+      still_is_episode_still?: boolean;
       still_thumbhash?: string;
       /** @description Presigned, short-lived */
       still_url?: string;
@@ -23019,6 +23227,8 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
+      /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
+      backdrop_is_episode_still?: boolean;
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -23062,6 +23272,8 @@ export interface components {
        * @description Resume position on a continue-watching card
        */
       position_seconds?: number;
+      /** @description Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable. */
+      poster_is_episode_still?: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -23453,6 +23665,8 @@ export interface components {
       allowed: boolean;
       /** @enum {string} */
       delivery: "server" | "direct";
+      /** @description Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown */
+      episode_still_provenance: boolean;
       /** Format: int64 */
       original_max_width_px: number;
       param: string;
@@ -24469,6 +24683,13 @@ export interface components {
       kind: "intro" | "credits" | "recap" | "preview";
       /** Format: double */
       start_seconds: number;
+      /**
+       * Format: double
+       * @description Captured source timestamp; marker previews sample the marker start
+       */
+      thumbnail_capture_seconds?: number;
+      thumbnail_thumbhash?: string;
+      thumbnail_url?: string;
     };
     MarkerSegment: {
       algorithm?: string;
@@ -31375,6 +31596,8 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
+      /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
+      backdrop_is_episode_still?: boolean;
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -31420,6 +31643,8 @@ export interface components {
        * @description Resume position on a continue-watching card
        */
       position_seconds?: number;
+      /** @description Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable. */
+      poster_is_episode_still?: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -31540,6 +31765,8 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
+      /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
+      backdrop_is_episode_still?: boolean;
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -31583,6 +31810,8 @@ export interface components {
        * @description Resume position on a continue-watching card
        */
       position_seconds?: number;
+      /** @description Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable. */
+      poster_is_episode_still?: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -33859,6 +34088,855 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminAICapabilities: {
+    parameters: {
+      query?: {
+        model?: string;
+      };
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminAICapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminChatGPTConnection: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGPTStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  disconnectAdminChatGPTAccount: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        client_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGPTDisconnectOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  selectAdminChatGPTAccount: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        client_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGPTStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startAdminChatGPTLogin: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatGPTLoginInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGPTLogin"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  completeAdminChatGPTLogin: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatGPTCompleteInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          "Cache-Control"?: string;
+          "X-Silo-ChatGPT-First-Connection"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminChatGPTModels: {
+    parameters: {
+      query?: {
+        client_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChatGPTModelsOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };
