@@ -339,7 +339,7 @@ func isExhaustedQuota(body []byte) bool {
 		return true
 	}
 	switch code {
-	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded", "billing_hard_limit_reached", "subscription_sharing_usage_limit_exceeded":
+	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded", "billing_hard_limit_reached", subscriptionUsageLimitExceeded:
 		return true
 	default:
 		return false

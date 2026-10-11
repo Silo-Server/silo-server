@@ -54162,6 +54162,16 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Silo-Settings-After-ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Settings-Before-ETag": {
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -54472,6 +54482,16 @@
             "description": "OK",
             "headers": {
               "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Settings-After-ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Settings-Before-ETag": {
                 "schema": {
                   "type": "string"
                 }
@@ -54814,7 +54834,24 @@
         },
         "responses": {
           "204": {
-            "description": "No Content"
+            "description": "No Content",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Settings-After-ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Settings-Before-ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {

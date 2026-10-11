@@ -6,7 +6,12 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
+import {
+  adminSettingsKey,
+  captureSettingsBaseline,
+  type ChatGPTSettingsChange,
+  type SettingsValues,
+} from "@/api/v2/adminSettingsSnapshot";
 
 const connectionKey = ["admin", "ai", "chatgpt"] as const;
 
@@ -56,6 +61,7 @@ export function useChatGPTModels(clientID: string, enabled: boolean) {
 function useConnectionWrite<TInput, TResult>(
   request: (input: TInput, context: ProfileRequestContextSnapshot) => Promise<TResult>,
   changesSettings = false,
+  afterSettingsRefresh?: (result: TResult, settings: SettingsValues | undefined) => void,
 ) {
   const qc = useQueryClient();
   const context = captureProfileRequestContext();
@@ -81,6 +87,9 @@ function useConnectionWrite<TInput, TResult>(
       });
       if (changesSettings && isCapturedProfileAuthorityActive(context)) {
         await qc.invalidateQueries({ queryKey: adminSettingsKey(context), exact: true });
+        if (isCapturedProfileAuthorityActive(context)) {
+          afterSettingsRefresh?.(result, qc.getQueryData(adminSettingsKey(context)));
+        }
       }
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       return result;
@@ -100,23 +109,55 @@ export function useStartChatGPTLogin() {
 export function useCompleteChatGPTLogin() {
   return useConnectionWrite(
     (callbackURL: string, profileContext) =>
-      v2("POST /api/v2/admin/ai/chatgpt/login/complete", {
-        body: { callback_url: callbackURL },
-        profileContext,
-      }),
+      captureActivationChange((onResponse) =>
+        v2("POST /api/v2/admin/ai/chatgpt/login/complete", {
+          body: { callback_url: callbackURL },
+          profileContext,
+          onResponse,
+        }),
+      ),
     true,
+    retainActivationSnapshot,
   );
 }
 
 export function useSelectChatGPTAccount() {
   return useConnectionWrite(
     (clientID: string, profileContext) =>
-      v2("POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select", {
-        path: { client_id: clientID },
-        profileContext,
-      }),
+      captureActivationChange((onResponse) =>
+        v2("POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select", {
+          path: { client_id: clientID },
+          profileContext,
+          onResponse,
+        }),
+      ),
     true,
+    retainActivationSnapshot,
   );
+}
+
+async function captureActivationChange(
+  request: (onResponse: (response: Response) => void) => Promise<unknown>,
+): Promise<ChatGPTSettingsChange> {
+  const change: ChatGPTSettingsChange = { beforeETag: "", afterETag: "" };
+  await request((response) => {
+    change.beforeETag = response.headers.get("X-Silo-Settings-Before-ETag") ?? "";
+    change.afterETag = response.headers.get("X-Silo-Settings-After-ETag") ?? "";
+  });
+  return change;
+}
+
+function retainActivationSnapshot(
+  change: ChatGPTSettingsChange,
+  settings: SettingsValues | undefined,
+) {
+  if (!change.beforeETag || !change.afterETag || !settings) return;
+  try {
+    if (captureSettingsBaseline(settings).etag === change.afterETag)
+      change.settingsSnapshot = settings;
+  } catch {
+    // A missing or stale refresh cannot acknowledge a settings transition.
+  }
 }
 
 export function useDisconnectChatGPTAccount() {

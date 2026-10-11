@@ -72,3 +72,29 @@ func TestAdminSettingsInspectionRedactionDoesNotMutateStore(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestSingleAdminReasoningWritesValidatePair(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, value string
+		stored           map[string]string
+		wantErr          bool
+	}{
+		{"effort incompatible", "ai.reasoning_effort", "high", map[string]string{"ai.chat_model": "gpt-4o-mini"}, true},
+		{"model incompatible", "ai.chat_model", "gpt-4o-mini", map[string]string{"ai.chat_model": "gpt-6-luna", "ai.reasoning_effort": "high"}, true},
+		{"legacy model incompatible", "subtitle_ai.chat_model", "gpt-4o-mini", map[string]string{"subtitle_ai.chat_model": "gpt-6-luna", "ai.reasoning_effort": "high"}, true},
+		{"supported effort", "ai.reasoning_effort", "high", map[string]string{"ai.chat_model": "gpt-6-luna"}, false},
+		{"clear effort", "ai.reasoning_effort", "", map[string]string{"ai.chat_model": "gpt-4o-mini", "ai.reasoning_effort": "high"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeServerSettingsStore{values: maps.Clone(tc.stored)}
+			h := &AdminHandler{SettingsRepo: store}
+			_, err := h.UpdateAdminSetting(t.Context(), tc.key, tc.value, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("single write error=%v, wantErr=%t", err, tc.wantErr)
+			}
+			if tc.wantErr && !maps.Equal(store.values, tc.stored) {
+				t.Fatal("rejected write changed settings")
+			}
+		})
+	}
+}

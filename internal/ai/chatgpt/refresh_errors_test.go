@@ -93,3 +93,23 @@ func TestNonterminalRefreshErrorsPreserveCredentialsAndRecover(t *testing.T) {
 		})
 	}
 }
+
+func TestReducedRefreshScopePersistsRotationAndRequestsConsent(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	save(t, store, credentials{Active: "app", Accounts: []account{{ClientID: "app", Subject: "verified", IDToken: "validated-hint", RefreshToken: "old-refresh", Scopes: planScope}}})
+	service := NewService(store)
+	service.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+		return response(200, tokenResponse{AccessToken: "reduced-access", RefreshToken: "rotated-refresh", Scope: "openid offline_access", TokenType: "Bearer", ExpiresIn: 3600}), nil
+	})
+	if token, err := service.BearerToken(t.Context()); token != "" || !errors.Is(err, ErrSignInRequired) {
+		t.Fatalf("reduced grant supplied inference token: %q, %v", token, err)
+	}
+	a := stored(t, store).Accounts[0]
+	if !a.NeedsLogin || a.Scopes != "openid offline_access" || a.RefreshToken != "rotated-refresh" || a.Subject != "verified" || a.IDToken != "validated-hint" {
+		t.Fatalf("reduced grant lost scope, rotation or identity: %+v", a)
+	}
+	login, err := service.StartLogin(t.Context(), "app")
+	if err != nil || !strings.Contains(login.AuthorizationURL, "prompt=consent") {
+		t.Fatalf("reconnect skipped consent: %+v, %v", login, err)
+	}
+}

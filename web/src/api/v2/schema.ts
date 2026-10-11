@@ -34247,6 +34247,8 @@ export interface operations {
       200: {
         headers: {
           "Cache-Control"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -34464,6 +34466,8 @@ export interface operations {
       200: {
         headers: {
           "Cache-Control"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;
         };
         content: {
@@ -34712,6 +34716,9 @@ export interface operations {
       /** @description No Content */
       204: {
         headers: {
+          "Cache-Control"?: string;
+          "X-Silo-Settings-After-ETag"?: string;
+          "X-Silo-Settings-Before-ETag"?: string;
           [name: string]: unknown;
         };
         content?: never;

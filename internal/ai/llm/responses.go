@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+const subscriptionUsageLimitExceeded = "subscription_sharing_usage_limit_exceeded"
+
 type responseReasoning struct {
 	Effort string `json:"effort"`
 }
@@ -139,7 +141,10 @@ func readResponseStream(data io.Reader) (string, error) {
 			if code == "subscription_sharing_usage_unavailable" {
 				return errors.New("ChatGPT usage is temporarily unavailable")
 			}
-			if code == "subscription_sharing_usage_limit_exceeded" {
+			if code == "server_error" {
+				return errors.New("ChatGPT is temporarily unavailable")
+			}
+			if code == subscriptionUsageLimitExceeded {
 				return &permanentError{ErrQuotaExhausted}
 			}
 			return &permanentError{errors.New("ChatGPT request failed; check the account and ChatGPT usage settings")}

@@ -8,6 +8,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 )
 
+const adminChatGPTSignInRequiredMessage = "Sign in with ChatGPT in AI Services settings."
+
 const adminInvalidSettingsCode = "invalid_settings"
 const adminAIChatModelKey = "ai.chat_model"
 const adminAIReasoningEffortKey = "ai.reasoning_effort"
@@ -32,7 +34,7 @@ func (h *AdminHandler) prepareAIModelValidation(ctx context.Context, changes map
 	if err != nil {
 		message := "Could not verify ChatGPT model availability. Refresh the connection and try again."
 		if errors.Is(err, chatgpt.ErrSignInRequired) {
-			message = "Sign in with ChatGPT in AI Services settings."
+			message = adminChatGPTSignInRequiredMessage
 		}
 		return nil, &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: message}
 	}

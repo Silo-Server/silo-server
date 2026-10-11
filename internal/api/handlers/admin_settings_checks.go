@@ -107,7 +107,7 @@ func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *h
 		return
 	}
 
-	response, err := runAdminSettingsConnectionCheck(r.Context(), kind, cfg, effectiveSettings)
+	response, err := h.runAdminSettingsConnectionCheck(r.Context(), kind, cfg, effectiveSettings)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported connection check kind")
 		return
@@ -115,7 +115,7 @@ func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, response)
 }
 
-func runAdminSettingsConnectionCheck(ctx context.Context, kind string, cfg *config.Config, effectiveSettings map[string]string) (connectionCheckResponse, error) {
+func (h *AdminHandler) runAdminSettingsConnectionCheck(ctx context.Context, kind string, cfg *config.Config, effectiveSettings map[string]string) (connectionCheckResponse, error) {
 	var response connectionCheckResponse
 	switch kind {
 	case "s3_public", "s3_operational":
@@ -127,7 +127,14 @@ func runAdminSettingsConnectionCheck(ctx context.Context, kind string, cfg *conf
 	case "recommendations_embedding":
 		response = checkRecommendationsEmbeddingConnection(ctx, cfg)
 	case "ai_chat":
-		response = checkAIChatConnection(ctx, cfg)
+		if cfg.AI.AuthMode == llm.AuthModeChatGPT {
+			if h.ChatGPT == nil {
+				return connectionCheckResponse{Message: adminChatGPTSignInRequiredMessage, safeMessage: adminChatGPTSignInRequiredMessage}, nil
+			}
+			response = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT.TokenSource, h.ChatGPT.RejectToken)
+		} else {
+			response = checkAIChatConnection(ctx, cfg)
+		}
 	case "ai_transcription":
 		response = checkAITranscriptionConnection(ctx, cfg)
 	case "meilisearch":

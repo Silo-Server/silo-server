@@ -80,8 +80,14 @@ func TestLoginActivationReconcilesModelWithoutLosingAcceptedTokens(t *testing.T)
 					}
 				})
 				callback := login.CallbackURI + "?state=" + url.QueryEscape(login.AttemptID) + "&code=code&client_id=" + test.clientID
-				err = s.CompleteLogin(t.Context(), callback)
+				receipt, err := s.CompleteLoginWithSettings(t.Context(), callback)
 				failed := test.status != 200 || test.empty
+				if failed && receipt != nil {
+					t.Fatal("failed activation returned settings receipt")
+				}
+				if !failed && (receipt == nil || receipt.Before["ai.chat_model"] != "a-model" || receipt.After["ai.chat_model"] != test.wantModel) {
+					t.Fatal("completion lost transaction-owned settings receipt")
+				}
 				if (err != nil) != failed {
 					t.Fatalf("completion error=%v, want failed=%t", err, failed)
 				}

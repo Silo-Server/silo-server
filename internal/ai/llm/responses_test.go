@@ -230,7 +230,7 @@ func testTokenSource(getToken func(context.Context) (string, error)) func(contex
 }
 
 func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
-	for _, status := range []int{http.StatusServiceUnavailable, http.StatusUnauthorized} {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusUnauthorized, http.StatusOK} {
 		t.Run(fmt.Sprintf("status=%d", status), func(t *testing.T) {
 			active := "a"
 			tokens := map[string]string{"a": "a-token", "b": "b-token"}
@@ -270,7 +270,11 @@ func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
 					next := client.Config()
 					next.ChatModel, next.ReasoningEffort = "gpt-5.4", "low"
 					client.UpdateConfig(next)
-					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+					failure := "{}"
+					if status == http.StatusOK {
+						failure = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\"}}}\n\n"
+					}
+					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(failure))}, nil
 				}
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
 			})
@@ -281,6 +285,23 @@ func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
 			}
 			if calls != 3 || factories != 2 {
 				t.Fatalf("calls=%d source resolutions=%d", calls, factories)
+			}
+		})
+	}
+}
+
+func TestSubscriptionPermanentStreamFailuresDoNotRetry(t *testing.T) {
+	for _, code := range []string{"invalid_request_error", "subscription_sharing_usage_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) {
+			client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol", ChatGPTTokenSource: testTokenSource(func(context.Context) (string, error) { return "token", nil })})
+			calls := 0
+			client.chatHTTP.Transport = retryRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				body := fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q}}}\n\n", code)
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			})
+			if out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false); out != "" || err == nil || calls != 1 {
+				t.Fatalf("permanent failure retried or published output: %q, %v, calls=%d", out, err, calls)
 			}
 		})
 	}

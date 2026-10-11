@@ -285,6 +285,7 @@ function TextModelTile({
   onChange,
   onReset,
   onConnectionConfirmed,
+  onSettingsTransitionStarted,
   onClearApiKey,
   onTest,
   isTesting,
@@ -308,6 +309,7 @@ function TextModelTile({
   onChange: (key: string, value: string) => void;
   onReset: (key: string) => void;
   onConnectionConfirmed: () => void;
+  onSettingsTransitionStarted: ReturnType<typeof useSettingsForm>["beginSettingsTransition"];
   onClearApiKey: () => void;
   onTest: () => void;
   isTesting: boolean;
@@ -361,6 +363,7 @@ function TextModelTile({
           model={chatModel}
           onModelChange={(next) => onChange("ai.chat_model", next)}
           onConnectionConfirmed={onConnectionConfirmed}
+          onSettingsTransitionStarted={onSettingsTransitionStarted}
         />
       ) : (
         <>
@@ -818,6 +821,7 @@ export default function AISettings() {
               onChange={setValue}
               onReset={form.resetValue}
               onConnectionConfirmed={() => void form.retryLoad()}
+              onSettingsTransitionStarted={form.beginSettingsTransition}
               // The legacy key goes with it: an empty `ai.api_key` falls back
               // to `subtitle_ai.api_key`, so clearing only the modern one would
               // leave the old secret in force on an upgraded server.

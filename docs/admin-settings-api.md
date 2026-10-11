@@ -63,7 +63,8 @@ The following operations require an acting administrator:
   a client treats a terminal outcome as its own. Responses carrying connection
   state or authorization URLs use `Cache-Control: no-store`.
 - `GET /api/v2/admin/ai/chatgpt/models` returns the active account's visible
-  models in provider order with display names. The capability endpoint supplies
+  streaming text models in provider order with display names; `o1-pro` and
+  `o3-pro` are excluded because they do not support streaming. The capability endpoint supplies
   reasoning levels for the selected model.
 - `POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select` selects a connected
   registration for subsequent requests. In ChatGPT mode, selection and successful
@@ -77,10 +78,18 @@ The following operations require an acting administrator:
   whether OpenAI confirmed revocation; a local disconnect succeeds even if
   revocation fails. Cleanup cannot overwrite a newer successful reconnect.
 
-Model and reasoning saves in ChatGPT mode validate against the account catalog.
+Single-setting and batch writes validate model/effort pairs. Model and reasoning
+saves in ChatGPT mode also validate against the account catalog.
 A selection that changes during validation rejects the save so the client can
 refresh its settings. The web refreshes persisted settings after activation and
-preserves unsaved drafts under the existing revision guards.
+preserves unsaved drafts under the existing revision guards. Successful selection
+and login completion return `X-Silo-Settings-Before-ETag` and
+`X-Silo-Settings-After-ETag`, signed from the settings inside the activation
+transaction. Completion remains HTTP 204. A client may advance an unrelated
+draft only if its baseline matches the before validator and refreshed settings
+match the after validator, under the same authority and without an overlapping
+settings save. Dirty model/effort fields retain their original guard. Background
+reads and uncertain completion status cannot acknowledge this transition.
 
 `ai.chatgpt.credentials` is encrypted internal state. Generic settings reads,
 secret-status lists, writes, and settings revision validators exclude it. The

@@ -3051,7 +3051,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) {
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {

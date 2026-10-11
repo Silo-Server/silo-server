@@ -108,3 +108,9 @@ func (h *AdminHandler) InspectAdminSettingsSnapshot(ctx context.Context) (AdminS
 	}
 	return h.adminSettingsSnapshot(stored), nil
 }
+
+// SnapshotAdminSettings projects a transaction-owned snapshot using the same
+// bootstrap values and redaction rules as settings inspection and writes.
+func (h *AdminHandler) SnapshotAdminSettings(stored map[string]string) AdminSettingsSnapshot {
+	return h.adminSettingsSnapshot(stored)
+}

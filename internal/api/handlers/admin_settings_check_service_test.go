@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
@@ -178,5 +181,14 @@ func TestChatGPTSettingsCheckUsesPinnedCredentialSource(t *testing.T) {
 	h := &AdminHandler{SettingsRepo: store, ChatGPT: service}
 	if result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil); err != nil || !result.Success {
 		t.Fatalf("admin check=%+v, %v", result, err)
+	}
+	store.values[chatgpt.CredentialsKey] = string(credentials)
+	router := chi.NewRouter()
+	router.Post("/api/v1/admin/settings/check/{kind}", h.HandleCheckSettingsConnection)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/check/ai_chat", strings.NewReader(`{}`)))
+	var legacy connectionCheckResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &legacy); err != nil || recorder.Code != http.StatusOK || !legacy.Success {
+		t.Fatalf("legacy check=%d %s, %v", recorder.Code, recorder.Body.String(), err)
 	}
 }

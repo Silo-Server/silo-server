@@ -401,3 +401,19 @@ describe("ChatGPTConnection", () => {
     expect(mocks.success).not.toHaveBeenCalled();
   });
 });
+
+it("allows disconnecting a saved active account that needs sign-in", async () => {
+  setAccessToken("chatgpt-test");
+  setProfileId("admin-profile");
+  status = {
+    active_client_id: "app",
+    accounts: [{ client_id: "app", email: "user@example.test", connected: false }],
+    login_pending: false,
+    login_result: "idle",
+    attempt_id: "",
+  };
+  mocks.disconnect.mockResolvedValue({ revocation_confirmed: true });
+  render(<ChatGPTConnection model="gpt-6.1-sol" onModelChange={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+  expect(mocks.disconnect).toHaveBeenCalledWith("app");
+});

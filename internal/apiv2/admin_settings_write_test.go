@@ -17,11 +17,7 @@ type fakeAdminSettingsWrite struct {
 }
 
 func (f *fakeAdminSettingsWrite) InspectAdminSettingsSnapshot(context.Context) (handlers.AdminSettingsSnapshot, error) {
-	visible := maps.Clone(f.stored)
-	delete(visible, "email.smtp_password")
-	delete(visible, config.StorageTransitionTargetKey)
-	delete(visible, config.ArtworkStorageReconcileCheckpointKey)
-	return handlers.AdminSettingsSnapshot{Stored: maps.Clone(f.stored), Effective: maps.Clone(f.stored), VisibleStored: visible, VisibleEffective: visible}, nil
+	return f.SnapshotAdminSettings(f.stored), nil
 }
 
 func TestAdminSettingsValidatorIgnoresRecoveryState(t *testing.T) {
@@ -121,4 +117,8 @@ func TestAdminSettingsWriteSnapshotGuard(t *testing.T) {
 	if saved.Code != 200 || f.stored["server.log_level"] != "debug" || f.writes != 1 {
 		t.Fatal(saved.Code, saved.Body.String())
 	}
+}
+
+func (f *fakeAdminSettingsWrite) SnapshotAdminSettings(stored map[string]string) handlers.AdminSettingsSnapshot {
+	return (&handlers.AdminHandler{}).SnapshotAdminSettings(stored)
 }

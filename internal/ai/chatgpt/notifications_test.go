@@ -41,7 +41,7 @@ func TestAutomaticModelNotificationsFollowCommittedChanges(t *testing.T) {
 				}
 				notifications[key] = value
 			}
-			err := s.mutateSettings(ctx, func(_ *credentials, values map[string]string) error {
+			_, err := s.mutateSettingsWithSnapshot(ctx, func(_ *credentials, values map[string]string) error {
 				if outcome != "unchanged" {
 					values[chatModelSetting], values[reasoningEffortSetting] = "gpt-4o-mini", ""
 				}

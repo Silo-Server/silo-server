@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +13,10 @@ import (
 )
 
 type fakeChatGPT struct {
-	calls    int
-	callback string
-	err      error
+	calls      int
+	callback   string
+	err        error
+	transition *chatgpt.SettingsTransition
 }
 
 func (f *fakeChatGPT) Status(context.Context) (chatgpt.Status, error) {
@@ -25,16 +27,19 @@ func (f *fakeChatGPT) StartLogin(context.Context, string) (chatgpt.Login, error)
 	f.calls++
 	return chatgpt.Login{AttemptID: "attempt", ExpiresAt: time.Now().Add(time.Minute), AuthorizationURL: "https://auth.openai.com/api/accounts/authorize", CallbackURI: "http://127.0.0.1:51121/auth/callback"}, f.err
 }
-func (f *fakeChatGPT) CompleteLogin(_ context.Context, callback string) error {
+func (f *fakeChatGPT) CompleteLoginWithSettings(_ context.Context, callback string) (*chatgpt.SettingsTransition, error) {
 	f.calls++
 	f.callback = callback
-	return f.err
+	return f.transition, f.err
 }
 func (f *fakeChatGPT) Models(context.Context) ([]chatgpt.Model, error) {
 	f.calls++
 	return []chatgpt.Model{}, f.err
 }
-func (f *fakeChatGPT) SelectAccount(context.Context, string) error { f.calls++; return f.err }
+func (f *fakeChatGPT) SelectAccountWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error) {
+	f.calls++
+	return f.transition, f.err
+}
 func (f *fakeChatGPT) Disconnect(context.Context, string) (bool, error) {
 	f.calls++
 	return false, f.err
@@ -122,6 +127,40 @@ func TestChatGPTCapabilityReflectsServiceAvailability(t *testing.T) {
 			res := do(t, NewHandler(deps), "GET", Prefix+"/admin/ai/capabilities", "", actingRequestAdmin)
 			if res.Code != 200 || !strings.Contains(res.Body.String(), fmt.Sprintf(`"chatgpt_sign_in":%t`, available)) {
 				t.Fatal(res.Code, res.Body.String())
+			}
+		})
+	}
+}
+
+func TestChatGPTActivationHeadersMatchSettingsInspection(t *testing.T) {
+	for _, path := range []string{"/admin/ai/chatgpt/accounts/app/select", "/admin/ai/chatgpt/login/complete"} {
+		t.Run(path, func(t *testing.T) {
+			before := map[string]string{"ai.chat_model": "old-model", "ai.api_key": "private-secret"}
+			after := maps.Clone(before)
+			after["ai.chat_model"] = "gpt-4o-mini"
+			settings := &fakeAdminSettingsWrite{stored: before}
+			deps := requestDeps(fixtureRequests())
+			deps.CursorSecret = []byte("synthetic-settings-secret")
+			deps.AdminSettingsWrite = settings
+			deps.AdminSettingsInspection = settings
+			deps.ChatGPT = &fakeChatGPT{transition: &chatgpt.SettingsTransition{Before: before, After: after}}
+			h := NewHandler(deps)
+			read := do(t, h, "GET", Prefix+"/admin/settings/effective", "", actingRequestAdmin)
+			res := do(t, h, "POST", Prefix+path, `{"callback_url":"callback"}`, actingRequestAdmin)
+			wantStatus := 200
+			if strings.HasSuffix(path, "/complete") {
+				wantStatus = 204
+			}
+			if res.Code != wantStatus || res.Header().Get("X-Silo-Settings-Before-ETag") != read.Header().Get("ETag") {
+				t.Fatalf("before receipt mismatch: %d %s", res.Code, res.Body.String())
+			}
+			settings.stored = after
+			read = do(t, h, "GET", Prefix+"/admin/settings/effective", "", actingRequestAdmin)
+			if res.Header().Get("X-Silo-Settings-After-ETag") != read.Header().Get("ETag") {
+				t.Fatal("after receipt differs from settings inspection")
+			}
+			if strings.Contains(res.Body.String(), "private-secret") {
+				t.Fatal("receipt exposed raw settings")
 			}
 		})
 	}

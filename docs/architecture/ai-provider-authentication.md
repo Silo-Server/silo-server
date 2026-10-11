@@ -69,6 +69,10 @@ catalog outside the transaction. In ChatGPT mode it retains a supported model or
 chooses the first listed model and resets incompatible effort to the provider
 default. Catalog failures prevent activation; accepted login credentials remain
 available for a later selection. API-key settings are preserved.
+Activation returns settings snapshots captured before and after its writes in
+that transaction. The API exposes only signed validators. The web advances an
+unrelated draft's baseline only when both validators and its authority match,
+with no overlapping settings save or dirty model/effort field.
 
 Model-setting writes fetch the catalog outside settings transactions and recheck
 the active registration at commit. Each text request reads the complete provider
@@ -100,7 +104,9 @@ Access token, refresh token, scopes,
 and expiry are committed together. A refresh without a replacement refresh token
 retains the existing token. Accepted refreshes and login exchanges finish under an
 independent, bounded context so request or job cancellation cannot discard a
-replacement. The final database write has its own bounded context. The verified
+replacement. The final database write has its own bounded context. Returned
+scopes and rotated refresh tokens are retained when a successful refresh drops
+plan access; inference stops and reconnect explicitly requests consent. The verified
 sign-in identity remains authoritative during refresh; optional refresh ID
 tokens are not used. Only the documented unusable-token errors (`invalid_grant`,
 `invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
@@ -136,13 +142,14 @@ requests use `reasoning_effort`.
 
 The stream reader buffers output until `response.completed`. Failed, incomplete,
 or truncated streams cannot publish partial translations. Account usage-limit
-errors terminate retries; temporary usage-check failures use bounded backoff
+errors terminate retries; temporary usage-check failures and streamed
+`server_error` failures use bounded backoff
 and retain credentials. An inference or model-catalog HTTP 401 invalidates only
 the rejected access token, then retries once with serialized token refresh. A
 second rejection marks that account as needing login. Comparing the rejected
 token protects credentials replaced concurrently by another node.
 The account model catalog preserves provider order and includes only entries
-with `visibility:list`.
+with `visibility:list`, excluding the non-streaming `o1-pro` and `o3-pro` families.
 
 OpenAI-compatible requests omit reasoning effort when empty, and omit
 temperature for known reasoning models or an explicit effort. Known model

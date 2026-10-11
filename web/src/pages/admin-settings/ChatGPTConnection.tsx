@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useId, useState } from "react";
 import { toast } from "sonner";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import type { ChatGPTSettingsChange } from "@/api/v2/adminSettingsSnapshot";
 import {
   useChatGPTModels,
   useChatGPTStatus,
@@ -26,6 +27,7 @@ export function ChatGPTConnection(props: {
   model: string;
   onModelChange: (model: string) => void;
   onConnectionConfirmed?: () => void;
+  onSettingsTransitionStarted?: () => (change: ChatGPTSettingsChange) => void;
 }) {
   useOptionalAuth();
   const authority = captureProfileRequestContext();
@@ -42,10 +44,12 @@ function ChatGPTConnectionPanel({
   model,
   onModelChange,
   onConnectionConfirmed,
+  onSettingsTransitionStarted,
 }: {
   model: string;
   onModelChange: (model: string) => void;
   onConnectionConfirmed?: () => void;
+  onSettingsTransitionStarted?: () => (change: ChatGPTSettingsChange) => void;
 }) {
   const authority = captureProfileRequestContext();
   const authorityActive = () => authority !== null && isCapturedProfileAuthorityActive(authority);
@@ -131,7 +135,9 @@ function ChatGPTConnectionPanel({
     }
     setCallbackError("");
     try {
-      await complete.mutateAsync(callbackURL.trim());
+      const acceptTransition = onSettingsTransitionStarted?.();
+      const change = await complete.mutateAsync(callbackURL.trim());
+      if (authorityActive()) acceptTransition?.(change);
     } catch {
       if (!authorityActive()) return;
       setCallbackError(
@@ -143,7 +149,9 @@ function ChatGPTConnectionPanel({
 
   async function choose(clientID: string) {
     try {
-      await select.mutateAsync(clientID);
+      const acceptTransition = onSettingsTransitionStarted?.();
+      const change = await select.mutateAsync(clientID);
+      if (authorityActive()) acceptTransition?.(change);
     } catch {
       if (!authorityActive()) return;
       toast.error("Could not switch ChatGPT accounts. Refresh the connection status.");
@@ -254,7 +262,7 @@ function ChatGPTConnectionPanel({
             Reconnect {account.email || `account ${index + 1}`}
           </Button>
         ))}
-        {connected ? (
+        {active ? (
           <Button
             size="sm"
             variant="outline"

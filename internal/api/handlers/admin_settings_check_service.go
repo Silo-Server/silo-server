@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -36,15 +35,7 @@ func (h *AdminHandler) CheckAdminSettingsConnection(ctx context.Context, kind st
 	if err != nil {
 		return AdminSettingsCheckResult{}, ErrAdminSettingsCheckConfig
 	}
-	var result connectionCheckResponse
-	if kind == "ai_chat" && cfg.AI.AuthMode == llm.AuthModeChatGPT {
-		if h.ChatGPT == nil {
-			return AdminSettingsCheckResult{Message: "Sign in with ChatGPT in AI Services settings."}, nil
-		}
-		result = checkAIChatConnectionWithToken(ctx, cfg, h.ChatGPT.TokenSource, h.ChatGPT.RejectToken)
-	} else {
-		result, err = runAdminSettingsConnectionCheck(ctx, kind, cfg, effective)
-	}
+	result, err := h.runAdminSettingsConnectionCheck(ctx, kind, cfg, effective)
 	if err != nil {
 		return AdminSettingsCheckResult{}, err
 	}

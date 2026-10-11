@@ -350,6 +350,11 @@ func (s *Service) exchange(ctx context.Context, form url.Values) (tokenResponse,
 func hasPlanScope(scopes string) bool { return slices.Contains(strings.Fields(scopes), planScope) }
 
 func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
+	_, err := s.CompleteLoginWithSettings(ctx, callbackURL)
+	return err
+}
+
+func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL string) (*SettingsTransition, error) {
 	var pending pendingLogin
 	var callback Callback
 	// Persist consumption before exchanging the authorization code. A node
@@ -371,7 +376,7 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Consumption has committed. Finish an accepted exchange independently of
 	// the browser request so a lost connection cannot discard its credentials.
@@ -406,7 +411,7 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 	// and the login outcome, including when activation must be retried.
 	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancelSave()
-	err = s.mutateSettings(saveCtx, func(c *credentials, values map[string]string) error {
+	transition, err := s.mutateSettingsWithSnapshot(saveCtx, func(c *credentials, values map[string]string) error {
 		// A newer administrator attempt supersedes this completion, including
 		// a callback already exchanging credentials on another node.
 		if c.LoginID != pending.State {
@@ -465,9 +470,12 @@ func (s *Service) CompleteLogin(ctx context.Context, callbackURL string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return completionErr
+	if completionErr != nil {
+		return nil, completionErr
+	}
+	return transition, nil
 }
 
 // TokenSource pins a logical request to its initial registration. Each use reads
@@ -543,6 +551,9 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 		if tokens.Scope == "" {
 			tokens.Scope = a.Scopes
 		}
+		// Persist replacement credentials even when a reduced grant needs consent.
+		a.AccessToken, a.RefreshToken, a.Scopes = tokens.AccessToken, tokens.RefreshToken, tokens.Scope
+		a.ExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 		if !hasPlanScope(tokens.Scope) {
 			a.NeedsLogin = true
 			refreshErr = ErrSignInRequired
@@ -550,8 +561,6 @@ func (s *Service) bearerTokenForAccount(ctx context.Context, clientID string) (s
 		}
 		// Identity remains bound to the validated sign-in token. An optional
 		// refresh ID token is not used for identity or the reauthorization hint.
-		a.AccessToken, a.RefreshToken, a.Scopes = tokens.AccessToken, tokens.RefreshToken, tokens.Scope
-		a.ExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 		token = a.AccessToken
 		return nil
 	})
@@ -582,7 +591,8 @@ func (s *Service) RejectToken(ctx context.Context, rejected string, needsLogin b
 }
 
 func (s *Service) SelectAccount(ctx context.Context, clientID string) error {
-	return s.selectAccount(ctx, clientID)
+	_, err := s.SelectAccountWithSettings(ctx, clientID)
+	return err
 }
 
 type discovery struct {

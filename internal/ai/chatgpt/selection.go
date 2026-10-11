@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
@@ -52,19 +53,24 @@ func (s *Service) selectionSettings(ctx context.Context) (map[string]string, err
 	return values, nil
 }
 
-func (s *Service) mutateSettings(ctx context.Context, fn func(*credentials, map[string]string) error) error {
+// SettingsTransition contains the exact settings surrounding a committed activation.
+// It stays inside the server; transports expose only keyed validators.
+type SettingsTransition struct{ Before, After map[string]string }
+
+func (s *Service) mutateSettingsWithSnapshot(ctx context.Context, fn func(*credentials, map[string]string) error) (*SettingsTransition, error) {
 	store, ok := s.store.(selectionStore)
 	if !ok {
 		values, err := s.selectionSettings(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if config.EffectiveAdminSettings(values)[authModeSetting] == authModeChatGPT {
-			return errors.New("ChatGPT settings require coordinated updates")
+			return nil, errors.New("ChatGPT settings require coordinated updates")
 		}
-		return s.mutate(ctx, func(c *credentials) error { return fn(c, values) })
+		return nil, s.mutate(ctx, func(c *credentials) error { return fn(c, values) })
 	}
 	changed := make(map[string]string)
+	var transition *SettingsTransition
 	err := store.UpdateValueAndSettingsAtomic(ctx, CredentialsKey, func(values map[string]string) (map[string]string, error) {
 		c, err := decode(values[CredentialsKey])
 		if err != nil {
@@ -85,6 +91,9 @@ func (s *Service) mutateSettings(ctx context.Context, fn func(*credentials, map[
 				changed[key] = values[key]
 			}
 		}
+		after := maps.Clone(before)
+		maps.Copy(after, writes)
+		transition = &SettingsTransition{Before: before, After: after}
 		return writes, nil
 	})
 	if err == nil && s.OnSettingUpdated != nil && len(changed) > 0 {
@@ -96,7 +105,10 @@ func (s *Service) mutateSettings(ctx context.Context, fn func(*credentials, map[
 			}
 		}
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return transition, nil
 }
 
 func reconcileModel(values map[string]string, models []Model) error {
@@ -118,19 +130,19 @@ func reconcileModel(values map[string]string, models []Model) error {
 	return nil
 }
 
-func (s *Service) selectAccount(ctx context.Context, clientID string) error {
+func (s *Service) SelectAccountWithSettings(ctx context.Context, clientID string) (*SettingsTransition, error) {
 	values, err := s.selectionSettings(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var models []Model
 	if config.EffectiveAdminSettings(values)[authModeSetting] == authModeChatGPT {
 		models, err = s.modelsForSource(ctx, func(ctx context.Context) (string, error) { return s.bearerTokenForAccount(ctx, clientID) })
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return s.mutateSettings(ctx, func(c *credentials, values map[string]string) error {
+	return s.mutateSettingsWithSnapshot(ctx, func(c *credentials, values map[string]string) error {
 		i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == clientID })
 		if i < 0 || c.Accounts[i].RefreshToken == "" || c.Accounts[i].NeedsLogin {
 			return ErrSignInRequired
@@ -238,7 +250,8 @@ func (s *Service) modelCatalog(ctx context.Context, token string) ([]Model, erro
 	}
 	models := []Model{}
 	for _, m := range response.Models {
-		if m.Visibility == visibilityListed && m.Slug != "" {
+		// These Responses models do not support the streaming text transport.
+		if m.Visibility == visibilityListed && m.Slug != "" && !strings.HasPrefix(m.Slug, "o1-pro") && !strings.HasPrefix(m.Slug, "o3-pro") {
 			models = append(models, Model{ID: m.Slug, Name: m.Name})
 		}
 	}

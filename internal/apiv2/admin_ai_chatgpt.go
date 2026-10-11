@@ -13,9 +13,9 @@ const chatGPTCacheControl = "no-store"
 type ChatGPTService interface {
 	Status(context.Context) (chatgpt.Status, error)
 	StartLogin(context.Context, string) (chatgpt.Login, error)
-	CompleteLogin(context.Context, string) error
+	CompleteLoginWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error)
 	Models(context.Context) ([]chatgpt.Model, error)
-	SelectAccount(context.Context, string) error
+	SelectAccountWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error)
 	Disconnect(context.Context, string) (bool, error)
 }
 
@@ -59,7 +59,18 @@ type AdminAICapabilitiesOutput struct {
 
 func (AdminAICapabilities) capabilityState() string { return StateAvailable }
 
+type ChatGPTSettingsTransitionHeaders struct {
+	BeforeETag string `header:"X-Silo-Settings-Before-ETag"`
+	AfterETag  string `header:"X-Silo-Settings-After-ETag"`
+}
+
+type ChatGPTCompleteOutput struct {
+	ChatGPTSettingsTransitionHeaders
+	CacheControl string `header:"Cache-Control"`
+}
+
 type ChatGPTStatusOutput struct {
+	ChatGPTSettingsTransitionHeaders
 	CacheControl string `header:"Cache-Control"`
 	Body         ChatGPTStatus
 }
@@ -163,14 +174,19 @@ func registerChatGPT(reg *Registry) {
 		if reg.deps.ChatGPT == nil {
 			return nil, unavailable("ChatGPT plan connection")
 		}
-		if err := reg.deps.ChatGPT.SelectAccount(ctx, in.ClientID); err != nil {
+		transition, err := reg.deps.ChatGPT.SelectAccountWithSettings(ctx, in.ClientID)
+		if err != nil {
 			return nil, chatGPTProblem(err)
 		}
 		v, err := reg.deps.ChatGPT.Status(ctx)
 		if err != nil {
 			return nil, chatGPTProblem(err)
 		}
-		return &ChatGPTStatusOutput{CacheControl: chatGPTCacheControl, Body: nativeChatGPTStatus(v)}, nil
+		headers, err := reg.chatGPTSettingsTransitionHeaders(ctx, transition)
+		if err != nil {
+			return nil, err
+		}
+		return &ChatGPTStatusOutput{ChatGPTSettingsTransitionHeaders: headers, CacheControl: chatGPTCacheControl, Body: nativeChatGPTStatus(v)}, nil
 	})
 	Register(reg, op("DELETE", "/admin/ai/chatgpt/accounts/{client_id}", "disconnectAdminChatGPTAccount", "Revoke and clear an account's tokens while retaining its registration for reconnect. Report whether remote revocation was confirmed."), func(ctx context.Context, in *ChatGPTAccountInput) (*ChatGPTDisconnectOutput, error) {
 		if reg.deps.ChatGPT == nil {
@@ -184,13 +200,36 @@ func registerChatGPT(reg *Registry) {
 		out.Body.RevocationConfirmed = revoked
 		return out, nil
 	})
-	Register(reg, op("POST", "/admin/ai/chatgpt/login/complete", "completeAdminChatGPTLogin", "Consume a one-time, state-checked OAuth callback from a pasted browser URL. Reconcile uncertain results through connection status before starting another attempt."), func(ctx context.Context, in *ChatGPTCompleteInput) (*struct{}, error) {
+	Register(reg, op("POST", "/admin/ai/chatgpt/login/complete", "completeAdminChatGPTLogin", "Consume a one-time, state-checked OAuth callback from a pasted browser URL. Reconcile uncertain results through connection status before starting another attempt."), func(ctx context.Context, in *ChatGPTCompleteInput) (*ChatGPTCompleteOutput, error) {
 		if reg.deps.ChatGPT == nil {
 			return nil, unavailable("ChatGPT plan connection")
 		}
-		if err := reg.deps.ChatGPT.CompleteLogin(ctx, in.Body.CallbackURL); err != nil {
+		transition, err := reg.deps.ChatGPT.CompleteLoginWithSettings(ctx, in.Body.CallbackURL)
+		if err != nil {
 			return nil, chatGPTProblem(err)
 		}
-		return nil, nil
+		headers, err := reg.chatGPTSettingsTransitionHeaders(ctx, transition)
+		if err != nil {
+			return nil, err
+		}
+		return &ChatGPTCompleteOutput{ChatGPTSettingsTransitionHeaders: headers, CacheControl: chatGPTCacheControl}, nil
 	})
+}
+
+func (reg *Registry) chatGPTSettingsTransitionHeaders(ctx context.Context, transition *chatgpt.SettingsTransition) (ChatGPTSettingsTransitionHeaders, error) {
+	if transition == nil {
+		return ChatGPTSettingsTransitionHeaders{}, nil
+	}
+	if reg.deps.AdminSettingsWrite == nil {
+		return ChatGPTSettingsTransitionHeaders{}, unavailable("administrator settings")
+	}
+	before, err := reg.adminSettingsSnapshotTag(ctx, reg.deps.AdminSettingsWrite.SnapshotAdminSettings(transition.Before))
+	if err != nil {
+		return ChatGPTSettingsTransitionHeaders{}, err
+	}
+	after, err := reg.adminSettingsSnapshotTag(ctx, reg.deps.AdminSettingsWrite.SnapshotAdminSettings(transition.After))
+	if err != nil {
+		return ChatGPTSettingsTransitionHeaders{}, err
+	}
+	return ChatGPTSettingsTransitionHeaders{BeforeETag: before.String(), AfterETag: after.String()}, nil
 }
