@@ -53,7 +53,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 			source.BitrateKbps = normalizeBitrateKbpsV3(track.Bitrate)
 		}
 		source.DynamicRange = normalizeDynamicRangeV3(track)
-		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
+		source.HDR10Plus = track.HDR10Plus || tonemap.VideoRangeTypeIsHDR10Plus(track.VideoRangeType)
 		source.DVProfile = track.DVProfile
 		if track.DVLevel >= 1 && track.DVLevel <= 13 {
 			source.DVLevel = track.DVLevel
@@ -354,8 +354,14 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDR10PlusV3:
-		claims.HDR10Plus = hdr != nil && hdr.HDR10Plus
-		return claims.HDR10Plus, claims
+		if hdr != nil && hdr.HDR10Plus {
+			claims.HDR10Plus = true
+			return true, claims
+		}
+		// HDR10+ adds dynamic metadata to an HDR10 signal. An output that
+		// only claims HDR10 ignores the metadata and shows the HDR10 picture.
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
+		return claims.HDR10, claims
 	case DynamicRangeHLGV3:
 		claims.HLG = hdr != nil && hdr.HLG
 		return claims.HLG, claims

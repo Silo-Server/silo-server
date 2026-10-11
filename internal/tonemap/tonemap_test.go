@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs verifies supported Dolby Vision bases are classified.
@@ -246,5 +248,22 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	}
 	if !ValidSourceKind(SourceDolbyVision) || slices.Contains(StandardSourceKinds(), SourceDolbyVision) {
 		t.Fatal("Dolby Vision must be a valid but non-standard source kind")
+	}
+}
+
+func TestDynamicRangeForVideoTrackReadsStoredHDR10PlusRangeType(t *testing.T) {
+	tests := []struct {
+		rangeType string
+		want      string
+	}{
+		{rangeType: "HDR10Plus", want: DynamicRangeHDR10Plus},
+		{rangeType: "HDR10+", want: DynamicRangeHDR10Plus},
+		{rangeType: "HDR10", want: DynamicRangeHDR10},
+	}
+	for _, tt := range tests {
+		track := models.VideoTrack{Codec: "hevc", VideoRange: "HDR", VideoRangeType: tt.rangeType, ColorTransfer: "smpte2084"}
+		if got := DynamicRangeForVideoTrack(track); got != tt.want {
+			t.Errorf("DynamicRangeForVideoTrack(%q) = %q, want %q", tt.rangeType, got, tt.want)
+		}
 	}
 }

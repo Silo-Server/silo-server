@@ -4106,6 +4106,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			BitDepth:            vt.BitDepth,
 			PixelFormat:         vt.PixelFormat,
 			ReferenceFrames:     vt.ReferenceFrames,
+			HDR10PlusUnchecked:  vt.HDR10PlusUnchecked,
 		}
 	}
 	mf.VideoTracks = videoTracks
