@@ -234,12 +234,12 @@ func TestLoginIdentityRejectsTerminalVerificationWithoutRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, failure := range []string{"malformed discovery", "empty discovery", "untrusted endpoint", "malformed keys", "invalid key", "nonce", "audience", "expired", "signature"} {
+	for _, failure := range []string{"malformed discovery", "empty discovery", "untrusted endpoint", "malformed keys", "invalid key", "invalid nonce", "audience", "expired", "signature"} {
 		t.Run(failure, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := newIdentityRetryFixture(t, key)
 				switch failure {
-				case "nonce":
+				case "invalid nonce":
 					f.claims.Nonce = "different"
 				case "audience":
 					f.claims.Audience = jwt.ClaimStrings{"different-app"}
