@@ -24,9 +24,11 @@ const (
 // alternative titles; an exact match there, with the same year, is the
 // provider confirming the folder's title.
 //
-// It is positive-only and conservative: every same-year contender is checked,
-// exactly one must list the title, and a failed detail fetch other than a 404
-// leaves the item unmatched, since an unreachable rival could have listed it
+// It is positive-only and conservative: every same-year contender is checked
+// and exactly one must list the title. A rival counts as ruled out only when a
+// provider no longer knows it (404) or returns its complete title list without
+// the title. A rival with conflicting provider IDs, a failed fetch, or a partial
+// title list leaves the item unmatched, since it could have listed the title
 // too. A search that already returned an exact-title result was rejected as
 // ambiguous, not as unrelated, and is left alone.
 func validateMatchByProviderTitleAliases(
@@ -51,10 +53,12 @@ func validateMatchByProviderTitleAliases(
 		if similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, hints.Year); similarity == 1 {
 			return nil, nil
 		}
-		if candidate.Year != hints.Year ||
-			len(candidate.ConflictingProviderIDKeys) > 0 ||
-			!candidateTypeMatchesHint(hints.Type, candidate.ContentType) {
+		if candidate.Year != hints.Year || !candidateTypeMatchesHint(hints.Type, candidate.ContentType) {
 			continue
+		}
+		// Its details would come from IDs that point at different works.
+		if len(candidate.ConflictingProviderIDKeys) > 0 {
+			return nil, nil
 		}
 		if len(contenders) == maxTitleAliasValidationCandidates {
 			return nil, nil
@@ -70,11 +74,14 @@ func validateMatchByProviderTitleAliases(
 
 	var winner *MatchCandidate
 	for _, candidate := range contenders {
-		matchedTitle, err := providerTitleAliasMatch(validationCtx, hints, candidate, providers, language)
+		matchedTitle, ruledOut, err := providerTitleAliasMatch(validationCtx, hints, candidate, providers, language)
 		if err != nil {
 			return nil, []error{err}
 		}
 		if matchedTitle == "" {
+			if !ruledOut {
+				return nil, nil
+			}
 			continue
 		}
 		if winner != nil {
@@ -90,31 +97,33 @@ func validateMatchByProviderTitleAliases(
 
 // providerTitleAliasMatch fetches the candidate's details from the providers
 // that returned it and reports which of their titles matches the local title
-// exactly, or "" when none does. A provider that no longer knows the ID (404)
-// simply doesn't confirm it. A local sidecar provider never confirms a remote
-// result, so only corroborating sources are asked.
+// exactly. When none does, ruledOut says whether that is established: a
+// provider returned a complete title list without it, or no longer knows the
+// ID (404). A local sidecar provider never confirms a remote result, so only
+// corroborating sources are asked.
 func providerTitleAliasMatch(
 	ctx context.Context,
 	hints *MatchHints,
 	candidate MatchCandidate,
 	providers []Provider,
 	language string,
-) (string, error) {
+) (matchedTitle string, ruledOut bool, err error) {
 	for _, p := range providers {
 		mp, ok := p.(MetadataProvider)
 		if !ok || nonCorroboratingSources[p.Slug()] || !candidateHasSource(candidate, p.Slug()) {
 			continue
 		}
-		result, err := mp.GetMetadata(ctx, MetadataRequest{
+		result, fetchErr := mp.GetMetadata(ctx, MetadataRequest{
 			ProviderIDs: candidate.ProviderIDs,
 			ContentType: candidate.ContentType,
 			Language:    language,
 		})
-		if isProvider404(err) {
+		if isProvider404(fetchErr) {
+			ruledOut = true
 			continue
 		}
-		if err != nil {
-			return "", fmt.Errorf("title alias validation via %s: %w", p.Slug(), err)
+		if fetchErr != nil {
+			return "", false, fmt.Errorf("title alias validation via %s: %w", p.Slug(), fetchErr)
 		}
 		if result == nil {
 			continue
@@ -125,9 +134,12 @@ func providerTitleAliasMatch(
 		}
 		for _, title := range titles {
 			if strings.TrimSpace(title) != "" && inferTitleSimilarity(hints.Title, title, hints.Year) == 1 {
-				return title, nil
+				return title, true, nil
 			}
 		}
+		if result.TitleAliasesComplete {
+			ruledOut = true
+		}
 	}
-	return "", nil
+	return "", ruledOut, nil
 }

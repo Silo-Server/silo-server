@@ -17,6 +17,8 @@ type aliasProvider struct {
 	aliases   map[string][]string
 	detailErr error
 	idErrs    map[string]error
+	// partial marks IDs whose detail response has an incomplete title list.
+	partial map[string]bool
 
 	mu          sync.Mutex
 	detailCalls []string
@@ -45,7 +47,7 @@ func (p *aliasProvider) GetMetadata(_ context.Context, req MetadataRequest) (*Me
 		OriginalTitle:        "서울의 봄",
 		Year:                 2023,
 		ProviderIDs:          map[string]string{"tmdb": req.ProviderIDs["tmdb"]},
-		TitleAliasesComplete: true,
+		TitleAliasesComplete: !p.partial[req.ProviderIDs["tmdb"]],
 	}
 	for _, alias := range p.aliases[req.ProviderIDs["tmdb"]] {
 		result.TitleAliases = append(result.TitleAliases, TitleAlias{Title: alias})
@@ -292,5 +294,55 @@ func TestValidateMatchByProviderTitleAliasesIgnoresTitleOnlyNFOCandidate(t *test
 		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
 	if winner == nil || winner.ProviderIDs["tmdb"] != "919207" || len(errs) != 0 {
 		t.Fatalf("winner = %v, errs = %v; want 919207 confirmed despite the NFO candidate", winner, errs)
+	}
+}
+
+func TestValidateMatchByProviderTitleAliasesLeavesConflictingRivalUnresolved(t *testing.T) {
+	t.Parallel()
+	// 222 lists the title, but rival 111 carries conflicting IDs, so its
+	// details can't rule it out.
+	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"111": {"首尔之春"}, "222": {"首尔之春"}}}
+	candidates := NormalizeCandidates([]SearchResult{
+		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
+	}, "movie")
+	for i := range candidates {
+		if candidates[i].ProviderIDs["tmdb"] == "111" {
+			candidates[i].ConflictingProviderIDKeys = []string{"tvdb"}
+		}
+	}
+
+	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match while a conflicting rival is unresolved", winner.ProviderIDs)
+	}
+}
+
+func TestValidateMatchByProviderTitleAliasesNeedsCompleteRivalTitles(t *testing.T) {
+	t.Parallel()
+	// 222 lists the title; rival 111's title list is partial, so its
+	// alternative titles are unknown.
+	provider := &aliasProvider{
+		slug:    "tmdb",
+		aliases: map[string][]string{"222": {"首尔之春"}},
+		partial: map[string]bool{"111": true},
+	}
+	candidates := NormalizeCandidates([]SearchResult{
+		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
+	}, "movie")
+
+	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match while a rival's titles are incomplete", winner.ProviderIDs)
+	}
+
+	// A partial list that does contain the title still confirms a lone result.
+	lone := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, partial: map[string]bool{"919207": true}}
+	winner, _ = validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
+		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{lone}, "en")
+	if winner == nil {
+		t.Fatalf("want a lone result confirmed by a partial list that contains the title")
 	}
 }
