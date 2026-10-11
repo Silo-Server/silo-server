@@ -48,6 +48,12 @@ type SkippedRootRepository interface {
 	DeleteMissingInScope(ctx context.Context, folderID int, scopePath string, seenRoots []string) error
 }
 
+// UnsupportedFileRepository keeps the files scans skipped because of their
+// type, for admins.
+type UnsupportedFileRepository interface {
+	Replace(ctx context.Context, folderID int, scopes []string, protectedPaths []string, unreadableEntries []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error
+}
+
 // Result captures the outcome of a full ingest run for one scope.
 type Result struct {
 	ScanResult             *scanner.ScanResult
@@ -93,6 +99,7 @@ type Executor struct {
 	matcher         Matcher
 	folders         FolderRepository
 	skippedRootRepo SkippedRootRepository
+	unsupported     UnsupportedFileRepository
 	events          cache.EventBus
 	realtime        *notifications.Hub
 	availability    *notifications.AvailabilityDetector
@@ -136,6 +143,14 @@ func NewExecutor(
 func (e *Executor) SetAvailabilityDetector(detector *notifications.AvailabilityDetector) {
 	if e != nil {
 		e.availability = detector
+	}
+}
+
+// SetUnsupportedFileRepository wires the list of files scans skip because of
+// their type. Optional; without it the list is not kept.
+func (e *Executor) SetUnsupportedFileRepository(repo UnsupportedFileRepository) {
+	if e != nil {
+		e.unsupported = repo
 	}
 }
 
@@ -312,6 +327,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	if err := e.reconcileSkippedRoots(scanCtx, folder.ID, folder.Type, mode, claim.path, matchScopes, scanResult, folder.Paths...); err != nil {
 		return nil, err
 	}
+	e.recordUnsupportedFiles(scanCtx, folder.ID, mode, claim.path, runStartedAt, scanResult)
 
 	result := &Result{
 		ScanResult:    scanResult,
@@ -589,6 +605,37 @@ func (e *Executor) reconcileSkippedRoots(
 	}
 
 	return nil
+}
+
+// recordUnsupportedFiles keeps the list of files the scan skipped because of
+// their type. A library scan replaces the library's list and a subtree scan
+// the part under its subtree. Rows the scanner protected (an unreachable or
+// suspect-empty root, a path it could not read) stay, as do rows a concurrent
+// scan refreshed after this one started. A scan stopped by the empty-root
+// guard or a file scan, which walks nothing, leaves the list alone. The list
+// is diagnostic, so a failure to write it is logged instead of failing the
+// scan.
+func (e *Executor) recordUnsupportedFiles(ctx context.Context, folderID int, mode scopeMode, scopePath string, startedAt time.Time, scanResult *scanner.ScanResult) {
+	if e.unsupported == nil || scanResult == nil || scanResult.EmptyRootGuarded {
+		return
+	}
+	var scopes []string
+	switch mode {
+	case scopeModeLibrary:
+		// No scopes: the whole library.
+	case scopeModeSubtree:
+		scopes = []string{scopePath}
+	default:
+		return
+	}
+	groups := scanner.GroupUnsupportedFiles(folderID, scanResult.UnsupportedFiles)
+	if err := e.unsupported.Replace(ctx, folderID, scopes, scanResult.ProtectedPaths, scanResult.UnreadableEntries, startedAt, groups); err != nil {
+		slog.WarnContext(ctx, "library ingest: recording unsupported files failed", "component", "libraryingest",
+			"folder_id", folderID,
+			"mode", mode,
+			"error", err,
+		)
+	}
 }
 
 // begin records claim as running. When claim overlaps a scan already running

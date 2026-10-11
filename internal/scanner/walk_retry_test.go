@@ -56,7 +56,7 @@ func TestWalkDirectoryReadRetries(t *testing.T) {
 					}
 					failures = scan.walkFailures
 				} else {
-					err = walkLogicalTree(ctx, root, root, walkModeFor(kind), make(map[string]struct{}), nil, &files, &failures, readDir)
+					err = walkLogicalTree(ctx, root, root, walkModeFor(kind), make(map[string]struct{}), nil, &files, &failures, nil, readDir)
 				}
 				if outcome == "canceled" {
 					if !errors.Is(err, context.Canceled) || attempts != 1 || len(failures) != 0 {

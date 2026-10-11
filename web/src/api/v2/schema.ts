@@ -8412,6 +8412,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/libraries/unsupported-files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Page the files library scans found but do not catalog because of their type, one entry per directory and reason, newest first by when each was first found. */
+    get: operations["listUnsupportedFiles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/library-jobs/{job_id}": {
     parameters: {
       query?: never;
@@ -30324,6 +30341,65 @@ export interface components {
        * @example 1
        */
       total: number;
+    };
+    UnsupportedFileCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["UnsupportedFileGroup"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+      /**
+       * Format: int64
+       * @description Directories matching the filter across every page
+       * @example 1
+       */
+      total: number;
+    };
+    UnsupportedFileGroup: {
+      /** @example /media/movies/Ronin (1998)/VIDEO_TS */
+      directory_path: string;
+      /**
+       * Format: int64
+       * @example 6
+       */
+      file_count: number;
+      /**
+       * @description The files' names in name order, at most 100; file_count counts them all
+       * @example [
+       *       "VIDEO_TS.VOB",
+       *       "VTS_01_1.VOB"
+       *     ]
+       */
+      file_names: string[];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      first_seen_at: string;
+      /**
+       * Format: date-time
+       * @description The last scan that found the files
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      last_seen_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      /** @example Movies */
+      library_name: string;
+      /**
+       * @description The reason, worded for an administrator
+       * @example DVD VOB files are not cataloged; remux the DVD title to a single file
+       */
+      message: string;
+      /**
+       * @description Why the files are not cataloged: DVD VOB files, disc images, RealMedia files, or streams in a Blu-ray or AVCHD disc folder
+       * @example dvd_vob
+       * @enum {string}
+       */
+      reason: "dvd_vob" | "disc_image" | "realmedia" | "disc_stream";
     };
     UpdateConnectionInput: {
       default_profile_id?: string;
@@ -106608,6 +106684,119 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UnmatchedItemCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listUnsupportedFiles: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Substring over directory path, reason, library name, or a file name in file_names, which lists the first 100 names in a directory */
+        q?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UnsupportedFileCollection"];
         };
       };
       /** @description Bad Request */

@@ -44,6 +44,7 @@ import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefres
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
 import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
+import { UnsupportedFilesSection } from "@/components/admin/libraries/UnsupportedFilesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -840,6 +841,7 @@ export default function AdminLibraries() {
           <MetadataMatcherQueuesSection libraries={libraries} />
           <AmbiguousRootsSection libraries={libraries} />
           <SkippedRootsSection />
+          <UnsupportedFilesSection libraries={libraries} />
           <StaleIDsSection />
         </TabsContent>
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 )
@@ -61,6 +63,20 @@ type RootOverrideDeleteRequest = rootOverrideDeleteRequest
 
 // SkippedRootView is one root the scanner skipped.
 type SkippedRootView = librarySkippedRootResponse
+
+// UnsupportedFileView is the files of one directory that scans found but do
+// not catalog, for one reason.
+type UnsupportedFileView struct {
+	LibraryID     int
+	LibraryName   string
+	DirectoryPath string
+	Reason        string
+	Message       string
+	FileCount     int
+	FileNames     []string
+	FirstSeenAt   time.Time
+	LastSeenAt    time.Time
+}
 
 // StaleMediaIDView is one stale provider identifier on a catalog item.
 type StaleMediaIDView = staleMediaIDResponse
@@ -648,6 +664,49 @@ func (h *LibraryHandler) ListSkippedRoots(ctx context.Context, search string, li
 			FileCount:      root.FileCount,
 			FirstSeenAt:    root.FirstSeenAt,
 			LastSeenAt:     root.LastSeenAt,
+		})
+	}
+	return resp, total, nil
+}
+
+// ListUnsupportedFiles pages the files scans found but do not catalog because
+// of their type, grouped by directory and reason, plus the total matching the
+// search across every page.
+func (h *LibraryHandler) ListUnsupportedFiles(ctx context.Context, search string, limit, offset int) ([]UnsupportedFileView, int, error) {
+	if h.UnsupportedFileRepo == nil {
+		return []UnsupportedFileView{}, 0, nil
+	}
+	folders, err := h.folderRepo.List(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing libraries for unsupported files", "component", "api", "error", err)
+		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to list libraries")
+	}
+	folderNames := make(map[int]string, len(folders))
+	for _, folder := range folders {
+		folderNames[folder.ID] = folder.Name
+	}
+	groups, err := h.UnsupportedFileRepo.ListPage(ctx, search, limit, offset)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing unsupported files", "component", "api", "error", err)
+		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to list unsupported files")
+	}
+	total, err := h.UnsupportedFileRepo.Count(ctx, search)
+	if err != nil {
+		slog.ErrorContext(ctx, "counting unsupported files", "component", "api", "error", err)
+		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to count unsupported files")
+	}
+	resp := make([]UnsupportedFileView, 0, len(groups))
+	for _, group := range groups {
+		resp = append(resp, UnsupportedFileView{
+			LibraryID:     group.MediaFolderID,
+			LibraryName:   folderNames[group.MediaFolderID],
+			DirectoryPath: group.DirectoryPath,
+			Reason:        group.Reason,
+			Message:       scanner.UnsupportedReasonMessage(group.Reason),
+			FileCount:     group.FileCount,
+			FileNames:     group.FileNames,
+			FirstSeenAt:   group.FirstSeenAt,
+			LastSeenAt:    group.LastSeenAt,
 		})
 	}
 	return resp, total, nil

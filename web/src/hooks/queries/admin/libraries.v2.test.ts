@@ -18,6 +18,7 @@ import listLibraryRootsOk from "../../../../../contracts/api/v2/fixtures/list_li
 import listMetadataMatchQueuesOk from "../../../../../contracts/api/v2/fixtures/list_metadata_match_queues_ok.json";
 import listStaleIdsOk from "../../../../../contracts/api/v2/fixtures/list_stale_ids_ok.json";
 import listUnmatchedItemsOk from "../../../../../contracts/api/v2/fixtures/list_unmatched_items_ok.json";
+import listUnsupportedFilesOk from "../../../../../contracts/api/v2/fixtures/list_unsupported_files_ok.json";
 import refreshLibraryMetadataAccepted from "../../../../../contracts/api/v2/fixtures/refresh_library_metadata_accepted.json";
 import updateLibraryOk from "../../../../../contracts/api/v2/fixtures/update_library_ok.json";
 
@@ -43,6 +44,7 @@ import {
   useRefreshLibraryMetadata,
   useSetLibraryProviders,
   useStaleMediaIDs,
+  useUnsupportedLibraryFiles,
   flattenStaleMediaIDs,
   STALE_MEDIA_IDS_PAGE_LIMIT,
   useUpdateLibrary,
@@ -374,6 +376,43 @@ describe("library admin hooks on the v2 contract", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const request of requestsOf(fetchMock)) {
       expect(request.url.searchParams.get("q")).toBe("Extras");
+      expect(request.url.searchParams.get("limit")).toBe("50");
+    }
+  });
+
+  it("pages unsupported files from the listUnsupportedFiles fixture with numeric library ids", async () => {
+    const fetchMock = stubFetch((url) => {
+      expect(url.pathname).toBe("/api/v2/libraries/unsupported-files");
+      if (url.searchParams.get("cursor") === null) return jsonResponse(listUnsupportedFilesOk);
+      return jsonResponse({ items: [], page: { has_more: false }, total: 3 });
+    });
+    const { result } = renderHook(() => useUnsupportedLibraryFiles({ search: " VIDEO_TS " }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    const first = result.current.data?.pages[0];
+    expect(first?.total).toBe(3);
+    expect(
+      first?.groups.map((g) => [
+        g.library_id,
+        g.directory_path,
+        g.reason,
+        g.file_count,
+        g.file_names,
+      ]),
+    ).toEqual([
+      [1, "/media/movies/Ronin (1998)/VIDEO_TS", "dvd_vob", 2, ["VIDEO_TS.VOB", "VTS_01_1.VOB"]],
+      [1, "/media/movies/Manhunter (1986)", "realmedia", 1, ["Manhunter (1986).rmvb"]],
+    ]);
+    expect(result.current.hasNextPage).toBe(true);
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    const requests = requestsOf(fetchMock);
+    expect(requests[1]?.url.searchParams.get("cursor")).toBe(
+      listUnsupportedFilesOk.page.next_cursor,
+    );
+    for (const request of requests) {
+      expect(request.url.searchParams.get("q")).toBe("VIDEO_TS");
       expect(request.url.searchParams.get("limit")).toBe("50");
     }
   });

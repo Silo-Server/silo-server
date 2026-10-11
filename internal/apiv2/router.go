@@ -930,6 +930,7 @@ type LibraryAdminService interface {
 	SetRootOverride(ctx context.Context, userID int, req handlers.RootOverrideUpsertRequest) error
 	DeleteRootOverride(ctx context.Context, req handlers.RootOverrideDeleteRequest) error
 	ListSkippedRoots(ctx context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, int, error)
+	ListUnsupportedFiles(ctx context.Context, search string, limit, offset int) ([]handlers.UnsupportedFileView, int, error)
 	ListStaleIDs(ctx context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, int, error)
 	RematchStaleID(ctx context.Context, contentID string) error
 	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)

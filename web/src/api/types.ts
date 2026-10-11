@@ -3477,6 +3477,20 @@ export interface LibrarySkippedRoot {
   last_seen_at: string;
 }
 
+/** The files of one directory that scans found but skip because of their type. */
+export interface LibraryUnsupportedFileGroup {
+  library_id: number;
+  library_name: string;
+  directory_path: string;
+  reason: "dvd_vob" | "disc_image" | "realmedia" | "disc_stream";
+  message: string;
+  file_count: number;
+  /** The files' names in name order, at most 100; file_count counts them all. */
+  file_names: string[];
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
 export interface LibraryRootOverride {
   forced_type?: string;
   forced_title?: string;

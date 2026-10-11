@@ -86,7 +86,7 @@ func TestScopedWalksInheritIgnoreRules(t *testing.T) {
 				var got []string
 				switch kind {
 				case "series":
-					files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, kind, []string{root})
+					files, failures, _, err := collectLogicalFilePaths(t.Context(), []string{scope}, kind, []string{root})
 					if err != nil || len(failures) != 0 {
 						t.Fatalf("walk: %v, failures: %v", err, failures)
 					}
@@ -136,8 +136,14 @@ func TestSubtreeScanUnderSkippedLibraryRootKeepsCatalog(t *testing.T) {
 			folder := &models.MediaFolder{ID: folderID, Type: "series", Paths: []string{root}, Enabled: true}
 			s := NewScanner(NewFileRepository(pool), "definitely-missing-ffprobe", nil, 1, true, 0)
 			for _, scope := range []string{filepath.Dir(episode), root} {
-				if _, err := s.ScanSubtree(ctx, folder, scope); err != nil {
+				result, err := s.ScanSubtree(ctx, folder, scope)
+				if err != nil {
 					t.Fatalf("ScanSubtree(%s): %v", scope, err)
+				}
+				// The list of unsupported files keeps its rows under a
+				// protected path, so the subtree must be reported as one.
+				if result == nil || !slices.Contains(result.ProtectedPaths, filepath.Clean(scope)) {
+					t.Fatalf("ScanSubtree(%s) protected paths = %+v, want the subtree", scope, result)
 				}
 			}
 			var missingSince *time.Time

@@ -385,6 +385,7 @@ export const adminKeys = {
     ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
   filesystemBrowse: (path: string) => ["admin", "filesystem", "browse", path] as const,
   librarySkippedRoots: () => ["admin", "libraries", "skippedRoots"] as const,
+  libraryUnsupportedFiles: () => ["admin", "libraries", "unsupportedFiles"] as const,
   staleMediaIDs: () => ["admin", "libraries", "staleMediaIDs"] as const,
   jobs: (jobType?: string) => ["admin", "jobs", jobType] as const,
   catalogImportSources: () => ["admin", "catalog", "importSources"] as const,
