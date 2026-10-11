@@ -98,16 +98,17 @@ func RecordMutation(ctx context.Context, tx pgx.Tx, action, targetType, targetID
 // database round trip. The owning transaction still commits every action together.
 func RecordMutations(ctx context.Context, tx pgx.Tx, action, targetType string, targetIDs []string, status int, changes []Change) ([]*Entry, error) {
 	lc := GetLogContext(ctx)
-	if lc == nil || lc.Request == nil || !strings.HasPrefix(lc.Request.URL.Path, "/api/v2/admin/") {
+	if lc == nil || lc.Request == nil || !recordsDomainActions(ctx, lc.Request.URL.Path) {
 		return nil, nil
 	}
 	if len(changes) == 0 || len(targetIDs) == 0 {
 		return nil, nil
 	}
 	r := lc.Request
-	path := r.URL.Path
+	route := chi.RouteContext(ctx)
+	path := RedactSecretPath(route, r.URL.Path)
 	pattern := path
-	if route := chi.RouteContext(ctx); route != nil && route.RoutePattern() != "" {
+	if route != nil && route.RoutePattern() != "" {
 		pattern = route.RoutePattern()
 	}
 	entry := &Entry{Timestamp: time.Now().UTC(), ClientIP: clientip.FromContext(ctx), UserID: lc.UserID,
@@ -142,6 +143,58 @@ func RecordMutations(ctx context.Context, tx pgx.Tx, action, targetType string, 
 	return entries, nil
 }
 
+type domainAuditKey struct{}
+
+// WithDomainAudit opts one v2 operation outside /api/v2/admin/ into domain
+// audit rows. The v2 registry sets it for operations that declare Audited, so
+// a shared service records its action on that operation only: every other v2
+// route and the frozen v1 routes keep their request rows alone.
+func WithDomainAudit(ctx context.Context) context.Context {
+	return context.WithValue(ctx, domainAuditKey{}, true)
+}
+
+// recordsDomainActions reports whether the request may write domain rows:
+// every v2 administration operation, and v2 operations that opted in.
+func recordsDomainActions(ctx context.Context, path string) bool {
+	if strings.HasPrefix(path, "/api/v2/admin/") {
+		return true
+	}
+	optedIn, _ := ctx.Value(domainAuditKey{}).(bool)
+	return optedIn && strings.HasPrefix(path, "/api/v2/")
+}
+
+// Recording reports whether RecordMutation would persist a domain row for
+// this request, so a caller can skip reads that only feed audit values.
+func Recording(ctx context.Context) bool {
+	lc := GetLogContext(ctx)
+	return lc != nil && lc.Request != nil && recordsDomainActions(ctx, lc.Request.URL.Path)
+}
+
+// RedactSecretPath strips bearer credentials from a request path before it
+// reaches any log sink. Public endpoints that authenticate through a secret
+// path segment name it with a chi route parameter "token" or "secret"
+// (password reset links, autoscan webhook intake, webhook-sync); logging the
+// raw path would persist the credential.
+func RedactSecretPath(route *chi.Context, path string) string {
+	if route == nil {
+		return path
+	}
+	for i, key := range route.URLParams.Keys {
+		if key != "token" && key != "secret" {
+			continue
+		}
+		if i >= len(route.URLParams.Values) {
+			continue
+		}
+		value := route.URLParams.Values[i]
+		if value == "" {
+			continue
+		}
+		path = strings.Replace(path, "/"+value, "/[redacted]", 1)
+	}
+	return path
+}
+
 func RecordUserMutation(ctx context.Context, tx pgx.Tx, before, after *models.User, passwordChanged bool) (*Entry, error) {
 	action, status, target := "user.updated", http.StatusNoContent, before
 	if before == nil {
@@ -152,7 +205,7 @@ func RecordUserMutation(ctx context.Context, tx pgx.Tx, before, after *models.Us
 	}
 	changes := Changes(UserValues(before), UserValues(after))
 	if passwordChanged {
-		changes = append(changes, Change{Field: "password"})
+		changes = append(changes, Change{Field: FieldPassword})
 	}
 	return RecordMutation(ctx, tx, action, "user", strconv.Itoa(target.ID), status, changes)
 }
@@ -172,7 +225,57 @@ func CommitMutation(ctx context.Context, entry *Entry) {
 	}
 }
 
+// Successful domain actions beyond account and access-group policy edits.
+// Each action's prefix is its target type.
+const (
+	ActionImpersonationStarted     = "user.impersonation_started"
+	ActionImpersonationEnded       = "user.impersonation_ended"
+	ActionOwnershipTransferred     = "user.ownership_transferred"
+	ActionPasswordResetLinkCreated = "user.password_reset_link_created"
+	ActionPasswordResetCompleted   = "user.password_reset_completed"
+	ActionPasswordChanged          = "user.password_changed"
+	ActionLoginSessionRevoked      = "user.login_session_revoked"
+	ActionLoginSessionsRevoked     = "user.login_sessions_revoked"
+	ActionAPIKeyCreated            = "api_key.created"
+	ActionAPIKeyUpdated            = "api_key.updated"
+	ActionAPIKeyDeleted            = "api_key.deleted"
+	ActionProfileCreated           = "profile.created"
+	ActionProfileUpdated           = "profile.updated"
+	ActionProfileDeleted           = "profile.deleted"
+)
+
+// Target types of domain actions.
+const (
+	TargetUser    = "user"
+	TargetAPIKey  = "api_key"
+	TargetProfile = "profile"
+)
+
+// FieldPassword marks a password replacement. It never carries a value.
+const FieldPassword = "password"
+
+// Created is the change list of a value that came into existence, such as a
+// new login session: no before side.
+func Created(field string, value any) []Change {
+	return Changes(nil, map[string]any{field: value})
+}
+
+// Removed is the change list of a value that ended: no after side.
+func Removed(field string, value any) []Change {
+	return Changes(map[string]any{field: value}, nil)
+}
+
+// SecretChanged is the change list of a replaced secret: the field name only.
+func SecretChanged(field string) []Change {
+	return []Change{{Field: field}}
+}
+
 // Actions is the capability inventory of supported successful domain actions.
 func Actions() []string {
-	return []string{"user.created", "user.updated", "user.deleted", "access_group.created", "access_group.updated", "access_group.deleted"}
+	return []string{"user.created", "user.updated", "user.deleted", "access_group.created", "access_group.updated", "access_group.deleted",
+		ActionImpersonationStarted, ActionImpersonationEnded, ActionOwnershipTransferred,
+		ActionPasswordResetLinkCreated, ActionPasswordResetCompleted, ActionPasswordChanged,
+		ActionLoginSessionRevoked, ActionLoginSessionsRevoked,
+		ActionAPIKeyCreated, ActionAPIKeyUpdated, ActionAPIKeyDeleted,
+		ActionProfileCreated, ActionProfileUpdated, ActionProfileDeleted}
 }
