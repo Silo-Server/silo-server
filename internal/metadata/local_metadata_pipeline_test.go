@@ -175,7 +175,7 @@ func TestRefresh_PartialPeopleLockKeepsTheLockedGroup(t *testing.T) {
 		want []string
 	}{
 		{"cast lock, manual", FieldCast, ModeManualRefresh, []string{"Keanu Reeves", "NFO Director"}},
-		{"cast lock, scheduled", FieldCast, ModeScheduledRefresh, []string{"Keanu Reeves", "Lana Wachowski", "NFO Director"}},
+		{"cast lock, scheduled", FieldCast, ModeScheduledRefresh, []string{"Keanu Reeves", "NFO Director"}},
 		{"crew lock, manual", FieldCrew, ModeManualRefresh, []string{"Lock Test Actor", "Lana Wachowski"}},
 	}
 	for _, tc := range cases {
@@ -382,5 +382,149 @@ func TestScheduledRefresh_NFOListsFillButDoNotJoinStoredLists(t *testing.T) {
 	item = run(ModeManualRefresh)
 	if !reflect.DeepEqual(item.Studios, []string{"Local Studio"}) {
 		t.Errorf("after manual refresh studios=%v, want the NFO list", item.Studios)
+	}
+}
+
+// A Cast lock keeps the stored crew when the providers send none, the way an
+// unlocked refresh leaves credits it gets nothing for.
+func TestRefresh_CastLockKeepsStoredCrewWhenNoneArrives(t *testing.T) {
+	h, repo := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:603", "The Matrix", 1999)
+	stored := h.itemRepo.items["movie:tmdb:603"]
+	stored.TmdbID = "603"
+	stored.LockedFields = lockFields(FieldCast)
+	repo.people["movie:tmdb:603"] = []models.ItemPerson{actor("Keanu Reeves", "Neo"), crewMember("Lana Wachowski", models.PersonKindDirector)}
+
+	nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "603"}, metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{actor("Lock Test Actor", "Intruder")}}}
+	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", ProviderIDs: map[string]string{"tmdb": "603"}}}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:603", Language: "en", Mode: ModeManualRefresh}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:603")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got, want := personNames(item.People), []string{"Keanu Reeves", "Lana Wachowski"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("people = %v, want %v", got, want)
+	}
+}
+
+// An NFO whose IDs are only for providers the item lacks adds to its
+// identity on a scheduled refresh; it is not another title.
+func TestScheduledRefresh_NFOWithOnlyNewIDKeysStillApplies(t *testing.T) {
+	h, _ := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
+	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"imdb": "tt0000100"},
+		metadata: &MetadataResult{HasMetadata: true, Overview: "Local overview."},
+	}
+	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}}}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: ModeScheduledRefresh}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.Overview != "Local overview." {
+		t.Errorf("Overview = %q, want the NFO's", item.Overview)
+	}
+}
+
+// localEpisodeStubProvider is a local (identity-hint) provider with season
+// and episode data.
+type localEpisodeStubProvider struct {
+	hints    map[string]string
+	episodes []EpisodeResult
+}
+
+func (p *localEpisodeStubProvider) Slug() string       { return "nfo" }
+func (p *localEpisodeStubProvider) Name() string       { return "NFO Files" }
+func (p *localEpisodeStubProvider) ForTypes() []string { return []string{"series"} }
+func (p *localEpisodeStubProvider) IdentityHints(context.Context, SearchQuery) map[string]string {
+	return copyMap(p.hints)
+}
+func (p *localEpisodeStubProvider) GetSeasons(context.Context, SeasonsRequest) ([]SeasonResult, error) {
+	return nil, nil
+}
+func (p *localEpisodeStubProvider) GetEpisodes(context.Context, EpisodesRequest) ([]EpisodeResult, error) {
+	return append([]EpisodeResult(nil), p.episodes...), nil
+}
+
+// A refresh of one episode keeps the series' stored identity, so it leaves
+// out local files that name a different show, and reads them otherwise.
+func TestRefreshScheduledTargetEpisode_SkipsLocalFilesOfAnotherShow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		hints map[string]string
+		want  string
+	}{
+		{"conflicting tvshow.nfo", map[string]string{"tmdb": "999"}, "Provider Episode 3"},
+		{"agreeing tvshow.nfo", map[string]string{"tmdb": "12345"}, "Local Episode 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remote := &targetRefreshProvider{episodesBySeason: map[int][]EpisodeResult{5: {{SeasonNumber: 5, EpisodeNumber: 3, Title: "Provider Episode 3"}}}}
+			h, seriesID, _, episodeID := seedTargetRefreshHarness(remote)
+			local := &localEpisodeStubProvider{hints: tc.hints, episodes: []EpisodeResult{{SeasonNumber: 5, EpisodeNumber: 3, Title: "Local Episode 3"}}}
+			for _, level := range []string{"0:series", "0:season", "0:episode"} {
+				entry := h.service.chainCache[level]
+				entry.providers = []Provider{local, remote}
+				h.service.chainCache[level] = entry
+			}
+			if err := h.service.RefreshScheduledTarget(context.Background(), RefreshTargetEpisode, episodeID); err != nil {
+				t.Fatalf("RefreshScheduledTarget episode: %v", err)
+			}
+			episode, err := h.service.episodeRepo.GetBySeriesAndNumber(context.Background(), seriesID, 5, 3)
+			if err != nil {
+				t.Fatalf("GetBySeriesAndNumber: %v", err)
+			}
+			if episode.Title != tc.want {
+				t.Errorf("episode title = %q, want %q", episode.Title, tc.want)
+			}
+		})
+	}
+}
+
+// Re-matching a stored item keeps its durable identity and leaves out an NFO
+// for another title.
+func TestInitialMatch_StoredItemSkipsNFOForAnotherTitle(t *testing.T) {
+	h, _ := newLocalPipelineHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
+	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set("movie:tmdb:100", &models.MediaItemProviderID{ContentID: "movie:tmdb:100", ItemType: "movie", Provider: "tmdb", ProviderID: "100"})
+	h.service.providerIDRepo = providerRepo
+
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "999"},
+		metadata: &MetadataResult{HasMetadata: true, Overview: "Other overview."},
+	}
+	remote := &remoteStubProvider{
+		slug:          "tmdb",
+		searchResults: []SearchResult{{Name: "Stable Movie", Year: 2018, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "100"}}},
+		metadata:      &MetadataResult{HasMetadata: true, Title: "Stable Movie", Year: 2018, ProviderIDs: map[string]string{"tmdb": "100"}},
+	}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID: "movie:tmdb:100",
+		Hints:     &MatchHints{Title: "Stable Movie", Year: 2018, Type: "movie"},
+		Language:  "en",
+		Mode:      ModeInitialMatch,
+	}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.TmdbID != "100" || item.Overview != "" {
+		t.Errorf("item = tmdb %q overview %q, want the stored match without the other title's NFO", item.TmdbID, item.Overview)
+	}
+	if nfo.searchCalls != 0 || nfo.metadataCalls != 0 {
+		t.Errorf("NFO consulted: search=%d metadata=%d, want 0", nfo.searchCalls, nfo.metadataCalls)
 	}
 }

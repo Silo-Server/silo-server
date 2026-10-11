@@ -45,7 +45,9 @@ func TestLocalTierIsStoredAndResolvedFirst(t *testing.T) {
 	localCap := fmt.Sprintf("test-local-%d", time.Now().UnixNano())
 	RegisterBuiltinProvider(localCap, func() Provider { return &builtinStubProvider{slug: localCap} })
 	builtinID := insertTestInstallation(t, pool, "builtin", true)
-	insertTestCapability(t, pool, builtinID, localCap, `{"default_priority":{"movie":1},"default_enabled":true}`)
+	// Disabled by default, so the startup sync below appends it to other
+	// tests' chains switched off, as the legacy sync test's builtin is.
+	insertTestCapability(t, pool, builtinID, localCap, `{"default_priority":{"movie":1},"default_enabled":false}`)
 	pluginID := insertTestInstallation(t, pool, "plugin", true)
 	remoteCap := fmt.Sprintf("test-remote-%d", time.Now().UnixNano())
 	insertTestCapability(t, pool, pluginID, remoteCap, `{"metadata":{"default_priority":{"movie":1}}}`)

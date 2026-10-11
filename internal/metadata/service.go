@@ -1496,7 +1496,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		for key := range req.ProviderIDs {
 			protectedKeys[key] = true
 		}
-		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
+		localHints := collectLocalIdentityHints(ctx, itemChain, searchQuery)
+		if len(req.durableProviderIDs) > 0 {
+			// A stored item keeps its durable identity; local metadata for
+			// another title is left out (identify_sticky.go).
+			skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, canonicalIdentityProviderIDs(req.durableProviderIDs))
+			if err != nil {
+				return nil, err
+			}
+			if skipLocalProvider {
+				localHints = nil
+			}
+		}
+		wonHints := applyLocalIdentityHints(ctx, localHints, accumulatedIDs, protectedKeys)
 		if len(wonHints) > 0 {
 			hintsCopy := *selectionHints
 			overrideHintIDs(&hintsCopy, wonHints)
@@ -1508,6 +1520,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			for _, p := range itemChain {
 				sp, ok := p.(SearchProvider)
 				if !ok {
+					continue
+				}
+				if _, local := p.(IdentityHintProvider); local && skipLocalProvider {
 					continue
 				}
 				results, searchErr := sp.Search(ctx, query)
@@ -2631,7 +2646,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		mergeLocked := locked
 		if !req.enrichmentOnly {
-			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult)
+			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
 		}
 		if mergeMode == MergeFillEmpty {
 			accumulator.localLists.keepStoredLists(accumulator, existingResult)
@@ -4118,6 +4133,10 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	if err != nil {
 		return err
 	}
+	skipLocal, err := s.seriesChildSkipsLocal(ctx, series, folderID)
+	if err != nil {
+		return err
+	}
 	for _, language := range languages {
 		canonicalLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
 		if canonicalLanguage == "" {
@@ -4131,11 +4150,11 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, seasonSearched, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
+		seasons, seasonSearched, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal)
 		if err != nil {
 			return err
 		}
-		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
+		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, skipLocal)
 		if err != nil {
 			return err
 		}
@@ -4240,7 +4259,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 
 // fetchTargetSeasonResults also reports localArtworkSeason when the local
 // provider answered, as processInternal records it.
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, localArtworkLevel, error) {
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]SeasonResult, localArtworkLevel, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve season provider chain: %w", err)
@@ -4250,6 +4269,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 	for _, p := range seasonChain {
 		ep, ok := p.(EpisodeProvider)
 		if !ok {
+			continue
+		}
+		if _, local := p.(IdentityHintProvider); local && skipLocal {
 			continue
 		}
 		seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
@@ -4285,7 +4307,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 
 // fetchTargetEpisodeResults also reports localArtworkEpisode when the local
 // provider answered, as processInternal records it.
-func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, localArtworkLevel, error) {
+func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]EpisodeResult, localArtworkLevel, error) {
 	episodeChain, err := s.resolveChainCached(ctx, folderID, "episode")
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve episode provider chain: %w", err)
@@ -4295,6 +4317,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 	for _, p := range episodeChain {
 		ep, ok := p.(EpisodeProvider)
 		if !ok {
+			continue
+		}
+		if _, local := p.(IdentityHintProvider); local && skipLocal {
 			continue
 		}
 		episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{

@@ -70,9 +70,10 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
 - **Locks win in every mode.** The persist merge applies the item's locked
   fields in initial match, scheduled and manual refresh, and Identify. Cast and
   Crew are separate locks; with only one set, the stored credits are read so
-  the locked group survives the wholesale credit write
-  (`internal/metadata/people_locks.go`). An initial match of a skeleton item
-  keeps a locked title and year.
+  the locked group survives the wholesale credit write, while the other group
+  is replaced by the incoming one as it would be without a lock, or kept when
+  the providers send none (`internal/metadata/people_locks.go`). An initial
+  match of a skeleton item keeps a locked title and year.
 - **One switch per library.** The chain editor shows the local entry as a
   pinned "Local metadata (NFO + artwork)" switch that sets every level's row at
   once and cannot be reordered. v2 marks the entry with
@@ -99,12 +100,16 @@ search-by-title fails. Conflict policy by mode:
   later manual refresh whose NFO names a different identity keeps the chosen
   one. Running Identify again is how an admin changes it.
 
-Whenever a refresh keeps an identity the NFO's IDs contradict (a scheduled
-refresh, or a manual one after Identify), it logs the conflict and leaves the
-NFO provider out of every phase of that refresh, series, season and episode,
-since its text, lists and art describe the other title
-(`internal/metadata/identify_sticky.go`). NFO IDs that agree with or only
-extend the stored identity are not a conflict; a title-only NFO declares no
+Whenever a run keeps an identity the NFO's IDs contradict, it logs the
+conflict and leaves the NFO provider out of every phase of that run (series,
+season and episode), since its text, lists and art describe the other title
+(`internal/metadata/identify_sticky.go`). Runs that keep the stored identity
+(scheduled refresh, initial match of a stored item, and a refresh of one
+season or episode, judged by the series' own files) treat a declared ID that
+differs from the stored one for the same provider as a conflict; an ID for a
+provider the item lacks only adds to it. A manual refresh after Identify
+treats any declared IDs that don't confirm the chosen identity as a conflict,
+since it would otherwise re-match on them. A title-only NFO declares no
 identity and always applies.
 
 The NFO search candidate exists only for the title-only case and is defanged:
