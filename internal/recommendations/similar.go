@@ -49,12 +49,8 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 	// the ranked list. A source of unknown type keeps every type. Co-watch
 	// only adds to the embedding candidates, so neighbors that cannot be
 	// checked are left out rather than failing the list.
-	var cowatchTypes []string
-	if sourceType != "" {
-		cowatchTypes = []string{sourceType}
-	}
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
-	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchTypes)
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, nil))
 	if err != nil {
 		slog.WarnContext(ctx, "filtering co-watch neighbors failed; leaving them out", "component", "recommendations", "item_id", itemID, "error", err)
 		cowatchMap = map[string]float64{}

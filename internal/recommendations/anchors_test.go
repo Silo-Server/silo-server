@@ -210,3 +210,15 @@ func TestReaderSkipsClusterRowsCachedEmpty(t *testing.T) {
 		t.Fatalf("refreshes = %d, want one for a missing cluster row", refresher.calls)
 	}
 }
+
+// A list anchored on an item keeps its co-watch neighbors to the item's
+// media type, as its embedding candidates are: a movie's Because You Watched
+// row takes no series its viewers also watched.
+func TestCowatchNeighborsKeepTheSourceType(t *testing.T) {
+	if got := cowatchMediaTypes("movie", recommendableMediaTypes); !slices.Equal(got, []string{"movie"}) {
+		t.Fatalf("movie source keeps %v, want movies only", got)
+	}
+	if got := cowatchMediaTypes("", recommendableMediaTypes); !slices.Equal(got, recommendableMediaTypes) {
+		t.Fatalf("unknown source keeps %v, want %v", got, recommendableMediaTypes)
+	}
+}

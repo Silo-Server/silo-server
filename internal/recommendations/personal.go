@@ -431,10 +431,11 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
 	}
 
-	// Get co-watch neighbors the viewer can see. Co-watch counts ebook
-	// reading too, so neighbors are kept to recommendableMediaTypes.
+	// Get co-watch neighbors the viewer can see, of the source item's media
+	// type like the embedding candidates: co-watch counts ebook reading too,
+	// and a movie's row would otherwise take series its viewers also watched.
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
-	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, recommendableMediaTypes)
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, recommendableMediaTypes))
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
@@ -460,6 +461,16 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 	}
 
 	return result, nil
+}
+
+// cowatchMediaTypes is the media types a list anchored on an item of
+// sourceType keeps its co-watch neighbors to: the source's own, or
+// unknownSource when the source's type is unknown.
+func cowatchMediaTypes(sourceType string, unknownSource []string) []string {
+	if sourceType == "" {
+		return unknownSource
+	}
+	return []string{sourceType}
 }
 
 // cowatchScores maps each co-watch neighbor filter admits, and whose media
