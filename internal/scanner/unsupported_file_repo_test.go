@@ -543,3 +543,52 @@ func TestScanDoesNotFreezeTheFolderAboveAnUnreadableFolder(t *testing.T) {
 		t.Errorf("second scan: disc image count = %d, want the removed disc image dropped", got)
 	}
 }
+
+// AddNew adds the groups not stored yet and leaves every stored row alone,
+// including one the call also found with a different count.
+func TestUnsupportedFileRepositoryAddNew(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Add New Test")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-add-%d", time.Now().UnixNano())
+	group := func(dir, reason string, count int) models.UnsupportedMediaFileGroup {
+		return models.UnsupportedMediaFileGroup{MediaFolderID: folderID, DirectoryPath: base + dir, Reason: reason, FileCount: count, FileNames: []string{"sample"}}
+	}
+
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now(), []models.UnsupportedMediaFileGroup{
+		group("/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 6),
+		group("/Manhunter (1986)", UnsupportedReasonRealMedia, 1),
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := repo.AddNew(ctx, folderID, time.Now().Add(time.Minute), []models.UnsupportedMediaFileGroup{
+		group("/Ronin (1998)/VIDEO_TS", UnsupportedReasonDVDVOB, 2),
+		group("/Thief (1981)", UnsupportedReasonDiscImage, 1),
+	}); err != nil {
+		t.Fatalf("add new: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, `SELECT directory_path, reason, file_count FROM unsupported_media_files WHERE media_folder_id = $1 ORDER BY directory_path`, folderID)
+	if err != nil {
+		t.Fatalf("query rows: %v", err)
+	}
+	defer rows.Close()
+	got := []string{}
+	for rows.Next() {
+		var dir, reason string
+		var count int
+		if err := rows.Scan(&dir, &reason, &count); err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		got = append(got, fmt.Sprintf("%s %s %d", strings.TrimPrefix(dir, base), reason, count))
+	}
+	want := []string{
+		"/Manhunter (1986) realmedia 1",
+		"/Ronin (1998)/VIDEO_TS dvd_vob 6",
+		"/Thief (1981) disc_image 1",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
