@@ -221,3 +221,31 @@ func TestCollectLogicalFilePathsLeavesIgnoredFilesUnreported(t *testing.T) {
 		t.Errorf("unsupported files = %v, want none", walk.unsupported)
 	}
 }
+
+// A search for the reason text an admin sees, its label or its explanation,
+// finds the reason as a search for its code does.
+func TestUnsupportedReasonsMatching(t *testing.T) {
+	for _, tc := range []struct {
+		search string
+		want   []string
+	}{
+		{search: "Blu-ray or AVCHD folder", want: []string{UnsupportedReasonDiscStream}},
+		{search: "dvd vob", want: []string{UnsupportedReasonDVDVOB}},
+		{search: "Disc image", want: []string{UnsupportedReasonDiscImage}},
+		{search: "disc_stream", want: []string{UnsupportedReasonDiscStream}},
+		{search: "remux", want: []string{UnsupportedReasonDiscImage, UnsupportedReasonDiscStream, UnsupportedReasonDVDVOB}},
+		{search: "Ronin", want: []string{}},
+	} {
+		if got := unsupportedReasonsMatching(tc.search); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("unsupportedReasonsMatching(%q) = %v, want %v", tc.search, got, tc.want)
+		}
+	}
+}
+
+func TestEveryUnsupportedReasonHasALabel(t *testing.T) {
+	for reason := range unsupportedReasonMessages {
+		if unsupportedReasonLabels[reason] == "" {
+			t.Errorf("reason %q has no label", reason)
+		}
+	}
+}
