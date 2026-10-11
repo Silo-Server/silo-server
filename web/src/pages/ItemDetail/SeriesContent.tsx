@@ -13,7 +13,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useMissingSeasonsRequestable } from "@/hooks/useCanRequest";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
@@ -38,12 +38,6 @@ import { cn } from "@/lib/utils";
 
 /** Series lead with their creators; one without Creator credits keeps showing its directors. */
 const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
-
-/**
- * The series Crew section lists every creator ahead of the usual crew. Season
- * and episode pages keep CrewList's default jobs, so creators stay on the series.
- */
-const SERIES_CREW_JOBS = ["Creator", "Director", "Writer", "Producer"] as const;
 
 export default function SeriesContent({
   item,
@@ -81,6 +75,7 @@ export default function SeriesContent({
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Creator"), [item.crew]);
 
   const title = item.title ?? "";
   const firstYear = item.first_air_date?.slice(0, 4);
@@ -272,12 +267,11 @@ export default function SeriesContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {item.cast && item.cast.length > 0 && (
-        <DetailSection title="Cast">
-          <CastCarousel cast={item.cast} prefetchPeople />
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} jobs={SERIES_CREW_JOBS} />}
 
       {similarLoading ? (
         <RecommendationGridSkeleton />
