@@ -336,9 +336,9 @@ func deriveYear(p *parsedNFO, candidates ...string) {
 	}
 }
 
-// applyRatings maps the modern multi-source <ratings> block with the legacy
-// bare <rating> as an IMDB-slot fallback (Kodi's legacy field historically
-// held the scraper's IMDB rating).
+// applyRatings maps the modern multi-source <ratings> block, with the legacy
+// bare <rating> as the IMDB slot when no <ratings> block exists (Kodi's legacy
+// field historically held the scraper's IMDB rating).
 func applyRatings(p *parsedNFO, c *nfoCommon) {
 	applyRatingValues(p, c.Ratings, c.LegacyRating)
 }
@@ -374,7 +374,11 @@ func applyRatingValues(p *parsedNFO, block nfoRatingsBlock, legacyRating string)
 			p.RatingRTAudience = scaleRating(value, max, 100)
 		}
 	}
-	if p.RatingIMDB == 0 {
+	// The bare <rating> is an IMDB fallback only in an NFO without a <ratings>
+	// block. A writer that emits both, such as Radarr, copies its default
+	// source into the bare tag, and that source is TMDB until IMDb has a
+	// score. Reading it as IMDB would show TMDB's number under the IMDb label.
+	if len(block.Ratings) == 0 {
 		if value, ok := parseRatingValue(legacyRating); ok {
 			p.RatingIMDB = scaleRating(value, 10, 10)
 		}
