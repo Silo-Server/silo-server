@@ -101,6 +101,13 @@ Count the served cards, in every row of `getForYouMain`, `listForYouRows`,
 - **out of 1.0 scope:** of a type other than `movie` or `series`, in a personal
   row of a profile with no book activity.
 
+Cards name a movie or series, so an episode or season in the history,
+favorites or ratings counts as its series, as the rows' own exclusion set does:
+a series the profile finished an episode of, favorited an episode of or rated
+an episode of is leakage when a row serves it. History and favorites items
+carry `series_id`; a rating names only the rated item, so its series comes from
+`getCatalogItem`.
+
 Watchlist titles are not leakage: they stay recommendable.
 
 ## New-profile usefulness
@@ -147,7 +154,8 @@ refresh at the next nightly taste run or stale sweep.
 URL and a token from the environment and, per profile, saves the
 `getTasteProfile`, `getForYouMain`, `listForYouRows`, `getDiscover`,
 `listHomeSections`, `listHistory`, `listFavorites` and `listRatings` responses
-as JSON. It prints one line per check: signal counts, main row and Discover
+as JSON, and looks up each rated ID that is not a movie or series with
+`getCatalogItem` to find its series. It prints one line per check: signal counts, main row and Discover
 row sizes, leakage counts, repeats within the load, card types in personal
 rows, and genre shares with amplification. It then prints the overlap between
 each pair of profiles and, given an earlier capture in `PREV_DIR`, the

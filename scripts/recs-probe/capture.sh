@@ -84,6 +84,25 @@ cards() {
 	jq -c --argjson rec "$rec_sections" '.sections[] | select(.section_type | IN($rec[])) | . as $s | $s.items[] | {surface: "home", row: $s.title, type: $s.section_type, card: .}' "$dir/home.json"
 }
 
+# rated_series DIR PROFILE writes, one per line, the series or movie each
+# rated item stands for, as recommendation cards name it: a rating names the
+# rated item, which can be an episode or season. Movie and series IDs stand
+# for themselves; any other ID is looked up with getCatalogItem, and kept as
+# it is when the lookup fails.
+rated_series() {
+	local dir=$1 profile=$2 id
+	while IFS= read -r id; do
+		if [[ $id == movie-* || $id == series-* ]]; then
+			printf '%s\n' "$id"
+		elif get "/api/v2/catalog/items/$id" "$dir/rated-item.json" "$profile" 2>/dev/null; then
+			jq -r --arg id "$id" 'if (.series_id // "") != "" then .series_id else (.content_id // $id) end' "$dir/rated-item.json"
+		else
+			printf '%s\n' "$id"
+		fi
+	done < <(jq -r '[.items[].item_id] | unique[]' "$dir/ratings.json")
+	rm -f "$dir/rated-item.json"
+}
+
 for pid in "${profiles[@]}"; do
 	dir="$out/$pid"
 	mkdir -p "$dir"
@@ -104,6 +123,7 @@ for pid in "${profiles[@]}"; do
 		continue
 	fi
 	cards "$dir" >"$dir/cards.jsonl"
+	rated_series "$dir" "$pid" >"$dir/rated-series.txt"
 
 	echo "[$label] profile $pid"
 	jq -r '"  signals: positive=\([.signal_counts | to_entries[] | select(.key != "rated_low" and .key != "watch_low" and .key != "rated_3" and .key != "positive_titles") | .value] | add // 0) counts=\(.signal_counts | tostring) updated_at=\(.updated_at // "never")"' "$dir/taste.json"
@@ -114,12 +134,15 @@ for pid in "${profiles[@]}"; do
 
 	# Leakage: cards the profile finished, favorited or rated, by the
 	# card's own flags and by the captured history, favorites and ratings
-	# pages. A "+" marks a page with more entries than were captured.
-	jq -rs --slurpfile h "$dir/history.json" --slurpfile f "$dir/favorites.json" --slurpfile r "$dir/ratings.json" '
+	# pages. Cards name a series, so an episode in those pages counts as its
+	# series. A "+" marks a page with more entries than were captured.
+	jq -rs --slurpfile h "$dir/history.json" --slurpfile f "$dir/favorites.json" --slurpfile r "$dir/ratings.json" \
+		--rawfile rs "$dir/rated-series.txt" '
 		def more(p): "\(p.items | length)\(if p.page.has_more then "+" else "" end)";
-		([$h[0].items[] | select(.watch.completed == true) | .content_id] | unique) as $finished
-		| ([$f[0].items[].content_id] | unique) as $favorites
-		| ([$r[0].items[].item_id] | unique) as $rated
+		def series: if (.series_id // "") != "" then .series_id else .content_id end;
+		([$h[0].items[] | select(.watch.completed == true) | series] | unique) as $finished
+		| ([$f[0].items[] | series] | unique) as $favorites
+		| ($rs | split("\n") | map(select(. != "")) | unique) as $rated
 		| "  leakage: finished=\([.[] | select(.card.content_id | IN($finished[]))] | length)"
 		+ " favorited=\([.[] | select(.card.content_id | IN($favorites[]))] | length)"
 		+ " rated=\([.[] | select(.card.content_id | IN($rated[]))] | length)"
