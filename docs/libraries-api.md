@@ -110,8 +110,10 @@ is ignored. `state` is the first that applies:
 
 `GET /api/v2/libraries/capabilities` (`getLibraryCapabilities`, administrators
 only) is the feature-detection document for these library features; it answers
-`realtime_monitoring: true`, `trickplay: true`, and `ignore_unmatched: true` (the
-unmatched-item ignore operations above) alongside the common capability members. `trickplay_supported` reports whether public asset storage is configured,
+`realtime_monitoring: true`, `trickplay: true`, `ignore_unmatched: true` (the
+unmatched-item ignore operations above), and `unsupported_files: true`
+(`GET /api/v2/libraries/unsupported-files` is available) alongside the common
+capability members. `trickplay_supported` reports whether public asset storage is configured,
 so administrators can enable seek previews when creating the first library.
 
 Scans the monitor queues carry the trigger `realtime_monitor`.

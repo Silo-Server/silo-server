@@ -24642,6 +24642,11 @@ export interface components {
        * @example true
        */
       trickplay_supported: boolean;
+      /**
+       * @description This build lists the files library scans found but do not catalog because of their type (listUnsupportedFiles)
+       * @example true
+       */
+      unsupported_files: boolean;
     };
     LibraryCollection: {
       /** @description The page's items; empty, never null */

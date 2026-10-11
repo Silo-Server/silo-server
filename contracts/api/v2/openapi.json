@@ -32204,6 +32204,13 @@
               true
             ],
             "type": "boolean"
+          },
+          "unsupported_files": {
+            "description": "This build lists the files library scans found but do not catalog because of their type (listUnsupportedFiles)",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
@@ -32211,6 +32218,7 @@
           "trickplay",
           "trickplay_supported",
           "ignore_unmatched",
+          "unsupported_files",
           "revision",
           "state",
           "allowed"

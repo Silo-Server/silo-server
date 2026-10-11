@@ -73,6 +73,7 @@ type LibraryCapabilities struct {
 	Trickplay          bool `json:"trickplay" doc:"This build supports the per-library trickplay_enabled setting, which generates seek-bar previews" example:"true"`
 	TrickplaySupported bool `json:"trickplay_supported" doc:"Whether public asset storage is configured so seek previews can be enabled, including before the first library is created" example:"true"`
 	IgnoreUnmatched    bool `json:"ignore_unmatched" doc:"This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter" example:"true"`
+	UnsupportedFiles   bool `json:"unsupported_files" doc:"This build lists the files library scans found but do not catalog because of their type (listUnsupportedFiles)" example:"true"`
 }
 
 func (c LibraryCapabilities) capabilityState() string { return StateAvailable }
@@ -98,7 +99,7 @@ func registerLibraryMonitoring(reg *Registry) {
 			"Discover library features supported by this build."),
 		Class: ClassActingAdmin,
 	}, func(context.Context, *CapabilityInput) (*LibraryCapabilitiesOutput, error) {
-		return &LibraryCapabilitiesOutput{Body: LibraryCapabilities{RealtimeMonitoring: true, Trickplay: true, TrickplaySupported: reg.deps.ArtworkStore != nil, IgnoreUnmatched: true}}, nil
+		return &LibraryCapabilitiesOutput{Body: LibraryCapabilities{RealtimeMonitoring: true, Trickplay: true, TrickplaySupported: reg.deps.ArtworkStore != nil, IgnoreUnmatched: true, UnsupportedFiles: true}}, nil
 	})
 }
 
