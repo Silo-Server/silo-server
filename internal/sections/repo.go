@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -496,6 +497,18 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 }
 
 func (r *Repository) createGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
+	if IsVideoLibraryType(libraryType) {
+		home, err := r.ListByScopeAll(ctx, "home", nil)
+		if err != nil {
+			return nil, fmt.Errorf("listing home sections: %w", err)
+		}
+		// A home seeded with the shared Recently Added row already shows the
+		// new library; homes from older defaults still get per-library rows.
+		if slices.ContainsFunc(home, IsSharedHomeRecentlyAddedSection) {
+			return nil, nil
+		}
+	}
+
 	existing, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing generated home sections: %w", err)

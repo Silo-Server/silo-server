@@ -620,17 +620,20 @@ func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	got := libraryDefaultSections(&models.MediaFolder{Type: "series"}, 12)
 
-	if len(got) != 6 {
-		t.Fatalf("expected 6 series default sections, got %d", len(got))
+	if len(got) != 7 {
+		t.Fatalf("expected 7 series default sections, got %d", len(got))
 	}
 	if got[1].Title != "Recently Added TV" {
 		t.Fatalf("section 1 title = %q, want %q", got[1].Title, "Recently Added TV")
 	}
-	if got[2].Title != "Recently Released Episodes" {
-		t.Fatalf("section 2 title = %q, want %q", got[2].Title, "Recently Released Episodes")
+	if got[2].SectionType != sections.SectionReturningShows {
+		t.Fatalf("section 2 type = %q, want %q", got[2].SectionType, sections.SectionReturningShows)
 	}
-	if got[4].SectionType != sections.SectionRecommendedForYou {
-		t.Fatalf("section 4 type = %q, want %q", got[4].SectionType, sections.SectionRecommendedForYou)
+	if got[3].Title != "Recently Released Episodes" {
+		t.Fatalf("section 3 title = %q, want %q", got[3].Title, "Recently Released Episodes")
+	}
+	if got[5].SectionType != sections.SectionRecommendedForYou {
+		t.Fatalf("section 5 type = %q, want %q", got[5].SectionType, sections.SectionRecommendedForYou)
 	}
 }
 
