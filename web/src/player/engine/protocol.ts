@@ -88,7 +88,8 @@ export type WorkletToWorkerMessage = {
 
 export type PageToWorkletMessage =
   | { type: "connect"; port: MessagePort }
-  | { type: "generation"; generation: number }
+  /** A new decode run, starting at `position` on the media timeline. */
+  | { type: "generation"; generation: number; position: number }
   | { type: "playing"; playing: boolean }
   | { type: "rate"; rate: number };
 

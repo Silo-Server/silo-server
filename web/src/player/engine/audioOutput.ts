@@ -58,8 +58,8 @@ export class EngineAudioOutput {
     return channel.port2;
   }
 
-  setGeneration(generation: number): void {
-    this.send({ type: "generation", generation });
+  setGeneration(generation: number, position: number): void {
+    this.send({ type: "generation", generation, position });
   }
 
   setPlaying(playing: boolean): void {

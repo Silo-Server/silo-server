@@ -35,6 +35,13 @@ interface Chunk {
 
 const CLOCK_REPORT_QUANTA = 4;
 const CONSUMED_REPORT_QUANTA = 8;
+/**
+ * A chunk that starts later than this past what has been played is a real gap
+ * (audio starting after the video, or missing packets), filled with silence so
+ * the clock keeps the track's timing. Smaller differences are timestamp
+ * rounding and play back to back.
+ */
+const GAP_TOLERANCE_SECONDS = 0.02;
 
 class EngineAudioProcessor extends AudioWorkletProcessor {
   private readonly channels: number;
@@ -50,7 +57,10 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   private consumedFrames = 0;
   private quanta = 0;
   private lastAdvancing = false;
-  /** Media time just past the last sample rendered in this generation. */
+  /**
+   * Media time just past the last sample rendered in this generation, or the
+   * generation's start position before anything has played.
+   */
   private renderedUntil: number | null = null;
   private worker: MessagePort | null = null;
 
@@ -81,6 +91,11 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
         return;
       case "generation":
         this.adopt(message.generation);
+        // The worker's first chunk can arrive before this message and adopt the
+        // generation without its position.
+        if (message.generation === this.generation && this.renderedUntil === null) {
+          this.renderedUntil = message.position;
+        }
         return;
       case "playing":
         this.playing = message.playing;
@@ -110,7 +125,10 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     if (!output || output.length === 0) return true;
     const length = output[0]!.length;
     const head = this.queue[0];
-    const mediaTime = head ? head.timestamp + this.offset / sampleRate : null;
+    let mediaTime: number | null = null;
+    if (head) {
+      mediaTime = this.inGap(head) ? this.renderedUntil : head.timestamp + this.offset / sampleRate;
+    }
     let rendered = 0;
 
     if (this.playing) {
@@ -118,6 +136,11 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       const step = this.rate;
       for (; rendered < length && this.queue.length > 0; rendered++) {
         const chunk = this.queue[0]!;
+        if (this.inGap(chunk)) {
+          for (let c = 0; c < channels; c++) output[c]![rendered] = 0;
+          this.renderedUntil! += step / sampleRate;
+          continue;
+        }
         const index = Math.floor(this.offset);
         const fraction = this.offset - index;
         const next = index + 1 < chunk.frames ? chunk : this.queue[1];
@@ -137,7 +160,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
           this.renderedUntil = finished.timestamp + finished.frames / sampleRate;
         }
       }
-      if (rendered > 0 && this.queue[0]) {
+      if (rendered > 0 && this.queue[0] && !this.inGap(this.queue[0])) {
         this.renderedUntil = this.queue[0].timestamp + this.offset / sampleRate;
       }
     }
@@ -181,6 +204,15 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       this.worker.postMessage(report);
     }
     return true;
+  }
+
+  /** True while `chunk` is not due yet: silence plays until it is. */
+  private inGap(chunk: Chunk): boolean {
+    return (
+      this.offset < 1 &&
+      this.renderedUntil !== null &&
+      chunk.timestamp - this.renderedUntil > GAP_TOLERANCE_SECONDS
+    );
   }
 
   private postPage(message: WorkletToPageMessage): void {

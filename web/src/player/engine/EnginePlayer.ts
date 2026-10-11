@@ -606,7 +606,7 @@ export class EnginePlayer {
     this.audioBuffered = false;
     this.clock?.reset(position);
     this.audio?.setPlaying(false);
-    this.audio?.setGeneration(this.generation);
+    this.audio?.setGeneration(this.generation, position);
     this.post({ type: "start", generation: this.generation, position });
   }
 
