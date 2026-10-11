@@ -99,7 +99,7 @@ func (d resetDB) issue(t *testing.T, userID int, token string, expiresAt time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), Issuer{}, expiresAt); err != nil {
+	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), Issuer{}, expiresAt, DeliveryLink); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -254,7 +254,7 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 					}
 					done <- err
 				} else {
-					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", Issuer{}, time.Now().Add(time.Hour))
+					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", Issuer{}, time.Now().Add(time.Hour), DeliveryLink)
 				}
 			}()
 			// Observe the real database lock before committing the email change.
@@ -363,7 +363,7 @@ func TestResetIssuanceSerializesPromotionDB(t *testing.T) {
 
 			done := make(chan error, 1)
 			go func() {
-				done <- d.repo.Issue(ctx, target, name+"@example.invalid", token, issuer, time.Now().Add(time.Hour))
+				done <- d.repo.Issue(ctx, target, name+"@example.invalid", token, issuer, time.Now().Add(time.Hour), DeliveryLink)
 			}()
 			d.awaitBlocked(t, blocker, done)
 			releaseOnce()
@@ -423,7 +423,7 @@ func TestResetIssuanceSerializesOwnershipMoveDB(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- d.repo.Issue(ctx, target, "target@example.invalid", "moved-link", Issuer{ID: owner}, time.Now().Add(time.Hour))
+		done <- d.repo.Issue(ctx, target, "target@example.invalid", "moved-link", Issuer{ID: owner}, time.Now().Add(time.Hour), DeliveryLink)
 	}()
 	d.awaitBlocked(t, blocker, done)
 	if err := tx.Commit(ctx); err != nil {
