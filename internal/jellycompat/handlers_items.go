@@ -1268,7 +1268,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	if h.sectionsFetcher != nil && latestFastPathEligible(params, libraryItemType) {
 		items, err := h.loadLatestViaSections(r.Context(), session, query)
 		if err == nil {
-			h.applyListMediaSourceCounts(r.Context(), session, items, query)
+			h.applyListFileFields(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, items)
 			return
@@ -1291,7 +1291,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, items)
 }
@@ -2132,7 +2132,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 	if page {
 		startIndex = query.startIndex
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	if query.totalOverride != nil {
 		total = *query.totalOverride
@@ -2311,7 +2311,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 			items[i] = dto
 		}
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2398,7 +2398,7 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 	for i, ep := range episodes {
 		applyPlayableLocation(&items[i], hasFiles[ep.ContentID])
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, 200, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2581,7 +2581,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2653,7 +2653,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range listItems {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
-		h.applyListMediaSourceCounts(r.Context(), session, items, query)
+		h.applyListFileFields(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2703,7 +2703,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range result.Items {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
-		h.applyListMediaSourceCounts(r.Context(), session, items, query)
+		h.applyListFileFields(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2740,7 +2740,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	}
 	total := len(items)
 	items = sliceBaseItems(items, query.startIndex, query.limit)
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2812,7 +2812,7 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2901,7 +2901,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		total = 0
 	}
 	items = slicePage(items, query.startIndex, query.limit)
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2939,7 +2939,7 @@ func (h *ItemsHandler) handlePlayedItems(w http.ResponseWriter, r *http.Request,
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 
 	writeJSON(w, http.StatusOK, queryResultDTO{
@@ -2989,7 +2989,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
-			h.applyListMediaSourceCounts(r.Context(), session, items, query)
+			h.applyListFileFields(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, queryResultDTO{
 				Items:            items,
@@ -3006,7 +3006,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,

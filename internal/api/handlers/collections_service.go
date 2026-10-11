@@ -27,6 +27,8 @@ type PersonalCollectionCreateCommand struct {
 	// carried no multipart body. It answers http.ErrMissingFile when the
 	// part is absent.
 	PosterFile func() ([]byte, error)
+	// V1Rules: see PersonalCollectionPreviewRequest.
+	V1Rules bool
 }
 
 const (
@@ -134,12 +136,12 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
 	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
 	if collectionType == collectionTypeSmart {
-		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true)
+		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
 	} else if len(req.QueryDefinition) > 0 {
-		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true)
+		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}

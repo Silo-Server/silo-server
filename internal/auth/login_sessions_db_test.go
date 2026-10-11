@@ -70,6 +70,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 		return id
 	}
 	one, two, untouched := session(target), session(target), session(other)
+	targetJellyfin, otherJellyfin := insertJellyfinSession(t, pool, target), insertJellyfinSession(t, pool, other)
 	read := func(id string) *time.Time {
 		t.Helper()
 		s, err := repo.GetByID(ctx, id)
@@ -105,6 +106,9 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 	if n, err := repo.RevokeAsAdmin(ctx, actor, target, &one); err != nil || n != 1 {
 		t.Fatalf("single revoke %d %v", n, err)
 	}
+	if !jellyfinSessionExists(t, pool, targetJellyfin) {
+		t.Fatal("single-session revoke must leave the account's Jellyfin-compatible sessions")
+	}
 	if _, active, err := repo.ActiveSessionRole(ctx, one); err != nil || active {
 		t.Fatalf("revoked session still valid: %t %v", active, err)
 	}
@@ -136,6 +140,9 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 	}
 	if !absRevoked(targetABS) || absRevoked(otherABS) {
 		t.Fatal("account-wide revoke must end only the target's Audiobookshelf sessions")
+	}
+	if jellyfinSessionExists(t, pool, targetJellyfin) || !jellyfinSessionExists(t, pool, otherJellyfin) {
+		t.Fatal("account-wide revoke must delete only the target's Jellyfin-compatible sessions")
 	}
 	for _, id := range []string{one, two} {
 		if _, active, err := repo.ActiveSessionRole(ctx, id); err != nil || active {

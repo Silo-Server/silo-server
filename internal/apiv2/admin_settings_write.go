@@ -14,6 +14,7 @@ import (
 )
 
 type AdminSettingsWriteService interface {
+	SnapshotAdminSettings(map[string]string) handlers.AdminSettingsSnapshot
 	InspectAdminSettingsSnapshot(context.Context) (handlers.AdminSettingsSnapshot, error)
 	UpdateAdminSettings(context.Context, map[string]string, func(handlers.AdminSettingsSnapshot) error) (handlers.AdminSettingsUpdateResult, error)
 	UpdateAdminSetting(context.Context, string, string, func(handlers.AdminSettingsSnapshot) error) (handlers.AdminSettingUpdateResult, error)

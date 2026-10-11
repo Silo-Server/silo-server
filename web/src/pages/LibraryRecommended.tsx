@@ -361,8 +361,8 @@ function NoSectionsState() {
       </div>
       <div className="flex flex-wrap items-center justify-center gap-4">
         {actingAdmin ? (
-          <Link to="/admin/home-rows" className="text-primary text-sm font-medium hover:underline">
-            Manage Home rows
+          <Link to="/admin/sections" className="text-primary text-sm font-medium hover:underline">
+            Manage sections
           </Link>
         ) : null}
         <Link

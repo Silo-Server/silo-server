@@ -160,7 +160,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -1438,7 +1439,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -5999,7 +6001,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -6955,7 +6958,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -7147,7 +7151,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -8103,7 +8108,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9024,7 +9030,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9216,7 +9223,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9516,7 +9524,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {

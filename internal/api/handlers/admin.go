@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -136,6 +137,7 @@ type ImpersonationService interface {
 // AdminHandler handles admin-only HTTP endpoints for user management,
 // session listing, unmatched files, and system stats.
 type AdminHandler struct {
+	ChatGPT            *chatgpt.Service
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
 	loginSessions      adminLoginSessionStore
@@ -1666,7 +1668,8 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req)
+	// The frozen v1 contract treats null like omission, so v1 clears nothing.
+	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req, nil)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1685,6 +1688,7 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
 var machineManagedSettingKeys = map[string]bool{
+	chatgpt.CredentialsKey:                      true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	config.MediaImageSweepCheckpointKey:         true,
@@ -2362,6 +2366,7 @@ var adminSettingDependencyGroups = [][]string{
 	{"download.max_per_period", "download.period_duration"},
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
+	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -2618,6 +2623,11 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		normalized[key] = value
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanges map[string]bool
@@ -2626,7 +2636,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2646,6 +2656,12 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				rows = maps.Clone(normalized)
 				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
 				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			}
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
 			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
@@ -2997,6 +3013,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		req.Value = strconv.FormatBool(enabled)
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanged bool
@@ -3004,7 +3025,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -3019,13 +3040,19 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
 			}
 			prospective[key] = row
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
+			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) {
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {

@@ -88,7 +88,7 @@ export function safeReturnPath(value: string | null): string | null {
 }
 
 const HOME_ROWS_PATHS: Record<Surface, string> = {
-  admin: "/admin/home-rows",
+  admin: "/admin/sections",
   profile: "/settings/home-screen",
 };
 

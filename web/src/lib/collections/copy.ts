@@ -78,11 +78,11 @@ export const SHOW_TO_OTHER_PROFILES_LABEL = "Show to other profiles";
 export const SHOW_TO_OTHER_PROFILES_HELP =
   "Every profile on this account sees it, minus titles it can't access. Nobody else on the server can see it.";
 
-/** What turning sharing off costs: "Maya and Leo lose it, including Home rows they made from it." */
+/** What turning sharing off costs: "Maya and Leo lose it, including rows they made from it." */
 export function unshareConsequence(profileNames: readonly string[]): string {
   const who = profileNames.length > 0 ? joinNames(profileNames) : "Other profiles";
   const verb = profileNames.length === 1 ? "loses" : "lose";
-  return `${who} ${verb} it, including Home rows they made from it.`;
+  return `${who} ${verb} it, including rows they made from it.`;
 }
 
 /** Shown when sharing is turned off on a saved collection. */

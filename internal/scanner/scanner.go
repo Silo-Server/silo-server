@@ -3033,7 +3033,8 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
-		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe) {
+		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
+		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe, rejectionStands) {
 			if probeRejected {
 				// Nothing else about the row changes here, so the rejection
 				// is recorded on its own. The repository only marks rows with
@@ -3043,8 +3044,10 @@ func (s *Scanner) processFile(
 				}
 			}
 			// Leave the migrated row's probe_updated_at NULL so a later scan
-			// retries without replacing valid metadata with zero values.
-			if len(updateReasons) > 1 {
+			// retries without replacing valid metadata with zero values. A
+			// standing rejection has no probe_repair reason, so every reason
+			// it has is an identity or subtitle change to write.
+			if rejectionStands || len(updateReasons) > 1 {
 				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
 				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
 				mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
@@ -3332,7 +3335,7 @@ func scanStateUpdateReasons(
 	if existing.MissingSince != nil {
 		reasons = append(reasons, "was_missing")
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		reasons = append(reasons, "probe_repair")
 	}
 	if externalSubtitlesChecked {
@@ -3425,7 +3428,7 @@ func shouldSkipStableConfirmedScanState(
 	if existing.MissingSince != nil {
 		return false
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		return false
 	}
 	if len(updateReasons) > 0 {
@@ -3512,6 +3515,28 @@ func normalizeFileModifiedAt(ts time.Time) time.Time {
 	return models.NormalizeFileModifiedAt(ts)
 }
 
+// scanStateNeedsProbeRepair reports whether a scan should probe an unchanged
+// file again to fill in playback-critical metadata. ffprobe has already
+// rejected a file marked probe_failed_at that never probed successfully, and
+// the mark only stands while its size and modification time are the ones that
+// were probed, so probing the same bytes again would only fail again. Changed
+// bytes drop the mark and are probed as usual. Playback still probes a marked
+// file when it is played.
+func scanStateNeedsProbeRepair(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time, canRepairProbe bool) bool {
+	if !canRepairProbe || probeRejectionStands(existing, fileSize, fileModifiedAt) {
+		return false
+	}
+	return needsCriticalProbeRepairScanState(existing)
+}
+
+// probeRejectionStands reports that ffprobe rejected the bytes the row still
+// describes: it is marked probe_failed_at, never probed successfully, and its
+// size and modification time match the file on disk.
+func probeRejectionStands(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time) bool {
+	return existing != nil && existing.ProbeFailedAt != nil && existing.ProbeUpdatedAt == nil &&
+		existing.FileSize == fileSize && sameFileModifiedAt(existing.FileModifiedAt, fileModifiedAt)
+}
+
 func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if file == nil {
 		return true
@@ -3562,11 +3587,15 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	return false
 }
 
-func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData) bool {
+// shouldPreserveExistingProbeAfterProbeFailure reports whether a failed probe
+// must leave the row's stored probe metadata alone: the scan was there to
+// repair it, alongside at most identity and subtitle changes. A standing
+// rejection skips the repair reason but is the same case.
+func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData, rejectionStands bool) bool {
 	if probe != nil || len(updateReasons) == 0 {
 		return false
 	}
-	foundRepair := false
+	foundRepair := rejectionStands
 	for _, reason := range updateReasons {
 		switch reason {
 		case "probe_repair":

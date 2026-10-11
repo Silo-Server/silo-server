@@ -31,9 +31,13 @@ const (
 	// hidden, so every later run drops them the same way.
 	warnHiddenHistorySuppressed = "skipped hidden history items (%d)"
 
-	warnEmbyFavoritesUnavailable = "fetching Emby favorites failed"
-	warnEmbySeriesUnavailable    = "fetching Emby series metadata failed"
-	warnEmbySeasonFavorites      = "skipped Emby season favorites (%d)"
+	warnEmbyFavoritesUnavailable  = "fetching Emby favorites failed"
+	warnEmbySeriesUnavailable     = "fetching Emby series metadata failed"
+	warnEmbySeasonFavorites       = "skipped Emby season favorites (%d)"
+	warnEmbyResumeListUnavailable = "fetching Emby continue watching failed"
+	// warnContinueWatchingNotReconciled reports a failed pass dropping the
+	// shows the source hid from its Continue Watching.
+	warnContinueWatchingNotReconciled = "hiding shows hidden from the source's continue watching failed"
 	// Runs before the fixed text stored the upstream error after this prefix.
 	legacyEmbyFavoritesPrefix = "fetching Emby favorites: "
 
@@ -41,8 +45,10 @@ const (
 	warnJellyfinFavoritesUnavailable      = "fetching Jellyfin favorites failed"
 	warnJellyfinFavoriteSeriesUnavailable = "fetching Jellyfin series metadata for favorites failed"
 
-	embyFavoritesUnavailableSummary = "Emby favorites couldn't be read, so none were imported."
-	embySeriesUnavailableSummary    = "Emby show details couldn't be read, so some episodes may be unmatched."
+	embyFavoritesUnavailableSummary      = "Emby favorites couldn't be read, so none were imported."
+	embySeriesUnavailableSummary         = "Emby show details couldn't be read, so some episodes may be unmatched."
+	embyResumeListUnavailableSummary     = "Emby's Continue Watching couldn't be read, so titles hidden there may appear in Continue Watching."
+	continueWatchingNotReconciledSummary = "Shows hidden from the source's Continue Watching couldn't all be hidden here, so some may appear in Continue Watching."
 
 	jellyfinResumeUnavailableSummary         = "Jellyfin in-progress items couldn't be read, so partly watched titles may be missing."
 	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so some favorites may be missing."
@@ -94,6 +100,10 @@ func PublicWarning(diagnostic string) string {
 		return embyFavoritesUnavailableSummary
 	case diagnostic == warnEmbySeriesUnavailable:
 		return embySeriesUnavailableSummary
+	case diagnostic == warnEmbyResumeListUnavailable:
+		return embyResumeListUnavailableSummary
+	case diagnostic == warnContinueWatchingNotReconciled:
+		return continueWatchingNotReconciledSummary
 	case diagnostic == warnJellyfinResumeUnavailable:
 		return jellyfinResumeUnavailableSummary
 	case diagnostic == warnJellyfinFavoritesUnavailable:

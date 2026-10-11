@@ -67,7 +67,7 @@ function makeForm(
     isDirty: (key: string) => dirtyKeys.has(key),
     dirtyCount: dirtyKeys.size,
     dirtyKeys: [...dirtyKeys],
-    save: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
     discard: vi.fn(),
     isSaving: false,
     restartRequired: false,
@@ -471,12 +471,13 @@ describe("seek preview settings", () => {
     sheet_bytes: 0,
   });
 
-  it("asks before changing the interval while published previews are pending replacement", async () => {
+  it.each([false, true])("handles confirmed preview saves (failure=%s)", async (failure) => {
     const form = makeForm(
       { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
       ["playback.trickplay_interval_seconds"],
       { "playback.trickplay_interval_seconds": "10" },
     );
+    if (failure) form.save.mockRejectedValue(new Error("412 precondition failed"));
     useSettingsFormMock.mockReturnValue(form);
     useAdminTrickplayLibrariesMock.mockReturnValue({
       data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
@@ -490,6 +491,7 @@ describe("seek preview settings", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
     );
     expect(form.save).toHaveBeenCalledOnce();
+    expect(form.dirtyCount).toBe(1);
   });
 
   it("manages the four seek preview keys under advanced", () => {

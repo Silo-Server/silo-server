@@ -340,7 +340,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   password change, and an access token minted before the account's role changed gets
   `token_refresh_required` so clients refresh instead of signing out. A credential the auth
   gate could not check because its store failed (v1 `503 service_unavailable`) becomes
-  `503 dependency_unavailable` with `Retry-After`, never a 401. A gate the
+  `503 dependency_unavailable` with `Retry-After`, never a 401. Viewer access answers the
+  same way, with reason `viewer_access_unavailable`, when the viewer's scope policy runs out
+  of evaluation time; the request is refused either way. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -2186,7 +2188,11 @@ complete, accessible manual order; the canonical item-order read never returns m
 Artwork changes use `PUT /collections/{id}/poster` with either a bounded multipart `poster` or
 `source_url`. Definition PATCH does not download artwork. The web saves the definition first,
 then changes the poster; artwork failure leaves the saved collection intact and is reported
-separately. Membership and artwork operations check creator ownership, and item additions also
+separately. Artwork libvips cannot read, whether uploaded or fetched from `source_url`, a JPEG or
+PNG of up to 4 megapixels whose pixel data does not decode, and a `source_url` that has no http(s)
+host, answers other than `200`, or returns more than 10 MiB are `422 validation_failed` problems
+and leave the stored poster unchanged. Other processing failures, such as damaged pixel data in a
+larger image, stay `500`. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
 use the explicit ordering operation. Shared viewers can read shared collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.
@@ -2332,7 +2338,8 @@ The administrator collection surface uses `/api/v2/admin/collections` and
 the demo write guard. Library IDs are opaque strings at the boundary. JSON definition inputs
 exclude artwork source URLs; poster and backdrop changes each use a separate bounded multipart
 PUT with `image` or `source_url`. A definition can save successfully even if a later artwork
-request fails. Creation, provider imports, sync, template application, and artwork changes are
+request fails. Artwork and source URLs that the personal poster operation rejects with
+`422 validation_failed` are rejected the same way here and leave the stored artwork unchanged. Creation, provider imports, sync, template application, and artwork changes are
 non-retryable. The capability endpoint reports configured groups, imports, artwork, and item
 ordering support.
 

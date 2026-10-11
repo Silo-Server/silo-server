@@ -744,8 +744,16 @@ func parseRequestedFields(raw string) map[string]bool {
 // (catalog SQL performance overhaul plan §3.2 part b), it can be removed.
 var fieldsRequiringDetail = parseRequestedFields("RemoteTrailers,ProviderIds,People,Chapters,MediaStreams,MediaSources")
 
+// Lowercased Fields keys for the list path's file-backed video size.
+const (
+	fieldWidth  = "width"
+	fieldHeight = "height"
+	fieldIsHD   = "ishd"
+)
+
 // fieldsServedByList enumerates Fields values that mapping.go's itemFromList
-// can populate — gated by `if allFields || fields[X]` blocks. Anything outside
+// can populate — gated by `if allFields || fields[X]` blocks — plus the
+// file-backed ones applyListFileFields fills in afterwards. Anything outside
 // this set AND outside fieldsRequiringDetail is silently dropped from
 // list-path responses (no detail fetch is triggered to fill it).
 //
@@ -762,6 +770,9 @@ var fieldsServedByList = map[string]struct{}{
 	"productionlocations": {},
 	"criticrating":        {},
 	"mediasourcecount":    {},
+	fieldWidth:            {},
+	fieldHeight:           {},
+	fieldIsHD:             {},
 	"providerids":         {},
 }
 

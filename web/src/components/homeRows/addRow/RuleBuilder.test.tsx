@@ -5,6 +5,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueryDefinition } from "@/api/types";
 import { RuleBuilder, RuleSortField } from "./RuleBuilder";
 
+vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
+  useExtendedQueryRules: () => true,
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));

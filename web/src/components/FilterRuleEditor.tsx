@@ -17,16 +17,20 @@ import { cn } from "@/lib/utils";
 import type { FilterConfig, FilterGroup, FilterRule } from "@/api/types";
 import {
   COLLECTION_FIELD_GROUPS,
-  COLLECTION_FIELD_OPTIONS,
+  RELATIVE_DATE_OPERATORS,
+  availableCollectionFields,
   getCollectionSortOptions,
   getCollectionFieldOption,
   getDefaultRuleValue,
   newFilterRule,
   type CollectionFieldOption,
+  type CollectionLanguageSource,
 } from "@/components/collections/collectionBuilderFields";
 import { FacetValuePicker } from "@/components/ui/facet-value-picker";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
-import type { FacetValueScope } from "@/hooks/queries/facetValues";
+import { type FacetValueScope, useRuleLanguages } from "@/hooks/queries/facetValues";
+import { useExtendedQueryRules } from "@/hooks/queries/personSearch";
+import { formatLanguage } from "@/lib/languageDisplay";
 import {
   getDefaultQuerySortOrder,
   normalizeQuerySortForScope,
@@ -54,24 +58,40 @@ interface FilterRuleEditorProps {
   valueScope?: FacetValueScope;
 }
 
+/** The scopes a show can match in, where fields about its episodes apply. */
+const SHOW_SCOPES: ReadonlySet<FilterRuleMediaScope> = new Set(["all", "video", "series"]);
+
+/**
+ * The fields a rule row offers. `shownRatingSources` leaves out ratings an
+ * administrator hid; unset offers every rating. `extendedRules` false leaves
+ * out what only a server advertising `extended_query_rules` takes.
+ */
 export function getFilterRuleFieldOptions(
   allowPersonalizedFilters = false,
   mediaScope: FilterRuleMediaScope = "all",
+  shownRatingSources?: ReadonlySet<string>,
+  extendedRules = true,
 ) {
-  return COLLECTION_FIELD_OPTIONS.filter(
-    (option) => allowPersonalizedFilters || !option.personalized,
-  ).map((option) => {
-    // Ebook and manga are read rather than watched, so relabel "watched".
-    if (mediaScope !== "ebook" && mediaScope !== "manga") {
-      return option;
-    }
-    switch (option.value) {
-      case "watched":
-        return { ...option, label: "Read" };
-      default:
+  return availableCollectionFields(allowPersonalizedFilters, shownRatingSources, extendedRules)
+    .filter(
+      (option) =>
+        (!option.showsOnly || SHOW_SCOPES.has(mediaScope)) &&
+        (!option.noEpisodeValue || mediaScope !== "episode"),
+    )
+    .map((option) => {
+      // Ebook and manga are read rather than watched, so relabel "watched".
+      if (mediaScope !== "ebook" && mediaScope !== "manga") {
         return option;
-    }
-  });
+      }
+      switch (option.value) {
+        case "watched":
+          return { ...option, label: "Read" };
+        case "last_watched":
+          return { ...option, label: "Last read" };
+        default:
+          return option;
+      }
+    });
 }
 
 /**
@@ -131,7 +151,7 @@ function normalizeRuleValue(
   if (fieldDef.inputType === "date") {
     // A date and "in the last 30 days" don't convert into each other.
     const text = String(value ?? "");
-    return (op === "in_last" ? IN_LAST : ISO_DATE).test(text) ? text : "";
+    return (RELATIVE_DATE_OPERATORS.has(op) ? IN_LAST : ISO_DATE).test(text) ? text : "";
   }
   return value;
 }
@@ -166,7 +186,7 @@ const RULE_ROW_SIZES = {
   roomy: {
     row: "flex flex-wrap items-center gap-2",
     control: "h-9 text-sm",
-    field: "w-40",
+    field: "w-48",
     op: "w-36",
     value: "min-w-40 flex-1",
   },
@@ -217,9 +237,15 @@ export function FilterRuleRow({
     );
   }
 
-  // Status and genre "contains" are offered only to a rule that already uses them.
-  const fields = fieldOptions.filter((f) => !f.hidden || f.value === fieldDef.value);
-  const operators = fieldDef.operators.filter((op) => !op.hidden || op.value === rule.op);
+  // Status and genre "contains" are offered only to a rule that already uses
+  // them. A field this scope, the server's shown ratings or an older server
+  // leave out stays offered to a rule that already compares it.
+  const offeredDef = fieldOptions.find((f) => f.value === fieldDef.value);
+  const offered = offeredDef ? fieldOptions : [...fieldOptions, fieldDef];
+  const fields = offered.filter((f) => !f.hidden || f.value === fieldDef.value);
+  const operators = (offeredDef ?? fieldDef).operators.filter(
+    (op) => !op.hidden || op.value === rule.op,
+  );
 
   return (
     <div role={label ? "group" : undefined} aria-label={label} className={size.row}>
@@ -362,7 +388,10 @@ function RuleValueControl({
       );
     case "select":
       return (
-        <Select value={String(rule.value)} onValueChange={onChange}>
+        <Select
+          value={String(rule.value)}
+          onValueChange={(v) => onChange(fieldDef.valueType === "number" ? Number(v) : v)}
+        >
           <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
             <SelectValue placeholder="Pick one" />
           </SelectTrigger>
@@ -389,8 +418,18 @@ function RuleValueControl({
           className={cn(size.control, size.value)}
         />
       );
+    case "language":
+      return (
+        <LanguageValueSelect
+          source={fieldDef.languageSource ?? "original"}
+          scope={valueScope ?? {}}
+          value={String(rule.value ?? "")}
+          onChange={onChange}
+          className={cn(size.control, size.value)}
+        />
+      );
     case "date":
-      return rule.op === "in_last" ? (
+      return RELATIVE_DATE_OPERATORS.has(rule.op) ? (
         <InLastInput
           value={rule.value}
           onChange={onChange}
@@ -425,6 +464,75 @@ function RuleValueControl({
 /** A typed value: a number for number fields, except that a cleared field stays empty. */
 function inputValue(fieldDef: CollectionFieldOption, text: string): string | number {
   return fieldDef.inputType === "number" && text !== "" ? Number(text) : text;
+}
+
+const LANGUAGE_LISTS = {
+  original: "original_languages",
+  audio: "audio_languages",
+  subtitle: "subtitle_languages",
+} as const;
+
+/**
+ * A language the titles in the rule's scope have, by name. Original language
+ * comes from the titles' metadata; audio and subtitle languages from their
+ * files. A saved language no title has any more stays listed so the rule
+ * keeps reading right.
+ */
+function LanguageValueSelect({
+  source,
+  scope,
+  value,
+  onChange,
+  className,
+}: {
+  source: CollectionLanguageSource;
+  scope: FacetValueScope;
+  value: string;
+  onChange: (value: string) => void;
+  className: string;
+}) {
+  const filters = useRuleLanguages(scope, { includeTechnical: source !== "original" });
+  const codes = new Set(filters.data?.[LANGUAGE_LISTS[source]] ?? []);
+  if (value) codes.add(value);
+  const options = [...codes]
+    .map((code) => ({ code, name: formatLanguage(code) || code }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  let placeholder = "Pick a language";
+  if (filters.isLoading) placeholder = "Loading languages";
+  else if (filters.isError && !filters.data) placeholder = "Couldn’t load languages";
+  let status: string | null = null;
+  if (filters.isError) {
+    status = filters.data ? "Couldn’t refresh languages" : "Couldn’t load languages";
+  } else if (options.length === 0) {
+    status = "No languages yet";
+  }
+
+  return (
+    <Select
+      value={value}
+      onValueChange={onChange}
+      onOpenChange={(open) => {
+        // Opening the picker after a failed load asks again.
+        if (open && filters.isError) void filters.refetch();
+      }}
+    >
+      <SelectTrigger aria-label="Value" className={className}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.code} value={option.code}>
+            {option.name}
+          </SelectItem>
+        ))}
+        {status ? (
+          <p role="status" className="text-muted-foreground px-2 py-1.5 text-sm">
+            {status}
+          </p>
+        ) : null}
+      </SelectContent>
+    </Select>
+  );
 }
 
 /** A calendar date; a saved value that isn't YYYY-MM-DD stays editable as text. */
@@ -595,7 +703,14 @@ export default function FilterRuleEditor({
   valueScope,
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
-  const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
+  const shownRatingSources = useShownRatingSources();
+  const extendedRules = useExtendedQueryRules();
+  const fieldOptions = getFilterRuleFieldOptions(
+    allowPersonalizedFilters,
+    mediaScope,
+    shownRatingSources,
+    extendedRules,
+  );
 
   function updateConfig(updates: Partial<FilterConfig>) {
     onChange({ ...config, ...updates });

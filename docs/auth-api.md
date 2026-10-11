@@ -36,9 +36,13 @@ when it falls outside the requested page, or null for API-key callers and an adm
 inspecting another account. Account-wide admin revocation also ends existing sessions
 opened through "View as user" by that account and withdraws its approved, uncollected
 device sign-ins, including temporary remote-playback approvals that would mint a native
-login session. It also revokes the account's Audiobookshelf-compatible sessions and,
-after commit, ends its Jellyfin-compatible sessions on every node, as a password reset
-does. The response counts revoked live login sessions, not withdrawn approvals or
+login session. The same transaction revokes the account's Audiobookshelf-compatible
+sessions and deletes its stored Jellyfin-compatible sessions, as a password reset does;
+when any of it fails, nothing is revoked and the request fails. After commit, every node
+drops the Jellyfin-compatible sessions it holds in memory. A node that has not dropped them
+yet cannot write one back: extending a session or storing its refreshed tokens only updates
+an existing row, and ends the session when the row is gone. The response counts revoked
+live login sessions, not withdrawn approvals or
 compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged.
 Other accounts' own sessions remain usable. API keys are not login sessions and are not
 revoked here.
@@ -302,7 +306,10 @@ answer 401. It answers `503` with `Retry-After`: v2 `dependency_unavailable`, v1
 `service_unavailable`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
 cannot read the session or account. Whether the session is still valid is unknown, so a
 client keeps its tokens, waits `Retry-After` seconds and retries; it signs out only on a
-401. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
+401. Viewer access answers the same `503`, with `Retry-After: 1`, when the policy that
+resolves the viewer's access runs out of its evaluation time (`policy.eval_timeout_ms`):
+the request is refused, but no decision was made, so the client retries. Any other failure
+to resolve viewer access is still `500`. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
 too. The Jellyfin surface keeps its session and answers `503` when its session check or
 its stream and HLS authorization cannot read the session from the database, when a due
 token refresh cannot reach the database, and when that refresh meets an unreachable

@@ -443,6 +443,9 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 // instead of serving it until the entry expires.
 func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, error) {
 	key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+	if dailyMixSectionTypes[resolved.SectionType] {
+		key += "|day=" + strconv.FormatInt(dailyMixDay(f.now()), 10)
+	}
 	if resolved.SectionType != SectionCollection || f.CollectionRepo == nil {
 		return key, nil
 	}

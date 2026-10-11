@@ -234,6 +234,7 @@ func (s *Server) relayGrantToTranscodeNode(w http.ResponseWriter, r *http.Reques
 	// the two grant transcode handlers take, so attaching once here is the
 	// equivalent hook. The proxy→node hop itself stays internal_relay.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	cfg := s.watcher.Config()
 	forwardToken := ""
 	if cfg != nil && cfg.Auth.JWTSecret != "" {

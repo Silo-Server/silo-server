@@ -455,6 +455,10 @@ const (
 	// ReasonItemIDRequired: an item-scoped permission gate found no {id} path
 	// parameter on the route it was mounted on.
 	ReasonItemIDRequired = "item_id_required"
+	// ReasonViewerAccessUnavailable: the viewer's access policy ran out of
+	// time, so the request was refused without a decision (a 503
+	// service_unavailable, like a credential that could not be checked).
+	ReasonViewerAccessUnavailable = "viewer_access_unavailable"
 )
 
 // writeUnauthorized writes a 401 JSON error response. reason is one of the

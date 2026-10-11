@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/animeids"
@@ -257,6 +258,10 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// OnDownloadService receives the configured download service when the
+	// router builds one, so the Jellyfin-compatible listener serves its
+	// downloads under the same policy and bandwidth limiters. Optional.
+	OnDownloadService func(*downloads.Service)
 	// v2Wiring observes the sealed v2 dependency set right before
 	// apiv2.NewHandler consumes it; tests only. It is the one way to assert
 	// that a v1 handler reached the v2 listener, since NewRouter returns a
@@ -773,6 +778,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
+	var catalogResolver *catalog.CatalogResolver
 	var shuffleService *shuffle.Service
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
@@ -896,6 +902,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			itemsHandler.MarkerPopulation = deps.MarkerPopulation
 		}
 		itemsHandler.MarkerFileResolver = deps.FileRepo
+		itemsHandler.MarkerImageURLs = deps.ArtworkResolver
 		itemsHandler.EventsHub = deps.EventsHub
 		itemsHandler.UserRepo = userRepo
 		if accessGroupStore != nil {
@@ -945,7 +952,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
-		catalogResolver := catalog.NewCatalogResolver(browseRepo, itemRepo).
+		catalogResolver = catalog.NewCatalogResolver(browseRepo, itemRepo).
 			WithEpisodeRepository(episodeRepo).
 			WithUserStoreProvider(deps.UserStoreProvider).
 			WithSearchProvider(catalogSearchService.Provider()).
@@ -1068,6 +1075,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userImportHandler *handlers.UserCollectionImportHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	// One device-sightings recorder for every surface that registers the
+	// request's device (legacy and canonical settings, playback start), so
+	// they share one throttle window per (profile, device).
+	deviceSightings := handlers.NewDeviceSightings()
 	// userPluginSettingsHandler is the plugin handler the user-scoped
 	// /settings/plugins routes are registered on; v2 shares it.
 	var userPluginSettingsHandler *handlers.PluginHandler
@@ -1168,6 +1179,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			userImportHandler.ArtworkResolver = deps.ArtworkResolver
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
+		settingsHandler.DeviceSightings = deviceSightings
 		settingsHandler.EventsHub = deps.EventsHub
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
@@ -1178,6 +1190,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// which degrades to "no typed settings routes" instead of no server.
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
+			settingValuesHandler.DeviceSightings = deviceSightings
 			settingValuesHandler.EventsHub = deps.EventsHub
 			// Household management: a primary profile acting for another
 			// profile on its own account. Without the token service a
@@ -1301,6 +1314,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
+			playbackHandler.DeviceSightings = deviceSightings
 		}
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		playbackHandler.CompletionObserver = deps.WatchCompletionObserver
@@ -1696,6 +1710,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
 		markersHandler.BaseContext = deps.AppContext
+		if deps.DB != nil {
+			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+		}
+		markersHandler.MarkerImageURLs = deps.ArtworkResolver
+		markersHandler.ThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if deps.MarkerPopulation != nil {
 			markersHandler.MarkerPopulation = deps.MarkerPopulation
 		}
@@ -1782,14 +1801,36 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// OnConfigChange; only the semaphore size (ai.max_concurrent_jobs) is
 	// fixed at construction.
 	var aiClient *llm.Client
+	var chatGPT *chatgpt.Service
+	if store, ok := settingsRepo.(chatgpt.Store); ok && deps.SecretCipher != nil {
+		chatGPT = chatgpt.NewService(store)
+		chatGPT.OnSettingUpdated = func(ctx context.Context, key, value string) {
+			if deps.OnServerSettingUpdated != nil {
+				deps.OnServerSettingUpdated(ctx, key, value)
+			}
+			if deps.EventBus != nil {
+				_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+		}
+	}
+	aiConfig := func(cfg *config.Config) llm.Config {
+		c := llmConfigFromServer(cfg)
+		if chatGPT != nil {
+			c.ChatGPTTokenSource = chatGPT.TokenSource
+			c.ChatGPTTokenRejected = chatGPT.RejectToken
+			c.ChatGPTPlanRejected = chatGPT.RejectPlanToken
+			c.TextConfigSource = chatGPT.TextConfig
+		}
+		return c
+	}
 	var aiSem chan struct{}
 	if deps.Config != nil {
-		aiClient = llm.NewClient(llmConfigFromServer(deps.Config))
+		aiClient = llm.NewClient(aiConfig(deps.Config))
 		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		if deps.OnConfigChange != nil {
 			clientForReload := aiClient
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				clientForReload.UpdateConfig(llmConfigFromServer(updated))
+				clientForReload.UpdateConfig(aiConfig(updated))
 			})
 		}
 	}
@@ -1797,6 +1838,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiCfg := effectiveSubtitleAIConfig(deps.Config)
+		aiCfg.TextConfigSource = aiClient.TextConfig
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -1822,6 +1864,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
 				newCfg := effectiveSubtitleAIConfig(updated)
+				newCfg.TextConfigSource = aiClient.TextConfig
 				aiService.UpdateConfig(newCfg)
 				aiTranslator.SetBatching(updated.SubtitleAI.BatchSize, updated.SubtitleAI.ContextNeighbors)
 				aiTranscriber.SetExtraction(updated.Playback.FFmpegPath, updated.SubtitleAI.ASRChunkSeconds)
@@ -1836,9 +1879,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataAIHandler *handlers.MetadataAIHandler
 	if deps.DB != nil && deps.Config != nil && aiClient != nil {
 		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
+		mtConfig := func(cfg *config.Config) metadatatranslation.Config {
+			c := metadataAIConfigFromServer(cfg)
+			c.TextConfigSource = aiClient.TextConfig
+			return c
+		}
 		mtService := metadatatranslation.NewService(
 			deps.AppContext,
-			metadataAIConfigFromServer(deps.Config),
+			mtConfig(deps.Config),
 			mtRepo,
 			mtRepo,
 			&metadatatranslation.CatalogLocalizationStore{
@@ -1853,7 +1901,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mtService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				mtService.UpdateConfig(metadataAIConfigFromServer(updated))
+				mtService.UpdateConfig(mtConfig(updated))
 			})
 		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
@@ -1893,6 +1941,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		sections.InstallRecipeDelegate(sectionFetcher)
 		sectionHandler = handlers.NewSectionHandler(sectionRepo, sectionFetcher)
+		catalogResolver.WithSectionResolver(sectionHandler)
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
 		}
@@ -2188,6 +2237,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// delete_watched monitors skip episodes the profile has finished.
 			downloadSvc.SetProgressStores(deps.UserStoreProvider)
 		}
+		if deps.OnDownloadService != nil {
+			deps.OnDownloadService(downloadSvc)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 		if jwtService != nil {
 			downloadHandler.SetDirectDownloadLinks(jwtService)
@@ -2234,6 +2286,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		historyImportSvc.SetLocalNetworkAccess(localNetworkAccess)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
+		// Shows hidden from the source's Continue Watching are dropped through
+		// the same tracker as Home dismissals, so interest recomputes.
+		historyImportSvc.SetContinueWatchingStores(
+			notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications),
+			catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider),
+		)
 		if deps.EventsHub != nil {
 			historyImportSvc.AddObserver(evt.NewHistoryImportObserver(deps.EventsHub))
 		}
@@ -2397,6 +2455,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DownloadSubscriptionSync = downloadSvc
 		v2deps.DownloadCreation = downloadSvc
 		v2deps.AdminAccountDownloads = downloadSvc
+		v2deps.AdminDownloadDevices = downloadSvc
+		v2deps.DownloadPrepareAgain = downloadSvc
 	}
 	if ebookReaderHandler != nil {
 		v2deps.EbookProgress = ebookReaderHandler
@@ -2560,6 +2620,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil && deps.ArtifactManager != nil {
 			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
 			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
+			v2deps.AdminDownloadStorage = deps.ArtifactManager
 		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
@@ -2576,6 +2637,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
+		adminHandler.ChatGPT = chatGPT
+	}
+	if chatGPT != nil {
+		v2deps.ChatGPT = chatGPT
 	}
 	if watchTogetherHandler != nil {
 		v2deps.WatchTogetherSuggestions = watchTogetherHandler
@@ -4656,7 +4721,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
-		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID))
+		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
 }
 
@@ -5107,12 +5172,14 @@ func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list str
 // config. Used at construction and again on every config reload.
 func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
-		BaseURL:    cfg.AI.BaseURL,
-		APIKey:     cfg.AI.APIKey,
-		ChatModel:  cfg.AI.ChatModel,
-		ASRBaseURL: cfg.AI.ASRBaseURL,
-		ASRAPIKey:  cfg.AI.ASRAPIKey,
-		ASRModel:   cfg.AI.ASRModel,
+		AuthMode:        cfg.AI.AuthMode,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		ChatModel:       cfg.AI.ChatModel,
+		ASRBaseURL:      cfg.AI.ASRBaseURL,
+		ASRAPIKey:       cfg.AI.ASRAPIKey,
+		ASRModel:        cfg.AI.ASRModel,
 	}
 }
 

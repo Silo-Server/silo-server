@@ -2,7 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { captureProfileRequestContext } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
-import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
+import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import {
   HOME_LAYOUT_MAX_LENGTH,
@@ -53,14 +53,19 @@ export interface HomeLayoutExport {
   running: boolean;
   /** The libraries and Home preferences have loaded. */
   ready: boolean;
-  /** The libraries the layout covers, once loaded; the import plans against them too. */
-  libraries: ReturnType<typeof useAvailableUserLibraries>["data"];
+  /**
+   * The libraries the layout covers, once loaded; the import plans against
+   * them too. These are the libraries this profile shows: the server refuses
+   * section reads and writes for one the profile hid.
+   */
+  libraries: ReturnType<typeof useUserLibraries>["data"];
 }
 
 /** Export of the profile's Home and library page layouts (#1705), started from More. */
 export function useHomeLayoutExport(): HomeLayoutExport {
-  const librariesQuery = useAvailableUserLibraries();
-  const libraries = librariesQuery.data;
+  const librariesQuery = useUserLibraries();
+  // Until the profile's hidden libraries load, the list still includes them.
+  const libraries = librariesQuery.isLoading ? undefined : librariesQuery.data;
   const homePreferences = useEffectiveSettings({ keys: HOME_PREFERENCE_KEYS });
   // Only a value this profile chose travels; an inherited one would be
   // pinned on the importing profile.
@@ -74,6 +79,12 @@ export function useHomeLayoutExport(): HomeLayoutExport {
     if (homePreferences.isError) {
       toast.error(
         "Couldn't read this profile's Home preferences, so the export would be incomplete. Reload the page and try again.",
+      );
+      return;
+    }
+    if (librariesQuery.error) {
+      toast.error(
+        "Couldn't read which libraries this profile shows, so the export would fail. Reload the page and try again.",
       );
       return;
     }

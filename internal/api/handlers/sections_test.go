@@ -494,7 +494,7 @@ func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
 
 	for _, config := range tests {
 		t.Run(config, func(t *testing.T) {
-			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config)); !ok {
+			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config), false); !ok {
 				t.Fatalf("validateSectionConfig(%s) rejected config: %s", config, msg)
 			}
 		})
@@ -502,7 +502,7 @@ func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
 }
 
 func TestValidateSectionConfigRejectsUnknownContinueType(t *testing.T) {
-	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`))
+	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`), false)
 	if ok {
 		t.Fatal("validateSectionConfig accepted unknown continue_type")
 	}

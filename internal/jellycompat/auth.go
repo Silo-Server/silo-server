@@ -158,20 +158,29 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 				return
 			}
+			// The request uses the session exactly as Update stores it, so
+			// it never reads the session back after the write.
+			var refreshed Session
 			updateErr := a.sessions.Update(token, func(s *Session) error {
 				s.StreamAppAccessToken = newPair.AccessToken
 				s.StreamAppRefreshToken = newPair.RefreshToken
 				s.StreamAppTokenExpiry = a.now().Add(time.Duration(newPair.ExpiresIn) * time.Second)
+				refreshed = *s
 				return nil
 			})
-			if updateErr != nil {
+			switch {
+			case errors.Is(updateErr, ErrSessionNotFound):
+				// Signed out while the tokens refreshed, such as by an
+				// account-wide revocation.
+				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
+				return
+			case updateErr != nil:
 				slog.WarnContext(r.Context(), "jellycompat auth: session update after refresh failed", "component", "jellycompat",
 					"token_prefix", safeTokenPrefix(token),
 					"error", updateErr,
 				)
-			} else {
-				// Re-read the session to get the updated tokens.
-				session, _ = a.sessions.Get(token)
+			default:
+				session = &refreshed
 			}
 		}
 

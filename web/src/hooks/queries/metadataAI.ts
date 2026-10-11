@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
 
+export const metadataAIStatusKey = ["metadata-ai", "status"] as const;
+
 export type MetadataAIOnViewMode = "off" | "button" | "auto";
 
 export interface MetadataAIStatus {
@@ -31,7 +33,7 @@ export async function fetchMetadataAIStatus(
  * viewer-facing on-view mode. */
 export function useMetadataAIStatus(enabled = true) {
   return useQuery({
-    queryKey: ["metadata-ai", "status"],
+    queryKey: metadataAIStatusKey,
     queryFn: ({ signal }) => fetchMetadataAIStatus({ signal }),
     staleTime: 5 * 60 * 1000,
     enabled,

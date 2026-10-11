@@ -43,6 +43,14 @@ export function matchRecipePreset(
   def: RecipeDefinition,
   config: Record<string, unknown> | undefined,
 ): GalleryPreset | undefined {
+  return findMatchingPreset(def, config) ?? def.presets[0];
+}
+
+/** The preset a config came from, or undefined when it matches none. */
+export function findMatchingPreset(
+  def: RecipeDefinition,
+  config: Record<string, unknown> | undefined,
+): GalleryPreset | undefined {
   let best: GalleryPreset | undefined;
   let bestScore = -1;
   for (const preset of def.presets) {
@@ -55,7 +63,7 @@ export function matchRecipePreset(
       bestScore = entries.length;
     }
   }
-  return best ?? def.presets[0];
+  return best;
 }
 
 export interface PreviewRequest {

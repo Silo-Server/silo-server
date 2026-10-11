@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { captureProfileRequestContext } from "@/api/client";
-import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
+import { toast } from "sonner";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import {
+  adminSettingsKey,
+  captureSettingsBaseline,
+  type ChatGPTSettingsChange,
+} from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
   useAdminServerSettings,
@@ -15,9 +20,12 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading, isError: loadError } = useAdminServerSettings();
+  const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
   const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
+  const [, setBaselineRevision] = useState(0);
+  const saveEpoch = useRef(0);
+  const savePending = useRef(false);
   const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
@@ -136,6 +144,48 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     [dirty, keys, localValues, settings],
   );
 
+  const beginSettingsTransition = useCallback(() => {
+    const startedAt = saveEpoch.current;
+    const overlappingSave = savePending.current;
+    const authority = captureProfileRequestContext();
+    return (change: ChatGPTSettingsChange) => {
+      if (
+        !authority ||
+        !isCapturedProfileAuthorityActive(authority) ||
+        overlappingSave ||
+        savePending.current ||
+        saveEpoch.current !== startedAt
+      )
+        return;
+      if (
+        !editBaseline.current ||
+        !change.settingsSnapshot ||
+        dirtyRef.current.has("ai.chat_model") ||
+        dirtyRef.current.has("subtitle_ai.chat_model") ||
+        dirtyRef.current.has("ai.reasoning_effort")
+      )
+        return;
+      try {
+        const before = captureSettingsBaseline(editBaseline.current);
+        const after = captureSettingsBaseline(change.settingsSnapshot);
+        if (before.etag !== change.beforeETag || after.etag !== change.afterETag) return;
+        // Both records must belong to the initiating authority, even if an old
+        // callback is delivered after the form switched profiles.
+        if (
+          JSON.stringify(adminSettingsKey(before.profileContext)) !==
+            JSON.stringify(adminSettingsKey(authority)) ||
+          JSON.stringify(adminSettingsKey(after.profileContext)) !==
+            JSON.stringify(adminSettingsKey(authority))
+        )
+          return;
+        editBaseline.current = change.settingsSnapshot;
+        setBaselineRevision((revision) => revision + 1);
+      } catch {
+        // Keep the original conflict guard when the transition cannot be proven.
+      }
+    };
+  }, []);
+
   const save = useCallback(
     async (selectedKeys?: string[]) => {
       const submittedKeys = Array.from(dirty).filter((key) => selectedKeys?.includes(key) ?? true);
@@ -144,7 +194,21 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       const submittedVersions = new Map(
         submittedKeys.map((key) => [key, editVersions.current.get(key) ?? 0]),
       );
-      const result = await updateSettings.mutateAsync(values);
+      // Callers must distinguish failed writes from acknowledged saves before
+      // advancing a wizard or performing a dependent mutation.
+      if (!settings) {
+        const error = new Error("Reload settings before saving.");
+        toast.error(error.message);
+        throw error;
+      }
+      saveEpoch.current++;
+      savePending.current = true;
+      let result;
+      try {
+        result = await updateSettings.mutateAsync(values);
+      } finally {
+        savePending.current = false;
+      }
       // An acknowledged save changes the validator even when newer local edits
       // remain dirty. Reconcile only with a refresh matching that write's revision;
       // background reads and failed writes never advance this draft baseline.
@@ -175,7 +239,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         setRestartRequired(true);
       }
     },
-    [dirty, localValues, updateSettings],
+    [dirty, localValues, settings, updateSettings],
   );
 
   const discard = useCallback(() => {
@@ -203,6 +267,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     isPending: settings == null && !loadError,
     /** True when the settings snapshot could not be read; values are unset. */
     loadError,
+    retryLoad: refetch,
     /** True once the settings snapshot is available to read and save against. */
     loaded: settings != null,
     getValue,
@@ -222,5 +287,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     sensitiveStatusReady: sensitiveData != null,
     sensitiveStatusError,
     buildConnectionCheckRequest,
+    beginSettingsTransition,
   };
 }

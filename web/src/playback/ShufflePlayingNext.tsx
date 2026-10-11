@@ -8,7 +8,8 @@ import { shuffleKeys } from "@/hooks/queries/keys";
 import { useShuffle } from "@/hooks/queries/shuffles";
 import type { WatchRouteRequest } from "@/pages/watchRouteHelpers";
 import { PlayingNextScreen } from "@/player/components/PlayingNextScreen";
-import type { EpisodeRef, PlaybackStartTrigger } from "@/player/types";
+import type { PlaybackStartTrigger } from "@/player/types";
+import { shuffleNextEpisodeRef } from "./shuffleNextEpisodeRef";
 import { useWatchPlaybackController } from "./watchPlaybackContext";
 
 interface ShufflePlayingNextProps {
@@ -138,26 +139,6 @@ export default function ShufflePlayingNext({
       }
     />
   );
-}
-
-/** The shuffle's next pick in the shape the post-roll screen renders. */
-function shuffleNextEpisodeRef(shuffle: Shuffle): EpisodeRef {
-  const next = shuffle.next;
-  const episode = next.type === "episode";
-  return {
-    contentId: next.content_id,
-    // A movie has no season or episode; the screen hides that line at zero.
-    seasonNumber: episode ? (next.season_number ?? 0) : 0,
-    episodeNumber: episode ? (next.episode_number ?? 0) : 0,
-    title: next.title,
-    runtime: next.runtime ?? 0,
-    overview: next.overview,
-    // An episode card's poster is its 16:9 still; a movie's poster is
-    // portrait, so it shows its backdrop instead.
-    stillUrl: (episode ? next.poster_url : undefined) ?? next.backdrop_url,
-    stillThumbhash: (episode ? next.poster_thumbhash : undefined) ?? next.backdrop_thumbhash,
-    airDate: next.release_date ?? null,
-  };
 }
 
 /** The post-roll heading: an episode's series, or a movie's own title. */

@@ -267,7 +267,9 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
-	_, _, manifest, err := openPluginArchive(data)
+	// Refuse a package the installer would refuse before an installed copy
+	// is stopped to replace it.
+	_, _, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
 	}
@@ -306,17 +308,13 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 		return nil, err
 	}
 
-	repositoryID := target.RepositoryID
 	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
 	if err != nil {
 		return nil, err
 	}
 	var result *InstallResult
 	if target.LegacyArchive {
-		archiveReq := InstallArchiveRequest{
-			ArchiveURL:   target.ArchiveURL,
-			RepositoryID: &repositoryID,
-		}
+		archiveReq := target.ArchiveRequest()
 		if existing == nil {
 			result, err = s.installer.InstallRemote(ctx, archiveReq)
 		} else {
@@ -325,11 +323,7 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 			})
 		}
 	} else {
-		binaryReq := InstallBinaryRequest{
-			BinaryURL:    target.ArchiveURL,
-			Checksum:     target.Checksum,
-			RepositoryID: &repositoryID,
-		}
+		binaryReq := target.BinaryRequest()
 		if existing == nil {
 			result, err = s.installer.InstallBinary(ctx, binaryReq)
 		} else {

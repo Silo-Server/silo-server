@@ -466,7 +466,7 @@ describe("LibraryRecommended", () => {
       await render(<LibraryRecommended libraryId={42} />);
 
       expect(container.textContent).toContain("No sections yet");
-      expect(linkHrefs()).toEqual(["/admin/home-rows", "/settings/home-screen"]);
+      expect(linkHrefs()).toEqual(["/admin/sections", "/settings/home-screen"]);
     });
 
     it("waits for the library check before choosing an empty state", async () => {

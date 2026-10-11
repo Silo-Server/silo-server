@@ -864,6 +864,45 @@ func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn st
 	return result, rows.Err()
 }
 
+// PartitionIDsBySeries splits a series' episode IDs into those a library
+// holds a file for (the rows episodeAvailabilityPredicate keeps) and those it
+// doesn't. Metadata creates file-less rows, and a history import or a deleted
+// file can leave watches on them that history removal still has to reach.
+// One statement reads both sets, so a file linked mid-read can't drop an
+// episode from both.
+func (r *EpisodeRepository) PartitionIDsBySeries(ctx context.Context, seriesID string) (withFile, fileless []string, err error) {
+	return r.partitionIDs(ctx, "series_id", seriesID)
+}
+
+// PartitionIDsBySeason is the season counterpart of PartitionIDsBySeries.
+func (r *EpisodeRepository) PartitionIDsBySeason(ctx context.Context, seasonID string) (withFile, fileless []string, err error) {
+	return r.partitionIDs(ctx, "season_id", seasonID)
+}
+
+func (r *EpisodeRepository) partitionIDs(ctx context.Context, parentColumn, parentID string) (withFile, fileless []string, err error) {
+	// parentColumn comes only from the two fixed-column wrappers above.
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`SELECT content_id, %s FROM episodes
+		WHERE %s = $1
+		ORDER BY season_number ASC, episode_number ASC`, episodeAvailabilityPredicate, parentColumn), parentID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("partitioning episode ids by %s: %w", parentColumn, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contentID string
+		var available bool
+		if err := rows.Scan(&contentID, &available); err != nil {
+			return nil, nil, fmt.Errorf("scanning episode ids by %s: %w", parentColumn, err)
+		}
+		if available {
+			withFile = append(withFile, contentID)
+		} else {
+			fileless = append(fileless, contentID)
+		}
+	}
+	return withFile, fileless, rows.Err()
+}
+
 // buildListBySeriesGroupedBySeasonQuery returns the SQL and bound args used by
 // ListBySeriesGroupedBySeason. Extracted so tests can assert SQL shape without
 // a live Postgres pool.
@@ -1057,7 +1096,8 @@ func (r *EpisodeRepository) ListBySeasonIDs(ctx context.Context, seasonIDs []str
 }
 
 // UpdateMetadata builds a dynamic UPDATE query for the episodes table,
-// setting only the non-nil fields in upd. Always bumps updated_at.
+// setting only the non-nil fields in upd and NULLing the ones it clears.
+// Always bumps updated_at.
 // Returns ErrEpisodeNotFound if no row matches contentID.
 func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
 	var setClauses []string
@@ -1103,6 +1143,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 	}
 	addString("still_source_path", upd.StillSourcePath)
 	addString("still_thumbhash", upd.StillThumbhash)
+	setClauses = append(setClauses, upd.nullClauses(episodeClearableColumns...)...)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
@@ -1127,7 +1168,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 		}
 		return fmt.Errorf("updating episode metadata: %w", err)
 	}
-	if upd.AirDate != nil {
+	if upd.AirDate != nil || upd.clears(columnAirDate) {
 		if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
 			return fmt.Errorf("update series air dates: %w", err)
 		}

@@ -32,6 +32,9 @@ func TestCatalogSearchCapabilities(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"video_with_episodes_scope":true`) {
 		t.Fatal("the video_with_episodes search scope is not advertised", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"extended_query_rules":true`) {
+		t.Fatal("the extended rule fields and operators are not advertised", rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/search/capabilities", "", nil), TypeAuthenticationRequired)
 	deps.People = nil
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/catalog/search/capabilities", "", viewerHeaders())

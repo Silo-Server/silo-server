@@ -4,6 +4,7 @@
  */
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { catalogFiltersFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 
 import type { CatalogFacetName } from "./catalog";
@@ -75,5 +76,40 @@ export function useFacetValues(facet: CatalogFacetName, q: string, scope: FacetV
     },
     placeholderData: keepPreviousData,
     staleTime: 60 * 1000,
+  });
+}
+
+/**
+ * The catalog filter lists for the titles in a rule's libraries and kind of
+ * titles, which a language picker reads its languages from. Audio and
+ * subtitle languages come from files, so only `includeTechnical` asks for them.
+ */
+export function useRuleLanguages(
+  scope: FacetValueScope,
+  { includeTechnical }: { includeTechnical: boolean },
+) {
+  const queryClient = useQueryClient();
+  const libraryIds = [...(scope.libraryIds ?? [])].sort((a, b) => a - b);
+  const type = scope.mediaScope && scope.mediaScope !== "all" ? scope.mediaScope : undefined;
+  return useQuery({
+    queryKey: ["catalog", "ruleLanguages", { libraryIds, type, includeTechnical }] as const,
+    queryFn: async ({ signal }) => {
+      // A server without facet_value_search refuses library_ids, so it is
+      // asked for the whole kind instead. A failed capability request fails
+      // the load, so the picker asks again rather than keeping that list.
+      const capabilities = await fetchPeopleSearchCapabilities(queryClient);
+      const byLibrary = capabilities.facet_value_search === true && libraryIds.length > 0;
+      const filters = await v2("GET /api/v2/catalog/filters", {
+        query: {
+          source: "query",
+          type,
+          library_ids: byLibrary ? libraryIds.map(String) : undefined,
+          skip_technical: includeTechnical ? undefined : true,
+        },
+        signal,
+      });
+      return catalogFiltersFromV2(filters);
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }

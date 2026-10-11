@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	redisv9 "github.com/redis/go-redis/v9"
 )
 
 func TestParseRedisURLSingleServer(t *testing.T) {
@@ -121,6 +123,9 @@ func TestParseRedisURLRejectsInvalid(t *testing.T) {
 		"redis://sentinel-1:26379?master_name=mymaster&password=p+ss",
 		"redis://localhost:6379?unknown=1",
 		"http://localhost:6379",
+		// go-redis panics building a client with a negative pool size.
+		"redis://localhost:6379?pool_size=-1",
+		"redis://sentinel-1:26379?master_name=mymaster&pool_size=-1",
 	} {
 		if options, failover, err := ParseRedisURL(raw); err == nil {
 			t.Errorf("ParseRedisURL(%q) = (%v, %v), want an error", raw, options, failover)
@@ -169,6 +174,8 @@ func TestParseRedisURLErrorsStillSayWhatIsWrong(t *testing.T) {
 		hint      bool
 	}{
 		{"redis://redis.example:6379?pool_size=many", "invalid pool_size number", false},
+		{"redis://redis.example:6379?pool_size=-1", "pool_size must be 0 or more", false},
+		{"redis://sentinel-1:26379?master_name=mymaster&pool_size=-5", "pool_size must be 0 or more", false},
 		{"http://redis.example:6379", "invalid URL scheme", false},
 		{"redis://sentinel-1:26379?master_name=mymaster&addr=nowhere", "unable to parse addr param", false},
 		{"redis://sentinel-1?master_name=mymaster", "needs a host and a port", false},
@@ -212,5 +219,40 @@ func TestNormalizeRedisURLAcceptsSentinel(t *testing.T) {
 	}
 	if _, err := NormalizeRedisURL("redis://sentinel-1:26379?master_name="); err == nil {
 		t.Fatal("NormalizeRedisURL accepted a Sentinel URL without a master name")
+	}
+}
+
+// Every pool size ParseRedisURL accepts builds a client: go-redis panics on a
+// negative one, in the connection check and at every start. 0 still means
+// the default.
+func TestParseRedisURLPoolSizeBuildsAClient(t *testing.T) {
+	for _, raw := range []string{
+		"redis://localhost:6379?pool_size=0",
+		"redis://localhost:6379?pool_size=20",
+		"redis://localhost:6379?pool_size=-1",
+		"redis://sentinel-1:26379?master_name=mymaster&pool_size=0",
+		"redis://sentinel-1:26379?master_name=mymaster&pool_size=-1",
+	} {
+		options, failover, err := ParseRedisURL(raw)
+		if err != nil {
+			continue
+		}
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					t.Errorf("ParseRedisURL(%q) accepted options that panic go-redis: %v", raw, rec)
+				}
+			}()
+			var client *redisv9.Client
+			if failover != nil {
+				client = redisv9.NewFailoverClient(failover)
+			} else {
+				client = redisv9.NewClient(options)
+			}
+			_ = client.Close()
+		}()
+	}
+	if _, err := NormalizeRedisURL("redis://localhost:6379?pool_size=-1"); err == nil {
+		t.Error("NormalizeRedisURL saved a negative pool_size")
 	}
 }

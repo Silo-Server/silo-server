@@ -38,6 +38,11 @@ type PlaybackCaller struct {
 	DeviceID, DeviceName, Platform                        string
 	UserAgent, RemoteAddr                                 string
 	ClientName, ClientVersion, ClientBuild, ClientChannel string
+	// DeclaredDevice is the device the client declared in its
+	// X-Silo-Device-* headers. A successful start registers it in the
+	// profile's device registry. It is separate from DeviceID, the playback
+	// device named by the v2 X-Device-ID header.
+	DeclaredDevice DeviceMetadata
 }
 
 // PlaybackCapabilitiesView is the v2 capabilities body. State is always
@@ -318,6 +323,9 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
 	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
+		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
+	}
 	return withNativeServerFeaturesV3(response), err
 }
 

@@ -362,6 +362,8 @@ func (r *fakeRefreshDebtRepo) UpsertTargetDebt(_ context.Context, targetType, co
 // earlier next_refresh_at. Callers reason about all three (a trailer request
 // adds its reason to whatever debt an item already has, and must not push
 // genuinely-due work out), so a fake that replaced the row would hide that.
+// Like the statement, it leaves next_refresh_at alone while the row is leased
+// or was attempted or refreshed within the cooldown.
 func (r *fakeRefreshDebtRepo) RequestDue(
 	_ context.Context,
 	targetType string,
@@ -369,7 +371,7 @@ func (r *fakeRefreshDebtRepo) RequestDue(
 	priority int,
 	reasonMask int64,
 	nextRefreshAt time.Time,
-	_ time.Duration,
+	cooldown time.Duration,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -379,9 +381,15 @@ func (r *fakeRefreshDebtRepo) RequestDue(
 		return nil
 	}
 	if existing, ok := r.debts[key]; ok {
+		now := time.Now()
+		cooldownStart := now.Add(-max(cooldown, 0))
 		existing.ReasonMask |= reasonMask
 		existing.Priority = max(existing.Priority, priority)
-		if nextRefreshAt.Before(existing.NextRefreshAt) {
+		switch {
+		case existing.LeaseExpiresAt != nil && !existing.LeaseExpiresAt.Before(now):
+		case existing.LastAttemptAt != nil && existing.LastAttemptAt.After(cooldownStart):
+		case existing.LastSuccessAt != nil && existing.LastSuccessAt.After(cooldownStart):
+		case nextRefreshAt.Before(existing.NextRefreshAt):
 			existing.NextRefreshAt = nextRefreshAt
 		}
 		return nil
@@ -425,12 +433,17 @@ func (r *fakeRefreshDebtRepo) MarkTargetFailure(
 	if key == "" || contentID == "" || reasonMask == 0 {
 		return nil
 	}
+	attemptedAt := time.Now()
+	if existing, ok := r.debts[key]; ok {
+		attemptCount = max(attemptCount, existing.AttemptCount)
+	}
 	r.debts[key] = &models.MetadataRefreshDebt{
 		TargetType:    targetType,
 		ContentID:     contentID,
 		Priority:      priority,
 		ReasonMask:    reasonMask,
 		NextRefreshAt: nextRefreshAt,
+		LastAttemptAt: &attemptedAt,
 		AttemptCount:  attemptCount,
 		LastError:     lastError,
 	}
@@ -453,7 +466,8 @@ func (r *fakeRefreshDebtRepo) MarkTargetSuccess(_ context.Context, targetType, c
 		delete(r.debts, key)
 		return nil
 	}
-	debt := &models.MetadataRefreshDebt{TargetType: targetType, ContentID: contentID}
+	succeededAt := time.Now()
+	debt := &models.MetadataRefreshDebt{TargetType: targetType, ContentID: contentID, LastSuccessAt: &succeededAt}
 	if existing, ok := r.debts[key]; ok {
 		// Mirror the repository's upsert: a success leaves attempt_count and
 		// last_attempt_at alone, so terminal give-up survives later syncs.
@@ -1530,6 +1544,171 @@ func TestRequestStaleMetadataRefreshStartsOnDemandRefreshOnce(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for on-demand refresh to complete")
+	}
+}
+
+// TestRequestStaleMetadataRefreshLeavesTerminalEpisodeDebtParked covers a
+// detail view of a series whose episode-incomplete debt gave up. The view must
+// not lift the row back to the top priority band, make it due, or refresh it.
+func TestRequestStaleMetadataRefreshLeavesTerminalEpisodeDebtParked(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	debts := newFakeRefreshDebtRepo()
+	h.service.refreshDebtRepo = debts
+
+	// A refresh that started would hold its in-process claim until released.
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		waitForOnDemandIdle(t, h.service)
+	})
+	h.service.hooks.process = func(ctx context.Context, req ProcessRequest) (*ProcessResult, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
+	}
+
+	// The last attempt and success are older than the nudge cooldown, so the
+	// repository would otherwise pull next_refresh_at forward to now.
+	settledAt := time.Now().Add(-2 * metadataRefreshNudgeCooldown)
+	parkedUntil := time.Now().Add(refreshDebtTerminalDelay)
+	debts.debts[fakeRefreshDebtKey(RefreshTargetItem, "series-1")] = &models.MetadataRefreshDebt{
+		TargetType:    RefreshTargetItem,
+		ContentID:     "series-1",
+		Priority:      refreshDebtTerminalPriority,
+		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
+		NextRefreshAt: parkedUntil,
+		LastAttemptAt: &settledAt,
+		LastSuccessAt: &settledAt,
+		AttemptCount:  refreshDebtEpisodeTerminalAttempts,
+	}
+
+	for range 2 {
+		if err := h.service.RequestStaleMetadataRefresh(ctx, RefreshTargetItem, "series-1"); err != nil {
+			t.Fatalf("RequestStaleMetadataRefresh: %v", err)
+		}
+	}
+
+	debt, err := debts.GetTarget(ctx, RefreshTargetItem, "series-1")
+	if err != nil {
+		t.Fatalf("GetTarget: %v", err)
+	}
+	if debt.Priority != refreshDebtTerminalPriority {
+		t.Fatalf("priority = %d, want terminal priority %d", debt.Priority, refreshDebtTerminalPriority)
+	}
+	if !debt.NextRefreshAt.Equal(parkedUntil) {
+		t.Fatalf("next_refresh_at = %v, want the terminal re-check %v", debt.NextRefreshAt, parkedUntil)
+	}
+	if !h.service.claimOnDemandMetadataRefresh(RefreshTargetItem, "series-1") {
+		t.Fatal("an on-demand refresh was started for terminal debt")
+	}
+	h.service.releaseOnDemandMetadataRefresh(RefreshTargetItem, "series-1")
+}
+
+// TestRequestStaleMetadataRefreshStillNudgesRetryableEpisodeDebt keeps the
+// terminal guard to the debt that is actually parked: episode debt with
+// attempts left, and terminal episode debt that also carries a reason with its
+// own backoff, are still nudged and refreshed.
+func TestRequestStaleMetadataRefreshStillNudgesRetryableEpisodeDebt(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		reasonMask   int64
+		attemptCount int
+	}{
+		{"attempts left", RefreshDebtReasonEpisodeIncomplete, 1},
+		{"terminal with a fixable reason", RefreshDebtReasonEpisodeIncomplete | RefreshDebtReasonCoreMetadataIncomplete, refreshDebtEpisodeTerminalAttempts},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			debts := newFakeRefreshDebtRepo()
+			h.service.refreshDebtRepo = debts
+
+			started := make(chan struct{})
+			var startedOnce sync.Once
+			h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
+				startedOnce.Do(func() { close(started) })
+				return &ProcessResult{ContentID: req.ContentID, Updated: true}, nil
+			}
+
+			settledAt := time.Now().Add(-2 * metadataRefreshNudgeCooldown)
+			debts.debts[fakeRefreshDebtKey(RefreshTargetItem, "series-1")] = &models.MetadataRefreshDebt{
+				TargetType:    RefreshTargetItem,
+				ContentID:     "series-1",
+				Priority:      effectiveRefreshDebtPriority(tc.reasonMask, tc.attemptCount),
+				ReasonMask:    tc.reasonMask,
+				NextRefreshAt: time.Now().Add(24 * time.Hour),
+				LastAttemptAt: &settledAt,
+				LastSuccessAt: &settledAt,
+				AttemptCount:  tc.attemptCount,
+			}
+
+			if err := h.service.RequestStaleMetadataRefresh(ctx, RefreshTargetItem, "series-1"); err != nil {
+				t.Fatalf("RequestStaleMetadataRefresh: %v", err)
+			}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for the on-demand refresh")
+			}
+			waitForOnDemandIdle(t, h.service)
+			debt, err := debts.GetTarget(ctx, RefreshTargetItem, "series-1")
+			if err != nil {
+				t.Fatalf("GetTarget: %v", err)
+			}
+			if debt.NextRefreshAt.After(time.Now()) {
+				t.Fatalf("next_refresh_at = %v, want it pulled forward to now", debt.NextRefreshAt)
+			}
+		})
+	}
+}
+
+// TestScheduledItemFailureReportsTerminalDebtOnce covers the failure sync of
+// an item target. The scheduled refresh's claim counted the attempt that took
+// the row to the terminal count, so its failure reports it. An on-demand
+// refresh that fails counts no attempt and reports nothing.
+func TestScheduledItemFailureReportsTerminalDebtOnce(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	debts := newFakeRefreshDebtRepo()
+	h.service.refreshDebtRepo = debts
+	h.itemRepo.items["series-1"] = &models.MediaItem{
+		ContentID:                 "series-1",
+		Type:                      "series",
+		Status:                    "matched",
+		EpisodeMetadataIncomplete: true,
+	}
+	claimedAt := time.Now()
+	debts.debts[fakeRefreshDebtKey(RefreshTargetItem, "series-1")] = &models.MetadataRefreshDebt{
+		TargetType:    RefreshTargetItem,
+		ContentID:     "series-1",
+		Priority:      refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
+		NextRefreshAt: claimedAt,
+		ClaimedAt:     &claimedAt,
+		LastAttemptAt: &claimedAt,
+		AttemptCount:  refreshDebtEpisodeTerminalAttempts,
+	}
+	h.service.hooks.process = func(context.Context, ProcessRequest) (*ProcessResult, error) {
+		return nil, errors.New("provider unavailable")
+	}
+	logs := captureDefaultLogs(t)
+
+	if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetItem, "series-1"); err == nil {
+		t.Fatal("RefreshScheduledTarget succeeded, want the provider error")
+	}
+	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
+		t.Fatalf("terminal warnings after the claimed refresh failed = %d, want 1\n%s", got, logs.String())
+	}
+
+	// runOnDemandMetadataRefresh refreshes the target this way, with no claim.
+	if err := h.service.refreshTarget(ctx, RefreshTargetItem, "series-1", 0, ModeScheduledRefresh, false); err == nil {
+		t.Fatal("on-demand refreshTarget succeeded, want the provider error")
+	}
+	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
+		t.Fatalf("terminal warnings after an on-demand failure = %d, want still 1\n%s", got, logs.String())
 	}
 }
 
