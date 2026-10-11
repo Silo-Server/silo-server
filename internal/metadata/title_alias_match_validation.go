@@ -100,10 +100,10 @@ func validateMatchByProviderTitleAliases(
 
 // providerTitleAliasMatch fetches the candidate's details from the providers
 // that returned it and reports which of their titles matches the local title
-// exactly. When none does, ruledOut says whether that is established: a
-// provider returned a complete title list without it, or no longer knows the
-// ID (404). A local sidecar provider never confirms a remote result, so only
-// corroborating sources are asked.
+// exactly. Any one provider can confirm it. When none does, ruledOut says
+// whether that is established: every provider asked returned a complete title
+// list without it or no longer knows the ID (404). A local sidecar provider
+// never confirms a remote result, so only corroborating sources are asked.
 func providerTitleAliasMatch(
 	ctx context.Context,
 	hints *MatchHints,
@@ -111,24 +111,26 @@ func providerTitleAliasMatch(
 	providers []Provider,
 	language string,
 ) (matchedTitle string, ruledOut bool, err error) {
+	asked, unresolved := 0, false
 	for _, p := range providers {
 		mp, ok := p.(MetadataProvider)
 		if !ok || nonCorroboratingSources[p.Slug()] || !candidateHasSource(candidate, p.Slug()) {
 			continue
 		}
+		asked++
 		result, fetchErr := mp.GetMetadata(ctx, MetadataRequest{
 			ProviderIDs: candidate.ProviderIDs,
 			ContentType: candidate.ContentType,
 			Language:    language,
 		})
 		if isProvider404(fetchErr) {
-			ruledOut = true
 			continue
 		}
 		if fetchErr != nil {
 			return "", false, fmt.Errorf("title alias validation via %s: %w", p.Slug(), fetchErr)
 		}
 		if result == nil {
+			unresolved = true
 			continue
 		}
 		titles := []string{result.Title, result.OriginalTitle}
@@ -140,9 +142,9 @@ func providerTitleAliasMatch(
 				return title, true, nil
 			}
 		}
-		if result.TitleAliasesComplete {
-			ruledOut = true
+		if !result.TitleAliasesComplete {
+			unresolved = true
 		}
 	}
-	return "", ruledOut, nil
+	return "", asked > 0 && !unresolved, nil
 }

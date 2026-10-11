@@ -413,3 +413,25 @@ func TestInitialMatchChecksPrimaryResultsAfterAlternateIdentityFails(t *testing.
 		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
 	}
 }
+
+func TestValidateMatchByProviderTitleAliasesNeedsEverySourceToRuleOutRival(t *testing.T) {
+	t.Parallel()
+	// Rival 111 came from two providers: tmdb's complete list lacks the
+	// title, but tvdb's list is partial, so 111 isn't ruled out.
+	tmdb := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"222": {"首尔之春"}}}
+	tvdb := &aliasProvider{slug: "tvdb", partial: map[string]bool{"111": true, "222": true}}
+	candidates := NormalizeCandidates([]SearchResult{
+		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
+	}, "movie")
+	for i := range candidates {
+		if candidates[i].ProviderIDs["tmdb"] == "111" {
+			candidates[i].Sources = []string{"tmdb", "tvdb"}
+		}
+	}
+
+	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tmdb, tvdb}, "en")
+	if winner != nil {
+		t.Fatalf("winner = %v, want no match while one source's list for the rival is partial", winner.ProviderIDs)
+	}
+}
