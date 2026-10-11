@@ -65,6 +65,26 @@ describe("EngineAudioProcessor", () => {
     expect(quantum(processor)[127]).toBe(0.5);
   });
 
+  it("holds a new run's audio until the page starts it", () => {
+    const processor = new Processor({ processorOptions: { channels: 1 } });
+    const page = (data: PageToWorkletMessage) => processor.port.onmessage!({ data });
+    const worker = (data: WorkerToWorkletMessage) =>
+      (processor as unknown as { onWorker(message: WorkerToWorkletMessage): void }).onWorker(data);
+    page({ type: "generation", generation: 1, position: 0 });
+    page({ type: "playing", playing: true });
+    // A seek: the worker's first chunk for run 2 beats the page's messages.
+    worker({
+      type: "pcm",
+      generation: 2,
+      timestamp: 30,
+      samples: new Float32Array(4_800).fill(0.5),
+    });
+    expect(Array.from(quantum(processor)).every((sample) => sample === 0)).toBe(true);
+    page({ type: "generation", generation: 2, position: 30 });
+    page({ type: "playing", playing: true });
+    expect(quantum(processor)[0]).toBe(0.5);
+  });
+
   it("reports running dry as a stop, without an advancing clock after it", () => {
     const processor = new Processor({ processorOptions: { channels: 1 } });
     const page = (data: PageToWorkletMessage) => processor.port.onmessage!({ data });

@@ -73,6 +73,10 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   private adopt(generation: number): void {
     if (generation <= this.generation) return;
     this.generation = generation;
+    // The worker's first chunk can arrive before the page's messages for this
+    // run, which travel on another port. Output waits for the page to say the
+    // new position is ready.
+    this.playing = false;
     this.queue = [];
     this.offset = 0;
     this.ended = false;
