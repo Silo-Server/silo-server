@@ -113,8 +113,9 @@ function ChatGPTConnectionPanel({
       return;
     }
     if (complete.isPending || status.isFetching) return;
+    if (next.attempt_id === attempt.attempt_id && next.login_pending) return;
     const expired = Date.now() >= Date.parse(attempt.expires_at);
-    if (!expired && (next.attempt_id !== attempt.attempt_id || next.login_pending)) return;
+    if (!expired && next.attempt_id !== attempt.attempt_id) return;
     clearLogin();
     toast.error("Sign-in did not complete. Continue with ChatGPT to try again.");
   });

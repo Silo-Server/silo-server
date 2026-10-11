@@ -13,6 +13,7 @@ import {
   type ChatGPTSettingsChange,
   type SettingsValues,
 } from "@/api/v2/adminSettingsSnapshot";
+import { metadataAIStatusKey } from "@/hooks/queries/metadataAI";
 
 const connectionKey = ["admin", "ai", "chatgpt"] as const;
 
@@ -79,8 +80,10 @@ export function useChatGPTModels(clientID: string, enabled: boolean) {
 
 function useConnectionWrite<TInput, TResult>(
   request: (input: TInput, context: ProfileRequestContextSnapshot) => Promise<TResult>,
-  changesSettings = false,
-  afterSettingsRefresh?: (result: TResult, settings: SettingsValues | undefined) => void,
+  options: {
+    changesReadiness?: boolean;
+    afterSettingsRefresh?: (result: TResult, settings: SettingsValues | undefined) => void;
+  } = {},
 ) {
   const qc = useQueryClient();
   const context = captureProfileRequestContext();
@@ -93,11 +96,14 @@ function useConnectionWrite<TInput, TResult>(
       const result = await request(input, context);
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       await qc.invalidateQueries({ queryKey: scopedConnectionKey(context) });
-      if (changesSettings && isCapturedProfileAuthorityActive(context)) {
+      if (options.afterSettingsRefresh && isCapturedProfileAuthorityActive(context)) {
         await qc.invalidateQueries({ queryKey: adminSettingsKey(context), exact: true });
         if (isCapturedProfileAuthorityActive(context)) {
-          afterSettingsRefresh?.(result, qc.getQueryData(adminSettingsKey(context)));
+          options.afterSettingsRefresh(result, qc.getQueryData(adminSettingsKey(context)));
         }
+      }
+      if (options.changesReadiness && isCapturedProfileAuthorityActive(context)) {
+        await qc.invalidateQueries({ queryKey: metadataAIStatusKey, exact: true });
       }
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       return result;
@@ -124,8 +130,7 @@ export function useCompleteChatGPTLogin() {
           onResponse,
         }),
       ),
-    true,
-    retainActivationSnapshot,
+    { changesReadiness: true, afterSettingsRefresh: retainActivationSnapshot },
   );
 }
 
@@ -139,8 +144,7 @@ export function useSelectChatGPTAccount() {
           onResponse,
         }),
       ),
-    true,
-    retainActivationSnapshot,
+    { changesReadiness: true, afterSettingsRefresh: retainActivationSnapshot },
   );
 }
 
@@ -170,10 +174,12 @@ function retainActivationSnapshot(
 }
 
 export function useDisconnectChatGPTAccount() {
-  return useConnectionWrite((clientID: string, profileContext) =>
-    v2("DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}", {
-      path: { client_id: clientID },
-      profileContext,
-    }),
+  return useConnectionWrite(
+    (clientID: string, profileContext) =>
+      v2("DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}", {
+        path: { client_id: clientID },
+        profileContext,
+      }),
+    { changesReadiness: true },
   );
 }

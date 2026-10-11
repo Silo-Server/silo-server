@@ -281,8 +281,14 @@ func TestLoginValidatesIdentityAndConsumesCallback(t *testing.T) {
 					if a != (account{ClientID: clientID, NeedsLogin: true}) {
 						t.Fatalf("unverified registration retained identity or tokens: %+v", a)
 					}
-				} else if a.Subject != "user" || a.Email != claims.Email || a.IDToken != signed || !a.NeedsLogin || a.AccessToken != "" || a.RefreshToken != "" || !a.ExpiresAt.IsZero() {
-					t.Fatalf("disabled registration retained inference credentials or lost identity: %+v", a)
+				} else {
+					wantRefresh := "refresh"
+					if test.omitRefresh {
+						wantRefresh = ""
+					}
+					if a.Subject != "user" || a.Email != claims.Email || a.IDToken != signed || !a.NeedsLogin || a.AccessToken != "access" || a.RefreshToken != wantRefresh || a.Scopes != grantScope || a.ExpiresAt.IsZero() {
+						t.Fatal("disabled registration lost accepted tokens or verified identity")
+					}
 				}
 				if err := s.SelectAccount(t.Context(), clientID); !errors.Is(err, ErrSignInRequired) {
 					t.Fatalf("disabled account selected: %v", err)

@@ -20,6 +20,7 @@ import {
 } from "./chatgpt";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
+import { metadataAIStatusKey, useMetadataAIStatus } from "../metadataAI";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", () => ({ v2: request }));
@@ -111,6 +112,67 @@ it("keeps refetched model catalogs tied to their account during selection", asyn
   });
   rerender({ account: "a" });
   await waitFor(() => expect(result.current.models.data?.models[0]?.id).toBe("a-model"));
+});
+
+it.each([
+  ["completed login", useCompleteChatGPTLogin, false, true],
+  ["selection", useSelectChatGPTAccount, false, true],
+  ["disconnect", useDisconnectChatGPTAccount, true, false],
+] as const)(
+  "refreshes viewer translation readiness after %s",
+  async (_name, hook, before, after) => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    let ready: boolean = before;
+    request.mockImplementation(async (operation) => {
+      if (operation === "GET /api/v2/capabilities/metadata-ai") {
+        return { state: ready ? "available" : "not_configured", on_view: "button" };
+      }
+      ready = after;
+      return {};
+    });
+    const { result } = renderHook(
+      () => ({ capability: useMetadataAIStatus(), connection: hook() }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.capability.data?.enabled).toBe(before));
+    await act(async () => {
+      await result.current.connection.mutateAsync("fixture");
+    });
+    await waitFor(() => expect(result.current.capability.data?.enabled).toBe(after));
+    expect(
+      request.mock.calls.filter(
+        ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
+      ),
+    ).toHaveLength(2);
+  },
+);
+
+it("keeps viewer readiness cached when sign-in only starts", async () => {
+  const client = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  request.mockImplementation(async (operation) =>
+    operation === "GET /api/v2/capabilities/metadata-ai"
+      ? { state: "not_configured", on_view: "off" }
+      : {},
+  );
+  const { result } = renderHook(
+    () => ({ capability: useMetadataAIStatus(), start: useStartChatGPTLogin() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.capability.data?.enabled).toBe(false));
+  await act(async () => {
+    await result.current.start.mutateAsync(undefined);
+  });
+  expect(
+    request.mock.calls.filter(
+      ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
+    ),
+  ).toHaveLength(1);
 });
 
 it.each([
@@ -232,32 +294,114 @@ it("refuses completion after an account switch before sending a request", async 
   expect(request).not.toHaveBeenCalled();
 });
 
-it("rejects a result when authority changes while invalidation is pending", async () => {
-  const client = new QueryClient();
-  let finishInvalidation!: () => void;
-  const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(
-    () =>
-      new Promise<void>((resolve) => {
+it.each([
+  ["start", useStartChatGPTLogin],
+  ["complete", useCompleteChatGPTLogin],
+  ["select", useSelectChatGPTAccount],
+  ["disconnect", useDisconnectChatGPTAccount],
+] as const)(
+  "rejects a %s result when authority changes during connection refresh",
+  async (_name, hook) => {
+    const client = new QueryClient();
+    let finishInvalidation!: () => void;
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishInvalidation = resolve;
+        }),
+    );
+    request.mockResolvedValue({ attempt_id: "old-attempt" });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      () => {
+        const mutation = hook();
+        return { mutateAsync: (input: string): Promise<unknown> => mutation.mutateAsync(input) };
+      },
+      { wrapper },
+    );
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.mutateAsync("fixture");
+    });
+    const rejected = expect(pending).rejects.toBeInstanceOf(StaleApiRequestContextError);
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledOnce());
+    setAccessToken("account-b");
+    rerender();
+    await act(async () => {
+      finishInvalidation();
+      await rejected;
+    });
+    expect(invalidate).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(["settings", "viewer capability"])(
+  "rejects completion when authority changes during %s refresh",
+  async (refresh) => {
+    const client = new QueryClient();
+    const settingsKey = adminSettingsKey(captureProfileRequestContext()!);
+    const pausedKey = refresh === "settings" ? settingsKey : metadataAIStatusKey;
+    let finishInvalidation!: () => void;
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockImplementation((filter) => {
+      if (JSON.stringify(filter?.queryKey) !== JSON.stringify(pausedKey)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
         finishInvalidation = resolve;
-      }),
-  );
-  request.mockResolvedValue({ attempt_id: "old-attempt" });
+      });
+    });
+    request.mockResolvedValue({});
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(useCompleteChatGPTLogin, { wrapper });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.mutateAsync("fixture");
+    });
+    const rejected = expect(pending).rejects.toBeInstanceOf(StaleApiRequestContextError);
+    await vi.waitFor(() => expect(finishInvalidation).toBeTypeOf("function"));
+    setAccessToken("account-b");
+    rerender();
+    const callsBeforeSwitch = invalidate.mock.calls.length;
+    await act(async () => {
+      finishInvalidation();
+      await rejected;
+    });
+    expect(invalidate).toHaveBeenCalledTimes(callsBeforeSwitch);
+    if (refresh === "settings") {
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: metadataAIStatusKey, exact: true });
+    }
+  },
+);
+
+it("leaves viewer readiness cached after a failed disconnect", async () => {
+  const client = new QueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const { result, rerender } = renderHook(useStartChatGPTLogin, { wrapper });
-  let pending!: Promise<unknown>;
-  act(() => {
-    pending = result.current.mutateAsync(undefined);
+  request.mockImplementation(async (operation) => {
+    if (operation === "GET /api/v2/capabilities/metadata-ai") {
+      return { state: "available", on_view: "button" };
+    }
+    throw new Error("disconnect failed");
   });
-  const rejected = expect(pending).rejects.toBeInstanceOf(StaleApiRequestContextError);
-  await vi.waitFor(() => expect(invalidate).toHaveBeenCalledOnce());
-  setAccessToken("account-b");
-  rerender();
+  const { result } = renderHook(
+    () => ({ capability: useMetadataAIStatus(), disconnect: useDisconnectChatGPTAccount() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.capability.data?.enabled).toBe(true));
   await act(async () => {
-    finishInvalidation();
-    await rejected;
+    await expect(result.current.disconnect.mutateAsync("fixture")).rejects.toThrow(
+      "disconnect failed",
+    );
   });
+  expect(result.current.capability.data?.enabled).toBe(true);
+  expect(
+    request.mock.calls.filter(
+      ([operation]) => operation === "GET /api/v2/capabilities/metadata-ai",
+    ),
+  ).toHaveLength(1);
 });
 
 it("refreshes an expired Silo token while preserving the captured write authority", async () => {

@@ -557,6 +557,54 @@ describe("ChatGPTConnection", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps server-confirmed pending sign-in open when the browser clock passes its deadline", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    loginExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    act(() => {
+      vi.setSystemTime(Date.parse(loginExpiresAt) + 3_600_000);
+      status = {
+        ...status,
+        attempt_id: "fixture-state",
+        login_pending: true,
+        login_result: "pending",
+      };
+      statusVersion++;
+      view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    });
+    expect(screen.getByRole("textbox", { name: "Browser URL" })).toBeInTheDocument();
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.completeReset).not.toHaveBeenCalled();
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Browser URL" }),
+      "http://127.0.0.1:51121/auth/callback?state=fixture-state&code=auth-code&client_id=issued-app",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Connect ChatGPT" }));
+    expect(mocks.complete).toHaveBeenCalledOnce();
+    expect(mocks.success).toHaveBeenCalledOnce();
+  });
+
+  it.each(["expired", "superseded"])("closes a settled %s sign-in", async (ending) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const view = render(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    act(() => {
+      status = {
+        ...status,
+        attempt_id: ending === "expired" ? "fixture-state" : "another-browser",
+        login_pending: ending !== "expired",
+        login_result: ending === "expired" ? "expired" : "pending",
+      };
+      if (ending === "superseded") vi.setSystemTime(Date.parse(loginExpiresAt) + 1);
+      statusVersion++;
+      view.rerender(<ChatGPTConnection model="" onModelChange={vi.fn()} />);
+    });
+    expect(screen.queryByRole("textbox", { name: "Browser URL" })).not.toBeInTheDocument();
+    expect(mocks.error).toHaveBeenCalledOnce();
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
   it("keeps an accepted completion open across expiry and confirms its settled response", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     loginExpiresAt = new Date(Date.now() + 1_000).toISOString();

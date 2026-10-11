@@ -469,14 +469,12 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 			return nil //nolint:nilerr // Commit the failed outcome before returning completionErr.
 		}
 		a := account{ClientID: clientID, Subject: claims.Subject, Email: claims.Email,
+			AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresAt: expiresAt,
 			IDToken: tokens.IDToken, Scopes: tokens.Scope, NeedsLogin: !hasPlanScope(tokens.Scope)}
 		if a.NeedsLogin {
-			// Verified sign-in without plan consent retains the registration for
-			// re-consent, but must never supply credentials for inference.
+			// Preserve accepted tokens for disconnect revocation. NeedsLogin
+			// blocks inference until a verified sign-in grants plan consent.
 			completionErr = ErrIdentity
-		} else {
-			a.AccessToken, a.RefreshToken = tokens.AccessToken, tokens.RefreshToken
-			a.ExpiresAt = expiresAt
 		}
 		i := slices.IndexFunc(c.Accounts, func(existing account) bool { return existing.ClientID == clientID })
 		if i >= 0 {
@@ -840,16 +838,12 @@ func (s *Service) Disconnect(ctx context.Context, clientID string) (bool, error)
 func (s *Service) revokeSession(ctx context.Context, a account) bool {
 	form := url.Values{"token": {a.RefreshToken}, "token_type_hint": {oauthRefreshToken}, oauthClientID: {a.ClientID}}.Encode()
 	var endpoint string
+	var retryAfter time.Duration
 	for attempt := range 3 {
-		if attempt > 0 {
-			timer := time.NewTimer(time.Second << (attempt - 1))
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return false
-			case <-timer.C:
-			}
+		if attempt > 0 && !waitProviderRetry(ctx, attempt-1, retryAfter) {
+			return false
 		}
+		retryAfter = 0
 		if ctx.Err() != nil {
 			return false
 		}
@@ -858,6 +852,9 @@ func (s *Service) revokeSession(ctx context.Context, a account) bool {
 			if err != nil {
 				if errors.Is(err, ErrIdentity) || errors.Is(err, ErrSignInRequired) {
 					return false
+				}
+				if temporary, ok := errors.AsType[*transientProviderError](err); ok {
+					retryAfter = temporary.retryAfter
 				}
 				continue
 			}
@@ -879,6 +876,7 @@ func (s *Service) revokeSession(ctx context.Context, a account) bool {
 		if resp.StatusCode != http.StatusTooManyRequests && (resp.StatusCode < http.StatusInternalServerError || resp.StatusCode >= 600) {
 			return false
 		}
+		retryAfter = tokenRetryAfter(resp.Header.Get("Retry-After"))
 	}
 	return false
 }

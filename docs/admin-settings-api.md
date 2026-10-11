@@ -54,6 +54,9 @@ The following operations require an acting administrator:
   `login_first_connection: true` identifies the connected login outcome
   that first activated the connection; clients must match its `attempt_id`.
   The field is absent when false.
+  A verified grant missing plan-sharing consent remains saved with
+  `needs_login: true`; inference stays blocked, and Disconnect can revoke
+  its renewable session. A declined reconnect preserves an existing usable grant.
   A registration with `plan_ineligible: true` has a terminal plan-sharing
   restriction: `connected` is false, and clients explain the restriction without
   prompting repeated authorization. The optional field is absent when false.
@@ -70,8 +73,10 @@ The following operations require an acting administrator:
   attempt available for a corrected paste. A valid callback is consumed once;
   clients reconcile an uncertain exchange through connection status before
   starting a new attempt. Status must match the initiating `attempt_id` before
-  a client treats a terminal outcome as its own. Responses carrying connection
-  state or authorization URLs use `Cache-Control: no-store`.
+  a client treats a terminal outcome as its own. Matching `login_pending: true`
+  remains authoritative even if the browser clock passes `expires_at`.
+  Responses carrying connection state or authorization URLs use
+  `Cache-Control: no-store`.
 - `GET /api/v2/admin/ai/chatgpt/models` returns a saved account's visible
   streaming text models in provider order with display names; `o1-pro` and
   `o3-pro` and `gpt-5.5-pro` families are excluded because they do not support
@@ -88,6 +93,7 @@ The following operations require an acting administrator:
   activation. API-key model settings are preserved.
 - `DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}` disables the account before
   contacting OpenAI, retains the refresh token for bounded revocation retries,
+  honoring `Retry-After` within the cleanup deadline,
   then clears it while retaining the registration. `revocation_confirmed` reports
   whether OpenAI confirmed revocation; a local disconnect succeeds even if
   revocation fails. Missing local tokens do not confirm remote revocation.
@@ -97,7 +103,9 @@ Single-setting and batch writes validate model/effort pairs. Model and reasoning
 saves in ChatGPT mode also validate against the account catalog.
 A selection that changes during validation rejects the save so the client can
 refresh its settings. The web refreshes persisted settings after activation and
-preserves unsaved drafts under the existing revision guards. Successful selection
+preserves unsaved drafts under the existing revision guards. Completion,
+selection, and disconnect also refresh cached viewer translation readiness.
+Successful selection
 and login completion return `X-Silo-Settings-Before-ETag` and
 `X-Silo-Settings-After-ETag`, signed from the settings inside the activation
 transaction. `X-Silo-ChatGPT-First-Connection` is `true` only for the activation
