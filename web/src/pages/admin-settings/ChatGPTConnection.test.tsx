@@ -1,7 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId } from "@/api/client";
+import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ChatGPTConnection } from "./ChatGPTConnection";
 
 const mocks = vi.hoisted(() => ({
@@ -65,7 +67,10 @@ vi.mock("@/hooks/queries/admin/chatgpt", () => ({
 vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error } }));
 
 describe("ChatGPTConnection", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
   beforeEach(() => {
     setAccessToken("chatgpt-test");
     setProfileId("profile-a");
@@ -83,6 +88,68 @@ describe("ChatGPTConnection", () => {
     statusFetching = false;
     completePending = false;
     loginExpiresAt = new Date(Date.now() + 600_000).toISOString();
+  });
+
+  it("clears a prepared dialog when AuthProvider replaces the Silo session", async () => {
+    setRefreshToken(null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              items: [],
+              needs_setup: false,
+              wizard_completed: true,
+              id: "1",
+              username: "fixture",
+              email: "",
+              role: "admin",
+              permissions: [],
+              download_allowed: true,
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+      ),
+    );
+    let replaceSession!: (token: string) => void;
+    function SessionControls() {
+      const { completeLogin, loading } = useAuth();
+      useEffect(() => {
+        replaceSession = (token) => {
+          completeLogin({
+            access_token: token,
+            refresh_token: "fixture-refresh",
+            expires_in: 3600,
+            user: {
+              id: 1,
+              username: "fixture",
+              email: "",
+              role: "admin",
+              permissions: [],
+              download_allowed: true,
+            },
+          });
+          setProfileId("profile-a");
+        };
+      }, [completeLogin]);
+      return <span data-testid="auth-ready">{loading ? "loading" : "ready"}</span>;
+    }
+    render(
+      <AuthProvider>
+        <SessionControls />
+        <ChatGPTConnection model="" onModelChange={vi.fn()} />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("auth-ready")).toHaveTextContent("ready"));
+    await userEvent.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    act(() => replaceSession("replacement-session"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.success).not.toHaveBeenCalled();
   });
 
   it("clears the login dialog when the active authority changes", async () => {

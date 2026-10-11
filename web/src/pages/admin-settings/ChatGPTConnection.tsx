@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useId, useState } from "react";
 import { toast } from "sonner";
+import { useOptionalAuth } from "@/hooks/useAuth";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import {
   useChatGPTModels,
@@ -25,6 +26,7 @@ export function ChatGPTConnection(props: {
   model: string;
   onModelChange: (model: string) => void;
 }) {
+  useOptionalAuth();
   const authority = captureProfileRequestContext();
   const key = JSON.stringify([
     authority?.authContextVersion,
