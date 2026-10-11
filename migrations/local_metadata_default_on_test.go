@@ -8,7 +8,8 @@ import (
 // Turning local metadata on by default enables the built-in NFO rows of
 // existing chains, including ones the startup sync appended disabled and last,
 // moves them to the front, and keeps the other providers' order. Rolling back
-// turns them off again.
+// puts every row it found back as it was, including an NFO row an admin had
+// turned on, and turns off NFO rows added since.
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -26,10 +27,12 @@ INSERT INTO plugin_capabilities VALUES
 -- 10: an upgraded movie library, NFO appended disabled and last.
 -- 11: an upgraded series level with two remote providers.
 -- 12: a library created after NFO existed, NFO first but disabled.
+-- 13: an admin turned NFO on, still last.
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
     (10, 2, 'tmdb', 'movie', 0, true), (10, 1, 'nfo', 'movie', 1, false),
     (11, 3, 'tvdb', 'series', 0, true), (11, 2, 'tmdb', 'series', 1, false), (11, 1, 'nfo', 'series', 2, false),
-    (12, 1, 'nfo', 'movie', 0, false), (12, 2, 'tmdb', 'movie', 1, true);`)
+    (12, 1, 'nfo', 'movie', 0, false), (12, 2, 'tmdb', 'movie', 1, true),
+    (13, 2, 'tmdb', 'movie', 0, true), (13, 1, 'nfo', 'movie', 1, true);`)
 
 	type row struct {
 		folder     int
@@ -63,6 +66,7 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		return enabled
 	}
 
+	before := chains()
 	const migration = "20261011201709_local_metadata_default_on"
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, false))
 	if !defaultEnabled() {
@@ -72,20 +76,21 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		{10, "nfo", 0, true}, {10, "tmdb", 1, true},
 		{11, "nfo", 0, true}, {11, "tvdb", 1, true}, {11, "tmdb", 2, false},
 		{12, "nfo", 0, true}, {12, "tmdb", 1, true},
+		{13, "nfo", 0, true}, {13, "tmdb", 1, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
 	}
 
+	// A library created after the upgrade seeds NFO on.
+	migrationExec(t, tx, `INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
+    (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true)`)
+
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	if defaultEnabled() {
 		t.Error("nfo default_enabled not turned off on rollback")
 	}
-	for i := range want {
-		if want[i].capability == "nfo" {
-			want[i].enabled = false
-		}
-	}
+	want = append(before, row{14, "nfo", 0, false}, row{14, "tmdb", 1, true})
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)
 	}

@@ -178,3 +178,33 @@ func TestMergeMetadata_CastAndCrewLocksHoldSeparately(t *testing.T) {
 		})
 	}
 }
+
+// One person credited as both actor and director gets each credit enriched
+// from the matching remote credit, not both from whichever matched first.
+func TestFold_EnrichesEachCreditWithinItsRole(t *testing.T) {
+	t.Parallel()
+
+	local := &MetadataResult{HasMetadata: true, People: []models.ItemPerson{
+		actor("Clint Eastwood", ""),
+		crewMember("Clint Eastwood", models.PersonKindDirector),
+	}}
+	remote := &MetadataResult{HasMetadata: true, People: []models.ItemPerson{
+		{Person: models.Person{Name: "Clint Eastwood", TmdbID: "190"}, Kind: models.PersonKindActor, Character: "William Munny"},
+		{Person: models.Person{Name: "Clint Eastwood", TmdbID: "190"}, Kind: models.PersonKindDirector},
+	}}
+	accumulator := &MetadataResult{}
+	foldProviderResult(accumulator, local, "en", "nfo", true, nil)
+	foldProviderResult(accumulator, remote, "en", "tmdb", false, nil)
+
+	if len(accumulator.People) != 2 {
+		t.Fatalf("people = %+v, want the two NFO credits", accumulator.People)
+	}
+	for _, p := range accumulator.People {
+		if p.TmdbID != "190" {
+			t.Errorf("%v credit not enriched: %+v", p.Kind, p)
+		}
+		if p.Kind == models.PersonKindDirector && p.Character != "" {
+			t.Errorf("director credit took the actor's role %q", p.Character)
+		}
+	}
+}

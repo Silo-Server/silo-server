@@ -644,6 +644,7 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			SET imdb_id = COALESCE(NULLIF(dest.imdb_id, ''), src.imdb_id),
 			    tmdb_id = COALESCE(NULLIF(dest.tmdb_id, ''), src.tmdb_id),
 			    tvdb_id = COALESCE(NULLIF(dest.tvdb_id, ''), src.tvdb_id),
+			    identity_chosen_at = GREATEST(dest.identity_chosen_at, src.identity_chosen_at),
 			    updated_at = NOW()
 			FROM media_items src
 			WHERE dest.content_id = $2 AND src.content_id = $1`},

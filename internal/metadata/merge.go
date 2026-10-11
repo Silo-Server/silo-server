@@ -437,17 +437,27 @@ func mergePeople(target *[]models.ItemPerson, source []models.ItemPerson, mode M
 	}
 }
 
-// enrichPeople fills IDs, photos and roles on target credits from the source
-// credits that match them by provider ID or by name and kind. Unlike
-// mergePeople it never adds a credit: the target list is authoritative.
-func enrichPeople(target []models.ItemPerson, source []models.ItemPerson) {
+// enrichPeople fills IDs, photos and roles on the target's cast (cast true)
+// or crew from the source credits that match them by provider ID or by name
+// and kind. Matching stays within that group, so one person credited as both
+// actor and director is enriched once per credit. Unlike mergePeople it never
+// adds a credit: the target list is authoritative.
+func enrichPeople(target []models.ItemPerson, source []models.ItemPerson, cast bool) {
 	if len(target) == 0 || len(source) == 0 {
 		return
 	}
-	indexes := personMatchIndexes(target)
+	var positions []int
+	var group []models.ItemPerson
+	for i, p := range target {
+		if isCastKind(p.Kind) == cast {
+			positions = append(positions, i)
+			group = append(group, p)
+		}
+	}
+	indexes := personMatchIndexes(group)
 	for _, sp := range source {
 		if idx, ok := findPersonMatch(sp, indexes...); ok {
-			mergePersonFields(&target[idx], sp)
+			mergePersonFields(&target[positions[idx]], sp)
 		}
 	}
 }

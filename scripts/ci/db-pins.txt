@@ -239,3 +239,4 @@
 ./migrations TestLocalMetadataDefaultOnMigrationPostgres
 ./internal/metadata TestLocalTierIsStoredAndResolvedFirst
 ./internal/catalog TestIdentityChoiceSurvivesUpsertAndRenameDB
+./internal/metadata TestCanonicalizeKeepsIdentityChoicePostgres

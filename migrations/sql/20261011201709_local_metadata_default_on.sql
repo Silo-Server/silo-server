@@ -11,6 +11,22 @@
 --
 -- Without .nfo files or sidecar art the provider finds nothing and changes
 -- nothing.
+--
+-- Every chain row's order and on/off state is kept first, so the Down can put
+-- back exactly what admins had, including libraries that had NFO on.
+CREATE TABLE local_metadata_default_on_chain_backup (
+    media_folder_id integer NOT NULL,
+    plugin_installation_id integer NOT NULL,
+    capability_id text NOT NULL,
+    content_level text NOT NULL,
+    priority integer NOT NULL,
+    enabled boolean NOT NULL,
+    PRIMARY KEY (media_folder_id, plugin_installation_id, capability_id, content_level)
+);
+INSERT INTO local_metadata_default_on_chain_backup
+SELECT media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled
+FROM library_provider_chains;
+
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'true'::jsonb)
 FROM plugin_installations pi
@@ -44,10 +60,9 @@ WHERE c.media_folder_id = ranked.media_folder_id
   AND c.priority <> ranked.position;
 
 -- +goose Down
--- Restores the opt-in default and turns the built-in rows off again. Which
--- libraries had an admin enable NFO before this migration is not recorded, so
--- those lose it too, and the rows stay at the front of their chains, where
--- being disabled leaves them inert.
+-- Restores the opt-in default and each chain row this migration found to the
+-- order and on/off state it had. Builtin NFO rows added since (new libraries,
+-- the startup sync) go back to the old default, off.
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'false'::jsonb)
 FROM plugin_installations pi
@@ -56,9 +71,26 @@ WHERE pc.plugin_installation_id = pi.id
   AND pc.capability_type = 'metadata_provider.v1' AND pc.capability_id = 'nfo';
 
 UPDATE library_provider_chains c
+SET priority = b.priority, enabled = b.enabled
+FROM local_metadata_default_on_chain_backup b
+WHERE c.media_folder_id = b.media_folder_id
+  AND c.plugin_installation_id = b.plugin_installation_id
+  AND c.capability_id = b.capability_id
+  AND c.content_level = b.content_level;
+
+UPDATE library_provider_chains c
 SET enabled = false
 FROM plugin_installations pi
 WHERE c.plugin_installation_id = pi.id
   AND pi.plugin_id = 'silo.builtin' AND pi.kind = 'builtin'
   AND c.capability_id = 'nfo'
-  AND c.enabled;
+  AND c.enabled
+  AND NOT EXISTS (
+      SELECT 1 FROM local_metadata_default_on_chain_backup b
+      WHERE b.media_folder_id = c.media_folder_id
+        AND b.plugin_installation_id = c.plugin_installation_id
+        AND b.capability_id = c.capability_id
+        AND b.content_level = c.content_level
+  );
+
+DROP TABLE local_metadata_default_on_chain_backup;

@@ -7681,6 +7681,18 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 			args: []any{fromContentID, toContentID},
 		},
 		{
+			// An admin's Identify choice survives the merge (identify_sticky.go).
+			name: "keep identity choice",
+			sql: `
+				UPDATE media_items dest
+				SET identity_chosen_at = GREATEST(dest.identity_chosen_at, src.identity_chosen_at)
+				FROM media_items src
+				WHERE dest.content_id = $2 AND src.content_id = $1
+				  AND src.identity_chosen_at IS NOT NULL
+			`,
+			args: []any{fromContentID, toContentID},
+		},
+		{
 			name: "delete orphaned skeleton",
 			sql: `
 				DELETE FROM media_items

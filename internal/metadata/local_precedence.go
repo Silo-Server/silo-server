@@ -78,12 +78,12 @@ func (l localListFields) restrict(accumulator, result *MetadataResult) *Metadata
 		remoteCast, remoteCrew := splitPeopleByRole(result.People)
 		var kept []models.ItemPerson
 		if l.cast {
-			enrichPeople(accumulator.People, remoteCast)
+			enrichPeople(accumulator.People, remoteCast, true)
 		} else {
 			kept = append(kept, remoteCast...)
 		}
 		if l.crew {
-			enrichPeople(accumulator.People, remoteCrew)
+			enrichPeople(accumulator.People, remoteCrew, false)
 		} else {
 			kept = append(kept, remoteCrew...)
 		}
