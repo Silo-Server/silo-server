@@ -2540,7 +2540,7 @@ func (s *MetadataService) mergeAndPersist(
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
 	if !req.enrichmentOnly && !isNew && contentid.IsLocal(contentID) {
 		canonical, err := s.canonicalizeLocalContentID(
-			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("canonicalize local content id: %w", err)
 		}
@@ -2568,7 +2568,7 @@ func (s *MetadataService) mergeAndPersist(
 		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
 	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
 		reanchored, err := s.reanchorContentID(
-			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("reanchor provider content id: %w", err)
 		}
@@ -2975,7 +2975,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	// An Identify's choice commits with the identity it chose
 	// (identify_sticky.go).
 	if identityChosen {
-		if err := itemRepo.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}
@@ -7599,6 +7599,12 @@ func (s *MetadataService) rebindSkeletonToExistingItem(ctx context.Context, from
 }
 
 func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromContentID, toContentID string, allowMatchedSource bool) error {
+	return s.rebindItemOnto(ctx, fromContentID, toContentID, allowMatchedSource, false)
+}
+
+// rebindItemOnto is rebindItemToExistingItem that, with markIdentity, also
+// records an Identify choice on the target in the same transaction.
+func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toContentID string, allowMatchedSource, markIdentity bool) error {
 	if s == nil || fromContentID == "" || toContentID == "" || fromContentID == toContentID {
 		return nil
 	}
@@ -7735,6 +7741,11 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 	for _, step := range steps {
 		if _, err := tx.Exec(ctx, step.sql, step.args...); err != nil {
 			return fmt.Errorf("%s: %w", step.name, err)
+		}
+	}
+	if markIdentity {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, toContentID); err != nil {
+			return err
 		}
 	}
 	if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, []string{fromContentID}); err != nil {

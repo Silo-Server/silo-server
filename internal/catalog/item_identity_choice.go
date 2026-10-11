@@ -12,19 +12,13 @@ import (
 // Identify. A refresh then keeps that identity when a local .nfo names a
 // different one. A missing item is not an error: there is nothing to mark.
 func (r *ItemRepository) MarkIdentityChosen(ctx context.Context, contentID string) error {
-	if _, err := r.pool.Exec(ctx,
-		`UPDATE media_items SET identity_chosen_at = NOW() WHERE content_id = $1`,
-		contentID,
-	); err != nil {
-		return fmt.Errorf("marking identity chosen for %s: %w", contentID, err)
-	}
-	return nil
+	return MarkIdentityChosenTx(ctx, r.pool, contentID)
 }
 
 // MarkIdentityChosenTx is MarkIdentityChosen inside the caller's transaction,
-// so the mark commits only with the identity it records.
-func (r *ItemRepository) MarkIdentityChosenTx(ctx context.Context, tx pgx.Tx, contentID string) error {
-	if _, err := tx.Exec(ctx,
+// so the mark commits only with the identity write or move it records.
+func MarkIdentityChosenTx(ctx context.Context, execer itemExecer, contentID string) error {
+	if _, err := execer.Exec(ctx,
 		`UPDATE media_items SET identity_chosen_at = NOW() WHERE content_id = $1`,
 		contentID,
 	); err != nil {

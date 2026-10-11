@@ -241,3 +241,4 @@
 ./internal/catalog TestIdentityChoiceSurvivesUpsertAndRenameDB
 ./internal/metadata TestCanonicalizeKeepsIdentityChoicePostgres
 ./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
+./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres

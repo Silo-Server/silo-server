@@ -97,3 +97,57 @@ func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
 		t.Error("a committed identity write did not record the Identify mark")
 	}
 }
+
+// An Identify that moves the item to the chosen anchor, by rename or by merge
+// onto an existing row, records the choice in the move's own transaction, so
+// a failed identity write after it cannot leave the moved item unmarked.
+// Other moves leave no mark.
+func TestIdentifyMoveMarksTheMovedItemPostgres(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := context.Background()
+	itemRepo := catalog.NewItemRepository(pool)
+	svc := &MetadataService{dbPool: pool}
+
+	for _, tc := range []struct {
+		name         string
+		merge        bool
+		markIdentity bool
+	}{
+		{"rename on Identify", false, true},
+		{"merge on Identify", true, true},
+		{"rename otherwise", false, false},
+		{"merge otherwise", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			from, to := "identity-move-from-"+uuid.NewString(), "identity-move-to-"+uuid.NewString()
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
+			})
+			seed := []string{from}
+			if tc.merge {
+				seed = append(seed, to)
+			}
+			for _, id := range seed {
+				if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
+					t.Fatalf("seed %s: %v", id, err)
+				}
+			}
+			var err error
+			if tc.merge {
+				err = svc.rebindItemOnto(ctx, from, to, true, tc.markIdentity)
+			} else {
+				err = svc.renameContentID(ctx, from, to, false, tc.markIdentity)
+			}
+			if err != nil {
+				t.Fatalf("move: %v", err)
+			}
+			chosen, err := itemRepo.IdentityChosen(ctx, to)
+			if err != nil {
+				t.Fatalf("IdentityChosen: %v", err)
+			}
+			if chosen != tc.markIdentity {
+				t.Errorf("moved item marked = %v, want %v", chosen, tc.markIdentity)
+			}
+		})
+	}
+}
