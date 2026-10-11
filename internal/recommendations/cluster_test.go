@@ -256,3 +256,14 @@ func TestClusterAssignmentsRecoversInterests(t *testing.T) {
 		t.Fatalf("checked %d profiles, want at least 50", checked)
 	}
 }
+
+// The fallback partition is the first seeding bestSeeding already ran,
+// kmeansCluster's, so no seeding is run twice.
+func TestBestSeedingReturnsTheFirstSeeding(t *testing.T) {
+	items := tasteItems(func(i int) float64 { return 1 + float64(i)*0.1 })
+	k := determinClusterCount(len(items))
+	_, first := bestSeeding(items, k, 3)
+	if want := kmeansCluster(items, k); !slices.Equal(first, want) {
+		t.Fatalf("first seeding = %v, want kmeansCluster's %v", first, want)
+	}
+}

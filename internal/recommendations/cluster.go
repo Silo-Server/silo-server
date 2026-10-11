@@ -324,7 +324,7 @@ func mergSmallClusters(items []clusterItem, assignments []int, k int) []int {
 // of three titles gets a cluster of its own, while one interest is not cut up
 // for the sake of a count. Each count's partition is its best seeding (see
 // bestSeeding). When determinClusterCount's count has none, and no larger
-// count qualifies, that count is run once and its small clusters merged.
+// count qualifies, that count's first seeding has its small clusters merged.
 func clusterAssignments(items []clusterItem) []int {
 	n := len(items)
 	minK := determinClusterCount(n)
@@ -334,11 +334,14 @@ func clusterAssignments(items []clusterItem) []int {
 	maxK := max(minK, min(kmeansMaxClusters, n/kmeansMinClusterSize))
 	restarts := max(1, min(kmeansRestarts, kmeansRestartBudget/n))
 
-	var best []int
+	var best, fallback []int
 	bestScore := math.Inf(-1)
 	var distances [][]float64
 	for k := minK; k <= maxK; k++ {
-		assignments := bestSeeding(items, k, restarts)
+		assignments, first := bestSeeding(items, k, restarts)
+		if k == minK {
+			fallback = first
+		}
 		if assignments == nil {
 			continue
 		}
@@ -360,24 +363,27 @@ func clusterAssignments(items []clusterItem) []int {
 		}
 	}
 	if best == nil {
-		return mergSmallClusters(items, kmeansCluster(items, minK), minK)
+		return mergSmallClusters(items, fallback, minK)
 	}
 	return compactAssignments(best)
 }
 
 // bestSeeding partitions items into k clusters with restarts k-means++
 // seedings and returns the partition with the lowest inertia whose clusters
-// all hold kmeansMinClusterSize items, or nil when no seeding gives one.
-func bestSeeding(items []clusterItem, k, restarts int) []int {
-	var best []int
+// all hold kmeansMinClusterSize items, or nil when no seeding gives one, and
+// the first seeding's partition, which is kmeansCluster's.
+func bestSeeding(items []clusterItem, k, restarts int) (best, first []int) {
 	bestInertia := math.Inf(1)
 	for r := range restarts {
 		assignments, inertia := kmeansRun(items, k, kmeansRestartSeed(items, k, r))
+		if r == 0 {
+			first = assignments
+		}
 		if inertia < bestInertia && clustersHoldMinimum(assignments, k) {
 			best, bestInertia = assignments, inertia
 		}
 	}
-	return best
+	return best, first
 }
 
 // clustersHoldMinimum reports whether each of the k clusters of assignments

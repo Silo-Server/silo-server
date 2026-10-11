@@ -167,10 +167,12 @@ finish out of order.
   (60-199) or 5 (200 or more), or more, up to 5, when a partition into
   more has a higher silhouette (cosine distance) and one of at least 0.1;
   every cluster holds at least 3 titles. A partition is the best of up to 8
-  deterministic k-means++ seedings (fewer above 100 titles, one from 800),
+  deterministic k-means++ seedings (`min(8, 800/titles)`: fewer above 100
+  titles, one from 401),
   by inertia, among those leaving no cluster under 3 titles. One seeding
   can put two seeds in one interest and leave a sliver that merging folds
-  away together with every other interest. Real distinct
+  away together with every other interest. When no seeding qualifies, the
+  first seeding's small clusters are merged; it is not run again. Real distinct
   interests scored 0.13-0.22 and one interest cut in two under 0.08
   (gemini-embedding-001 on a real catalog).
 - Watch, rewatch, favorite and watchlist counts in `signal_counts` count each
