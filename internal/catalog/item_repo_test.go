@@ -964,8 +964,10 @@ func TestScoreFuzzyTitleVariantJoinsWordsWithinTheirTypoAllowance(t *testing.T) 
 	}{
 		{"live stream from hel", "Livestream from Hell", 4}, //nolint:misspell
 		{"spiderman", "Spider-Man", 1},
-		// "edwood" is two edits from "wood", but "ed" and "wood" allow 0 and 1.
+		// Joining must not drop a short word that has no typo allowance.
 		{"ed wood", "Wood", 1},
+		{"a spider", "Spider", 1},
+		{"live streem", "Livestream", 2},
 	} {
 		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
 		if got := scoreFuzzyTitleVariant(tc.query, tokens, tc.title).matchedTokens; got != tc.want {

@@ -1497,16 +1497,11 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	titleTerms := slices.Concat(titleTokens, joinAdjacentFuzzyTokens(titleTokens))
 	matches := make([]fuzzyTokenMatch, len(queryTokens))
 	for i, token := range queryTokens {
-		matches[i] = bestFuzzyTokenMatch(token, titleTerms, fuzzyAutoMaxEdits(len(token)))
+		matches[i] = bestFuzzyTokenMatch(token, titleTerms)
 	}
 	for i := 0; i < len(queryTokens); i++ {
 		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) {
-			// The pair's typo allowance never exceeds what its words allow
-			// separately, so "ed wood" cannot match "Wood" by dropping "ed".
-			joined := slices.Concat(queryTokens[i], queryTokens[i+1])
-			maxEdits := min(fuzzyAutoMaxEdits(len(joined)), fuzzyAutoMaxEdits(len(queryTokens[i]))+fuzzyAutoMaxEdits(len(queryTokens[i+1])))
-			pair := bestFuzzyTokenMatch(joined, titleTerms, maxEdits)
-			if pair.ok {
+			if pair := bestFuzzyPairMatch(queryTokens[i], queryTokens[i+1], titleTerms); pair.ok {
 				score.matchedTokens += 2
 				score.editDistance += pair.distance
 				i++
@@ -1526,7 +1521,8 @@ type fuzzyTokenMatch struct {
 	ok       bool // distance is within the token's typo allowance
 }
 
-func bestFuzzyTokenMatch(token []rune, terms [][]rune, maxEdits int) fuzzyTokenMatch {
+func bestFuzzyTokenMatch(token []rune, terms [][]rune) fuzzyTokenMatch {
+	maxEdits := fuzzyAutoMaxEdits(len(token))
 	best := maxEdits + 1
 	for _, term := range terms {
 		if distance := boundedLevenshteinRunes(token, term, maxEdits); distance < best {
@@ -1534,6 +1530,30 @@ func bestFuzzyTokenMatch(token []rune, terms [][]rune, maxEdits int) fuzzyTokenM
 		}
 	}
 	return fuzzyTokenMatch{distance: best, ok: best <= maxEdits}
+}
+
+// bestFuzzyPairMatch matches two adjacent query words against one term split
+// into two parts, each part within its own word's typo allowance. Splitting
+// keeps a short word from being dropped: "ed wood" does not match "Wood", nor
+// "a spider" match "Spider".
+func bestFuzzyPairMatch(first, second []rune, terms [][]rune) fuzzyTokenMatch {
+	firstEdits, secondEdits := fuzzyAutoMaxEdits(len(first)), fuzzyAutoMaxEdits(len(second))
+	best := firstEdits + secondEdits + 1
+	for _, term := range terms {
+		if absInt(len(term)-len(first)-len(second)) > firstEdits+secondEdits {
+			continue
+		}
+		for split := max(0, len(first)-firstEdits); split <= min(len(term), len(first)+firstEdits); split++ {
+			head := boundedLevenshteinRunes(first, term[:split], firstEdits)
+			if head > firstEdits {
+				continue
+			}
+			if tail := boundedLevenshteinRunes(second, term[split:], secondEdits); tail <= secondEdits {
+				best = min(best, head+tail)
+			}
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= firstEdits+secondEdits}
 }
 
 func joinAdjacentFuzzyTokens(tokens [][]rune) [][]rune {
