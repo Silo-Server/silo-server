@@ -327,3 +327,28 @@ func TestImageCacheProcessorHonorsWorkerBudget(t *testing.T) {
 		t.Fatalf("concurrent jobs = %d, want 1 within the budget", cacher.maxRunning)
 	}
 }
+
+// A manual refresh keeps its own workers: it does not wait for the artwork
+// budget the drain and discovery copies share.
+func TestCacheTargetArtworkDoesNotWaitForTheSharedBudget(t *testing.T) {
+	root := t.TempDir()
+	job := localArtworkJob("file://" + writeLocalPoster(t, root))
+	jobs := &targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{{job}}}
+	p := NewImageCacheProcessorWithTargets(jobs, &fakeByteImageCacher{}, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
+	p.SetWorkerBudget(1)
+	release, err := p.workBudget.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("take the only slot: %v", err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.CacheTargetArtwork(ctx, "movie-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork: %v", err)
+	}
+	if jobs.succeededID != job.ID {
+		t.Fatalf("succeeded = %d, want the refreshed job copied while the budget is taken", jobs.succeededID)
+	}
+}

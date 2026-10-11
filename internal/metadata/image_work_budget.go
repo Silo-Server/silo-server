@@ -8,9 +8,9 @@ import (
 )
 
 // imageWorkBudget bounds the artwork jobs one process runs at once across the
-// image-cache drain, manual refreshes and discovery copies. Each job can decode
-// a large image and encode its variant ladder, so metadata.image_workers and
-// its memory cap must hold for all of them together.
+// image-cache drain and discovery copies. Each job can decode a large image
+// and encode its variant ladder, so metadata.image_workers and its memory cap
+// must hold for both together. A manual refresh keeps its own few workers.
 type imageWorkBudget struct {
 	mu    sync.Mutex
 	limit int
@@ -32,8 +32,12 @@ func (b *imageWorkBudget) set(limit int) {
 	}
 }
 
-// acquire waits for a slot and returns the function that frees it.
+// acquire waits for a slot and returns the function that frees it. A nil
+// budget never waits.
 func (b *imageWorkBudget) acquire(ctx context.Context) (release func(), err error) {
+	if b == nil {
+		return func() {}, nil
+	}
 	b.mu.Lock()
 	sem := b.sem
 	b.mu.Unlock()
@@ -47,7 +51,7 @@ func (b *imageWorkBudget) acquire(ctx context.Context) (release func(), err erro
 }
 
 // SetWorkerBudget sets how many artwork jobs this process runs at once, across
-// the queue drain, manual refreshes and copies of discovered local artwork.
+// the queue drain and copies of discovered local artwork.
 // Zero leaves them unbounded beyond each caller's own concurrency.
 func (p *ImageCacheProcessor) SetWorkerBudget(workers int) {
 	if p == nil {

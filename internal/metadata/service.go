@@ -5456,8 +5456,11 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			mergedSeason.PosterSourcePath = nextSourcePath
 			providerSeason = mergedSeason
 		}
-		if !imagesLocked {
-			providerSeason.PosterPath = localArtworkFallbackPath(providerSeason.PosterPath, providerSeason.PosterSourcePath, season.remotePosterPath)
+		if !imagesLocked && providerSeason.PosterPath == "" {
+			providerSeason.PosterPath = localArtworkFallbackPath("", providerSeason.PosterSourcePath, season.remotePosterPath)
+			if providerSeason.PosterPath != "" {
+				providerSeason.PosterThumbhash = season.remotePosterThumbhash
+			}
 		}
 		dbSeason := &models.Season{
 			SeriesID:                seriesID,

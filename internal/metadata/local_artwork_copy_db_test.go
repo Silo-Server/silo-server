@@ -197,22 +197,41 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 
 	t.Run("held from other drains", func(t *testing.T) {
 		repo := NewImageCacheJobRepository(pool)
+		// Drains claim due jobs only (claimDueQuery), so a job that is not
+		// due is out of their reach.
+		assertHeld := func(t *testing.T, what string) localArtworkJobRow {
+			t.Helper()
+			got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, seriesID, ImageCacheImagePoster)
+			if got.status != ImageCacheStatusQueued || got.nextAttemptIn < localArtworkDiscoveryHold-time.Minute {
+				t.Fatalf("%s: job = %+v, want queued behind the %s discovery hold", what, got, localArtworkDiscoveryHold)
+			}
+			return got
+		}
 		queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1])
 		if err != nil || len(queued) != 1 {
 			t.Fatalf("enqueueHeldLocalJobs = %d queued, %v; want 1", len(queued), err)
 		}
-		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, seriesID, ImageCacheImagePoster); got.status != ImageCacheStatusQueued ||
-			got.nextAttemptIn < localArtworkDiscoveryHold-time.Minute {
-			t.Fatalf("held job = %+v, want queued behind the %s discovery hold", got, localArtworkDiscoveryHold)
+		held := assertHeld(t, "discovered")
+
+		// Rediscovered during its hold, the hold is not extended.
+		if _, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1]); err != nil {
+			t.Fatalf("re-enqueue: %v", err)
 		}
-		if jobs, err := repo.claimDueForTarget(ctx, "other-server", seriesID, false, 10); err != nil || len(jobs) != 0 {
-			t.Fatalf("another drain claimed %d held jobs (%v), want none", len(jobs), err)
+		if got := assertHeld(t, "rediscovered while held"); got.nextAttemptIn > held.nextAttemptIn {
+			t.Fatalf("rediscovery moved the hold from %s to %s", held.nextAttemptIn, got.nextAttemptIn)
 		}
-		job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server")
-		if err != nil || job == nil || job.LockedBy != "discovering-server" {
-			t.Fatalf("discovering claim = %+v, %v; want the held job", job, err)
+
+		// A manual refresh of the target does not make it due for other
+		// drains, but claims it itself.
+		if err := repo.retryTargetNow(ctx, seriesID, false); err != nil {
+			t.Fatalf("retryTargetNow: %v", err)
 		}
-		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
+		assertHeld(t, "after a manual refresh's retry")
+		jobs, err := repo.claimDueForTarget(ctx, "refreshing-server", seriesID, false, 10)
+		if err != nil || len(jobs) != 1 {
+			t.Fatalf("refresh claim = %d jobs, %v; want the held job", len(jobs), err)
+		}
+		if err := repo.RequeueClaimed(ctx, []int64{jobs[0].ID}, "refreshing-server"); err != nil {
 			t.Fatalf("requeue: %v", err)
 		}
 
@@ -221,11 +240,13 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		if queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1]); err != nil || len(queued) != 1 {
 			t.Fatalf("re-enqueue = %d queued, %v; want 1", len(queued), err)
 		}
-		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, seriesID, ImageCacheImagePoster); got.nextAttemptIn < localArtworkDiscoveryHold-time.Minute {
-			t.Fatalf("rediscovered due job = %+v, want it held again", got)
+		assertHeld(t, "rediscovered while due")
+		job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server")
+		if err != nil || job == nil || job.LockedBy != "discovering-server" {
+			t.Fatalf("discovering claim = %+v, %v; want the held job", job, err)
 		}
-		if jobs, err := repo.claimDueForTarget(ctx, "other-server", seriesID, false, 10); err != nil || len(jobs) != 0 {
-			t.Fatalf("another drain claimed %d rediscovered jobs (%v), want none", len(jobs), err)
+		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
+			t.Fatalf("requeue: %v", err)
 		}
 	})
 
@@ -394,6 +415,12 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 			got.nextAttemptIn < imageCacheRootUnavailableRepeatRetry-time.Minute {
 			t.Fatalf("repeat deferral = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRepeatRetry)
 		}
+	})
+
+	t.Run("folder removed from mounted storage", func(t *testing.T) {
+		root := t.TempDir()
+		writeSidecar(t, filepath.Join(root, "Show", "Season 02", "poster.jpg"))
+		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Show", "Season 01", "poster.jpg")+"?v=12-1700000000"), "local image missing")
 	})
 
 	t.Run("share nested in a present root is not mounted", func(t *testing.T) {

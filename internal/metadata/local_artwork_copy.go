@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -150,30 +152,34 @@ func (p *ImageCacheProcessor) waitLocalArtworkCopies() {
 }
 
 // deferLocalJobWithoutStorage releases a local job this server cannot serve
-// because the storage holding its file is not mounted here. It applies the
-// rule a refresh uses before dropping cached local art (sidecarGone): only the
-// file's own folder, answering and listing entries, shows the storage is
-// mounted. An unmounted share leaves that folder missing or its mount point
-// empty, also when the share is nested inside a library root that is present,
-// and an unreadable or unresponsive folder proves nothing either. The job goes
-// back to the queue without counting an attempt, for a server that has the
-// mount. When the folder lists entries, the failure is about the file and the
-// caller records it as usual.
+// because the storage holding its file is not mounted here. It looks for the
+// nearest folder that exists at or above the file's folder, searching no
+// higher than the library roots holding the file: unless that folder answers
+// and lists entries, the storage is not mounted on this server. An unmounted
+// share leaves its mount point empty or missing, also when it sits inside a
+// library root that is present, and a folder that cannot be read or does not
+// answer in time proves nothing. The job goes back to the queue without
+// counting an attempt, for a server that has the mount. When the folder lists
+// entries, the storage is there and the failure is about the file (or a
+// folder removed under it), which the caller records as usual.
 func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, job *models.MetadataImageCacheJob, path string, roots []string) bool {
 	deferrer, ok := p.jobs.(imageCacheJobDeferrer)
 	if !ok {
 		return false
 	}
-	if !localImagePathWithinRoots(path, roots) {
-		return false
+	var containing []string
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if localImagePathWithinRoots(path, []string{root}) {
+			containing = append(containing, root)
+		}
 	}
-	// A canceled job must not read as an unresponsive mount; the probe keeps
+	// A canceled job must not read as an unresponsive mount; each probe keeps
 	// its own timeout.
-	dir := filepath.Dir(path)
-	if folder := rootcheck.ProbeWithTimeout(context.WithoutCancel(ctx), dir, rootcheck.DefaultProbeTimeout); folder.Reachable && !folder.Empty {
+	if len(containing) == 0 || nearestExistingFolderListsEntries(context.WithoutCancel(ctx), filepath.Dir(path), containing) {
 		return false
 	}
-	errText := localImageStorageUnavailable + ": " + dir
+	errText := localImageStorageUnavailable + ": " + filepath.Dir(path)
 	writeCtx, cancel := terminalJobContext(ctx)
 	defer cancel()
 	if err := deferrer.DeferClaimed(writeCtx, job.ID, job.LockedBy, errText, imageCacheRootUnavailableRetry, imageCacheRootUnavailableRepeatRetry); err != nil {
@@ -183,4 +189,24 @@ func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, j
 	p.logger.DebugContext(ctx, "metadata image cache: left local artwork for a server with the library mounted",
 		"job_id", job.ID, "target_id", job.TargetContentID, "reason", errText)
 	return true
+}
+
+// nearestExistingFolderListsEntries walks up from dir to the first folder that
+// exists, going no higher than roots, and reports whether it answers and lists
+// entries.
+func nearestExistingFolderListsEntries(ctx context.Context, dir string, roots []string) bool {
+	for {
+		probe := rootcheck.ProbeWithTimeout(ctx, dir, rootcheck.DefaultProbeTimeout)
+		if probe.Reachable {
+			return !probe.Empty
+		}
+		if probe.ErrorCode != rootcheck.ErrCodeNotFound || slices.Contains(roots, dir) {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }

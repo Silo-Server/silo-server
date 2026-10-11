@@ -20,6 +20,12 @@ const (
 	// the predicate of metadata_image_cache_jobs_local_due_idx.
 	localImageCacheSourceSQL = "source_path LIKE 'file://%'"
 
+	// heldLocalDiscoverySQL matches a local job queued by a discovery and not
+	// tried yet: no failed attempt and no deferral. A manual refresh of its
+	// target claims it whatever its hold, and does not make it due for
+	// other drains.
+	heldLocalDiscoverySQL = "(" + localImageCacheSourceSQL + " AND attempt_count = 0 AND last_error = '')"
+
 	// localArtworkDiscoveryHold is how long a job queued by the discovering
 	// process stays out of other drains' reach while that process copies it.
 	// Past the hold the job is an ordinary queued job any drain may retry, so a
@@ -185,9 +191,9 @@ type localImageCacheJobClaimer interface {
 
 // isLocalSidecarSource reports whether source names a sidecar file (file://):
 // the artwork copied on discovery, and whatever metadata.cache_images says.
+// It matches localImageCacheSourceSQL.
 func isLocalSidecarSource(source string) bool {
-	_, ok := localImageSourceFilePath(source)
-	return ok
+	return strings.HasPrefix(strings.TrimSpace(source), "file://")
 }
 
 // splitLocalImageCacheInputs separates local sidecar file inputs from the rest.

@@ -353,13 +353,14 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN EXCLUDED.next_attempt_at
-				-- A held enqueue also holds a waiting job that has not failed
+				-- A held enqueue also holds a due job that has not failed
 				-- (fresh, or deferred for missing storage), so the caller can
-				-- claim it before other drains do.
+				-- claim it before other drains do; an active hold is kept.
 				WHEN $1::interval > interval '0'
 					AND metadata_image_cache_jobs.status = 'queued'
 					AND metadata_image_cache_jobs.attempt_count = 0
-					THEN GREATEST(metadata_image_cache_jobs.next_attempt_at, EXCLUDED.next_attempt_at)
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN EXCLUDED.next_attempt_at
 				ELSE metadata_image_cache_jobs.next_attempt_at
 			END,
 			locked_at = CASE
@@ -550,7 +551,8 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 			updated_at = NOW()
 		WHERE ` + imageCacheTargetScope("$1") + `
 		  AND status IN ('queued', 'failed')
-		  AND (status = 'failed' OR next_attempt_at > NOW())`
+		  AND (status = 'failed' OR next_attempt_at > NOW())
+		  AND NOT ` + heldLocalDiscoverySQL
 	if localOnly {
 		query += " AND " + localImageCacheSourceSQL
 	}
@@ -613,12 +615,17 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 // claimDueQuery claims up to $1 due jobs for worker $2, within target scope
 // $3 when targeted.
 func claimDueQuery(targeted, localOnly bool) string {
+	due := "next_attempt_at <= NOW()"
+	if targeted {
+		// A refresh's own discoveries are its to copy now, hold or not.
+		due = "(" + due + " OR " + heldLocalDiscoverySQL + ")"
+	}
 	query := `
 		WITH due AS (
 			SELECT id
 			FROM metadata_image_cache_jobs
 			WHERE status = 'queued'
-			  AND next_attempt_at <= NOW()
+			  AND ` + due + `
 	`
 	if targeted {
 		query += " AND " + imageCacheTargetScope("$3")

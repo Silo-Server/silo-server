@@ -181,8 +181,8 @@ type ImageCacheProcessor struct {
 	libraryRoots  LibraryRootResolver
 	prefixDeleter ImagePrefixDeleter
 	localCopies   localArtworkCopies
-	// workBudget bounds artwork jobs across the drain, manual refreshes and
-	// discovery copies (SetWorkerBudget).
+	// workBudget bounds artwork jobs across the drain and discovery copies
+	// (SetWorkerBudget).
 	workBudget imageWorkBudget
 
 	// enabled mirrors metadata.cache_images. It governs remote artwork only:
@@ -411,7 +411,9 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			return err
 		}
 		if len(jobs) > 0 {
-			stats := p.processClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency)
+			// An interactive refresh keeps its own workers rather than queue
+			// behind the drain for the shared budget.
+			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, nil)
 			// Failures are collected rather than returned: the remaining
 			// artwork still gets cached, and a failed job carries its own
 			// backoff so it is not reclaimed by the loop below. A deferred
@@ -466,7 +468,15 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	return nil
 }
 
+// processClaimedJobs runs a drain's claimed page within the process's artwork
+// budget, which it shares with discovery copies (see imageWorkBudget).
 func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int) ImageCacheRunStats {
+	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, &p.workBudget)
+}
+
+// runClaimedJobs processes claimed jobs with up to concurrency at once, each
+// also holding a slot of budget when one is given.
+func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, budget *imageWorkBudget) ImageCacheRunStats {
 	stats := ImageCacheRunStats{Claimed: len(jobs)}
 	if len(jobs) == 0 {
 		return stats
@@ -496,15 +506,13 @@ loop:
 		// rather than inside a goroutine that already holds a claimed job. Jobs we
 		// never start are requeued below instead of being left locked until the
 		// lease expires.
-		// The process-wide budget is shared with discovery copies (see
-		// imageWorkBudget).
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			leaveFrom(i)
 			break loop
 		}
-		release, err := p.workBudget.acquire(ctx)
+		release, err := budget.acquire(ctx)
 		if err != nil {
 			<-sem
 			leaveFrom(i)
