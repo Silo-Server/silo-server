@@ -1,5 +1,6 @@
 import type { FileVersion, LeafItemUserData, PlaybackVariant } from "@/api/types";
-import { mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackAtmosEvidence, mapAudioLabel } from "@/lib/mediaFormat";
+import { versionAudioAtmosEvidence } from "./versionFormatUtils";
 
 const RESOLUTION_RANK: Record<string, number> = {
   "4k": 4,
@@ -86,6 +87,26 @@ export function pickBestAttributes(
   hdr: boolean;
   audioLabel: string;
 } | null {
+  const best = bestAttributes(versions, qualityPreference);
+  if (!best) return null;
+  return {
+    resolution: best.resolution,
+    hdr: best.hdr,
+    audioLabel: best.audioCodec ? mapAudioLabel(best.audioCodec, best.audioEvidence) : "",
+  };
+}
+
+// bestAttributes ranks audio by codec alone; the profile and titles only
+// refine the displayed label, so they never change which version is preferred.
+function bestAttributes(
+  versions: FileVersion[],
+  qualityPreference?: string | null,
+): {
+  resolution: string;
+  hdr: boolean;
+  audioCodec: string;
+  audioEvidence?: string;
+} | null {
   if (versions.length === 0) return null;
 
   // When the user has a quality preference, only consider versions at or below that cap.
@@ -102,6 +123,7 @@ export function pickBestAttributes(
   let bestResScore = -1;
   let hdr = false;
   let bestAudioCodec = "";
+  let bestAudioEvidence: string | undefined;
   let bestAudioScore = -1;
 
   for (const v of candidates) {
@@ -116,6 +138,7 @@ export function pickBestAttributes(
     if (as_ > bestAudioScore) {
       bestAudioScore = as_;
       bestAudioCodec = v.codec_audio;
+      bestAudioEvidence = versionAudioAtmosEvidence(v);
     }
 
     // Also check individual audio tracks for higher-quality codecs
@@ -126,6 +149,7 @@ export function pickBestAttributes(
           if (ts > bestAudioScore) {
             bestAudioScore = ts;
             bestAudioCodec = t.codec;
+            bestAudioEvidence = audioTrackAtmosEvidence(t);
           }
         }
       }
@@ -135,7 +159,8 @@ export function pickBestAttributes(
   return {
     resolution: bestRes,
     hdr,
-    audioLabel: bestAudioCodec ? mapAudioLabel(bestAudioCodec) : "",
+    audioCodec: bestAudioCodec,
+    audioEvidence: bestAudioEvidence,
   };
 }
 
@@ -169,14 +194,15 @@ export function selectDefaultVersion(
   if (candidates.length === 1) return candidates[0] ?? null;
 
   // Use quality-preference ranking to find the best match.
-  const preferred = pickBestAttributes(candidates, qualityPreference);
+  const preferred = bestAttributes(candidates, qualityPreference);
   if (preferred) {
+    const preferredAudio = preferred.audioCodec ? mapAudioLabel(preferred.audioCodec) : "";
     const matching = candidates.find(
       (v) =>
         v.resolution === preferred.resolution &&
         v.hdr === preferred.hdr &&
-        (preferred.audioLabel === "" ||
-          mapAudioLabel(v.codec_audio).toLowerCase() === preferred.audioLabel.toLowerCase()),
+        (preferredAudio === "" ||
+          mapAudioLabel(v.codec_audio).toLowerCase() === preferredAudio.toLowerCase()),
     );
     if (matching) return matching;
   }

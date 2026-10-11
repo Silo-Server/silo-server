@@ -1,4 +1,6 @@
 import {
+  audioTrackHasAtmos,
+  audioTrackLabel,
   dolbyVisionLabel,
   formatBitrate,
   formatCodecLabel,
@@ -467,6 +469,11 @@ export function formatOriginalAudioCodec(
   track?: PlayerAudioTrack,
 ): string {
   const title = track?.title || track?.embedded_title;
+  // An Atmos track whose title does not say so, such as the codec's long
+  // name the scanner gives an untagged track, shows its family label.
+  if (track?.codec && audioTrackHasAtmos(track) && !title?.toLowerCase().includes("atmos")) {
+    return audioTrackLabel(track);
+  }
   if (title) {
     return title;
   }
