@@ -1606,6 +1606,18 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 		}
+		// Last, and once per item: the candidates kept above may still hold the
+		// right result under a title the search didn't return, such as a
+		// regional release title. Its provider details can confirm it.
+		if !matched {
+			aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
+				ctx, effectiveHints, candidates, itemChain, searchQuery.Language,
+			)
+			providerMatchErrors = append(providerMatchErrors, aliasErrors...)
+			if aliasWinner != nil {
+				winner, matched = aliasWinner, true
+			}
+		}
 		trustedIDTypeMismatch := false
 		if !matched && len(candidates) == 0 && trustedHintIDsPresent(selectionHints) {
 			if mismatchCandidates := s.trustedIDTypeMismatchCandidates(
