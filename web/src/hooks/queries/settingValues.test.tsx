@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import listEffectiveSettingsUnknownKey from "../../../../contracts/api/v2/fixtures/list_effective_settings_unknown_key.json";
 import { v2Problem } from "@/api/v2/problems.test-support";
+import { V2ProblemError } from "@/api/v2/request";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   settingsCapabilitiesSupportAtomicShortcuts,
@@ -377,11 +379,17 @@ describe("keyed effective reads", () => {
     expect(v2Mock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an unknown key's 404 with the read that asked for it", async () => {
+  it("keeps an unknown key's 422 with the read that asked for it", async () => {
     v2Mock.mockImplementation((operation: string, options?: { query?: { keys?: string[] } }) => {
       if (operation !== "GET /api/v2/settings/values/effective") return Promise.resolve(undefined);
       if (options?.query?.keys?.includes(SETTING_KEYS.PLAYER_HDR_ENABLED)) {
-        return Promise.reject(v2Problem(404, "setting_unknown", "No setting named that"));
+        return Promise.reject(
+          new V2ProblemError(
+            "GET /api/v2/settings/values/effective",
+            listEffectiveSettingsUnknownKey,
+            null,
+          ),
+        );
       }
       return Promise.resolve({
         items: [

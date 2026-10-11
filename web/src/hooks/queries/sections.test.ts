@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
+import getHomeLayoutIncludeItemsOutOfRange from "../../../../contracts/api/v2/fixtures/get_home_layout_include_items_out_of_range.json";
 import getHomeLayoutWithItemsOk from "../../../../contracts/api/v2/fixtures/get_home_layout_with_items_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
 import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
@@ -69,6 +70,27 @@ describe("sections query helpers", () => {
     expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe(
       `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
     );
+    expect(response).toEqual({ sections: getHomeLayoutOk.sections });
+  });
+
+  it("reads the layout alone when the server rejects include_items", async () => {
+    mocks.fetchWithSession
+      .mockResolvedValueOnce({
+        ...jsonResponse(getHomeLayoutIncludeItemsOutOfRange),
+        res: new Response(JSON.stringify(getHomeLayoutIncludeItemsOutOfRange), {
+          status: 422,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+      })
+      .mockResolvedValueOnce(jsonResponse({ sections: getHomeLayoutOk.sections }));
+
+    const options = homeLayoutQueryOptions(new QueryClient()) as unknown as QueryOptions;
+    const response = await options.queryFn({});
+
+    expect(mocks.fetchWithSession.mock.calls.map((call) => call[0])).toEqual([
+      `/api/v2/home/layout?include_items=${HOME_LAYOUT_INCLUDED_ROWS}`,
+      "/api/v2/home/layout",
+    ]);
     expect(response).toEqual({ sections: getHomeLayoutOk.sections });
   });
 

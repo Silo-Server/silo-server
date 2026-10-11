@@ -91,10 +91,7 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
   return queryOptions({
     queryKey: sectionKeys.homeLayout(),
     queryFn: async ({ signal }): Promise<HomeLayoutResponse> => {
-      const layout = await v2("GET /api/v2/home/layout", {
-        query: { include_items: HOME_LAYOUT_INCLUDED_ROWS },
-        signal,
-      });
+      const layout = await fetchHomeLayout(signal);
       for (const section of layout.included_sections) {
         const queryKey = sectionKeys.homeItems(section.id);
         // setQueryData alone would create the entry with the client's default
@@ -109,6 +106,24 @@ export function homeLayoutQueryOptions(queryClient: QueryClient) {
     staleTime: HOME_SECTION_STALE_TIME,
     gcTime: HOME_SECTION_GC_TIME,
   });
+}
+
+/**
+ * Reads the home layout with its first rows' items. A server that predates
+ * include_items (an older node during a rolling upgrade) or allows fewer rows
+ * answers 422; the layout is then read alone and Home loads every row itself.
+ */
+async function fetchHomeLayout(signal?: AbortSignal) {
+  try {
+    return await v2("GET /api/v2/home/layout", {
+      query: { include_items: HOME_LAYOUT_INCLUDED_ROWS },
+      signal,
+    });
+  } catch (error) {
+    if (!(error instanceof V2ProblemError) || error.status !== 422) throw error;
+    const layout = await v2("GET /api/v2/home/layout", { signal });
+    return { ...layout, included_sections: [] };
+  }
 }
 
 export function useHomeLayout(enabled = true) {

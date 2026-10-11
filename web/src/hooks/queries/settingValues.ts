@@ -309,10 +309,11 @@ function flushEffectiveBatch(scope: string, batch: PendingEffectiveBatch) {
       }
     },
     (error: unknown) => {
-      // The server answers 404 for the whole read when any one key is missing
-      // from its contract. Re-read each caller's own keys so only the caller
-      // that asked for the unknown key fails, as it did before batching.
-      if (waiters.length > 1 && error instanceof V2ProblemError && error.status === 404) {
+      // The server rejects the whole read (422, a query.keys error) when any
+      // one key is missing from its contract. Re-read each caller's own keys so
+      // only the caller that asked for the unknown key fails, as it did before
+      // batching.
+      if (waiters.length > 1 && isUnknownSettingKeyError(error)) {
         for (const waiter of waiters) {
           fetchEffectiveSettings({ ...batch.request, keys: waiter.keys }).then(
             waiter.resolve,
@@ -392,6 +393,14 @@ export function useStoredSettingValues(options: {
     enabled: (options.enabled ?? true) && keys.length > 0,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+function isUnknownSettingKeyError(error: unknown): boolean {
+  return (
+    error instanceof V2ProblemError &&
+    error.status === 422 &&
+    (error.problem.errors?.some((detail) => detail.location === "query.keys") ?? false)
+  );
 }
 
 /** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */
