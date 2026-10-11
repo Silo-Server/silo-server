@@ -18,10 +18,14 @@ type WatchTonightResult struct {
 
 // GetWatchTonight returns a scored list of recommendation-engine candidates
 // for the Watch Tonight feature. It pulls from cached for-you, because-you-watched,
-// and similar-users sources, falling back to popular/recently-added for cold-start users.
-// Results are filtered before trimming so deeper cached candidates can backfill
-// watched, low-rated, or access-disallowed recommendations. With personal
-// rows off (see WithPersonalRows) only the cold-start rows are used.
+// and similar-users sources, falling back for cold-start users to the cached
+// Popular row and the live Recently Added row, which needs no cache and so
+// still fills on a fresh server or with recommendations disabled, when no
+// worker rebuilds the cached rows. Results are filtered before trimming so
+// deeper candidates can backfill watched, rated, or access-disallowed
+// recommendations, and the profile's exclusion set is read once for both
+// passes. With personal rows off (see WithPersonalRows) only the cold-start
+// rows are used.
 func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (WatchTonightResult, error) {
 	if limit <= 0 {
 		limit = 8
@@ -31,6 +35,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 	}
 
 	byID := make(map[string]ScoredItem, limit*3)
+	read := r.newRowRead(userID, profileID, filter)
 
 	// With recommendations disabled no personal row is served, even one
 	// still cached from before, and the cold-start rows stand in.
@@ -66,7 +71,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 	// The personal candidates are filtered before the fallback is chosen:
 	// a cache holding only titles the viewer cannot be served, such as books
 	// cached before they left personal rows, is as cold as an empty one.
-	items, err := r.rankWatchTonight(ctx, userID, profileID, byID, filter)
+	items, err := read.rankWatchTonight(ctx, byID)
 	if err != nil {
 		return WatchTonightResult{}, err
 	}
@@ -81,13 +86,13 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 		}
 		mergeScored(byID, popular, 0.20, 0.40)
 
-		recentlyAdded, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "")
+		recentlyAdded, err := read.defaultRow(ctx, RecTypeRecentlyAdded, limit)
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, recentlyAdded, 0.15, 0.35)
+		mergeScored(byID, recentlyAdded.Items, 0.15, 0.35)
 
-		if items, err = r.rankWatchTonight(ctx, userID, profileID, byID, filter); err != nil {
+		if items, err = read.rankWatchTonight(ctx, byID); err != nil {
 			return WatchTonightResult{}, err
 		}
 	}
@@ -100,7 +105,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 
 // rankWatchTonight sorts byID's candidates by descending score and filters
 // them for the viewer, keeping every survivor; the caller trims.
-func (r *Reader) rankWatchTonight(ctx context.Context, userID int, profileID string, byID map[string]ScoredItem, filter catalog.AccessFilter) ([]ScoredItem, error) {
+func (rr *rowRead) rankWatchTonight(ctx context.Context, byID map[string]ScoredItem) ([]ScoredItem, error) {
 	if len(byID) == 0 {
 		return []ScoredItem{}, nil
 	}
@@ -111,11 +116,11 @@ func (r *Reader) rankWatchTonight(ctx context.Context, userID int, profileID str
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Score > items[j].Score
 	})
-	rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{{
+	rows, err := rr.filter(ctx, []ForYouRow{{
 		Type:  "watch_tonight",
 		Label: "Watch Tonight",
 		Items: items,
-	}}, filter)
+	}})
 	if err != nil {
 		return nil, err
 	}

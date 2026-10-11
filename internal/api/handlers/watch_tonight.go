@@ -71,6 +71,10 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 // WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
 // list the v1 and v2 handlers both answer. limit must already be validated.
 func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (WatchTonightView, error) {
+	// The reader and the filter below each leave out what the profile
+	// watched; read that once.
+	ctx = recommendations.WithWatchedSetMemo(ctx)
+
 	// Fan out: recommendation candidates + live CW/Next-Up in parallel.
 	var (
 		recResult recommendations.WatchTonightResult

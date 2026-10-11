@@ -245,9 +245,9 @@ func (c *quietHouseholdCatalog) DeleteGlobalRecommendationCache(context.Context,
 
 // On a single-account server where nothing was added in the last 14 days,
 // a brand-new profile's cached reads (home and library "Recommended for You",
-// v1 For You, Jellyfin, Watch Tonight) still get a row: the worker caches
-// Recently Added without a window, and it stands in for the absent Popular
-// row.
+// v1 For You, Jellyfin) still get a row: the worker caches Recently Added
+// without a window, and it stands in for the absent Popular row. Watch
+// Tonight reads the same row live.
 func TestNewProfileGetsARowOnAQuietSingleAccountServer(t *testing.T) {
 	ctx := t.Context()
 	store := &quietHouseholdCatalog{cached: map[string][]ScoredItem{}}
@@ -255,7 +255,8 @@ func TestNewProfileGetsARowOnAQuietSingleAccountServer(t *testing.T) {
 	if _, ok := store.cached[RecTypePopular]; ok {
 		t.Fatal("one account's viewing was cached as Popular")
 	}
-	r := &Reader{repo: &fakeReaderRepo{global: store.cached}, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+	live := map[string][]ScoredItem{RecTypeRecentlyAdded: store.cached[RecTypeRecentlyAdded]}
+	r := &Reader{repo: &fakeReaderRepo{global: store.cached, defaults: live}, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
 	want := []string{"month-old-1", "month-old-2"}
 
 	main, err := r.GetForYouMain(ctx, 7, "p1", 20, catalog.AccessFilter{})

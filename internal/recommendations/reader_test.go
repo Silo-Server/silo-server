@@ -356,7 +356,8 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 			RecTypeRecentlyAdded:                {{MediaItemID: "recent"}},
 			RecTypeGenreSamplerPrefix + "Drama": {{MediaItemID: "top-drama"}},
 		},
-		genres: map[string][]ScoredItem{"Drama": {{MediaItemID: "top-drama"}}},
+		defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: {{MediaItemID: "recent"}}},
+		genres:   map[string][]ScoredItem{"Drama": {{MediaItemID: "top-drama"}}},
 	}
 	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}).WithPersonalRows(false)
 	ctx := t.Context()
@@ -393,20 +394,41 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 // Watch Tonight filters a profile's cached candidates before it chooses the
 // cold-start fallback: a cache holding only titles that can no longer be
 // served, such as books cached before they left personal rows, falls back to
-// Popular and Recently Added rather than answering an empty, warm list.
+// Popular and Recently Added rather than answering an empty, warm list. The
+// profile's watched set is read once for both passes.
 func TestWatchTonightFallsBackWhenFilteringEmptiesThePersonalRows(t *testing.T) {
 	repo := &fakeReaderRepo{
 		personal: map[string][]ScoredItem{RecTypeForYouMain + "|": {{MediaItemID: "cached-book", Score: 1}}},
-		global: map[string][]ScoredItem{
-			RecTypePopular:       {{MediaItemID: "popular", Score: 1}},
-			RecTypeRecentlyAdded: {{MediaItemID: "recent", Score: 1}},
-		},
-		types: map[string]string{"cached-book": "audiobook"},
+		global:   map[string][]ScoredItem{RecTypePopular: {{MediaItemID: "popular", Score: 1}}},
+		defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: {{MediaItemID: "recent", Score: 1}}},
+		types:    map[string]string{"cached-book": "audiobook"},
 	}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+	signals := &fakeSignalRepo{}
+	r := &Reader{repo: repo, signals: NewSignalReader(signals, nil)}
 	tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"popular", "recent"}) {
 		t.Fatalf("watch tonight = %+v, %v; want the cold-start rows", tonight, err)
+	}
+	if signals.watchedReads != 1 {
+		t.Fatalf("watched set read %d times, want once", signals.watchedReads)
+	}
+}
+
+// Watch Tonight's cold-start fallback reads Recently Added live, so it still
+// fills once the cached global rows expire, as they do with recommendations
+// disabled and no worker rebuilding them; the query leaves out what the
+// profile watched.
+func TestWatchTonightFallsBackToTheLiveRecentlyAddedRow(t *testing.T) {
+	repo := &fakeReaderRepo{
+		defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: {{MediaItemID: "watched", Score: 2}, {MediaItemID: "recent", Score: 1}}},
+	}
+	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}).WithPersonalRows(false)
+	tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", 8, catalog.AccessFilter{})
+	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"recent"}) {
+		t.Fatalf("watch tonight = %+v, %v; want the live Recently Added row", tonight, err)
+	}
+	if len(repo.defaultCalls) != 1 || repo.defaultCalls[0].kind != RecTypeRecentlyAdded || !slices.Equal(repo.defaultCalls[0].exclude, []string{"watched"}) {
+		t.Fatalf("default row reads = %+v, want one Recently Added read leaving out the watched title", repo.defaultCalls)
 	}
 }
 

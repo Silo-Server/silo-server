@@ -260,7 +260,8 @@ counts are served while a background count refreshes them, a read with no
 counts yet stops waiting when its request ends, and a failed count falls
 back to the scope's last counts, or equal weights, for a minute.
 Discover reads the profile's watched set once per request and shares it
-between its rows and the airings it blends in.
+between its rows and the airings it blends in; Watch Tonight shares it
+between its candidates, its cold-start fallback and the handler's filter.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
@@ -423,8 +424,10 @@ For You row, cluster rows, Because You Watched, Similar Users), even ones
 still cached from before, and reads fall back to the global and default rows.
 
 The Reader serves cached rows, except the default rows on Discover and their
-section pages; home and library sections keep the cached Recently Added row
-instead, since a library has its own shelves. The other live query
+section pages, and the Recently Added row Watch Tonight falls back to for a
+cold profile, which therefore still fills once the cached global rows expire
+with recommendations disabled; home and library sections keep the cached
+Recently Added row instead, since a library has its own shelves. The other live query
 is the server's top genre, for a taste-match section with no genre and no
 matching cluster; it is the same for every viewer and reads the whole
 catalog, so each server reuses it for 10 minutes, serving an expired genre
