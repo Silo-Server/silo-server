@@ -175,8 +175,8 @@ function castFromTMDB(cast: RequestMediaCastMember[]): CastMember[] {
 
 /**
  * TMDB names a movie's director and a series' creators without person IDs,
- * so the crew line shows them unlinked. Library series credit their creators
- * as directors under a "Created by" label; this follows suit.
+ * so the crew line shows them unlinked. Both go in as Director credits, which
+ * the crew line leads with by default; a series labels them "Created by".
  */
 function crewFromTMDB(names: string[]): CrewMember[] {
   return names.map((name) => ({ name, job: "Director", person_id: "" }));

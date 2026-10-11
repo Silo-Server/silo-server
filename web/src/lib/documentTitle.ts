@@ -27,6 +27,7 @@ export function setAppDocumentTitle(name: string) {
 
 const SETTINGS_TITLES: Record<string, string> = {
   account: "Account Settings",
+  sessions: "Signed-in sessions",
   interface: "Navigation & Card Settings",
   accessibility: "Accessibility Settings",
   playback: "Playback Settings",
@@ -51,6 +52,7 @@ const ADMIN_TITLES: Record<string, string> = {
   devices: "Admin Devices",
   "settings/devices": "Your Devices",
   diagnostics: "Admin Client Diagnostics",
+  downloads: "Admin Downloads",
   history: "Admin Playback History",
   "history-import": "Admin History Import",
   "marker-history": "Admin Marker History",

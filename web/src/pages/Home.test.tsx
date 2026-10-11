@@ -38,7 +38,7 @@ vi.mock("@/hooks/useDocumentTitle", () => ({
 }));
 
 vi.mock("react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
 
 vi.mock("@/components/TasteSeedBanner", () => ({
@@ -103,6 +103,22 @@ describe("Home", () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled();
     invalidateQueries.mockRestore();
+  });
+
+  it("links an empty Home to the Home Screen settings page", async () => {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    const link = Array.from(container.querySelectorAll("a")).find(
+      (anchor) => anchor.textContent === "Customize Home Screen",
+    );
+    expect(link?.getAttribute("href")).toBe("/settings/home-screen");
   });
 
   it("keeps section items cached past the client-wide gc time", async () => {

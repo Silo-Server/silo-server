@@ -49,14 +49,16 @@ func (c *customFilterRecipe) Validate(raw json.RawMessage) error {
 
 func (c *customFilterRecipe) Definition() RecipeDefinition {
 	return RecipeDefinition{
-		Type:      c.typ,
-		Category:  CategoryCustom,
-		AdminOnly: true,             // gated by sections.allow_profile_custom_sections at the API layer
-		Hidden:    c.typ == "genre", // legacy alias — keep resolvable, hide from UI
+		Type:     c.typ,
+		Category: CategoryCustom,
+		Hidden:   c.typ == legacyGenreType, // legacy alias — keep resolvable, hide from UI
 	}
 }
 
+// legacyGenreType is the old name of custom_filter, still resolvable.
+const legacyGenreType = "genre"
+
 func init() {
-	Register(&customFilterRecipe{typ: "genre", cacheTTL: 5 * time.Minute})
+	Register(&customFilterRecipe{typ: legacyGenreType, cacheTTL: 5 * time.Minute})
 	Register(&customFilterRecipe{typ: "custom_filter", cacheTTL: 5 * time.Minute})
 }

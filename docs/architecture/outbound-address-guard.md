@@ -1,7 +1,8 @@
 # Outbound address guard
 
 Some features make Silo send HTTP requests to an address a user typed or a
-third party supplied: history import, webhook sync, and notification webhooks.
+third party supplied: history import, webhook sync, notification webhooks, and
+collection posters set from a URL.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -72,6 +73,14 @@ was already accepted. A refused address fails with a message that tells the
 user what to change (`historyimport.PrivateAddressMessage`), never as an
 unreachable server.
 
+A Plex run carries every address plex.tv advertised for the server and races
+them. Admission checks each one and drops those the account may not reach,
+refusing the run only when none remain. A session-backed run may name only
+addresses the stored session advertised; the enqueue transaction recomputes
+that list rather than trusting the queued credential. The Plex client removes
+`X-Plex-Token` from any redirect that leaves the first request's host or
+downgrades from HTTPS to HTTP, which `net/http` does not do for custom headers.
+
 Run monitors, v1 run responses, and realtime history-import events carry only
 the fixed summaries from `historyimport.PublicRun`; stored diagnostics can hold
 an upstream response body and stay on the server.
@@ -95,6 +104,28 @@ request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
 Only acting admins reach that route, so this does not widen what any other
 account can make the server request.
+
+## Collection artwork
+
+Collection artwork downloads use the netguard transport with no fallback
+client (`newCollectionImageClient` in `internal/api/handlers`):
+
+- **Personal collection posters.** Any profile, including a child's, can set
+  one from a URL: `poster_source_url` on the v1 create and update and the v2
+  `createCollection`, and `source_url` on v2 `uploadCollectionPoster`. These
+  are Public only. Every refused address fails with the same error
+  (`errCollectionImageSourceNotAllowed`), whether something listens there or
+  not, so the answer cannot be used to map the server's network.
+- **Library collection artwork.** The poster and backdrop source URLs on the
+  admin collection routes (create, update, list imports, and the v2 artwork
+  operations) are trusted with the local network, like an image an admin
+  applies to an item. Only acting admins reach those routes.
+- **Collages.** A collage fetches its titles' posters as the server resolved
+  them, usually from its own artwork storage, which may be on the local
+  network. No request supplies those URLs, so the fetch is trusted with the
+  local network.
+
+Blocked addresses stay refused in all three cases, on every dial and redirect.
 
 ## Limits
 

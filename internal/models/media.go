@@ -79,6 +79,7 @@ type MediaFile struct {
 	SubtitleTracks               []SubtitleTrack    // JSONB
 	ExternalSubtitles            []ExternalSubtitle // JSONB
 	Chapters                     []MediaChapter     // JSONB; nil means not yet probed for chapters
+	MarkerThumbnails             []MarkerThumbnail  `json:"-"`
 	ChapterThumbnailRetryAfter   *time.Time
 	ChapterThumbnailFailureCount int
 	ChapterThumbnailLastError    string
@@ -142,6 +143,9 @@ type MediaFile struct {
 	FirstSeenScanRunID   string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+
+	// Non-nil only for an ephemeral on-demand overlay; fences canonical edits.
+	MarkerThumbnailBaseSegments []MarkerSegment `json:"-"`
 }
 
 // MediaChapter represents a single media chapter derived from embedded file metadata.
@@ -512,6 +516,8 @@ const (
 	PersonKindComposer  PersonKind = 6
 	PersonKindAuthor    PersonKind = 7
 	PersonKindNarrator  PersonKind = 8
+	// PersonKindCreator credits a series' creators, who are not its directors.
+	PersonKindCreator PersonKind = 9
 )
 
 // String returns the Jellyfin-compatible type string for this PersonKind.
@@ -533,6 +539,8 @@ func (k PersonKind) String() string {
 		return "Author"
 	case PersonKindNarrator:
 		return "Narrator"
+	case PersonKindCreator:
+		return "Creator"
 	default:
 		return "Unknown"
 	}
@@ -543,6 +551,8 @@ func PersonKindFromJob(job string) PersonKind {
 	switch strings.ToLower(strings.TrimSpace(job)) {
 	case "director":
 		return PersonKindDirector
+	case "creator":
+		return PersonKindCreator
 	case "writer", "screenplay", "story", "novel":
 		return PersonKindWriter
 	case "composer", "original music composer", "music":
@@ -701,6 +711,14 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
+	// set by the query that picks an episode card's artwork: true when the
+	// path is the episode's own still, false for season or series artwork, nil
+	// when no such query loaded the item. They travel with the paths so a
+	// cached item never pairs old artwork with newer provenance. json:"-"
+	// because some frozen v1 responses serialize MediaItem directly.
+	PosterIsEpisodeStill   *bool `json:"-"`
+	BackdropIsEpisodeStill *bool `json:"-"`
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.

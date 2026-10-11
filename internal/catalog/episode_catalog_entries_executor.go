@@ -758,19 +758,9 @@ func (e *QueryExecutor) hydrateEpisodeCatalogEntryPage(
 }
 
 func singleEpisodeCatalogLibraryID(def QueryDefinition, access AccessFilter) (int, bool, bool) {
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
-	if len(libraryIDs) == 0 {
-		if access.AllowedLibraryIDs != nil {
-			return 0, true, true
-		}
-		return 0, false, false
+	libraryIDs, empty := access.LibraryScope(def.LibraryIDs)
+	if empty {
+		return 0, true, true
 	}
 	if len(libraryIDs) != 1 {
 		return 0, false, false
@@ -778,11 +768,6 @@ func singleEpisodeCatalogLibraryID(def QueryDefinition, access AccessFilter) (in
 	libraryID := libraryIDs[0]
 	if libraryID <= 0 {
 		return 0, true, true
-	}
-	for _, disabledID := range access.DisabledLibraryIDs {
-		if disabledID == libraryID {
-			return 0, true, true
-		}
 	}
 	return libraryID, false, true
 }
@@ -992,12 +977,8 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		return fmt.Sprintf("%s = %s", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
 	case "is_not":
 		return fmt.Sprintf("NOT (%s = %s)", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", nil, argIdx, true, fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
+	case ruleOpInLast, ruleOpNotInLast:
+		interval, err := ruleInterval(rule)
 		if err != nil {
 			return "", nil, argIdx, true, err
 		}
@@ -1005,7 +986,7 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		if cast == "date" {
 			cutoff = fmt.Sprintf("(CURRENT_DATE - INTERVAL '%s')::date", interval)
 		}
-		return fmt.Sprintf("%s >= %s", column, cutoff), nil, argIdx, true, nil
+		return relativeDateClause(column, rule.Op, cutoff), nil, argIdx, true, nil
 	default:
 		return "", nil, argIdx, true, fmt.Errorf("unsupported comparison operator %q", rule.Op)
 	}

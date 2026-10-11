@@ -7,6 +7,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -14,9 +15,17 @@ import (
 )
 
 // networkSignInService wires a Service to a network identity plugin at the
-// env's installation.
+// env's installation, whose binding it declares a network provider's.
 func networkSignInService(t *testing.T, env *externalSignInEnv, plugin *peerPlugin, autoProvision bool) *Service {
 	t.Helper()
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET capability_id = 'tailscale' WHERE plugin_installation_id = $1`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}') ON CONFLICT DO NOTHING`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
 	return networkSignInServiceAt(env.pool, env.resolver, env.installationID, plugin, autoProvision)
 }
 
@@ -128,7 +137,7 @@ func TestNetworkSignInWithoutAccountCreationDB(t *testing.T) {
 
 // TestLinkNetworkIdentityDB: a signed-in account links the network identity
 // of its request's peer after re-entering its local password; afterwards the
-// peer signs in to that account.
+// peer signs in to that account, and the local password still does too.
 func TestLinkNetworkIdentityDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
@@ -159,6 +168,161 @@ func TestLinkNetworkIdentityDB(t *testing.T) {
 	pair, err := svc.NetworkSignIn(overlay, NetworkSignInInput{InstallationID: env.installationID})
 	if err != nil || pair.User.ID != owner.ID {
 		t.Fatalf("sign-in after linking = %+v, %v", pair, err)
+	}
+	users := NewUserRepository(env.pool)
+	if user, err := NewLocalProvider(users, NewSessionRepository(env.pool)).Authenticate(ctx,
+		Credentials{Username: owner.Username, Password: "correct horse battery"}); err != nil || user.ID != owner.ID {
+		t.Fatalf("password sign-in after linking = %+v, %v; want the account", user, err)
+	}
+}
+
+// TestNetworkRefusalBlocksLocalPasswordDB: linking a network identity keeps
+// the account's local password and its open sessions. The scheduled pass
+// re-checks that identity even without a credential to bound; a refusal ends
+// every session and API key of the account and refuses its password until
+// the provider vouches for the person again. Break-glass accounts and a
+// turned-off network provider are never blocked.
+func TestNetworkRefusalBlocksLocalPasswordDB(t *testing.T) {
+	env := newRecheckEnv(t, "network-password", "")
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := env.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	network := env.enableNetworkProvider(t, "network-password")
+	owner := env.localAccount(t, "owner", models.RoleUser)
+	session := models.AuthSession{ID: uuid.New().String(), UserID: owner.ID, DeviceName: "network-password-test",
+		ExpiresAt: time.Now().Add(recheckRefreshExpiry)}
+	if err := NewSessionRepository(env.pool).Create(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	link := func(user *models.User, label string) int64 {
+		t.Helper()
+		_, identityID, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Network: true, LinkingUserID: user.ID,
+			Identity: ExternalIdentity{Subject: "controlplane.tailscale.com|" + env.name(label), Username: user.Username}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return identityID
+	}
+	networkIdentityID := link(owner, "owner")
+	if user, err := NewUserRepository(env.pool).GetByID(ctx, owner.ID); err != nil || !user.LocalPasswordLoginEnabled {
+		t.Fatalf("after linking = %+v, %v; want local password sign-in on", user, err)
+	}
+	if row := env.sessionRow(t, session.ID); row.IdentityID != nil {
+		t.Fatalf("linking moved the local session under the network identity %d", *row.IdentityID)
+	}
+	key, err := NewAPIKeyRepository(env.pool).Create(ctx, owner.ID, "network-password", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signIn := func(user *models.User) error {
+		_, _, err := env.svc.Login(ctx, user.Username, "correct horse battery", "network-password-test", "")
+		return err
+	}
+	if err := signIn(owner); err != nil {
+		t.Fatalf("password sign-in after linking = %v", err)
+	}
+	recheck := func(status pluginv1.CheckAccountStatus) {
+		t.Helper()
+		env.checker.respond = answer(status, "")
+		exec(`UPDATE plugin_auth_identities SET last_checked_at = NOW() - INTERVAL '13 hours' WHERE id = $1`, networkIdentityID)
+		if _, err := env.recheck.RecheckIdleIdentities(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Removed from the overlay: signed out everywhere, password refused.
+	recheck(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND)
+	if env.sessionRow(t, session.ID).RevokedAt == nil {
+		t.Fatal("the password session survived the network provider's refusal")
+	}
+	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err == nil {
+		t.Fatal("the API key survived the network provider's refusal")
+	}
+	if err := signIn(owner); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("password sign-in after the refusal = %v, want ErrNotPermitted", err)
+	}
+	if _, err := NewLocalProvider(NewUserRepository(env.pool), NewSessionRepository(env.pool)).Authenticate(ctx,
+		Credentials{Username: owner.Username, Password: "wrong password"}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password after the refusal = %v, want ErrInvalidCredentials", err)
+	}
+
+	// An answer that decides nothing keeps the refusal on record.
+	for _, status := range []pluginv1.CheckAccountStatus{pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNAVAILABLE,
+		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED} {
+		recheck(status)
+		if err := signIn(owner); !errors.Is(err, ErrNotPermitted) {
+			t.Fatalf("password sign-in after a %v answer = %v, want ErrNotPermitted", status, err)
+		}
+	}
+
+	// An identity that answered unsupported, with nothing to bound, is still
+	// asked again, so a plugin that gains checks can refuse the person.
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, last_checked_at = NOW() - INTERVAL '13 hours' WHERE id = $1`,
+		networkIdentityID, CheckStatusUnsupported)
+	if due, err := env.recheck.IdleRecheckDue(ctx); err != nil || !due {
+		t.Fatalf("re-check due after an unsupported answer = %v, %v; want due", due, err)
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, networkIdentityID, CheckStatusNotFound)
+
+	// So does one that arrives while a refusal waits to be applied.
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = $3 WHERE id = $1`,
+		networkIdentityID, CheckStatusActive, CheckStatusNotFound)
+	if err := recordIdentityCheck(ctx, env.pool, networkIdentityID, CheckStatusUnavailable, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := signIn(owner); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("password sign-in after an unavailable answer to a pending refusal = %v, want ErrNotPermitted", err)
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = '' WHERE id = $1`,
+		networkIdentityID, CheckStatusNotFound)
+
+	// A break-glass admin is never blocked.
+	admin := env.localAccount(t, "glass", models.RoleAdmin)
+	exec(`UPDATE users SET break_glass = true WHERE id = $1`, admin.ID)
+	adminIdentity := link(admin, "glass")
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, adminIdentity, CheckStatusNotFound)
+	if err := signIn(admin); err != nil {
+		t.Fatalf("break-glass password sign-in during a network refusal = %v", err)
+	}
+
+	// Neither is anyone once the network provider is turned off.
+	exec(`UPDATE plugin_auth_bindings SET enabled = false WHERE plugin_installation_id = $1`, network)
+	if err := signIn(owner); err != nil {
+		t.Fatalf("password sign-in with the network provider off = %v", err)
+	}
+	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, network)
+
+	// Added back: the next scheduled re-check lifts the block.
+	recheck(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE)
+	if err := signIn(owner); err != nil {
+		t.Fatalf("password sign-in after the provider vouches again = %v", err)
+	}
+}
+
+// TestNetworkLinkAtMixedInstallationTurnsPasswordOffDB: an installation that
+// also has an OIDC or LDAP binding is that provider for linking, even while
+// that binding is off, so linking there turns the password off.
+func TestNetworkLinkAtMixedInstallationTurnsPasswordOffDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}')`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'tailscale', true)`,
+		env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	owner := env.localAccount(t, "owner", models.RoleUser)
+	if _, err := env.resolve(t, env.identity("owner"), false, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if user, err := NewUserRepository(env.pool).GetByID(ctx, owner.ID); err != nil || user.LocalPasswordLoginEnabled {
+		t.Fatalf("after linking at a mixed installation = %+v, %v; want local password sign-in off", user, err)
 	}
 }
 

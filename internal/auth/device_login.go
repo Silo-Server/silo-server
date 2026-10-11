@@ -68,6 +68,21 @@ const (
 // without the server that issued it.
 var deviceCodeAlphabet = []byte("0123456789")
 
+// withdrawDeviceSignInApprovalsInTransaction prevents an approved device from
+// minting a fresh native session after account-wide revocation. Callers lock
+// the approving accounts first, as approval and collection do, and commit this
+// update together with session revocation. Already-issued playback grants and
+// requests approved by other accounts are unchanged.
+func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE device_login_requests SET status = $2, updated_at = NOW()
+		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
+		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
+		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
+	}
+	return nil
+}
+
 type DeviceLoginStartInput struct {
 	DeviceName     string
 	DevicePlatform string
@@ -689,12 +704,14 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	}
 
 	profileID := ""
+	var profile *userstore.Profile
 	if record.ClientPurpose == DeviceLoginPurposeRemote {
 		if !record.Temporary || record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
 			return nil, ErrDeviceLoginNoProfile
 		}
 		profileID = strings.TrimSpace(*record.ApprovedProfileID)
-		if err := s.validateProfileOwnership(ctx, user.ID, profileID); err != nil {
+		profile, err = s.loadOwnedProfile(ctx, user.ID, profileID)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -709,11 +726,15 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		}
 	}
 	session := models.AuthSession{
-		ID:         sessionID,
-		UserID:     user.ID,
-		DeviceName: record.DeviceName,
-		IPAddress:  record.IPAddress,
-		ExpiresAt:  sessionExpiresAt,
+		ID:     sessionID,
+		UserID: user.ID,
+		// The name and platform the device started with. Device headers on
+		// the poll that collects the session replace them and add the
+		// device's id (applyClientDevice).
+		DeviceName:     record.DeviceName,
+		DevicePlatform: clampClientDeviceValue(record.DevicePlatform, maxClientDevicePlatformLen),
+		IPAddress:      record.IPAddress,
+		ExpiresAt:      sessionExpiresAt,
 		// The device continues the approving session's provider chain, so a
 		// provider that cannot re-check it ends the device's session when it
 		// would have ended the approver's.
@@ -740,9 +761,11 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 			return nil, errors.New("profile token service is not configured")
 		}
 		profileToken, _, err = s.profiles.Mint(access.ProfileTokenClaims{
-			UserID:         user.ID,
-			SessionID:      sessionID,
-			ProfileID:      profileID,
+			UserID:      user.ID,
+			SessionID:   sessionID,
+			ProfileID:   profileID,
+			PINRevision: profile.PINRevision,
+			// Only for nodes running an older release during a rolling deploy.
 			PolicyRevision: user.AccessPolicyRevision,
 		})
 		if err != nil {
@@ -948,25 +971,28 @@ func (s *DeviceLoginService) validateApprovingProfile(ctx context.Context, userI
 	if err := s.validateApprovingUser(ctx, userID); err != nil {
 		return err
 	}
-	return s.validateProfileOwnership(ctx, userID, profileID)
+	_, err := s.loadOwnedProfile(ctx, userID, profileID)
+	return err
 }
 
-func (s *DeviceLoginService) validateProfileOwnership(ctx context.Context, userID int, profileID string) error {
+// loadOwnedProfile returns the user's profile, or ErrDeviceLoginNoProfile
+// when the user has no such profile.
+func (s *DeviceLoginService) loadOwnedProfile(ctx context.Context, userID int, profileID string) (*userstore.Profile, error) {
 	if s.stores == nil {
-		return errors.New("user store provider is not configured")
+		return nil, errors.New("user store provider is not configured")
 	}
 	store, err := s.stores.ForUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("load approving user store: %w", err)
+		return nil, fmt.Errorf("load approving user store: %w", err)
 	}
 	profile, err := store.GetProfile(ctx, profileID)
 	if err != nil {
-		return fmt.Errorf("load approving profile: %w", err)
+		return nil, fmt.Errorf("load approving profile: %w", err)
 	}
 	if profile == nil {
-		return ErrDeviceLoginNoProfile
+		return nil, ErrDeviceLoginNoProfile
 	}
-	return nil
+	return profile, nil
 }
 
 func validateDeviceLoginDecision(record *deviceLoginRecord) error {

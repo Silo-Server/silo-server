@@ -293,8 +293,8 @@ func TestIngestFolderLetsActiveDrainerBatchFinishAfterSettleWindow(t *testing.T)
 	if got.err != nil {
 		t.Fatalf("expected ingest to complete, got error: %v", got.err)
 	}
-	if got.result == nil || got.result.Skipped {
-		t.Fatalf("expected a non-skipped result, got %+v", got.result)
+	if got.result == nil || got.result.ScanResult == nil {
+		t.Fatalf("expected a scanned result, got %+v", got.result)
 	}
 	if matcher.batchCalls.Load() == 0 {
 		t.Fatal("drainer never ran a batch; test did not exercise the settle-window shutdown path")

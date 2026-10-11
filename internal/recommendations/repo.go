@@ -24,6 +24,12 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 const minHNSWEfSearch = 200
 
+// maxHNSWEfSearch is the largest hnsw.ef_search pgvector accepts. A larger
+// value fails set_config, so the candidate scan never runs. With iterative
+// scans the index keeps returning rows past ef_search, so the cap does not
+// stop a larger LIMIT at 1000 candidates.
+const maxHNSWEfSearch = 1000
+
 // watchedActivityCTE unifies video watch progress and ebook reader progress
 // into one activity stream. Episodes roll up to their parent series via
 // COALESCE(e.series_id, ...). The ebook completed flag is derived from the
@@ -116,7 +122,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 }
 
 func hnswEfSearch(candidateLimit int) int {
-	return max(candidateLimit, minHNSWEfSearch)
+	return min(max(candidateLimit, minHNSWEfSearch), maxHNSWEfSearch)
 }
 
 func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn func(pgx.Tx) error) error {

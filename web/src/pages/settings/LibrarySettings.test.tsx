@@ -214,6 +214,12 @@ describe("LibrarySettings", () => {
     });
   });
 
+  it("lists hidden libraries so each keeps a switch to show it again", () => {
+    renderToStaticMarkup(<LibrarySettings />);
+
+    expect(mocks.useAvailableUserLibraries).toHaveBeenCalledWith({ includeHidden: true });
+  });
+
   it("renders the inherited summary for libraries without playback overrides", () => {
     const markup = renderToStaticMarkup(<LibrarySettings />);
 

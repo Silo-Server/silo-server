@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,160 +12,35 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { useReturnFocus } from "@/components/homeRows/useReturnFocus";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
-import { v2, V2ProblemError } from "@/api/v2/request";
-import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
+import { v2 } from "@/api/v2/request";
+import {
+  layoutPageQuery as pageQuery,
+  layoutProblemMessage as problemMessage,
+} from "@/hooks/queries/homeRows/useHomeLayoutExport";
 import { sectionKeys } from "@/hooks/queries/keys";
-import { invalidateSettingValueQueries, useEffectiveSettings } from "@/hooks/queries/settingValues";
+import { invalidateSettingValueQueries } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { fetchRecipeCatalog } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { randomUUID } from "@/lib/uuid";
 import {
   HOME_LAYOUT_MAX_LENGTH,
   HOME_LAYOUT_SKIP_REASON_LABELS,
-  buildHomeLayoutFile,
   importPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
   fileReferences,
   type HomeLayoutImportPlan,
   type HomeLayoutReferences,
-  type HomeLayoutScope,
 } from "@/lib/homeLayoutTransfer";
 
-const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_REFERENCES: HomeLayoutReferences = { personalCollections: false, profiles: false };
-// Page reads during export run this many at a time.
-const READ_BATCH = 4;
-
-async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
-  const results: R[] = [];
-  for (let start = 0; start < items.length; start += READ_BATCH) {
-    results.push(...(await Promise.all(items.slice(start, start + READ_BATCH).map(read))));
-  }
-  return results;
-}
-
-function pageQuery(scope: HomeLayoutScope, libraryId?: number) {
-  return { scope, library_id: libraryId ? String(libraryId) : undefined };
-}
-
-function problemMessage(error: unknown): string {
-  if (error instanceof V2ProblemError) {
-    return error.problem.detail?.trim() || error.problem.title || "request failed";
-  }
-  return error instanceof Error ? error.message : "request failed";
-}
-
-function downloadJson(fileName: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 function listNames(names: string[]): string {
   return names.join(", ");
-}
-
-/** Export and import of the profile's home and library page layouts. */
-export default function HomeLayoutTransfer() {
-  const librariesQuery = useAvailableUserLibraries();
-  const libraries = librariesQuery.data;
-  const homePreferences = useEffectiveSettings({ keys: HOME_PREFERENCE_KEYS });
-  // Only a value this profile chose travels; an inherited one would be
-  // pinned on the importing profile.
-  const hideWatched = homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS];
-  const hideWatchedItems =
-    hideWatched?.source === "profile" ? hideWatched.value === true : undefined;
-  const [exporting, setExporting] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-
-  async function handleExport() {
-    if (!libraries) return;
-    if (homePreferences.isError) {
-      toast.error(
-        "Couldn't read this profile's Home preferences, so the export would be incomplete. Reload the page and try again.",
-      );
-      return;
-    }
-    // Every read goes to the profile active now, even if it changes mid-export.
-    const profileContext = captureProfileRequestContext();
-    if (!profileContext) {
-      toast.error("Choose a profile before exporting its home layout.");
-      return;
-    }
-    setExporting(true);
-    try {
-      const identity = await v2("GET /api/v2/system/identity");
-      const sources = [
-        { scope: "home" as const, libraryId: undefined },
-        ...libraries.map((library) => ({ scope: "library" as const, libraryId: library.id })),
-      ];
-      const pages = await readInBatches(sources, async (source) => {
-        const result = await v2("GET /api/v2/profile/sections", {
-          query: pageQuery(source.scope, source.libraryId),
-          profileContext,
-        });
-        return { ...source, overrides: result.items };
-      });
-      const exportedAt = new Date();
-      const file = buildHomeLayoutFile({
-        serverId: identity.server_id,
-        exportedAt,
-        libraries,
-        hideWatchedItems,
-        pages,
-      });
-      const blob = new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json" });
-      if (blob.size > HOME_LAYOUT_MAX_LENGTH) {
-        toast.error(
-          "This home layout is too large to export. Remove some custom sections and try again.",
-        );
-        return;
-      }
-      downloadJson(`silo-home-layout-${exportedAt.toISOString().slice(0, 10)}.json`, blob);
-      toast.success("Home layout exported");
-    } catch (error) {
-      toast.error(`Failed to export the home layout: ${problemMessage(error)}`);
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleExport()}
-          disabled={!libraries || homePreferences.isLoading || exporting}
-        >
-          <Download className="mr-1 h-4 w-4" /> {exporting ? "Exporting…" : "Export layout"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setImportOpen(true)}
-          disabled={!libraries}
-        >
-          <Upload className="mr-1 h-4 w-4" /> Import layout
-        </Button>
-      </div>
-      {importOpen && libraries ? (
-        <HomeLayoutImportDialog onClose={() => setImportOpen(false)} libraries={libraries} />
-      ) : null}
-    </>
-  );
 }
 
 interface HomeLayoutImportDialogProps {
@@ -174,7 +48,8 @@ interface HomeLayoutImportDialogProps {
   libraries: { id: number; name: string; type: string }[];
 }
 
-function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogProps) {
+/** Import of a Home layout file into this profile (#1705), opened from More. */
+export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogProps) {
   const qc = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
@@ -182,6 +57,8 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
   // The profile this dialog imports into. Its reads and writes carry this
   // authority, so a profile switch can't redirect an import in progress.
   const [profileContext] = useState(captureProfileRequestContext);
+  // Opened from More, which gets focus back on close.
+  const returnFocus = useReturnFocus();
 
   const identityQuery = useQuery({
     queryKey: ["home-layout-import", "server-identity"],
@@ -229,31 +106,17 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
     staleTime: 5 * 60 * 1000,
   });
   const recipeCatalog = recipeCatalogQuery.data;
-  const role = useOptionalAuth()?.user?.role;
-  const flagsQuery = useQuery({
-    queryKey: ["profile-section-flags"],
-    queryFn: () => v2("GET /api/v2/profile/sections/flags"),
-    staleTime: 5 * 60 * 1000,
-    enabled: role !== "admin",
-  });
-  const allowAdminOnlyRecipes =
-    role === "admin" || flagsQuery.data
-      ? canAddAdminOnlyRecipes(role, flagsQuery.data?.allow_profile_custom_sections)
-      : undefined;
+  // Only an admin adds new rows of an admin-only kind (Editor's picks).
+  const allowAdminOnlyRecipes = useOptionalAuth()?.user?.role === "admin";
 
   const targetReady = Boolean(
-    identityQuery.data &&
-    personalCollectionIds &&
-    profileIds &&
-    recipeCatalog &&
-    allowAdminOnlyRecipes !== undefined,
+    identityQuery.data && personalCollectionIds && profileIds && recipeCatalog,
   );
   const targetError =
     identityQuery.isError ||
     (refs.personalCollections && collectionsQuery.isError) ||
     (refs.profiles && profilesQuery.isError) ||
-    recipeCatalogQuery.isError ||
-    flagsQuery.isError;
+    recipeCatalogQuery.isError;
 
   const plan = useMemo<HomeLayoutImportPlan | null>(() => {
     if (
@@ -261,8 +124,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
       !identityQuery.data ||
       !personalCollectionIds ||
       !profileIds ||
-      !recipeCatalog ||
-      allowAdminOnlyRecipes === undefined
+      !recipeCatalog
     ) {
       return null;
     }
@@ -387,7 +249,7 @@ function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportDialogPr
         if (!open && !applying) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl" {...returnFocus}>
         <DialogHeader>
           <DialogTitle>Import home layout</DialogTitle>
           <DialogDescription>

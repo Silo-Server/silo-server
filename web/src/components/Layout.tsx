@@ -467,7 +467,9 @@ export default function Layout({ children }: LayoutProps) {
           {needsNoPadding ? (
             children
           ) : (
-            <div className="relative z-10 px-4 py-4 sm:px-6 lg:px-10 lg:py-8 xl:px-12">
+            // `--page-gutter` is published so fixed page chrome (the collection
+            // editor's save bar) can line up with this content column.
+            <div className="relative z-10 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:py-8 lg:[--page-gutter:2.5rem] xl:[--page-gutter:3rem]">
               {children}
             </div>
           )}

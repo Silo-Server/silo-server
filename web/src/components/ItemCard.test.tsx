@@ -328,6 +328,6 @@ describe("ItemCard poster loading", () => {
     expect(poster).toHaveClass("opacity-100");
 
     fireEvent.error(poster);
-    expect(poster).toHaveClass("opacity-0");
+    expect(screen.queryByRole("img", { name: "The Last of Us" })).toBeNull();
   });
 });

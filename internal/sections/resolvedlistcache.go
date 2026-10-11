@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -433,6 +434,30 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 	filter.WriteAccessScopeCacheKey(&b)
 
 	return b.String()
+}
+
+// resolvedListKey is resolvedListCacheKey plus, for a library collection row,
+// the collection's stored revision. Every write to the collection, its items,
+// or its libraries advances that revision in the database, so an edit made on
+// any node changes the key on every node and the next read rebuilds the row
+// instead of serving it until the entry expires.
+func (f *Fetcher) resolvedListKey(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, error) {
+	key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+	if dailyMixSectionTypes[resolved.SectionType] {
+		key += "|day=" + strconv.FormatInt(dailyMixDay(f.now()), 10)
+	}
+	if resolved.SectionType != SectionCollection || f.CollectionRepo == nil {
+		return key, nil
+	}
+	collectionID := strings.TrimSpace(ParseCollectionConfig(resolved.Config).LibraryCollectionID)
+	if collectionID == "" {
+		return key, nil
+	}
+	revision, err := f.CollectionRepo.CollectionRevision(ctx, collectionID)
+	if err != nil {
+		return "", fmt.Errorf("loading library collection revision: %w", err)
+	}
+	return key + "|collection_revision=" + strconv.FormatInt(revision, 10), nil
 }
 
 func hashSectionConfig(config json.RawMessage) string {

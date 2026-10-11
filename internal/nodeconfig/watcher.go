@@ -42,6 +42,10 @@ type BootstrapOverrides struct {
 type nodeHWOverrides struct {
 	HWAccel  *string
 	HWDevice *string
+	// ArtifactDir is this node's own prepared-download directory. The
+	// transcode server reads it once at startup, so a change applies when
+	// the node restarts, like the cluster download.artifact_dir.
+	ArtifactDir *string
 }
 
 // loadNodeHWOverrides reads one node's overrides, matching its registered row
@@ -328,9 +332,7 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 	if w.bootstrap.JFListen != "" {
 		newCfg.JellyfinCompat.Listen = w.bootstrap.JFListen
 	}
-	if w.bootstrap.RedisURL != "" {
-		newCfg.Redis.URL = w.bootstrap.RedisURL
-	}
+	newCfg.Redis = newCfg.Redis.WithBootstrapURL(w.bootstrap.RedisURL)
 
 	for _, normalize := range w.normalizers {
 		normalize(newCfg)
@@ -429,6 +431,9 @@ func (w *Watcher) applyNodeHWOverrides(ctx context.Context, cfg *config.Config) 
 	if overrides.HWDevice != nil {
 		cfg.Playback.HWDevice = *overrides.HWDevice
 	}
+	if overrides.ArtifactDir != nil {
+		cfg.Download.ArtifactDir = *overrides.ArtifactDir
+	}
 }
 
 // queryNodeHWOverrides reads this node's own stream_nodes row. The URL is
@@ -459,7 +464,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 	// been identified, its id is what identifies it.
 	if id, ok := w.rememberedNodeRowID(); ok {
 		overrides, _, matched, err := w.queryOverrideRows(ctx,
-			`SELECT id, url, hw_accel_override, hw_device_override FROM stream_nodes
+			`SELECT id, url, hw_accel_override, hw_device_override, download_artifact_dir_override FROM stream_nodes
 			 WHERE id = $1`, id)
 		if err != nil {
 			return nodeHWOverrides{}, false, err
@@ -474,7 +479,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 	}
 
 	overrides, id, matched, err := w.queryOverrideRows(ctx,
-		`SELECT id, url, hw_accel_override, hw_device_override FROM stream_nodes
+		`SELECT id, url, hw_accel_override, hw_device_override, download_artifact_dir_override FROM stream_nodes
 		 WHERE rtrim(url, '/') = rtrim($1, '/') ORDER BY id LIMIT 2`, nodeURL)
 	if err != nil {
 		return nodeHWOverrides{}, false, err
@@ -496,7 +501,7 @@ func (w *Watcher) queryNodeHWOverrides(ctx context.Context, nodeURL, nodeName st
 		return nodeHWOverrides{}, false, nil
 	}
 	overrides, id, matched, err = w.queryOverrideRows(ctx,
-		`SELECT id, url, hw_accel_override, hw_device_override FROM stream_nodes
+		`SELECT id, url, hw_accel_override, hw_device_override, download_artifact_dir_override FROM stream_nodes
 		 WHERE name = $1 ORDER BY id LIMIT 2`, nodeName)
 	if err != nil {
 		return nodeHWOverrides{}, false, err
@@ -533,7 +538,7 @@ func (w *Watcher) queryOverrideRows(ctx context.Context, query string, arg any) 
 			url string
 			row nodeHWOverrides
 		)
-		if err := rows.Scan(&id, &url, &row.HWAccel, &row.HWDevice); err != nil {
+		if err := rows.Scan(&id, &url, &row.HWAccel, &row.HWDevice, &row.ArtifactDir); err != nil {
 			return nodeHWOverrides{}, 0, nil, fmt.Errorf("scan node acceleration overrides: %w", err)
 		}
 		if len(matched) == 0 {

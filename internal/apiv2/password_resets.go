@@ -267,7 +267,7 @@ func (reg *Registry) completePasswordReset(ctx context.Context, in *PasswordRese
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.CompletePasswordReset(ctx, in.Token, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+	view, err := svc.CompletePasswordReset(withClientDevice(ctx), in.Token, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
 	if err != nil && !errors.Is(err, passwordreset.ErrSessionStart) {
 		return nil, passwordResetProblem(err)
 	}

@@ -132,6 +132,30 @@ than the Goose CLI: those targets copy legacy `schema_versions` rows into
 anything. Set `ENV_FILE=path/to/.env` to read the database URL from a different
 env file.
 
+### Keep migrations online
+
+Migrations run at startup while other API replicas keep serving, against tables
+that can hold millions of rows. Keep locks on existing tables short:
+
+- Create and drop indexes on existing tables with `CONCURRENTLY`, in a file
+  marked `-- +goose NO TRANSACTION`. Run `DROP INDEX CONCURRENTLY IF EXISTS`
+  before creating a new index: a copy left by an interrupted run is invalid, and
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS` would keep it, so the planner would
+  never use the index.
+- Add foreign keys and `CHECK` constraints to existing tables as `NOT VALID`,
+  and run `VALIDATE CONSTRAINT` only after that commits: in a later migration,
+  or as a separate statement in a `NO TRANSACTION` file. Inside one
+  transaction, validation keeps the lock the `ADD` took. A `CHECK` attached to
+  `ADD COLUMN` scans the whole table under an `ACCESS EXCLUSIVE` lock.
+- Backfill large tables in batches that commit as they go, through a procedure
+  or a Go migration, rather than one statement over every row.
+- Scope session settings to the transaction with `SET LOCAL` or
+  `set_config(..., true)`. Compute partition bounds and dates in UTC, not in the
+  server's `TimeZone`.
+
+`20260914145000_index_artwork_reference_paths.sql` shows the index pattern, and
+`20260930130041_store_media_search_fields.sql` the batched backfill.
+
 ## Tests and lint
 
 While iterating:

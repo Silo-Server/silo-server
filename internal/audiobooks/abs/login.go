@@ -90,6 +90,10 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 			// The server turned local passwords off; this beta surface has no
 			// external sign-in.
 			http.Error(w, "password sign-in is turned off on this server", http.StatusUnauthorized)
+		} else if errors.Is(err, auth.ErrNotPermitted) {
+			// A network sign-in provider such as Tailscale no longer allows
+			// the account's person.
+			http.Error(w, "this account is not permitted to sign in to this server", http.StatusUnauthorized)
 		} else if errors.Is(err, auth.ErrPasswordChangeRequired) {
 			// This client cannot run the change a temporary password requires.
 			http.Error(w, "sign in to Silo to replace your temporary password", http.StatusUnauthorized)

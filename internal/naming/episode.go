@@ -550,6 +550,19 @@ func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
 	return strings.TrimLeft(stem[token.end:], " ._-")
 }
 
+// AirDateTitleSuffix returns the text following the air date of a by-date
+// episode name. Release-tag cleanup belongs to the caller, as with
+// EpisodeTitleSuffix.
+func AirDateTitleSuffix(filePath string) string {
+	base := filepath.Base(filePath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	match := airDateRe.FindStringSubmatchIndex(stem)
+	if match == nil {
+		return ""
+	}
+	return strings.TrimLeft(stem[match[7]:], " ._-")
+}
+
 func compactEpisodeMatch(name string) []int {
 	match := compactEpisodeRe.FindStringSubmatchIndex(name)
 	if match == nil || name[match[2]] == '0' || insideReleaseTag(name, match[2]) || strings.HasSuffix(strings.ToLower(name[:match[2]]), "h.") {

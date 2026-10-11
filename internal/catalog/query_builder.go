@@ -3,11 +3,13 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // EbookFinishedProgressThresholdSQL is models.EbookFinishedProgressThreshold
@@ -179,6 +181,11 @@ func (qb *QueryBuilder) UserHistoryCTEArgs() []any {
 // correlated MAX subqueries the previous lastWatchedExpr emitted (audit
 // 2026-05-01 §3.1 Pattern B).
 //
+// Watch history is recorded against episodes, so each episode row also counts
+// for its series: a show's last_watched is its most recently finished
+// episode. The hidden-item check runs on the episode itself, before the
+// rollup, because that is the item a history removal names.
+//
 // NULL handling: each UNION ALL branch sets exactly one of (uwh_at, uwp_at);
 // the other column is NULL. Postgres GREATEST and LEAST IGNORE NULL inputs
 // (unlike MySQL/Oracle, which propagate NULL) — "NULL values in the list
@@ -191,11 +198,13 @@ func (qb *QueryBuilder) UserHistoryCTEArgs() []any {
 // See https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-GREATEST-LEAST
 func UserHistoryCTESQL(argIdx int) string {
 	return fmt.Sprintf(`user_last_watched AS (
-	SELECT src.media_item_id, MAX(GREATEST(src.uwh_at, src.uwp_at)) AS last_watched
+	SELECT watched.media_item_id, MAX(GREATEST(src.uwh_at, src.uwp_at)) AS last_watched
 	FROM (
+		-- Only finished plays count, as on the episode path: a title, or a
+		-- show through its episodes, is dated by when it was last finished.
 		SELECT uwh.media_item_id, uwh.watched_at AS uwh_at, NULL::timestamptz AS uwp_at
 		FROM user_watch_history uwh
-		WHERE uwh.user_id = $%d AND uwh.profile_id = $%d
+		WHERE uwh.user_id = $%d AND uwh.profile_id = $%d AND uwh.completed = TRUE
 		UNION ALL
 		SELECT uwp.media_item_id, NULL::timestamptz, uwp.updated_at
 		FROM user_watch_progress uwp
@@ -205,13 +214,16 @@ func UserHistoryCTESQL(argIdx int) string {
 		FROM ebook_reader_progress erp
 		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= %s
 	) src
-	WHERE NOT EXISTS (
+	LEFT JOIN episodes ep ON ep.content_id = src.media_item_id
+	CROSS JOIN LATERAL (VALUES (src.media_item_id), (ep.series_id)) AS watched(media_item_id)
+	WHERE watched.media_item_id IS NOT NULL
+	  AND NOT EXISTS (
 		SELECT 1 FROM user_history_hidden_items hhi
 		WHERE hhi.user_id = $%d AND hhi.profile_id = $%d
 		  AND hhi.media_item_id = src.media_item_id
 		  AND COALESCE(src.uwh_at, src.uwp_at) <= hhi.hidden_before
 	)
-	GROUP BY src.media_item_id
+	GROUP BY watched.media_item_id
 )`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1, EbookFinishedProgressThresholdSQL, argIdx, argIdx+1)
 }
 
@@ -390,7 +402,7 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown filter field: %q", rule.Field)
 	}
-	if !def.validOps[rule.Op] {
+	if !def.allows(rule.Op) {
 		return "", fmt.Errorf("invalid operator %q for field %q", rule.Op, rule.Field)
 	}
 	if !def.executable {
@@ -423,9 +435,24 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	case "last_watched":
 		return qb.buildLastWatchedClause(rule)
 	case "added_at":
-		return qb.buildAddedAtClause(rule)
+		return qb.buildTimestampRuleClause(qb.addedAtFilterExpr(), rule)
 	case "release_date":
 		return qb.buildReleaseDateClause(rule)
+	case querySortLatestEpisodeAdded:
+		// An episode row has no newest episode of its own, so it matches no
+		// bound; the cross-type search evaluates show rules against episodes.
+		if isEpisodeCatalogScope(qb.mediaScope) {
+			return qb.buildTimestampRuleClause("NULL::timestamptz", rule)
+		}
+		return qb.buildTimestampRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
+	case querySortLastAirDate:
+		return qb.buildDateRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
+	case querySortTitle:
+		return qb.buildTitleClause(rule)
+	case ruleFieldDecade:
+		return qb.buildDecadeClause(rule)
+	case querySortRuntime, querySortRatingTMDb, querySortRatingRTCritic, querySortRatingRTAudience:
+		return qb.buildNumericRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
 	case "resolution":
 		return qb.buildResolutionClause(rule)
 	case "hdr":
@@ -1033,101 +1060,182 @@ func (qb *QueryBuilder) buildEbookInProgressClause(value bool) string {
 	return clause
 }
 
+// buildLastWatchedClause compares when the profile last finished the title.
+// A title it never finished reads as finished long ago, so it matches
+// "before" and "not in the last" but never "after" or "in the last".
 func (qb *QueryBuilder) buildLastWatchedClause(rule QueryRule) (string, error) {
 	if err := qb.ensureUserScope(rule.Field); err != nil {
 		return "", err
 	}
-	expr := qb.lastWatchedExpr(rule.Field)
-
-	switch rule.Op {
-	case "gt":
-		return qb.buildTimestampComparisonClause(expr, ">", rule.Value), nil
-	case "gte":
-		return qb.buildTimestampComparisonClause(expr, ">=", rule.Value), nil
-	case "lt":
-		return qb.buildTimestampComparisonClause(expr, "<", rule.Value), nil
-	case "lte":
-		return qb.buildTimestampComparisonClause(expr, "<=", rule.Value), nil
-	case "between":
-		values, err := toBetweenValues(rule.Value)
-		if err != nil {
-			return "", fmt.Errorf("between requires [min, max] array: %w", err)
-		}
-		qb.args = append(qb.args, values[0], values[1])
-		clause := fmt.Sprintf("%s >= $%d::timestamptz AND %s <= $%d::timestamptz", expr, qb.argIdx, expr, qb.argIdx+1)
-		qb.argIdx += 2
-		return clause, nil
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%s >= NOW() - INTERVAL '%s'", expr, interval), nil
-	default:
-		return "", fmt.Errorf("unsupported operator %q for last_watched", rule.Op)
-	}
+	return qb.buildTimestampRuleClause(qb.lastWatchedExpr(rule.Field), rule)
 }
 
-func (qb *QueryBuilder) buildAddedAtClause(rule QueryRule) (string, error) {
-	column := qb.addedAtFilterExpr()
+// buildReleaseDateClause compares the item's release date: release_date when
+// set, else a well-formed first_air_date. The comparison is emitted once per
+// source column, ((release_date IS NOT NULL AND cmp) OR (release_date IS NULL
+// AND first_air_date cmp)), rather than over their COALESCE, so the
+// release_date indexes can serve it. Both forms agree for every NULL
+// combination, including under NOT.
+func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
+	// Build the comparison once around a marker so both arms reuse the same
+	// bound arguments, then substitute each source column for the marker.
+	const column = "\x00release_date\x00"
+	clause, err := qb.buildDateRuleClause(column, rule)
+	if err != nil {
+		return "", err
+	}
+	if isEpisodeCatalogScope(qb.mediaScope) {
+		return strings.ReplaceAll(clause, column, qb.alias+".episode_air_date"), nil
+	}
+	releaseDate := qb.alias + ".release_date"
+	trimmedAirDate := fmt.Sprintf("NULLIF(BTRIM(%s.first_air_date), '')", qb.alias)
+	firstAirDate := fmt.Sprintf("(CASE WHEN %[1]s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN %[1]s::date ELSE NULL END)", trimmedAirDate)
+	return fmt.Sprintf("((%[1]s IS NOT NULL AND %[2]s) OR (%[1]s IS NULL AND %[3]s))",
+		releaseDate,
+		strings.ReplaceAll(clause, column, releaseDate),
+		strings.ReplaceAll(clause, column, firstAirDate),
+	), nil
+}
 
+var comparisonSQL = map[string]string{"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+
+// buildTimestampRuleClause compares a timestamptz expression with a date
+// rule's bounds, or with a span ending now.
+func (qb *QueryBuilder) buildTimestampRuleClause(column string, rule QueryRule) (string, error) {
 	switch rule.Op {
-	case "gt":
-		return qb.buildTypedComparisonClause(column, ">", rule.Value, "timestamptz"), nil
-	case "gte":
-		return qb.buildTypedComparisonClause(column, ">=", rule.Value, "timestamptz"), nil
-	case "lt":
-		return qb.buildTypedComparisonClause(column, "<", rule.Value, "timestamptz"), nil
-	case "lte":
-		return qb.buildTypedComparisonClause(column, "<=", rule.Value, "timestamptz"), nil
+	case "gt", "gte", "lt", "lte":
+		return qb.buildTypedComparisonClause(column, comparisonSQL[rule.Op], rule.Value, "timestamptz"), nil
 	case "between":
 		return qb.buildTypedBetweenClause(column, rule.Value, "timestamptz")
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
+	case ruleOpInLast, ruleOpNotInLast:
+		interval, err := ruleInterval(rule)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s >= NOW() - INTERVAL '%s'", column, interval), nil
+		return relativeDateClause(column, rule.Op, "NOW() - INTERVAL '"+interval+"'"), nil
 	default:
-		return "", fmt.Errorf("unsupported operator %q for added_at", rule.Op)
+		return "", fmt.Errorf("unsupported operator %q for %s", rule.Op, rule.Field)
 	}
 }
 
-func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
-	column := qb.releaseDateFilterExpr()
-
+// buildDateRuleClause is buildTimestampRuleClause for a date column: bounds
+// compare as dates, and a span ends today.
+func (qb *QueryBuilder) buildDateRuleClause(column string, rule QueryRule) (string, error) {
 	switch rule.Op {
-	case "gt":
-		return qb.buildTypedComparisonClause(column, ">", rule.Value, "date"), nil
-	case "gte":
-		return qb.buildTypedComparisonClause(column, ">=", rule.Value, "date"), nil
-	case "lt":
-		return qb.buildTypedComparisonClause(column, "<", rule.Value, "date"), nil
-	case "lte":
-		return qb.buildTypedComparisonClause(column, "<=", rule.Value, "date"), nil
+	case "gt", "gte", "lt", "lte":
+		return qb.buildTypedComparisonClause(column, comparisonSQL[rule.Op], rule.Value, "date"), nil
 	case "between":
 		return qb.buildTypedBetweenClause(column, rule.Value, "date")
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
+	case ruleOpInLast, ruleOpNotInLast:
+		interval, err := ruleInterval(rule)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s >= (CURRENT_DATE - INTERVAL '%s')::date", column, interval), nil
+		return relativeDateClause(column, rule.Op, "(CURRENT_DATE - INTERVAL '"+interval+"')::date"), nil
 	default:
-		return "", fmt.Errorf("unsupported operator %q for release_date", rule.Op)
+		return "", fmt.Errorf("unsupported operator %q for %s", rule.Op, rule.Field)
 	}
+}
+
+// relativeDateClause keeps dates on or after cutoff for in_last, and dates
+// before it for not_in_last. A NULL date fails both.
+func relativeDateClause(column, op, cutoff string) string {
+	if op == ruleOpNotInLast {
+		return column + " < " + cutoff
+	}
+	return column + " >= " + cutoff
+}
+
+// ruleInterval reads an in_last or not_in_last span ("30d") as a SQL interval.
+func ruleInterval(rule QueryRule) (string, error) {
+	duration, ok := rule.Value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s requires a duration string like '30d'", rule.Op)
+	}
+	return parseDuration(duration)
+}
+
+// buildNumericRuleClause compares a numeric column. The bound values are cast
+// to numeric so a fractional value compares against an integer column instead
+// of failing to encode.
+func (qb *QueryBuilder) buildNumericRuleClause(column string, rule QueryRule) (string, error) {
+	switch rule.Op {
+	case "gt", "gte", "lt", "lte":
+		if _, ok := catalogFloat(rule.Value); !ok {
+			return "", fmt.Errorf("%s requires a number", rule.Field)
+		}
+		return qb.buildTypedComparisonClause(column, comparisonSQL[rule.Op], rule.Value, "numeric"), nil
+	case "between":
+		if _, ok := catalogFloatRange(rule.Value); !ok {
+			return "", fmt.Errorf("%s between requires [min, max] numbers", rule.Field)
+		}
+		return qb.buildTypedBetweenClause(column, rule.Value, "numeric")
+	default:
+		return "", fmt.Errorf("unsupported operator %q for %s", rule.Op, rule.Field)
+	}
+}
+
+// buildTitleClause matches the title case-insensitively, whole or in part.
+// The partial operators escape LIKE wildcards, so "100%" matches literally.
+func (qb *QueryBuilder) buildTitleClause(rule QueryRule) (string, error) {
+	value, ok := rule.Value.(string)
+	if !ok {
+		return "", fmt.Errorf("title requires a string value")
+	}
+	value = strings.TrimSpace(value)
+	column := qb.alias + ".title"
+	escaped := pathscope.EscapeLike(value)
+	var clause string
+	switch rule.Op {
+	case "is", "is_not":
+		qb.args = append(qb.args, value)
+		clause = fmt.Sprintf("LOWER(BTRIM(%s)) = LOWER($%d)", column, qb.argIdx)
+	case "contains", ruleOpNotContains:
+		qb.args = append(qb.args, "%"+escaped+"%")
+		clause = fmt.Sprintf(`%s ILIKE $%d ESCAPE '\'`, column, qb.argIdx)
+	case ruleOpBeginsWith:
+		qb.args = append(qb.args, escaped+"%")
+		clause = fmt.Sprintf(`BTRIM(%s) ILIKE $%d ESCAPE '\'`, column, qb.argIdx)
+	case ruleOpEndsWith:
+		qb.args = append(qb.args, "%"+escaped)
+		clause = fmt.Sprintf(`BTRIM(%s) ILIKE $%d ESCAPE '\'`, column, qb.argIdx)
+	default:
+		return "", fmt.Errorf("unsupported operator %q for title", rule.Op)
+	}
+	qb.argIdx++
+	if rule.Op == "is_not" || rule.Op == ruleOpNotContains {
+		return "NOT (" + clause + ")", nil
+	}
+	return clause, nil
+}
+
+// buildDecadeClause matches a year within the decade the value starts
+// (1990 matches 1990 to 1999; 1995 reads as 1990).
+func (qb *QueryBuilder) buildDecadeClause(rule QueryRule) (string, error) {
+	start, ok := decadeStart(rule.Value)
+	if !ok {
+		return "", fmt.Errorf("decade requires a year such as 1990")
+	}
+	qb.args = append(qb.args, start, start+9)
+	column := qb.alias + ".year"
+	clause := fmt.Sprintf("%s >= $%d AND %s <= $%d", column, qb.argIdx, column, qb.argIdx+1)
+	qb.argIdx += 2
+	if rule.Op == "is_not" {
+		return "NOT (" + clause + ")", nil
+	}
+	return clause, nil
+}
+
+// decadeStart reads a decade rule's value as the decade's first year. Decade
+// 0 is refused: media_items.year is 0 when the year is unknown, so it would
+// catch every undated title.
+func decadeStart(value any) (int, bool) {
+	year, ok := catalogFloat(value)
+	if !ok || math.IsNaN(year) || year < 10 || year > 9999 {
+		return 0, false
+	}
+	start := int(year)
+	return start - start%10, true
 }
 
 // userStateCompletionClause emits a boolean predicate that is TRUE when the
@@ -1298,13 +1406,6 @@ func (qb *QueryBuilder) lastWatchedExpr(_ string) string {
 	return "COALESCE(uhist.last_watched, '-infinity'::timestamptz)"
 }
 
-func (qb *QueryBuilder) buildTimestampComparisonClause(column, op string, value any) string {
-	qb.args = append(qb.args, value)
-	clause := fmt.Sprintf("%s %s $%d::timestamptz", column, op, qb.argIdx)
-	qb.argIdx++
-	return clause
-}
-
 func (qb *QueryBuilder) buildTypedComparisonClause(column, op string, value any, cast string) string {
 	qb.args = append(qb.args, value)
 	placeholder := fmt.Sprintf("$%d", qb.argIdx)
@@ -1351,19 +1452,6 @@ func (qb *QueryBuilder) releaseDateSortExpr() string {
 	return queryColumnSQL(qb.alias, querySortDefs["release_date"].columnSQL)
 }
 
-func (qb *QueryBuilder) releaseDateFilterExpr() string {
-	if isEpisodeCatalogScope(qb.mediaScope) {
-		return fmt.Sprintf("%s.episode_air_date", qb.alias)
-	}
-	firstAirDate := fmt.Sprintf("NULLIF(BTRIM(%s.first_air_date), '')", qb.alias)
-	return fmt.Sprintf(
-		`COALESCE(%s.release_date, CASE WHEN %s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN %s::date ELSE NULL END)`,
-		qb.alias,
-		firstAirDate,
-		firstAirDate,
-	)
-}
-
 func (qb *QueryBuilder) addedAtFilterExpr() string {
 	if isEpisodeCatalogScope(qb.mediaScope) {
 		return fmt.Sprintf("%s.episode_created_at", qb.alias)
@@ -1408,6 +1496,21 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any, bool) {
 			qb.alias,
 		)
 		return "sort_added.added_at", []string{joinSQL}, args, true
+	}
+
+	if len(qb.libraryIDs) == 1 {
+		// The executor's library scope admits only members of this library,
+		// so the inner join drops no row, and its one (content, library) row
+		// is the MIN the aggregate below would compute. first_seen_at is NOT
+		// NULL, so the order matches idx_item_libraries_folder_seen_content
+		// and a page reads only its own rows instead of aggregating the whole
+		// library.
+		joinSQL := fmt.Sprintf(
+			`JOIN media_item_libraries sort_added ON sort_added.content_id = %s AND sort_added.media_folder_id = %s`,
+			qb.libraryContentExpr(),
+			placeholders[0],
+		)
+		return "sort_added.first_seen_at", []string{joinSQL}, args, false
 	}
 
 	joinSQL := fmt.Sprintf(
@@ -1783,6 +1886,15 @@ func parseDuration(s string) (string, error) {
 	return spec.sqlInterval(), nil
 }
 
+// postgresMinTimestamp is PostgreSQL's earliest timestamp and date,
+// 4714-11-24 BC (year -4713 in Go's proleptic calendar). A span whose
+// cutoff falls before it cannot be evaluated, so it is refused.
+var postgresMinTimestamp = time.Date(-4713, time.November, 24, 0, 0, 0, 0, time.UTC)
+
+// maxSpanAmount keeps the cutoff arithmetic from overflowing before that
+// check; in every unit it reaches far past 4714 BC.
+const maxSpanAmount = 100_000_000
+
 func parseDurationSpec(s string) (relativeDuration, error) {
 	normalized := strings.ToLower(strings.TrimSpace(s))
 	if len(normalized) < 2 {
@@ -1798,10 +1910,14 @@ func parseDurationSpec(s string) (relativeDuration, error) {
 
 	switch unit {
 	case 'h', 'd', 'w', 'm', 'y':
-		return relativeDuration{amount: amount, unit: unit}, nil
 	default:
 		return relativeDuration{}, fmt.Errorf("unsupported duration unit %q", unit)
 	}
+	spec := relativeDuration{amount: amount, unit: unit}
+	if amount > maxSpanAmount || spec.cutoffTime(time.Now().UTC()).Before(postgresMinTimestamp) {
+		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
+	}
+	return spec, nil
 }
 
 func (d relativeDuration) sqlInterval() string {
@@ -1824,7 +1940,8 @@ func (d relativeDuration) sqlInterval() string {
 func (d relativeDuration) cutoffTime(now time.Time) time.Time {
 	switch d.unit {
 	case 'h':
-		return now.Add(-time.Duration(d.amount) * time.Hour)
+		// Seconds rather than a time.Duration, which overflows past about 292 years.
+		return time.Unix(now.Unix()-int64(d.amount)*3600, int64(now.Nanosecond())).In(now.Location())
 	case 'd':
 		return now.AddDate(0, 0, -d.amount)
 	case 'w':

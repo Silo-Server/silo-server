@@ -34,6 +34,7 @@ import {
   oauthFailureText,
   oauthStartHref,
   wasSignedOut,
+  sessionEndReason,
 } from "@/lib/externalSignIn";
 import { toast } from "sonner";
 
@@ -111,6 +112,7 @@ export default function Login() {
   // Read once: a sign-out in this tab keeps the page from sending the person
   // straight back to the provider (see markSignedOut).
   const [signedOutHere] = useState(wasSignedOut);
+  const [endedSession] = useState(sessionEndReason);
   const autoRedirected = useRef(false);
   const [providersReady, setProvidersReady] = useState(false);
   const {
@@ -471,6 +473,21 @@ export default function Login() {
           <CardDescription className="mt-2 text-sm leading-6">{loginSubtitle}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {endedSession && (
+            <div
+              role="status"
+              className="border-border bg-muted/40 space-y-1 rounded-md border p-3 text-sm"
+            >
+              <p className="font-medium">
+                {endedSession === "signed-out" ? "You’re signed out" : "Your session ended"}
+              </p>
+              <p className="text-muted-foreground">
+                {endedSession === "signed-out"
+                  ? "Sign in again whenever you’re ready."
+                  : "This sign-in expired or was signed out. Sign in again to continue."}
+              </p>
+            </div>
+          )}
           {sessionRestoreUnavailable && (
             <div
               role="alert"

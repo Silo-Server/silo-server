@@ -95,8 +95,10 @@ On either the frame or the close code, a client refetches the data the viewer's
 access decides (libraries, home sections, search, item details, collections,
 and the account's own permissions) and reconnects at once with a newly minted
 ticket; no backoff is needed. If the ticket mint, or any other request, answers
-`403` `profile_verification_required`, the profile token was invalidated by the
-same change and the client returns to profile selection or PIN entry. Clients
+`403` `profile_verification_required`, the profile token no longer verifies
+the profile and the client returns to profile selection or PIN entry. An access
+change does not cause that by itself: a profile token is bound to the profile's
+own PIN, so only a change to that PIN ends it. Clients
 that ignore unknown frame types and close codes keep today's behavior: they
 reconnect and pick up the new access on their next requests. Playback that
 already started keeps its stream token until the next start.
@@ -538,3 +540,21 @@ for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
+
+### `marker_thumbnail_ready` (native v2, negotiated)
+
+Only playback attempts that opted into `marker_thumbnails_v1` at start receive
+this event. Its payload contains `session_id`, numeric `file_id`, `kind`,
+`start_seconds`, `end_seconds`, `thumbnail_url`, optional `thumbnail_thumbhash`,
+and `thumbnail_capture_seconds` (equal to marker start). It is sent only after
+durable, snapshot-fenced persistence and protected URL resolution.
+
+Consumers match the active session/file and exact kind/range before merging the
+image; they discard events for other versions or edited occurrences. Failed
+event delivery leaves the canonical v2 watch/marker read available. The existing
+`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+
+Marker thumbnail readiness uses the playback event bus to reach sessions on
+other API replicas. Each serving replica resolves a protected image URL and
+checks the session's negotiated feature before delivery. Subscribers do not
+rebroadcast events; retired image references cannot acquire new URLs.

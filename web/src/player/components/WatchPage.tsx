@@ -538,6 +538,32 @@ function WatchPagePlayer({
 
   const handleRealtimeEvent = useCallback(
     (event: PlaybackRealtimeEventEnvelope) => {
+      if (event.name === "marker_thumbnail_ready") {
+        const image = event.payload;
+        if (image.file_id !== session.mediaFileId || image.session_id !== session.sessionId) return;
+        setPlaybackVersions((current) =>
+          current.map((version) =>
+            version.file_id !== image.file_id
+              ? version
+              : {
+                  ...version,
+                  marker_segments: version.marker_segments?.map((marker) =>
+                    marker.kind === image.kind &&
+                    marker.start_seconds === image.start_seconds &&
+                    marker.end_seconds === image.end_seconds
+                      ? {
+                          ...marker,
+                          thumbnail_url: image.thumbnail_url,
+                          thumbnail_thumbhash: image.thumbnail_thumbhash,
+                          thumbnail_capture_seconds: image.thumbnail_capture_seconds,
+                        }
+                      : marker,
+                  ),
+                },
+          ),
+        );
+        return;
+      }
       if (event.name === "chapter_thumbnail_ready") {
         const { file_id, chapter_index, thumbnail_url, thumbnail_thumbhash } = event.payload;
         if (file_id !== session.mediaFileId) {
@@ -584,7 +610,7 @@ function WatchPagePlayer({
         ),
       );
     },
-    [session.mediaFileId],
+    [session.mediaFileId, session.sessionId],
   );
 
   // The plan is the player's contract: without one there is no transport, no

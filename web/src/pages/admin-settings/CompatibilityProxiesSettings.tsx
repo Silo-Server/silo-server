@@ -23,9 +23,9 @@ import {
 import { hasPinnedJellyfinWebInstalled } from "@/lib/jellyfinCompat";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { formatDateTime } from "@/lib/datetime";
 

@@ -2,9 +2,11 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -15,6 +17,9 @@ type PersonalAPIKeyService interface {
 	ListPersonalAPIKeysPage(context.Context, int, *auth.APIKeyPageKey, int) ([]handlers.APIKeyListItem, bool, error)
 	CreateAdminAPIKey(context.Context, int, string, []string) (*models.APIKey, error)
 	RevokePersonalAPIKey(context.Context, int, int64) error
+	// MayCreatePersonalAPIKey applies the household-manager rule to key
+	// creation: (account, acting profile, PIN verifier).
+	MayCreatePersonalAPIKey(context.Context, int, string, func(string) error) (bool, error)
 }
 
 type PersonalAPIKeyListItem struct {
@@ -117,7 +122,15 @@ func registerPersonalAPIKeys(reg *Registry) {
 		}
 		return &PersonalAPIKeyListOutput{Body: Paginated(items, next)}, nil
 	})
-	Register(reg, op(http.MethodPost, "/api-keys", "createPersonalAPIKey"), func(ctx context.Context, in *PersonalAPIKeyCreateInput) (*PersonalAPIKeyCreatedOutput, error) {
+	// Creation is profile scoped, profile optional, like createProfile: the
+	// key skips every profile's PIN, so only the household manager — on an
+	// admin account, the acting admin through the verified primary profile —
+	// may mint one, and the viewer gate must resolve that profile first.
+	create := op(http.MethodPost, "/api-keys", "createPersonalAPIKey")
+	create.Class = ClassProfileScoped
+	create.ProfileOptional = true
+	create.Description = "Only a server admin's login session may create a key, acting through the account's primary profile. X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied."
+	Register(reg, create, func(ctx context.Context, in *PersonalAPIKeyCreateInput) (*PersonalAPIKeyCreatedOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
 			return nil, p
@@ -132,6 +145,16 @@ func registerPersonalAPIKeys(reg *Registry) {
 		}
 		if reg.deps.PersonalAPIKeys == nil {
 			return nil, unavailable("API keys")
+		}
+		allowed, err := reg.deps.PersonalAPIKeys.MayCreatePersonalAPIKey(ctx, userID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+		if errors.Is(err, access.ErrProfileUnverified) {
+			return nil, NewProblem(TypeProfileVerificationRequired, "Creating API keys requires verifying the primary profile PIN.")
+		}
+		if err != nil {
+			return nil, serviceProblem(err)
+		}
+		if !allowed {
+			return nil, NewProblem(TypePermissionDenied, "Creating API keys requires the account's primary profile.")
 		}
 		row, err := reg.deps.PersonalAPIKeys.CreateAdminAPIKey(ctx, userID, in.Body.Label, in.Body.Scopes)
 		if err != nil {

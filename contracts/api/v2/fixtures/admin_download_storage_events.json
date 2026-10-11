@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "id": "b-expired",
+      "reason": "cache_expired",
+      "location": "node:9",
+      "location_name": "node-gpu-1",
+      "occurred_at": "2026-10-08T09:30:00.000Z",
+      "count": 1,
+      "bytes": 14200000000,
+      "titles": [
+        "Dune: Part Two"
+      ]
+    },
+    {
+      "id": "b-revoked",
+      "reason": "revoked",
+      "location": "device",
+      "location_name": "Pixel 8",
+      "occurred_at": "2026-10-08T08:30:00.000Z",
+      "count": 12,
+      "bytes": 34100000000,
+      "titles": [
+        "The Last of Us · S2 E1",
+        "The Last of Us · S2 E2",
+        "Oppenheimer"
+      ],
+      "detail": "Lost phone",
+      "actor": {
+        "id": "1",
+        "username": "alex"
+      },
+      "account": {
+        "id": "7",
+        "username": "maya"
+      }
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

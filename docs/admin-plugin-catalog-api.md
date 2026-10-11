@@ -4,7 +4,10 @@ All operations require an acting administrator. The PUT mutation retains the dem
 guard; GET reads do not.
 
 `GET /api/v2/admin/plugins/catalog-settings` returns the canonical editable
-configuration: `include_approved_community_plugins`. Its strong `ETag` binds the
+configuration: `include_approved_community_plugins`. It is off until an administrator
+turns it on. Migration `20261010162953` turns it off on upgraded servers, which an
+earlier migration had opted in, unless a plugin from the approved community catalog
+is installed. Its strong `ETag` binds the
 configuration representation to the administrator/profile scope. Conditional reads
 support `If-None-Match` and `304`.
 

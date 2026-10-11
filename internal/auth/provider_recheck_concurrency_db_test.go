@@ -259,6 +259,9 @@ func TestProviderRecheckActiveRoleFailureAfterUnavailableRetriesDB(t *testing.T)
 	if refreshErr == nil || errors.Is(refreshErr, ErrSessionRevoked) {
 		t.Fatalf("blocked role sync = %v, want a failure", refreshErr)
 	}
+	if !errors.Is(refreshErr, errAnswerNotApplied) || errors.Is(refreshErr, ErrSessionCheckUnavailable) {
+		t.Fatalf("blocked role sync = %v, want errAnswerNotApplied, not a retryable outage", refreshErr)
+	}
 	identity := env.identityState(t)
 	if identity.LastCheckStatus != CheckStatusActive || identity.LastCheckedAt != nil || env.storedToken(t) != "rt-2" {
 		t.Fatal("failed role sync lost the rotated state or did not leave the active answer due")

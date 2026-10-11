@@ -202,6 +202,35 @@ func TestPreviewRoute(t *testing.T) {
 	}
 }
 
+func TestPreviewRouteWithoutAnHDServer(t *testing.T) {
+	store := routingStore(RoutingFacts{})
+	store.routes[0].HD = RouteDestination{}
+	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{detail: &tmdb.MediaDetail{ID: 129}})
+
+	preview, err := svc.PreviewRoute(context.Background(), routeAdmin, MediaTypeMovie, 129, 7)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	hd, uhd := preview.Tiers[0], preview.Tiers[1]
+	if hd.RouteName != "Everything else" || hd.IntegrationID != "" ||
+		hd.Reason != "Everything else sends no HD version; requests from users without 4K fail." {
+		t.Fatalf("HD tier = %+v", hd)
+	}
+	if uhd.IntegrationName != "radarr-4k" {
+		t.Fatalf("4K tier = %+v, want the fallback's 4K server", uhd)
+	}
+
+	// With every request asking for 4K, no requester is left without a copy.
+	store.settings.ForceDualQuality = true
+	preview, err = svc.PreviewRoute(context.Background(), routeAdmin, MediaTypeMovie, 129, 7)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if hd := preview.Tiers[0]; hd.Reason != "Everything else sends no HD version." {
+		t.Fatalf("HD tier with force-dual = %+v", hd)
+	}
+}
+
 func TestRouteAdministrationGuardsDatabase(t *testing.T) {
 	svc, repo := routeAdminService(t)
 	ctx := t.Context()

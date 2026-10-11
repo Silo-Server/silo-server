@@ -109,7 +109,7 @@ type RecipeDefinition struct {
 	Presets          []RecipePreset `json:"presets" doc:"Empty, never null"`
 	AvoidDuplicates  bool           `json:"avoid_duplicates" example:"true"`
 	SupportsRotation bool           `json:"supports_rotation" example:"false"`
-	AdminOnly        bool           `json:"admin_only" example:"false"`
+	AdminOnly        bool           `json:"admin_only" doc:"Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has" example:"false"`
 }
 
 // RecipeCategory is one gallery category with its recipes.
