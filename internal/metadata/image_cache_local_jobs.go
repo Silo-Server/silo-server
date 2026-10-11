@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -130,6 +131,29 @@ func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lo
 	return nil
 }
 
+// targetHasDeferredLocalJobs reports whether a job in the target's scope is
+// waiting for a server with its storage mounted (DeferClaimed), so a manual
+// refresh does not report its artwork as done.
+func (r *ImageCacheJobRepository) targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, nil
+	}
+	var deferred bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM metadata_image_cache_jobs
+			WHERE `+imageCacheTargetScope("$1")+`
+			  AND status = 'queued'
+			  AND next_attempt_at > NOW()
+			  AND last_error LIKE $2 || '%'
+		)
+	`, strings.TrimSpace(targetContentID), localImageStorageUnavailable).Scan(&deferred); err != nil {
+		return false, fmt.Errorf("checking deferred local image cache jobs: %w", err)
+	}
+	return deferred, nil
+}
+
 // errNoLocalArtworkQueue reports a job store that cannot hold discovered
 // local artwork for its discovering process.
 var errNoLocalArtworkQueue = errors.New("metadata image cache does not support local artwork discovery")
@@ -145,6 +169,12 @@ type localArtworkJobStore interface {
 // claimed job without counting an attempt.
 type imageCacheJobDeferrer interface {
 	DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error
+}
+
+// deferredLocalJobReader is implemented by job stores that can tell whether a
+// target's local artwork waits for another server.
+type deferredLocalJobReader interface {
+	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
 }
 
 // localImageCacheJobClaimer is implemented by job stores that can claim only

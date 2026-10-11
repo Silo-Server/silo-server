@@ -219,3 +219,41 @@ func TestLocalArtworkFallsBackToQueueWhenCopierFails(t *testing.T) {
 		t.Fatalf("queued = %#v, want only the local poster", jobs.inputs)
 	}
 }
+
+// A manual refresh does not report its artwork done while another worker has
+// left one of the target's local jobs for a server with the storage mounted.
+func TestCacheTargetArtworkReportsLocalArtworkDeferredElsewhere(t *testing.T) {
+	jobs := &targetImageCacheJobs{deferredElsewhere: true}
+	p := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	if err := p.CacheTargetArtwork(context.Background(), "movie-1"); !errors.Is(err, ErrTargetArtworkPending) {
+		t.Fatalf("CacheTargetArtwork error = %v, want ErrTargetArtworkPending", err)
+	}
+}
+
+// recordingLocalArtworkStore records the lease token of every discovery claim.
+type recordingLocalArtworkStore struct {
+	tokens []string
+}
+
+func (s *recordingLocalArtworkStore) enqueueHeldLocalJobs(_ context.Context, inputs []EnqueueImageCacheJobInput) ([]EnqueueImageCacheJobInput, error) {
+	return inputs, nil
+}
+
+func (s *recordingLocalArtworkStore) claimQueuedLocalJob(_ context.Context, _ EnqueueImageCacheJobInput, workerID string) (*models.MetadataImageCacheJob, error) {
+	s.tokens = append(s.tokens, workerID)
+	return nil, nil
+}
+
+// Each discovery claim gets its own lease token: when a refresh replaces a
+// slot's source while an older copy still runs, the older copy's terminal
+// write must not match the newer claim of the same job row.
+func TestDiscoveryClaimsUseDistinctLeaseTokens(t *testing.T) {
+	store := &recordingLocalArtworkStore{}
+	p := NewImageCacheProcessor(&fakeImageCacheJobs{}, &fakeImageCacher{}, nil, nil, nil)
+	in := EnqueueImageCacheJobInput{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: "file:///media/Film/poster.jpg"}
+	p.copyDiscoveredLocalArtwork(store, in)
+	p.copyDiscoveredLocalArtwork(store, in)
+	if len(store.tokens) != 2 || store.tokens[0] == store.tokens[1] {
+		t.Fatalf("claim tokens = %q, want two distinct tokens", store.tokens)
+	}
+}

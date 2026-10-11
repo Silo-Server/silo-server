@@ -43,9 +43,8 @@ type LocalArtworkCopier interface {
 
 // localArtworkCopies is the processor's pool for discovered local artwork.
 type localArtworkCopies struct {
-	start    sync.Once
-	workerID string
-	pending  chan EnqueueImageCacheJobInput
+	start   sync.Once
+	pending chan EnqueueImageCacheJobInput
 	// inflight counts queued and running copies, so tests can wait for them.
 	inflight sync.WaitGroup
 }
@@ -85,7 +84,6 @@ func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []Enq
 // them on first use. A slot that does not fit the backlog waits out its hold.
 func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store localArtworkJobStore, queued []EnqueueImageCacheJobInput) {
 	p.localCopies.start.Do(func() {
-		p.localCopies.workerID = "local-artwork:" + uuid.NewString()
 		p.localCopies.pending = make(chan EnqueueImageCacheJobInput, localArtworkCopyBacklog)
 		for range localArtworkCopyWorkers {
 			go p.runLocalArtworkCopies(store)
@@ -120,7 +118,10 @@ func (p *ImageCacheProcessor) runLocalArtworkCopies(store localArtworkJobStore) 
 func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobStore, in EnqueueImageCacheJobInput) {
 	ctx, cancel := context.WithTimeout(context.Background(), ImageCacheJobTimeout)
 	defer cancel()
-	job, err := store.claimQueuedLocalJob(ctx, in, p.localCopies.workerID)
+	// A token per claim: when a refresh replaces the slot's source while an
+	// older copy runs, the older copy's terminal write must not match the
+	// newer claim of the same job row.
+	job, err := store.claimQueuedLocalJob(ctx, in, "local-artwork:"+uuid.NewString())
 	if err != nil {
 		p.logger.WarnContext(ctx, "metadata image cache: failed to claim discovered local artwork",
 			"target_type", in.TargetType, "target_id", in.TargetContentID, "error", err)

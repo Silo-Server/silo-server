@@ -253,6 +253,39 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		}
 	})
 
+	t.Run("a copy of a replaced source cannot finish the newer claim", func(t *testing.T) {
+		repo := NewImageCacheJobRepository(pool)
+		slot := inputs[1]
+		if _, err := repo.enqueueHeldLocalJobs(ctx, []EnqueueImageCacheJobInput{slot}); err != nil {
+			t.Fatalf("enqueue v1: %v", err)
+		}
+		older, err := repo.claimQueuedLocalJob(ctx, slot, "local-artwork:older")
+		if err != nil || older == nil {
+			t.Fatalf("claim v1 = %+v, %v", older, err)
+		}
+		replaced := slot
+		replaced.SourcePath = writeSidecar(t, filepath.Join(show, "Season 01", "folder.jpg"))
+		if _, err := repo.enqueueHeldLocalJobs(ctx, []EnqueueImageCacheJobInput{replaced}); err != nil {
+			t.Fatalf("enqueue v2: %v", err)
+		}
+		newer, err := repo.claimQueuedLocalJob(ctx, replaced, "local-artwork:newer")
+		if err != nil || newer == nil || newer.ID != older.ID {
+			t.Fatalf("claim v2 = %+v, %v; want the same job row", newer, err)
+		}
+		if err := repo.MarkSucceeded(ctx, older.ID, older.LockedBy); err != nil {
+			t.Fatalf("mark older succeeded: %v", err)
+		}
+		if got := readLocalArtworkJob(t, pool, slot.TargetType, slot.TargetContentID, slot.ImageType); got.status != ImageCacheStatusRunning {
+			t.Fatalf("job after the older copy finished = %+v, want the newer claim still running", got)
+		}
+		if err := repo.RequeueClaimed(ctx, []int64{newer.ID}, newer.LockedBy); err != nil {
+			t.Fatalf("release newer claim: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE metadata_image_cache_jobs SET source_path = $1 WHERE id = $2`, slot.SourcePath, newer.ID); err != nil {
+			t.Fatalf("restore source: %v", err)
+		}
+	})
+
 	t.Run("copied by the discovering process", func(t *testing.T) {
 		p, targets, cacher := newLocalArtworkDBProcessor(pool, []string{root})
 		// Remote caching off changes nothing for local art.
@@ -350,6 +383,9 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "unmounted")
 		contentID := enqueue(t, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000")
 		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
+		if waiting, err := repo.targetHasDeferredLocalJobs(ctx, contentID); err != nil || !waiting {
+			t.Fatalf("targetHasDeferredLocalJobs = %v, %v; want the deferred job reported", waiting, err)
+		}
 
 		// Deferred again for the same reason, it waits longer, still without
 		// counting an attempt.

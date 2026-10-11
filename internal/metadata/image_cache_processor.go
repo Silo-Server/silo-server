@@ -442,12 +442,22 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 		}
 		poll = min(2*poll, immediateImageCacheMaxPoll)
 	}
+	// Another worker may also have left a target job for a server with its
+	// storage mounted while this call waited on it.
+	pending := deferred > 0
+	if reader, ok := p.jobs.(deferredLocalJobReader); ok && !pending {
+		waiting, err := reader.targetHasDeferredLocalJobs(ctx, targetContentID)
+		if err != nil {
+			return err
+		}
+		pending = waiting
+	}
 	switch {
-	case failed > 0 && deferred > 0:
+	case failed > 0 && pending:
 		return fmt.Errorf("%d refreshed artwork image(s) failed to cache, and %w", failed, ErrTargetArtworkPending)
 	case failed > 0:
 		return fmt.Errorf("%d refreshed artwork image(s) failed to cache", failed)
-	case deferred > 0:
+	case pending:
 		return ErrTargetArtworkPending
 	}
 	return nil
