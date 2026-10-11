@@ -2,16 +2,11 @@ package metadata
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // Banner, thumb, clear art and disc art, and the backdrops after the primary,
@@ -59,32 +54,24 @@ func carryItemOnlyArtwork(item, existing *models.MediaItem) {
 	}
 }
 
-// settleItemOnlyArtwork runs after applyBestImages. A banner, thumb, clear art
-// or disc slot that holds a local sidecar and got no candidate this refresh is
-// cleared when the sidecar is gone: when local discovery ran and did not
-// return it, or, when it did not run (Identify, local artwork off), when the
-// file is confirmed missing. An unreachable library keeps it. Then the
+// settleItemOnlyArtwork runs after applyBestImages. When the refresh searched
+// the item level for sidecars (withLocalArtworkSearched), a banner, thumb,
+// clear art or disc slot that holds a local sidecar the search did not return
+// is cleared once the sidecar's folder answers (sidecarGone), and kept while it
+// does not. A refresh that did not search leaves the slots as stored. Then the
 // thumbhash follows the path, as for the poster and backdrop.
 func settleItemOnlyArtwork(ctx context.Context, item, existing *models.MediaItem, images []RemoteImage) {
 	if item == nil {
 		return
 	}
-	discovered := hasLocalImage(images)
-	locked := artworkLocked(item)
-	var retention *localArtworkRetention
-	for _, field := range itemOnlyArtworkFields(item) {
-		if locked || hasImageOfType(images, field.imageType) || !isLocalImageSourcePath(*field.source) {
-			continue
-		}
-		if !discovered {
-			if retention == nil {
-				retention = newLocalArtworkRetention(ctx, item.ContentID)
-			}
-			if !retention.sidecarMissing(*field.source) {
+	retention := newLocalArtworkRetention(ctx, item.ContentID, localArtworkItem)
+	if retention.searched && !artworkLocked(item) {
+		for _, field := range itemOnlyArtworkFields(item) {
+			if hasImageOfType(images, field.imageType) || !isLocalImageSourcePath(*field.source) || !retention.sidecarGone(*field.source) {
 				continue
 			}
+			*field.path, *field.source = "", ""
 		}
-		*field.path, *field.source = "", ""
 	}
 	for _, field := range itemOnlyArtworkFields(item) {
 		if field.thumbhash != nil {
@@ -98,15 +85,6 @@ func settleItemOnlyArtwork(ctx context.Context, item, existing *models.MediaItem
 	}
 }
 
-func hasLocalImage(images []RemoteImage) bool {
-	for _, img := range images {
-		if isLocalImageSourcePath(img.URL) {
-			return true
-		}
-	}
-	return false
-}
-
 func hasImageOfType(images []RemoteImage, imageType ImageType) bool {
 	for _, img := range images {
 		if img.Type == imageType && strings.TrimSpace(img.URL) != "" {
@@ -114,28 +92,6 @@ func hasImageOfType(images []RemoteImage, imageType ImageType) bool {
 		}
 	}
 	return false
-}
-
-// sidecarMissing reports whether a local source's file is confirmed gone: its
-// folder answers and the file is not there. Unlike sidecarGone, a file still on
-// disk counts as present, because a refresh that did not run local discovery
-// cannot say whether it still qualifies.
-func (r *localArtworkRetention) sidecarMissing(source string) bool {
-	path, ok := localImageSourceFilePath(source)
-	if !ok || !filepath.IsAbs(path) {
-		return true
-	}
-	dir := filepath.Dir(path)
-	folder, ok := r.probes[dir]
-	if !ok {
-		folder = rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
-		r.probes[dir] = folder
-	}
-	if !folder.Reachable || folder.Empty {
-		return false
-	}
-	_, err := os.Lstat(path)
-	return errors.Is(err, fs.ErrNotExist)
 }
 
 // planExtraBackdrops decides the item's backdrops after the primary. Local
@@ -156,24 +112,21 @@ func planExtraBackdrops(ctx context.Context, item *models.MediaItem, existing []
 		seen[url] = true
 		sources = append(sources, url)
 	}
-	switch {
-	case len(sources) > 0:
-		sources = sources[1:]
-	case hasLocalImage(images):
-		// Discovery ran and found no backdrop.
-	default:
-		// No local discovery this refresh: keep each row unless its sidecar is
-		// confirmed missing.
-		retention := newLocalArtworkRetention(ctx, item.ContentID)
+	if len(sources) == 0 {
+		// The search returned no backdrop, or there was none. As for the
+		// single slots, a searched refresh drops a row once its sidecar's
+		// folder answers; otherwise the rows stay.
+		retention := newLocalArtworkRetention(ctx, item.ContentID, localArtworkItem)
 		kept := make([]models.ItemBackdrop, 0, len(existing))
 		for _, b := range existing {
-			if isLocalImageSourcePath(b.SourcePath) && retention.sidecarMissing(b.SourcePath) {
+			if retention.searched && isLocalImageSourcePath(b.SourcePath) && retention.sidecarGone(b.SourcePath) {
 				continue
 			}
 			kept = append(kept, models.ItemBackdrop{Path: b.Path, SourcePath: b.SourcePath, Thumbhash: b.Thumbhash})
 		}
 		return kept
 	}
+	sources = sources[1:]
 	if len(sources) > MaxItemBackdrops-1 {
 		sources = sources[:MaxItemBackdrops-1]
 	}
