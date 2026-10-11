@@ -13991,9 +13991,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "last_partial_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest finished partial run on any server: the embedding catch-up pass for embeddings, the startup global-row build for recommendations. Absent for other jobs and until one finishes."
+          },
           "last_run": {
             "$ref": "#/components/schemas/AdminRecommendationJobRun",
-            "description": "The newest finished run of this job on any server. Absent until one finishes."
+            "description": "The newest finished full run of this job on any server: scheduled or triggered. Absent until one finishes."
           },
           "running": {
             "type": "boolean"

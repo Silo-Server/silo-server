@@ -21,13 +21,16 @@ when nonzero. Counts come from persisted catalog/recommendation data. Running
 flags describe the responding process and are sampled separately from counts.
 They do not form a consistent cluster-wide snapshot.
 
-Each job also carries `last_run`, the newest finished run recorded by any
-server, once one exists: `status` (`completed` or `failed`), `started_at`,
+Each job also carries `last_run`, the newest finished full run (scheduled or
+triggered) recorded by any server, once one exists: `status` (`completed` or `failed`), `started_at`,
 `completed_at`, `error` on a failed run, and `result`, the counts the run
 reported. A run that finished with partial failures is `completed` and counts
 them in `result`; its keys differ by job and may grow. The error is the job's
 own message with credential assignments and URL user info masked. Runs that a
-busy job skipped are not recorded.
+busy job skipped are not recorded. `embeddings` and `recommendations` can also
+carry `last_partial_run`, in the same shape: the newest embedding catch-up
+pass, or the newest startup build of the global rows. Partial runs are
+recorded apart, so one that runs after a failed full run does not hide it.
 
 `lock_conflict` is empty unless the stored embedding lock rejects the
 embedding base URL or model this server runs with, or records a vector size
@@ -42,10 +45,11 @@ absent when nothing is cached.
 
 The embeddings kind also covers the catch-up pass, which every 15 minutes
 embeds items that have no embedding or one from another model: while it runs,
-an embeddings trigger answers `409`, and the embeddings `last_run` may be a
-catch-up run, marked `missing_only: true` in `result`. Catch-up runs that found
-nothing to do are not recorded; failed ones are, so a lock conflict shows as a
-failed run every 15 minutes until it is resolved.
+an embeddings trigger answers `409`. Catch-up runs are reported as the
+embeddings `last_partial_run`, marked `missing_only: true` in `result`.
+Catch-up runs that found nothing to do are not recorded; failed ones are, so a
+lock conflict shows as a failed partial run every 15 minutes until it is
+resolved.
 
 Trigger success means the responding process claimed its running flag and the
 job kind's cluster-wide lock, then launched background work. It does not mean

@@ -17254,7 +17254,9 @@ export interface components {
     AdminRecommendationJobStatus: {
       /** Format: int64 */
       count: number;
-      /** @description The newest finished run of this job on any server. Absent until one finishes. */
+      /** @description The newest finished partial run on any server: the embedding catch-up pass for embeddings, the startup global-row build for recommendations. Absent for other jobs and until one finishes. */
+      last_partial_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /** @description The newest finished full run of this job on any server: scheduled or triggered. Absent until one finishes. */
       last_run?: components["schemas"]["AdminRecommendationJobRun"];
       running: boolean;
       /** Format: int64 */

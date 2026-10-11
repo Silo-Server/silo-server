@@ -38,21 +38,30 @@ func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int,
 func (*fakeAdminRecommendations) IsRunning(job recommendations.JobName) bool {
 	return job == recommendations.JobEmbeddings
 }
-func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendations.JobName]taskmanager.ExecutionResult, error) {
+func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendations.JobName]recommendations.JobRuns, error) {
 	if f.runsErr != nil || f.noRuns {
-		return map[recommendations.JobName]taskmanager.ExecutionResult{}, f.runsErr
+		return map[recommendations.JobName]recommendations.JobRuns{}, f.runsErr
 	}
-	return map[recommendations.JobName]taskmanager.ExecutionResult{
+	return map[recommendations.JobName]recommendations.JobRuns{
 		recommendations.JobEmbeddings: {
-			TaskKey: "recommendations.embeddings", Status: "failed",
-			StartedAt: fakeAdminRecommendationsTime, CompletedAt: fakeAdminRecommendationsTime.Add(90 * time.Second),
-			ResultData:   json.RawMessage(`{"embedded":0}`),
-			ErrorMessage: `embed batch: POST https://user:hunter2@embed.example/v1/embeddings: api_key=secret-value rejected`,
+			Full: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.embeddings", Status: "failed",
+				StartedAt: fakeAdminRecommendationsTime, CompletedAt: fakeAdminRecommendationsTime.Add(90 * time.Second),
+				ResultData:   json.RawMessage(`{"embedded":0}`),
+				ErrorMessage: `embed batch: POST https://user:hunter2@embed.example/v1/embeddings: api_key=secret-value rejected`,
+			},
+			Partial: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.embeddings.catch_up", Status: "completed",
+				StartedAt: fakeAdminRecommendationsTime.Add(15 * time.Minute), CompletedAt: fakeAdminRecommendationsTime.Add(16 * time.Minute),
+				ResultData: json.RawMessage(`{"missing_only":true,"embedded":2}`),
+			},
 		},
 		recommendations.JobRecommendations: {
-			TaskKey: "recommendations.cache", Status: "completed",
-			StartedAt: fakeAdminRecommendationsTime.Add(2 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(2*time.Hour + time.Minute),
-			ResultData: json.RawMessage(`{"profiles":2,"processed":2,"cached_rows":14,"build_errors":0}`),
+			Full: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.cache", Status: "completed",
+				StartedAt: fakeAdminRecommendationsTime.Add(2 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(2*time.Hour + time.Minute),
+				ResultData: json.RawMessage(`{"profiles":2,"processed":2,"cached_rows":14,"build_errors":0}`),
+			},
 		},
 	}, nil
 }
@@ -189,6 +198,14 @@ func TestAdminRecommendationsStatusReportsRunsConflictAndRefresh(t *testing.T) {
 	cache := status.Recommendations.LastRun
 	if cache == nil || cache.Status != "completed" || cache.Error != "" || cache.Result["cached_rows"] != float64(14) {
 		t.Fatalf("cache last run = %+v", cache)
+	}
+	// The catch-up pass that ran after the failed full run is reported
+	// beside it, not instead of it.
+	if p := status.Embeddings.LastPartialRun; p == nil || p.Status != "completed" || p.Result["missing_only"] != true {
+		t.Fatalf("embeddings last partial run = %+v", p)
+	}
+	if status.Recommendations.LastPartialRun != nil {
+		t.Fatalf("cache last partial run = %+v, want none recorded", status.Recommendations.LastPartialRun)
 	}
 	if status.TasteProfiles.LastRun != nil || status.Cowatch.LastRun != nil {
 		t.Fatalf("jobs with no recorded run report one: %+v %+v", status.TasteProfiles.LastRun, status.Cowatch.LastRun)

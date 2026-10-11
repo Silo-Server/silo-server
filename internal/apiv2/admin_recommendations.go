@@ -16,7 +16,7 @@ import (
 type AdminRecommendationsService interface {
 	StatusCounts(context.Context) (int, int, int, int, int, error)
 	IsRunning(recommendations.JobName) bool
-	LastRuns(context.Context) (map[recommendations.JobName]taskmanager.ExecutionResult, error)
+	LastRuns(context.Context) (map[recommendations.JobName]recommendations.JobRuns, error)
 	EmbeddingLockConflict(context.Context) (string, error)
 	CacheRefreshedAt(context.Context) (*time.Time, error)
 	TriggerEmbeddings() error
@@ -29,7 +29,10 @@ type AdminRecommendationJobStatus struct {
 	Running bool                       `json:"running"`
 	Count   int                        `json:"count"`
 	Total   *int                       `json:"total,omitempty"`
-	LastRun *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest finished run of this job on any server. Absent until one finishes."`
+	LastRun *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest finished full run of this job on any server: scheduled or triggered. Absent until one finishes."`
+	// LastPartialRun is recorded apart from LastRun so frequent partial runs
+	// never hide a failed full run.
+	LastPartialRun *AdminRecommendationJobRun `json:"last_partial_run,omitempty" doc:"The newest finished partial run on any server: the embedding catch-up pass for embeddings, the startup global-row build for recommendations. Absent for other jobs and until one finishes."`
 }
 type AdminRecommendationJobRun struct {
 	Status      string         `json:"status" enum:"completed,failed" doc:"completed also covers runs that finished with partial failures; result counts them."`
@@ -151,8 +154,12 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 	}
 	jobStatus := func(name recommendations.JobName, count int) AdminRecommendationJobStatus {
 		status := AdminRecommendationJobStatus{Running: w.IsRunning(name), Count: count}
-		if run, ok := lastRuns[name]; ok {
-			status.LastRun = adminRecommendationJobRunOf(run)
+		runs := lastRuns[name]
+		if runs.Full != nil {
+			status.LastRun = adminRecommendationJobRunOf(*runs.Full)
+		}
+		if runs.Partial != nil {
+			status.LastPartialRun = adminRecommendationJobRunOf(*runs.Partial)
 		}
 		return status
 	}

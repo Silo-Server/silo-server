@@ -244,6 +244,12 @@ describe("AdminRecommendations", () => {
             error: "recommendations reset required: embedding model changed",
             result: { embedded: 0 },
           },
+          last_partial_run: {
+            status: "completed",
+            started_at: minutesAgo(4),
+            completed_at: minutesAgo(3),
+            result: { missing_only: true, embedded: 2 },
+          },
         },
         recommendations: {
           ...idleJob(5),
@@ -261,6 +267,8 @@ describe("AdminRecommendations", () => {
 
     const text = container.textContent ?? "";
     expect(text).toContain("Last run failed 10m ago");
+    // A later catch-up shows beside the failed full run, not instead of it.
+    expect(text).toContain("Last catch-up completed 3m ago");
     expect(text).toContain("recommendations reset required: embedding model changed");
     expect(text).toContain("Last run completed 1h ago");
     expect(text).toContain("No finished run recorded");

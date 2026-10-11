@@ -306,7 +306,7 @@ func TestLastRunsReadsEachJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 2 || runs[JobCowatch].TaskKey != cowatchTaskKey || string(runs[JobRecommendations].ResultData) != `{"done":2,"failed":0}` {
+	if len(runs) != 2 || runs[JobCowatch].Full.TaskKey != cowatchTaskKey || string(runs[JobRecommendations].Full.ResultData) != `{"done":2,"failed":0}` {
 		t.Fatalf("last runs = %+v", runs)
 	}
 
@@ -320,6 +320,46 @@ func TestLastRunsReadsEachJob(t *testing.T) {
 	}
 	if runs, err := newJobTestWorker(&fakeLocker{}, nil).LastRuns(t.Context()); err != nil || len(runs) != 0 {
 		t.Fatalf("no-history last runs = %v, %v", runs, err)
+	}
+}
+
+// Partial runs (the embedding catch-up, the startup global-row build) are
+// recorded under keys of their own, so a later partial run does not hide a
+// failed full run.
+func TestPartialRunsDoNotHideTheLastFullRun(t *testing.T) {
+	history := newFakeHistory()
+	w := newJobTestWorker(&fakeLocker{}, history)
+	for _, j := range []job{
+		{name: JobEmbeddings, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
+			return embeddingsResult{}, errors.New("provider down")
+		}},
+		{name: JobEmbeddings, timeout: time.Minute, partial: true, run: func(context.Context, clusterLock) (jobResult, error) {
+			return embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Embedded: 1}}, nil
+		}},
+		{name: JobRecommendations, timeout: time.Minute, partial: true, run: func(context.Context, clusterLock) (jobResult, error) {
+			return cacheResult{GlobalOnly: true}, nil
+		}},
+	} {
+		if err := w.runJob(j, false); err != nil {
+			t.Fatal(err)
+		}
+		waitRun(t, history)
+	}
+
+	runs, err := w.LastRuns(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	embed := runs[JobEmbeddings]
+	if embed.Full == nil || embed.Full.Status != runStatusFailed || embed.Full.TaskKey != embeddingsTaskKey {
+		t.Fatalf("last full embeddings run = %+v, want the failed one", embed.Full)
+	}
+	if embed.Partial == nil || embed.Partial.Status != runStatusCompleted || embed.Partial.TaskKey != embeddingsCatchUpTaskKey {
+		t.Fatalf("last embeddings catch-up = %+v", embed.Partial)
+	}
+	cache := runs[JobRecommendations]
+	if cache.Full != nil || cache.Partial == nil || cache.Partial.TaskKey != globalRowsTaskKey {
+		t.Fatalf("cache runs = %+v, want only the startup build, as a partial run", cache)
 	}
 }
 
@@ -489,7 +529,7 @@ func TestEnsureGlobalRowsBuildsOnlyWhenNoneIsCached(t *testing.T) {
 	if err := json.Unmarshal(run.ResultData, &result); err != nil {
 		t.Fatal(err)
 	}
-	if run.TaskKey != cacheTaskKey || run.Status != runStatusCompleted || !result.GlobalOnly || result.GlobalRows != 4 {
+	if run.TaskKey != globalRowsTaskKey || run.Status != runStatusCompleted || !result.GlobalOnly || result.GlobalRows != 4 {
 		t.Fatalf("startup build recorded %+v %s", run, run.ResultData)
 	}
 

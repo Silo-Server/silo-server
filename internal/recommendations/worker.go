@@ -230,11 +230,13 @@ func (w *Worker) TriggerRecommendations() error {
 
 // embedMissingJob is the catch-up pass: Pass 1 of the embeddings job only. It
 // takes the embeddings job's claim, so it never overlaps an embedding run on
-// any server, and a run that found nothing to do is not recorded.
+// any server. It is recorded as a partial run, and a run that found nothing
+// to do is not recorded.
 func (w *Worker) embedMissingJob() job {
 	return job{
 		name:          JobEmbeddings,
 		timeout:       w.embeddingsJobTimeout,
+		partial:       true,
 		quietWhenIdle: true,
 		run:           func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doEmbedMissing(ctx) },
 	}
@@ -808,7 +810,7 @@ func (w *Worker) ensureGlobalRows(ctx context.Context, store globalRowCache) {
 		return
 	}
 	slog.InfoContext(ctx, "no global recommendation rows cached; building them now", "component", "recommendations")
-	err = w.runJob(job{name: JobRecommendations, timeout: globalRowsJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) {
+	err = w.runJob(job{name: JobRecommendations, timeout: globalRowsJobTimeout, partial: true, run: func(ctx context.Context, _ clusterLock) (jobResult, error) {
 		res := cacheResult{GlobalOnly: true}
 		res.GlobalRows, res.GlobalFailures = w.cacheGlobalRows(ctx, store, cacheExpiry(time.Now()))
 		return res, nil

@@ -11,6 +11,15 @@
       "result": {
         "embedded": 0
       }
+    },
+    "last_partial_run": {
+      "status": "completed",
+      "started_at": "2026-10-03T03:15:00.000Z",
+      "completed_at": "2026-10-03T03:16:00.000Z",
+      "result": {
+        "embedded": 2,
+        "missing_only": true
+      }
     }
   },
   "taste_profiles": {

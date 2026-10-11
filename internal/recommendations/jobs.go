@@ -53,6 +53,20 @@ var jobTaskKeys = map[JobName]string{
 	JobRecommendations: cacheTaskKey,
 }
 
+// Partial runs do part of a job under its claim between full runs: the
+// embedding catch-up pass and the startup build of the global rows. They are
+// recorded under keys of their own, so a frequent partial run never hides the
+// outcome of the last full one.
+const (
+	embeddingsCatchUpTaskKey = "recommendations.embeddings.catch_up"
+	globalRowsTaskKey        = "recommendations.cache.global_rows"
+)
+
+var partialJobTaskKeys = map[JobName]string{
+	JobEmbeddings:      embeddingsCatchUpTaskKey,
+	JobRecommendations: globalRowsTaskKey,
+}
+
 // Run statuses, from the task manager's execution history vocabulary.
 const (
 	runStatusCompleted = "completed"
@@ -150,20 +164,33 @@ func (w *Worker) WithJobHistory(history JobHistory) *Worker {
 	return w
 }
 
-// LastRuns returns the newest recorded run of each job. Jobs with no recorded
-// run are absent, and the map is empty when no history is wired.
-func (w *Worker) LastRuns(ctx context.Context) (map[JobName]taskmanager.ExecutionResult, error) {
-	runs := make(map[JobName]taskmanager.ExecutionResult, len(jobTaskKeys))
+// JobRuns holds a job's newest recorded full and partial runs. Each is nil
+// until one is recorded.
+type JobRuns struct {
+	Full    *taskmanager.ExecutionResult
+	Partial *taskmanager.ExecutionResult
+}
+
+// LastRuns returns the newest recorded runs of each job. Jobs with no
+// recorded run are absent, and the map is empty when no history is wired.
+func (w *Worker) LastRuns(ctx context.Context) (map[JobName]JobRuns, error) {
+	runs := make(map[JobName]JobRuns, len(jobTaskKeys))
 	if w == nil || w.history == nil {
 		return runs, nil
 	}
 	for name, key := range jobTaskKeys {
-		latest, err := w.history.GetLatest(ctx, key)
-		if err != nil {
+		var r JobRuns
+		var err error
+		if r.Full, err = w.history.GetLatest(ctx, key); err != nil {
 			return nil, fmt.Errorf("read last %s run: %w", jobLabel(name), err)
 		}
-		if latest != nil {
-			runs[name] = *latest
+		if partialKey, ok := partialJobTaskKeys[name]; ok {
+			if r.Partial, err = w.history.GetLatest(ctx, partialKey); err != nil {
+				return nil, fmt.Errorf("read last partial %s run: %w", jobLabel(name), err)
+			}
+		}
+		if r.Full != nil || r.Partial != nil {
+			runs[name] = r
 		}
 	}
 	return runs, nil
@@ -188,6 +215,9 @@ type job struct {
 	// run does the work. held is the job's cluster lock, through which
 	// the work takes any further lock.
 	run func(ctx context.Context, held clusterLock) (jobResult, error)
+	// partial marks a run that does part of the job between full runs; it
+	// is recorded under the job's partial task key.
+	partial bool
 	// quietWhenIdle logs the job at Debug and leaves a run out of history
 	// when it succeeds and its result reports nothing done. Frequent
 	// catch-up runs use it so history holds only runs that did something.
@@ -321,15 +351,19 @@ func (w *Worker) executeJob(j job, held clusterLock) {
 		slog.InfoContext(ctx, "recommendation job completed", attrs...)
 	}
 
-	w.recordJob(j.name, started, completed, resultData, err)
+	w.recordJob(j, started, completed, resultData, err)
 }
 
-func (w *Worker) recordJob(name JobName, started, completed time.Time, resultData json.RawMessage, runErr error) {
+func (w *Worker) recordJob(j job, started, completed time.Time, resultData json.RawMessage, runErr error) {
 	if w.history == nil {
 		return
 	}
+	taskKey := jobTaskKeys[j.name]
+	if j.partial {
+		taskKey = partialJobTaskKeys[j.name]
+	}
 	run := taskmanager.ExecutionResult{
-		TaskKey:     jobTaskKeys[name],
+		TaskKey:     taskKey,
 		StartedAt:   started,
 		CompletedAt: completed,
 		Status:      runStatusCompleted,
@@ -343,6 +377,6 @@ func (w *Worker) recordJob(name JobName, started, completed time.Time, resultDat
 	ctx, cancel := context.WithTimeout(context.Background(), jobHistoryTimeout)
 	defer cancel()
 	if err := w.history.Insert(ctx, run); err != nil {
-		slog.WarnContext(ctx, "recording recommendation job run failed", "component", "recommendations", "job", name, "error", err)
+		slog.WarnContext(ctx, "recording recommendation job run failed", "component", "recommendations", "job", j.name, "error", err)
 	}
 }

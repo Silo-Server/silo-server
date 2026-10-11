@@ -127,10 +127,10 @@ func TestRecommendationJobRunsOnOneServerPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run := last[JobCowatch]; run.Status != runStatusFailed || run.ErrorMessage != "co-watch upsert failed" {
+	if run := last[JobCowatch].Full; run == nil || run.Status != runStatusFailed || run.ErrorMessage != "co-watch upsert failed" {
 		t.Fatalf("last co-watch run = %+v", run)
 	}
-	if run := last[JobTasteProfiles]; run.Status != runStatusCompleted {
+	if run := last[JobTasteProfiles].Full; run == nil || run.Status != runStatusCompleted {
 		t.Fatalf("last taste profile run = %+v", run)
 	}
 }

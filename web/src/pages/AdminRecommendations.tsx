@@ -222,7 +222,7 @@ function RecSettingField({
   );
 }
 
-function RecJobLastRun({ run }: { run?: RecJobRun }) {
+function RecJobLastRun({ run, label = "Last run" }: { run?: RecJobRun; label?: string }) {
   if (!run) {
     return <p className="text-muted-foreground text-xs">No finished run recorded</p>;
   }
@@ -230,7 +230,9 @@ function RecJobLastRun({ run }: { run?: RecJobRun }) {
   if (run.status === "failed") {
     return (
       <div className="space-y-0.5">
-        <p className="text-destructive text-xs font-medium">Last run failed {when}</p>
+        <p className="text-destructive text-xs font-medium">
+          {label} failed {when}
+        </p>
         {run.error && (
           <p className="text-muted-foreground line-clamp-3 text-xs break-words" title={run.error}>
             {run.error}
@@ -239,7 +241,11 @@ function RecJobLastRun({ run }: { run?: RecJobRun }) {
       </div>
     );
   }
-  return <p className="text-muted-foreground text-xs">Last run completed {when}</p>;
+  return (
+    <p className="text-muted-foreground text-xs">
+      {label} completed {when}
+    </p>
+  );
 }
 
 function RecJobStatusCard({
@@ -248,6 +254,8 @@ function RecJobStatusCard({
   total,
   running,
   lastRun,
+  lastPartialRun,
+  partialRunLabel,
   note,
   onTrigger,
   triggerPending,
@@ -257,6 +265,9 @@ function RecJobStatusCard({
   total?: number;
   running: boolean;
   lastRun?: RecJobRun;
+  /** A partial run between full runs, shown beside the last full run. */
+  lastPartialRun?: RecJobRun;
+  partialRunLabel?: string;
   note?: string;
   onTrigger: () => void;
   triggerPending: boolean;
@@ -277,6 +288,7 @@ function RecJobStatusCard({
           </p>
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
+          {lastPartialRun && <RecJobLastRun run={lastPartialRun} label={partialRunLabel} />}
         </div>
         <Button
           size="sm"
@@ -628,6 +640,8 @@ export default function AdminRecommendations() {
               total={status.embeddings.total}
               running={status.embeddings.running}
               lastRun={status.embeddings.last_run}
+              lastPartialRun={status.embeddings.last_partial_run}
+              partialRunLabel="Last catch-up"
               onTrigger={() => triggerEmbeddings.mutate()}
               triggerPending={triggerEmbeddings.isPending}
             />
@@ -652,6 +666,8 @@ export default function AdminRecommendations() {
               count={status.recommendations.count}
               running={status.recommendations.running}
               lastRun={status.recommendations.last_run}
+              lastPartialRun={status.recommendations.last_partial_run}
+              partialRunLabel="Last startup build"
               note={
                 status.cache_refreshed_at
                   ? `Cache refreshed ${formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at}`
