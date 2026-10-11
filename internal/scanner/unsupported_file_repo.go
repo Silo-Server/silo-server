@@ -84,6 +84,10 @@ const unsupportedFileColumns = `media_folder_id, directory_path, reason, file_co
 // of its tree. A directory the walk could not read protects only its own
 // tree. A group the scan found in a protected place is only inserted when
 // new, so a partial count does not overwrite the stored one.
+//
+// A row's last_seen_at is the start of the scan that last wrote it, and a
+// scan does not overwrite a row written by one that started later, so a long
+// library scan finishing after a newer subtree scan keeps the newer count.
 func (r *UnsupportedFileRepository) Replace(
 	ctx context.Context,
 	folderID int,
@@ -112,23 +116,24 @@ func (r *UnsupportedFileRepository) Replace(
 		if groupDirProtected(group.DirectoryPath, protectedPaths, protectedParents) {
 			upserts.Queue(`
 				INSERT INTO unsupported_media_files (
-					media_folder_id, directory_path, reason, file_count, file_names
+					media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
 				)
-				VALUES ($1, $2, $3, $4, $5)
+				VALUES ($1, $2, $3, $4, $5, $6, $6)
 				ON CONFLICT (media_folder_id, directory_path, reason) DO NOTHING
-			`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames)
+			`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
 			continue
 		}
 		upserts.Queue(`
 			INSERT INTO unsupported_media_files (
-				media_folder_id, directory_path, reason, file_count, file_names
+				media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
 			)
-			VALUES ($1, $2, $3, $4, $5)
+			VALUES ($1, $2, $3, $4, $5, $6, $6)
 			ON CONFLICT (media_folder_id, directory_path, reason) DO UPDATE
 			SET file_count = EXCLUDED.file_count,
 				file_names = EXCLUDED.file_names,
-				last_seen_at = now()
-		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames)
+				last_seen_at = EXCLUDED.last_seen_at
+			WHERE unsupported_media_files.last_seen_at <= EXCLUDED.last_seen_at
+		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
