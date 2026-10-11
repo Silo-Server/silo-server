@@ -25,6 +25,12 @@ const PROGRESS_INTERVAL_MS = 1_000;
 const PRESENT_AHEAD_SECONDS = 0.005;
 /** How long a start or a seek may take to become playable before it fails. */
 const READINESS_TIMEOUT_MS = 20_000;
+/**
+ * How long playback may wait for data before the connection counts as lost:
+ * a read that never answers (a node gone, a half-open connection) is reported
+ * as a read failure, which reconnects instead of waiting forever.
+ */
+const STALL_TIMEOUT_MS = 20_000;
 /** While the tab is hidden, due frames are still released at this cadence. */
 const HIDDEN_TICK_MS = 100;
 /** Video further behind the clock than this on return to the tab is re-synced. */
@@ -132,6 +138,8 @@ export class EnginePlayer {
   private frameRequest = 0;
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
   private readinessTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the current wait for data began, while playing; null otherwise. */
+  private waitingSince: number | null = null;
   private lastTimeupdate = 0;
   private lastProgress = 0;
   private callbacks = new Map<number, VideoFrameRequestCallback>();
@@ -374,12 +382,7 @@ export class EnginePlayer {
     this.queue = [];
     if (this.shown) this.release(this.shown);
     this.shown = null;
-    const worker = this.worker;
-    this.worker = null;
-    if (worker) {
-      worker.postMessage({ type: "close" } satisfies PageToWorkerMessage);
-      setTimeout(() => worker.terminate(), 1_000);
-    }
+    this.stopWorker();
     this.audio?.close();
     this.audio = null;
     this.renderer?.destroy();
@@ -395,6 +398,14 @@ export class EnginePlayer {
 
   // -- Internals ---------------------------------------------------------------
 
+  private stopWorker(): void {
+    const worker = this.worker;
+    this.worker = null;
+    if (!worker) return;
+    worker.postMessage({ type: "close" } satisfies PageToWorkerMessage);
+    setTimeout(() => worker.terminate(), 1_000);
+  }
+
   private post(message: PageToWorkerMessage, transfer: Transferable[] = []): void {
     this.worker?.postMessage(message, transfer);
   }
@@ -408,6 +419,16 @@ export class EnginePlayer {
     this.failed = true;
     this.audio?.setPlaying(false);
     this.clock?.setRunning(false);
+    // This engine is done even if no other route takes over: stop reading and
+    // decoding, free queued pictures and audio, and let the screen sleep. The
+    // last picture stays up until the player replaces or destroys the engine.
+    this.clearReadinessDeadline();
+    for (const picture of this.queue) this.release(picture);
+    this.queue = [];
+    this.stopWorker();
+    this.audio?.close();
+    this.audio = null;
+    this.updatePresence();
     this.onFailure({ classification, message, decoder_name: "silo-web-engine" });
   }
 
@@ -676,6 +697,15 @@ export class EnginePlayer {
     if (this.failed) return;
     const clock = this.clock;
     if (!clock) return;
+    if (this.waitingValue && !this.pausedValue && !this.seekingValue) {
+      this.waitingSince ??= performance.now();
+      if (performance.now() - this.waitingSince > STALL_TIMEOUT_MS) {
+        this.fail(ENGINE_READ_FAILED, "The browser engine stopped receiving data.");
+        return;
+      }
+    } else {
+      this.waitingSince = null;
+    }
     const firstOfGeneration = !this.shown || this.shown.generation !== this.generation;
     if (firstOfGeneration) {
       const first = this.queue.shift();
@@ -709,12 +739,15 @@ export class EnginePlayer {
 
     this.settleReadiness();
 
+    // The last picture stays up for its own duration before the media ends.
+    const shownUntil = this.shown ? this.shown.timestamp + Math.max(0, this.shown.duration) : 0;
     if (
       !this.pausedValue &&
       !this.seekingValue &&
       this.videoEnded &&
       this.queue.length === 0 &&
-      (!this.audio || this.audioDrained)
+      (!this.audio || this.audioDrained) &&
+      clock.now() >= shownUntil
     ) {
       this.finish();
       return;
@@ -786,7 +819,7 @@ export class EnginePlayer {
    * stays awake and hardware media keys reach it.
    */
   private updatePresence(): void {
-    const playing = !this.pausedValue && !this.disposed;
+    const playing = !this.pausedValue && !this.disposed && !this.failed;
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     }
@@ -796,7 +829,7 @@ export class EnginePlayer {
       wakeLock
         .request("screen")
         .then((lock) => {
-          if (this.pausedValue || this.disposed) {
+          if (this.pausedValue || this.disposed || this.failed) {
             void lock.release();
             this.wakeLock = null;
             return;

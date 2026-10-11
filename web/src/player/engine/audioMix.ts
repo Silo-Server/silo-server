@@ -88,7 +88,7 @@ const MINUS_3DB = Math.SQRT1_2;
 /**
  * Where an input speaker goes when the output has no speaker of its own for
  * it. Downmixing to stereo follows the ATSC A/52 Lo/Ro coefficients: center
- * and surrounds at -3 dB, LFE dropped. The worklet's limiter catches the rare
+ * and surrounds at -3 dB, LFE dropped. `mixToInterleaved` soft-limits the rare
  * overs this produces on fully correlated loud passages.
  */
 function routeSpeaker(speaker: number, outputs: number[]): Array<[number, number]> {
@@ -170,14 +170,34 @@ export function mixToInterleaved(
   const frames = Math.max(0, end - start);
   const out = new Float32Array(frames * outputChannels);
   for (let o = 0; o < outputChannels; o++) {
+    let rowGain = 0;
     for (let i = 0; i < inputs; i++) {
       const gain = matrix[o * inputs + i]!;
       if (gain === 0) continue;
+      rowGain += Math.abs(gain);
       const plane = planes[i]!;
       for (let f = 0; f < frames; f++) out[f * outputChannels + o]! += plane[start + f]! * gain;
     }
+    // Only a mix that sums several inputs can go over full scale; a channel
+    // passed straight through keeps its samples exactly.
+    if (rowGain > 1) {
+      for (let f = 0; f < frames; f++) {
+        const index = f * outputChannels + o;
+        out[index] = softLimit(out[index]!);
+      }
+    }
   }
   return out;
+}
+
+const LIMITER_KNEE = 0.9;
+
+/** Soft-clips above the knee so a hot downmix never wraps or hard-clips. */
+function softLimit(sample: number): number {
+  const magnitude = Math.abs(sample);
+  if (magnitude <= LIMITER_KNEE) return sample;
+  const over = (magnitude - LIMITER_KNEE) / (1 - LIMITER_KNEE);
+  return Math.sign(sample) * (LIMITER_KNEE + (1 - LIMITER_KNEE) * Math.tanh(over));
 }
 
 /** Mediabunny PCM codec names the engine unpacks itself. */

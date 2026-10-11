@@ -35,15 +35,6 @@ interface Chunk {
 
 const CLOCK_REPORT_QUANTA = 4;
 const CONSUMED_REPORT_QUANTA = 8;
-const LIMITER_KNEE = 0.9;
-
-/** Soft-clips above the knee so a hot downmix never wraps or hard-clips. */
-function limit(sample: number): number {
-  const magnitude = Math.abs(sample);
-  if (magnitude <= LIMITER_KNEE) return sample;
-  const over = (magnitude - LIMITER_KNEE) / (1 - LIMITER_KNEE);
-  return Math.sign(sample) * (LIMITER_KNEE + (1 - LIMITER_KNEE) * Math.tanh(over));
-}
 
 class EngineAudioProcessor extends AudioWorkletProcessor {
   private readonly channels: number;
@@ -134,7 +125,9 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
         for (let c = 0; c < channels; c++) {
           const a = chunk.samples[index * this.channels + c]!;
           const b = fraction > 0 && next ? next.samples[nextIndex * this.channels + c]! : a;
-          output[c]![rendered] = limit(a + (b - a) * fraction);
+          // Interpolating between two samples never leaves their range, so the
+          // mix's limiting holds here.
+          output[c]![rendered] = a + (b - a) * fraction;
         }
         this.offset += step;
         this.consumedFrames += step;

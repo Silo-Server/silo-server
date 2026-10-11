@@ -56,10 +56,10 @@ class FakeWorker {
   }
 }
 
-function fakeFrame(seconds: number) {
+function fakeFrame(seconds: number, durationSeconds = 0.04) {
   return {
     timestamp: seconds * 1e6,
-    duration: 40_000,
+    duration: durationSeconds * 1e6,
     displayWidth: 1920,
     displayHeight: 1080,
     close: vi.fn(),
@@ -270,6 +270,39 @@ describe("EnginePlayer", () => {
     expect(player.ended).toBe(true);
     expect(player.paused).toBe(true);
     expect(events.slice(-2)).toEqual(["pause", "ended"]);
+    player.destroy();
+  });
+
+  it("ends only after the last picture's own duration", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0, 2) });
+    worker.emit({ type: "video-ended", generation: worker.generation });
+    await settle();
+    await player.play();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(player.ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(player.ended).toBe(true);
+    player.destroy();
+  });
+
+  it("treats a long wait for data while playing as a lost connection", async () => {
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    await player.play();
+    // No more frames arrive, so playback waits; a short wait is not a failure.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onFailure).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_read_failed" }),
+    );
+    // A failed engine stops its worker even when no other route takes over.
+    expect(worker.posted.some((m) => m.type === "close")).toBe(true);
     player.destroy();
   });
 

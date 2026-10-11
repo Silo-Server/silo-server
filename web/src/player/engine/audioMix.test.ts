@@ -70,6 +70,18 @@ describe("mixToInterleaved", () => {
     );
     expect(Array.from(out)).toEqual([1, 0, 0, 1]);
   });
+
+  it("keeps channels passed straight through exact, and limits only an over-unity mix", () => {
+    const loud = new Float32Array([0.98]);
+    // Stereo passthrough: no channel sums more than one input.
+    const straight = mixToInterleaved([loud, loud], new Float32Array([1, 0, 0, 1]), 2);
+    expect(Array.from(straight)).toEqual([loud[0], loud[0]]);
+    // Two inputs at full gain on one output can go over full scale.
+    const half = new Float32Array([0.6]);
+    const summed = mixToInterleaved([half, half], new Float32Array([1, 1]), 1);
+    expect(summed[0]).toBeLessThan(1);
+    expect(summed[0]).toBeGreaterThan(0.9);
+  });
 });
 
 describe("unpackPCM", () => {
