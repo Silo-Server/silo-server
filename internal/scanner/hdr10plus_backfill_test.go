@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -367,5 +368,61 @@ func TestPlaybackProbeRepairKeepsCheckedHDR10Plus(t *testing.T) {
 	}
 	if track := got.VideoTracks[0]; track.HDR10PlusUnchecked || !track.HDR10Plus || track.VideoRangeType != "HDR10Plus" {
 		t.Fatalf("repaired track = %+v, want the checked HDR10+ status kept", track)
+	}
+}
+
+// A stat blocked on stalled storage must not hold up the pass: it times out
+// as a retryable file, ends the pass once every slot is stuck, gives way to
+// cancellation, and frees its slot only when the syscall returns.
+func TestHDR10PlusBackfillBoundsTheOnDiskCheck(t *testing.T) {
+	release := make(chan struct{})
+	var released sync.Once
+	t.Cleanup(func() { released.Do(func() { close(release) }) })
+	backfiller := &HDR10PlusBackfiller{
+		readFrame: func(context.Context, string, string, string) ([]ffprobeSideData, error) {
+			return []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}, nil
+		},
+		statFile: func(string) (fs.FileInfo, error) {
+			<-release
+			return nil, errors.New("stat after the stall")
+		},
+		statSlots:   make(chan struct{}, 1),
+		statTimeout: 20 * time.Millisecond,
+	}
+	candidate := hdr10PlusCandidate{id: 1, path: "/stalled/movie.mkv", size: 1000}
+
+	outcome, err := backfiller.backfillFile(context.Background(), candidate)
+	if err != nil || outcome != hdr10PlusOutcomeTimedOut {
+		t.Fatalf("stalled check = %v, %v; want a timed-out file", outcome, err)
+	}
+	// The first check still holds the only slot.
+	if _, err := backfiller.backfillFile(context.Background(), candidate); !errors.Is(err, errHDR10PlusStorageStalled) {
+		t.Fatalf("check with every slot stuck = %v, want the pass to end on stalled storage", err)
+	}
+
+	released.Do(func() { close(release) })
+	select {
+	case backfiller.statSlots <- struct{}{}:
+		<-backfiller.statSlots
+	case <-time.After(time.Second):
+		t.Fatal("the slot was not freed after the stat returned")
+	}
+
+	// Cancel the pass while a check is blocked in the kernel.
+	started, unblock := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(unblock) })
+	backfiller.statFile = func(string) (fs.FileInfo, error) {
+		close(started)
+		<-unblock
+		return nil, errors.New("stat after the stall")
+	}
+	backfiller.statTimeout = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	if _, err := backfiller.backfillFile(ctx, candidate); !errors.Is(err, context.Canceled) {
+		t.Fatalf("check canceled while blocked = %v, want context.Canceled", err)
 	}
 }

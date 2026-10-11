@@ -35,6 +35,14 @@ const (
 // errHDR10PlusStorageStalled ends a pass whose frame reads keep timing out.
 var errHDR10PlusStorageStalled = errors.New("media storage is not responding")
 
+// hdr10PlusStatTimeout bounds the on-disk check after a frame read.
+const hdr10PlusStatTimeout = 5 * time.Second
+
+var (
+	errHDR10PlusStatTimeout = errors.New("file check did not finish in time; the storage may be stalled")
+	errHDR10PlusStatBusy    = errors.New("file checks are already waiting on stalled storage")
+)
+
 // HDR10PlusBackfillResult counts what one backfill pass did. HDR10Plus and
 // NotHDR10Plus are recorded on the file, so it is not read again until a scan
 // rewrites its row. Changed, Unreadable, and TimedOut are read again on the
@@ -77,6 +85,10 @@ type HDR10PlusBackfiller struct {
 	// replace them.
 	readFrame func(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error)
 	statFile  func(path string) (fs.FileInfo, error)
+	// statSlots caps on-disk checks still blocked in the kernel; see
+	// statFileBounded.
+	statSlots   chan struct{}
+	statTimeout time.Duration
 }
 
 // NewHDR10PlusBackfiller returns a backfiller over repo's database that reads
@@ -92,6 +104,8 @@ func NewHDR10PlusBackfiller(repo *FileRepository, ffprobePath string) *HDR10Plus
 		batch:       hdr10PlusBackfillBatchSize,
 		readFrame:   probeVideoFrameSideData,
 		statFile:    os.Stat,
+		statSlots:   make(chan struct{}, hdr10PlusBackfillWorkers),
+		statTimeout: hdr10PlusStatTimeout,
 	}
 }
 
@@ -258,7 +272,20 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	// it changed since the row was written. Such a file is settled by that
 	// scan, not by writing its new status onto the old row. A row stored
 	// without an mtime can only be checked on size.
-	info, err := b.statFile(c.path)
+	info, err := b.statFileBounded(ctx, c.path)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, ctxErr
+	}
+	if errors.Is(err, errHDR10PlusStatBusy) {
+		// Earlier checks are still stuck on storage. Checking more would
+		// only add to them, so the pass ends here and the next run resumes.
+		return 0, fmt.Errorf("%w: %w", errHDR10PlusStorageStalled, err)
+	}
+	if errors.Is(err, errHDR10PlusStatTimeout) {
+		slog.WarnContext(ctx, "scanner: HDR10+ backfill file check timed out",
+			"component", "scanner", "file_id", c.id, "path", c.path, "timeout", b.statTimeout)
+		return hdr10PlusOutcomeTimedOut, nil
+	}
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not stat the file",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
@@ -297,6 +324,43 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		return hdr10PlusOutcomeChanged, nil
 	}
 	return outcome, nil
+}
+
+// statFileBounded runs statFile off the worker's goroutine, bounded by ctx and
+// statTimeout, because a stat on a stalled network mount can block in the
+// kernel indefinitely. A blocked syscall cannot be canceled, so the goroutine
+// of a timed-out check lingers until the kernel returns; statSlots caps how
+// many can, and a check holds its slot until its syscall returns. When every
+// slot is taken the check is skipped rather than queued behind the stall.
+func (b *HDR10PlusBackfiller) statFileBounded(ctx context.Context, path string) (fs.FileInfo, error) {
+	slots, stat, timeout := b.statSlots, b.statFile, b.statTimeout
+	select {
+	case slots <- struct{}{}:
+	default:
+		return nil, errHDR10PlusStatBusy
+	}
+	type statResult struct {
+		info fs.FileInfo
+		err  error
+	}
+	done := make(chan statResult, 1)
+	go func() {
+		info, err := stat(path)
+		// Free the slot before publishing: a caller that receives the
+		// answer and immediately checks again must find it available.
+		<-slots
+		done <- statResult{info, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		return result.info, result.err
+	case <-timer.C:
+		return nil, errHDR10PlusStatTimeout
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // logHDR10PlusUnreadable warns once per pass about files it could not read,
