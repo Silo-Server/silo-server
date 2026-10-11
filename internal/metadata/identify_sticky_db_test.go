@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -98,56 +99,80 @@ func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
 	}
 }
 
-// An Identify that moves the item to the chosen anchor, by rename or by merge
-// onto an existing row, records the choice in the move's own transaction, so
-// a failed identity write after it cannot leave the moved item unmarked.
-// Other moves leave no mark.
+// An Identify that moves the item before writing its identity, by re-anchor
+// rename, by merge onto an existing row, or by merge onto the item that owns
+// its provider IDs, records the choice in the move's own transaction, so a
+// failed identity write after it cannot leave the moved item unmarked. Other
+// moves leave no mark.
 func TestIdentifyMoveMarksTheMovedItemPostgres(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
 	itemRepo := catalog.NewItemRepository(pool)
-	svc := &MetadataService{dbPool: pool}
+	providerRepo := catalog.NewProviderIDRepository(pool)
+	svc := &MetadataService{dbPool: pool, itemRepo: itemRepo, providerIDRepo: providerRepo}
 
-	for _, tc := range []struct {
-		name         string
-		merge        bool
-		markIdentity bool
+	moves := []struct {
+		name  string
+		skip  string
+		merge bool
+		move  func(from, to, tmdbID string, markIdentity bool) error
 	}{
-		{"rename on Identify", false, true},
-		{"merge on Identify", true, true},
-		{"rename otherwise", false, false},
-		{"merge otherwise", true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			from, to := "identity-move-from-"+uuid.NewString(), "identity-move-to-"+uuid.NewString()
-			t.Cleanup(func() {
-				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
-			})
-			seed := []string{from}
-			if tc.merge {
-				seed = append(seed, to)
+		{name: "rename", move: func(from, to, _ string, markIdentity bool) error {
+			return svc.renameContentID(ctx, from, to, false, markIdentity)
+		}},
+		{name: "merge", merge: true, move: func(from, to, _ string, markIdentity bool) error {
+			return svc.rebindItemOnto(ctx, from, to, true, markIdentity)
+		}},
+		{name: "rebind by provider IDs", merge: true, move: func(from, to, tmdbID string, markIdentity bool) error {
+			got, err := svc.rebindItemByProviderIDsLocked(ctx, from, map[string]string{"tmdb": tmdbID}, "movie", true, markIdentity)
+			if err == nil && got != to {
+				t.Fatalf("rebound to %q, want %q", got, to)
 			}
-			for _, id := range seed {
-				if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
-					t.Fatalf("seed %s: %v", id, err)
+			return err
+		}},
+		{name: "provider-ID conflict merge", merge: true, skip: "duplicate merges fail at the personal collection step until #2299 is fixed",
+			move: func(from, to, _ string, markIdentity bool) error {
+				_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, from, to, true, markIdentity)
+				return err
+			}},
+	}
+	for _, mv := range moves {
+		for _, markIdentity := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/identify=%v", mv.name, markIdentity), func(t *testing.T) {
+				if mv.skip != "" {
+					t.Skip(mv.skip)
 				}
-			}
-			var err error
-			if tc.merge {
-				err = svc.rebindItemOnto(ctx, from, to, true, tc.markIdentity)
-			} else {
-				err = svc.renameContentID(ctx, from, to, false, tc.markIdentity)
-			}
-			if err != nil {
-				t.Fatalf("move: %v", err)
-			}
-			chosen, err := itemRepo.IdentityChosen(ctx, to)
-			if err != nil {
-				t.Fatalf("IdentityChosen: %v", err)
-			}
-			if chosen != tc.markIdentity {
-				t.Errorf("moved item marked = %v, want %v", chosen, tc.markIdentity)
-			}
-		})
+				suffix := uuid.NewString()
+				from, to := "identity-move-from-"+suffix, "identity-move-to-"+suffix
+				tmdbID := "8" + strings.ReplaceAll(suffix[:8], "-", "")
+				t.Cleanup(func() {
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
+				})
+				seed := []string{from}
+				if mv.merge {
+					seed = append(seed, to)
+				}
+				for _, id := range seed {
+					if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
+						t.Fatalf("seed %s: %v", id, err)
+					}
+				}
+				if mv.merge {
+					if err := providerRepo.ReplaceByContentID(ctx, to, map[string]string{"tmdb": tmdbID}); err != nil {
+						t.Fatalf("seed provider id: %v", err)
+					}
+				}
+				if err := mv.move(from, to, tmdbID, markIdentity); err != nil {
+					t.Fatalf("move: %v", err)
+				}
+				chosen, err := itemRepo.IdentityChosen(ctx, to)
+				if err != nil {
+					t.Fatalf("IdentityChosen: %v", err)
+				}
+				if chosen != markIdentity {
+					t.Errorf("moved item marked = %v, want %v", chosen, markIdentity)
+				}
+			})
+		}
 	}
 }

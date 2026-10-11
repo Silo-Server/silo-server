@@ -236,12 +236,12 @@ func (r *ProviderIDIntegrityRepairer) repairDriftRow(ctx context.Context, row pr
 		}
 		return "provisional_conflict", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isProvisionalOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, row.ContentID, owner.ContentID, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, row.ContentID, owner.ContentID, false, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isConfirmedOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, row.ContentID, owner.ContentID, true); err != nil {
+		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, row.ContentID, owner.ContentID, true, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
@@ -359,11 +359,12 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil || s.dbPool == nil {
 		return "", nil
 	}
-	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, leftContentID, rightContentID, allowMatchedSource)
+	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
 // clearProvisionalProviderIDsLocked removes provider ID rows for an item only
@@ -402,12 +403,17 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	return nil
 }
 
+// canonicalizeProviderIDDuplicate merges two items that share a provider ID
+// onto the one chooseCanonicalProviderOwner picks. With markIdentity (an
+// Identify that hit the conflict) the merge also records the choice on the
+// survivor, so a failed identity write after it cannot leave it unmarked.
 func canonicalizeProviderIDDuplicate(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	leftContentID = strings.TrimSpace(leftContentID)
 	rightContentID = strings.TrimSpace(rightContentID)
@@ -439,18 +445,26 @@ func canonicalizeProviderIDDuplicate(
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, source.ContentID, canonical.ContentID); err != nil {
 		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", source.ContentID, canonical.ContentID, err)
 	}
+	if markIdentity {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, canonical.ContentID); err != nil {
+			return "", err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
 	return canonical.ContentID, nil
 }
 
+// canonicalizeProviderIDDuplicateInto merges sourceID onto canonicalID;
+// markIdentity works as in canonicalizeProviderIDDuplicate.
 func canonicalizeProviderIDDuplicateInto(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	sourceID string,
 	canonicalID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	canonicalID = strings.TrimSpace(canonicalID)
@@ -516,6 +530,11 @@ func canonicalizeProviderIDDuplicateInto(
 	}
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, sourceID, canonicalID); err != nil {
 		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", sourceID, canonicalID, err)
+	}
+	if markIdentity {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, canonicalID); err != nil {
+			return "", err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)

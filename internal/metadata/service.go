@@ -2514,7 +2514,7 @@ func (s *MetadataService) mergeAndPersist(
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
-		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0)
+		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, err
 		}
@@ -2936,7 +2936,7 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 		return "", fmt.Errorf("persisting provider IDs for %s: %w", contentID, err)
 	}
 
-	reboundTo, recoverErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true)
+	reboundTo, recoverErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true, identityChosen)
 	if recoverErr != nil {
 		return "", fmt.Errorf("recovering provider ID conflict for %s: %w", contentID, recoverErr)
 	}
@@ -3006,7 +3006,7 @@ func (s *MetadataService) persistItemAndProviderIDsLegacy(
 	}
 	if err := s.providerIDRepo.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
 		if isProviderIDUniqueConflict(err) {
-			reboundTo, reboundErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true)
+			reboundTo, reboundErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true, false)
 			if reboundErr != nil {
 				return "", fmt.Errorf("recovering provider ID conflict for %s: %w", contentID, reboundErr)
 			}
@@ -7510,15 +7510,19 @@ func (s *MetadataService) rebindSkeletonByProviderIDsLocked(
 	providerIDs map[string]string,
 	itemType string,
 ) (string, error) {
-	return s.rebindItemByProviderIDsLocked(ctx, skeletonContentID, providerIDs, itemType, false)
+	return s.rebindItemByProviderIDsLocked(ctx, skeletonContentID, providerIDs, itemType, false, false)
 }
 
+// rebindItemByProviderIDsLocked merges the source onto the confirmed item
+// that already owns its provider IDs. With markIdentity (an Identify) the
+// merge also records the choice on that item, as reanchorContentID does.
 func (s *MetadataService) rebindItemByProviderIDsLocked(
 	ctx context.Context,
 	sourceContentID string,
 	providerIDs map[string]string,
 	itemType string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil || sourceContentID == "" {
 		return "", nil
@@ -7533,7 +7537,7 @@ func (s *MetadataService) rebindItemByProviderIDsLocked(
 	if existing == nil || existing.ContentID == "" || existing.ContentID == sourceContentID {
 		return "", nil
 	}
-	if err := s.rebindItemToExistingItem(ctx, sourceContentID, existing.ContentID, allowMatchedSource); err != nil {
+	if err := s.rebindItemOnto(ctx, sourceContentID, existing.ContentID, allowMatchedSource, markIdentity); err != nil {
 		return "", err
 	}
 	slog.InfoContext(ctx, "metadata: rebound skeleton to existing item", "component", "metadata",
@@ -7550,6 +7554,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 	providerIDs map[string]string,
 	itemType string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	existing, err := s.findExistingByProviderIDs(ctx, providerIDs, itemType, sourceContentID)
 	if err != nil {
@@ -7577,13 +7582,13 @@ func (s *MetadataService) recoverProviderIDConflict(
 			return "", fmt.Errorf("loading source status for provider conflict recovery: %w", statusErr)
 		}
 		if isProvisionalOwnershipStatus(sourceStatus) && isConfirmedOwnershipStatus(existing.Status) {
-			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, sourceContentID, existing.ContentID, false)
+			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, sourceContentID, existing.ContentID, false, markIdentity)
 			if err != nil {
 				return "", err
 			}
 			return canonicalID, nil
 		}
-		canonicalID, err := s.canonicalizeProviderIDDuplicate(ctx, sourceContentID, existing.ContentID, allowMatchedSource)
+		canonicalID, err := s.canonicalizeProviderIDDuplicate(ctx, sourceContentID, existing.ContentID, allowMatchedSource, markIdentity)
 		if err != nil {
 			return "", err
 		}
@@ -7591,7 +7596,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 			return canonicalID, nil
 		}
 	}
-	return s.rebindItemByProviderIDsLocked(ctx, sourceContentID, providerIDs, itemType, allowMatchedSource)
+	return s.rebindItemByProviderIDsLocked(ctx, sourceContentID, providerIDs, itemType, allowMatchedSource, markIdentity)
 }
 
 func (s *MetadataService) rebindSkeletonToExistingItem(ctx context.Context, fromContentID, toContentID string) error {
