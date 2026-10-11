@@ -1979,7 +1979,7 @@ func (r *Repo) GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[st
 
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given
 // access filter, including its excluded media types (the Jellyfin surface
-// excludes audiobooks and podcasts). The returned map is keyed by
+// excludes audiobooks and podcasts) and its content scope. The returned map is keyed by
 // media_items.content_id.
 func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	if len(itemIDs) == 0 {
@@ -1990,14 +1990,9 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	args := []any{itemIDs}
 	argIdx := 2
 
-	if filter.AllowedContentIDs != nil {
-		if len(filter.AllowedContentIDs) == 0 {
-			return map[string]struct{}{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
-		args = append(args, filter.AllowedContentIDs)
-		argIdx++
-	}
+	// The content allow-list and name prefix, as every catalog read applies
+	// them.
+	catalog.AppendContentScope(&conditions, &args, &argIdx, filter)
 
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
 		return map[string]struct{}{}, nil

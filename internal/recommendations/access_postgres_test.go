@@ -258,6 +258,25 @@ func TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres(t *testing.T) 
 	if _, ok := visible[movie]; !ok || len(visible) != 1 {
 		t.Fatalf("filter excluding audiobooks kept %v, want only the movie", visible)
 	}
+
+	// The content scope applies as on every catalog read: the allow-list
+	// (empty allows nothing) and the name prefix.
+	for name, tc := range map[string]struct {
+		filter catalog.AccessFilter
+		want   int
+	}{
+		"allow-list":       {catalog.AccessFilter{AllowedContentIDs: []string{movie}}, 1},
+		"empty allow-list": {catalog.AccessFilter{AllowedContentIDs: []string{}}, 0},
+		"name prefix":      {catalog.AccessFilter{NamePrefix: prefix + "aud"}, 1},
+	} {
+		kept, err := repo.FilterAccessibleItemIDs(ctx, []string{movie, audiobook}, tc.filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(kept) != tc.want {
+			t.Fatalf("%s: kept %v, want %d", name, kept, tc.want)
+		}
+	}
 }
 
 // An access change that reaches whole accounts marks every profile on them
