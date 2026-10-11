@@ -64,7 +64,8 @@ func TestQueryEpisodeAirDateTiesPostgres(t *testing.T) {
 		{bravo, "B", 1, 4, "Qualifying", "2026-08-26"},
 		{bravo, "B", 1, 3, "Practice 3", "2026-08-26"},
 	} {
-		id := fmt.Sprintf("%s-s%02de%02d", episode.series, episode.season, episode.number)
+		// IDs follow the titles, so content-ID order is not episode order either.
+		id := episode.series + "-" + strings.ToLower(strings.ReplaceAll(episode.title, " ", ""))
 		label[id] = fmt.Sprintf("%s%d.%d", episode.tag, episode.season, episode.number)
 		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,air_date) VALUES($1,$2,$3,$4,$5,$6::date)`, id, episode.series, episode.season, episode.number, episode.title, episode.airDate); err != nil {
 			t.Fatal(err)
@@ -72,6 +73,16 @@ func TestQueryEpisodeAirDateTiesPostgres(t *testing.T) {
 		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries(episode_id,media_folder_id,first_seen_at) VALUES($1,$2,'2026-08-01'::timestamptz)`, id, library); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, alpha).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID) }()
+	profile := "10000000-0000-4000-8000-000000000011"
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id,user_id,name) VALUES($1,$2,'air date ties')`, profile, userID); err != nil {
+		t.Fatal(err)
 	}
 
 	want := map[string]string{
@@ -82,12 +93,20 @@ func TestQueryEpisodeAirDateTiesPostgres(t *testing.T) {
 	access := AccessFilter{AllowedLibraryIDs: []int{library, emptyLibrary}}
 	for _, field := range []string{querySortReleaseDate, querySortLastAirDate} {
 		for _, order := range []string{"desc", "asc"} {
-			// One library takes the episode_catalog_entries page; two take the
+			// One library takes the episode_catalog_entries page, and an unwatched
+			// rule for a profile its user-state variant; two libraries take the
 			// shared query builder. Cursor pages always use the builder.
-			for _, path := range []string{"entries", "builder"} {
+			for _, path := range []string{"entries", "user_state", "builder"} {
 				t.Run(field+"/"+order+"/"+path, func(t *testing.T) {
 					def := QueryDefinition{MediaScope: "episode", LibraryIDs: []int{library}, Sort: QuerySort{Field: field, Order: order}}
-					if path == "builder" {
+					access := access
+					switch path {
+					case "user_state":
+						def.Match = "all"
+						def.Groups = []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "watched", Op: "is", Value: false}}}}
+						access.UserID = userID
+						access.ProfileID = profile
+					case "builder":
 						def.LibraryIDs = []int{library, emptyLibrary}
 					}
 					items, _, _, err := executor.PreviewPage(ctx, def, access, 100, 0, false)
@@ -122,6 +141,26 @@ func TestQueryEpisodeAirDateTiesPostgres(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+
+	// The Jellyfin episode list for one series (PremiereDate) breaks ties the
+	// same way.
+	episodes := NewEpisodeRepository(pool)
+	for order, want := range map[string]string{
+		BrowseOrderDescending: "A3.11 A3.10 A3.9 A3.3 A3.2 A3.1",
+		"":                    "A3.1 A3.2 A3.3 A3.9 A3.10 A3.11",
+	} {
+		items, _, err := episodes.BrowseEpisodes(ctx, alpha, "", nil, "", BrowseFilters{Sort: BrowseSortReleaseDate, Order: order, Limit: 20}, AccessFilter{AllowedLibraryIDs: []int{library}}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(items))
+		for _, item := range items {
+			got = append(got, label[item.ContentID])
+		}
+		if strings.Join(got, " ") != want {
+			t.Fatalf("BrowseEpisodes order %q = %s, want %s", order, strings.Join(got, " "), want)
 		}
 	}
 }

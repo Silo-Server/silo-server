@@ -258,12 +258,12 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 		}
 	}
 
-	titleExpr := qb.normalizedTitleExpr()
 	plan := QuerySortPlan{}
 	if isEpisodeCatalogScope(qb.mediaScope) && (sortConfig.Field == querySortReleaseDate || sortConfig.Field == querySortLastAirDate) {
 		plan.OrderBy = qb.episodeAirDateOrderBy(dir)
 		return plan, nil
 	}
+	titleExpr := qb.normalizedTitleExpr()
 
 	switch sortConfig.Field {
 	case "title":
@@ -1442,13 +1442,11 @@ func (qb *QueryBuilder) normalizedTitleExpr() string {
 	if isEpisodeCatalogScope(qb.mediaScope) {
 		return fmt.Sprintf("%s.sort_key", qb.alias)
 	}
-	return mediaItemSortKeySQL(qb.alias)
-}
-
-// mediaItemSortKeySQL is the title sort key for a media_items row. It must stay
-// byte-identical to the idx_media_items_sort_key expression.
-func mediaItemSortKeySQL(alias string) string {
-	return fmt.Sprintf("LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", alias, alias)
+	return fmt.Sprintf(
+		"LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))",
+		qb.alias,
+		qb.alias,
+	)
 }
 
 // episodeAirDateOrderBy orders episodes by air date, then keeps same-day
@@ -1458,7 +1456,7 @@ func mediaItemSortKeySQL(alias string) string {
 func (qb *QueryBuilder) episodeAirDateOrderBy(dir string) string {
 	descending := dir == "DESC"
 	qb.cursorTerms = []queryCursorTerm{
-		{expression: qb.alias + ".episode_air_date", descending: descending, nullsLast: true},
+		{expression: qb.alias + ".episode_air_date", kind: cursorKindDate, descending: descending, nullsLast: true},
 		{expression: qb.alias + ".episode_series_sort_key"},
 		{expression: qb.alias + ".episode_series_id"},
 		{expression: qb.alias + ".episode_season_number", kind: cursorKindNumber, descending: descending},

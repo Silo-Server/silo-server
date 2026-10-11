@@ -152,7 +152,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	args = append(args, plan.userArgs...)
 	argIdx += len(plan.userArgs)
 
-	fromClause := episodeCatalogUserStateFromClause(plan) + episodeCatalogEntrySortJoin(plan.sortField)
+	fromClause := episodeCatalogUserStateFromClause(plan)
 	orderBy, ok := episodeCatalogUserStateOrderBy(plan)
 	if !ok {
 		return nil, 0, false, false, nil
@@ -180,7 +180,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 		%s
 		LIMIT $%d%s`,
 		strings.Join(ctes, ",\n"),
-		fromClause,
+		fromClause+episodeCatalogEntrySortJoin(plan.sortField),
 		whereClause,
 		orderBy,
 		limitArgIdx,
@@ -1048,7 +1048,7 @@ func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 		return fmt.Sprintf(
 			"ORDER BY ece.episode_air_date %[1]s NULLS LAST, %[2]s ASC, ece.series_id ASC, sort_episode.season_number %[1]s, sort_episode.episode_number %[1]s, ece.episode_id ASC",
 			dir,
-			mediaItemSortKeySQL("sort_series"),
+			queryColumnSQL("sort_series", querySortDefs["title"].columnSQL),
 		), true
 	case "year":
 		return fmt.Sprintf("ORDER BY ece.year %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
