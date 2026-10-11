@@ -39,6 +39,20 @@ const (
 // creates without a limit.
 const DefaultItemLimit = 100
 
+// betaLibraryItemLimit is the row size of default rows for beta library
+// types (audiobooks, ebooks, manga, podcasts). Those surfaces stay as they
+// were until the Books effort replaces them, so they keep their old size.
+const betaLibraryItemLimit = 20
+
+// libraryRowItemLimit is the default row size for rows that belong to one
+// library type: DefaultItemLimit for video libraries, the beta size otherwise.
+func libraryRowItemLimit(libraryType string) int {
+	if IsVideoLibraryType(libraryType) {
+		return DefaultItemLimit
+	}
+	return betaLibraryItemLimit
+}
+
 // DefaultHomeSections returns the canonical default sections for the home scope.
 // These are used for seeding fresh installs and the admin "Restore Defaults" action.
 //
@@ -52,7 +66,7 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 		{ID: idContinueWatching, Scope: scopeHome, SectionType: SectionContinueWatching, Title: titleContinueWatching, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeWatching), Enabled: true},
 	}
 	if hasAudiobookLibrary(libraries) {
-		result = append(result, &PageSection{ID: idContinueListening, Scope: scopeHome, SectionType: SectionContinueWatching, Title: titleContinueListening, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true})
+		result = append(result, &PageSection{ID: idContinueListening, Scope: scopeHome, SectionType: SectionContinueWatching, Title: titleContinueListening, ItemLimit: betaLibraryItemLimit, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true})
 	}
 	result = append(result, &PageSection{ID: idRecentlyAdded, Scope: scopeHome, SectionType: SectionRecentlyAdded, Title: titleRecentlyAdded, ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: true})
 
@@ -127,12 +141,13 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 		releasedConfig = GeneratedHomeLibraryRecentConfigScoped(libraryID, "manga")
 	}
 
+	itemLimit := libraryRowItemLimit(libraryType)
 	sections := []*PageSection{
 		{
 			Scope:       scopeHome,
 			SectionType: SectionRecentlyAdded,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyAdded, libraryName),
-			ItemLimit:   DefaultItemLimit,
+			ItemLimit:   itemLimit,
 			Config:      addedConfig,
 			Enabled:     true,
 		},
@@ -144,7 +159,7 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 			Scope:       scopeHome,
 			SectionType: SectionCustomFilter,
 			Title:       fmt.Sprintf("Recently Released Episodes in %s", libraryName),
-			ItemLimit:   DefaultItemLimit,
+			ItemLimit:   itemLimit,
 			Config:      GeneratedHomeLibraryRecentEpisodesConfig(libraryID),
 			Enabled:     true,
 		})
@@ -153,7 +168,7 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 			Scope:       scopeHome,
 			SectionType: SectionRecentlyReleased,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyReleased, libraryName),
-			ItemLimit:   DefaultItemLimit,
+			ItemLimit:   itemLimit,
 			Config:      releasedConfig,
 			Enabled:     true,
 		})
@@ -228,33 +243,33 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 		// Continue Listening is featured: the library Home tab renders it as
 		// the "Now Listening" resume hero instead of a backdrop carousel.
 		return []*PageSection{
-			{ID: idContinueListening, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueListening, Featured: true, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true},
-			{ID: "default-next-in-series", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionNextInSeries, Title: "Next in Your Series", ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
-			{ID: "default-recently-added-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyAdded, Title: "Recently Added Audiobooks", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
-			{ID: "default-recently-released-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecentlyReleased, Title: "Recently Released Audiobooks", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
-			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
-			{ID: "default-random-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 5, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: idContinueListening, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueListening, Featured: true, ItemLimit: betaLibraryItemLimit, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true},
+			{ID: "default-next-in-series", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionNextInSeries, Title: "Next in Your Series", ItemLimit: betaLibraryItemLimit, Config: emptyCfg, Enabled: true},
+			{ID: "default-recently-added-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyAdded, Title: "Recently Added Audiobooks", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: "default-recently-released-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecentlyReleased, Title: "Recently Released Audiobooks", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: betaLibraryItemLimit, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-audiobooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 5, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
 		}
 	case "ebooks", "ebook":
 		return []*PageSection{
-			{ID: idContinueReading, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueReading, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
-			{ID: "default-recently-added-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Ebooks", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
-			{ID: "default-recently-released-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Ebooks", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
-			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
-			{ID: "default-random-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+			{ID: idContinueReading, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueReading, ItemLimit: betaLibraryItemLimit, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
+			{ID: "default-recently-added-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Ebooks", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+			{ID: "default-recently-released-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Ebooks", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: betaLibraryItemLimit, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-ebooks", Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
 		}
 	case "manga":
 		// Manga libraries browse the series items (media_items.type='manga');
 		// the per-chapter ebook items are scoped out by the "manga" media scope.
 		return []*PageSection{
-			{ID: idContinueReading, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueReading, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
-			{ID: "default-recently-added-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Manga", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
-			{ID: "default-recently-released-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Manga", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
-			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
-			{ID: "default-random-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: idContinueReading, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueReading, ItemLimit: betaLibraryItemLimit, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
+			{ID: "default-recently-added-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Manga", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: "default-recently-released-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Manga", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: betaLibraryItemLimit, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
 		}
 	default:
-		return DefaultLibrarySections(libraryID)
+		return defaultLibrarySections(libraryID, libraryRowItemLimit(libraryType))
 	}
 }
 
@@ -262,10 +277,14 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 // with no admin-configured sections. This remains available as a degraded-path
 // fallback when typed defaults cannot be resolved safely.
 func DefaultLibrarySections(libraryID *int) []*PageSection {
+	return defaultLibrarySections(libraryID, DefaultItemLimit)
+}
+
+func defaultLibrarySections(libraryID *int, itemLimit int) []*PageSection {
 	emptyCfg := json.RawMessage(`{}`)
 	return []*PageSection{
-		{ID: idContinueWatching, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueWatching, ItemLimit: DefaultItemLimit, Config: ContinueTypeConfig(ContinueTypeWatching), Enabled: true},
-		{ID: idRecentlyAdded, Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: titleRecentlyAdded, ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
-		{ID: "default-recently-released", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released", ItemLimit: DefaultItemLimit, Config: emptyCfg, Enabled: true},
+		{ID: idContinueWatching, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueWatching, ItemLimit: itemLimit, Config: ContinueTypeConfig(ContinueTypeWatching), Enabled: true},
+		{ID: idRecentlyAdded, Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: titleRecentlyAdded, ItemLimit: itemLimit, Config: emptyCfg, Enabled: true},
+		{ID: "default-recently-released", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released", ItemLimit: itemLimit, Config: emptyCfg, Enabled: true},
 	}
 }

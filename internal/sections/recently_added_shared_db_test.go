@@ -78,13 +78,13 @@ func TestSharedRecentlyAddedMergesTVEventsWithMoviesDB(t *testing.T) {
 	exec(`INSERT INTO media_files (episode_id, media_folder_id, file_path) VALUES ($1, $2, $3)`, episodeID, showsID, "/shared-recent/"+episodeID+".mkv")
 
 	libraries := []int{moviesID, showsID, booksID}
-	fetch := func(config string) []string {
+	fetchIn := func(config string, scope []int) []string {
 		t.Helper()
 		items, total, err := NewFetcher(pool).fetchRecentlyAdded(ctx, ResolvedSection{
 			SectionType: SectionRecentlyAdded,
 			ItemLimit:   20,
 			Config:      json.RawMessage(config),
-		}, nil, libraries, catalog.AccessFilter{})
+		}, nil, scope, catalog.AccessFilter{})
 		if err != nil {
 			t.Fatalf("fetch recently added %s: %v", config, err)
 		}
@@ -97,6 +97,10 @@ func TestSharedRecentlyAddedMergesTVEventsWithMoviesDB(t *testing.T) {
 		}
 		return ids
 	}
+	fetch := func(config string) []string {
+		t.Helper()
+		return fetchIn(config, libraries)
+	}
 
 	video := fetch(string(defaultMediaScopeConfig(catalog.MediaScopeVideo)))
 	if want := []string{"episode:" + episodeID, "movie:" + movieID}; !slices.Equal(video, want) {
@@ -105,6 +109,13 @@ func TestSharedRecentlyAddedMergesTVEventsWithMoviesDB(t *testing.T) {
 	all := fetch(`{}`)
 	if want := []string{"audiobook:" + bookID, "episode:" + episodeID, "movie:" + movieID}; !slices.Equal(all, want) {
 		t.Fatalf("unscoped row = %v, want %v", all, want)
+	}
+
+	// A row configured for both video libraries, read in a caller scope of
+	// only the movie library, must not show the TV library's cards.
+	configured := fmt.Sprintf(`{"filter_library_ids":[%d,%d]}`, moviesID, showsID)
+	if got, want := fetchIn(configured, []int{moviesID}), []string{"movie:" + movieID}; !slices.Equal(got, want) {
+		t.Fatalf("configured row in movie scope = %v, want %v", got, want)
 	}
 }
 
@@ -116,15 +127,23 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(home, IsSharedHomeRecentlyAddedSection) {
-		// Older homes have no shared row and keep per-library rows.
+	if !hasEnabledSharedHomeRecentlyAdded(home) {
+		// Older homes have no shared row, and a disabled shared row shows
+		// nothing; both keep per-library rows.
+		disabled, err := f.repo.Create(ctx, &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Title: f.app + "-disabled", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: false})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.Background(), `DELETE FROM page_sections WHERE id = $1`, disabled.ID)
+		})
 		created, err := f.repo.CreateGeneratedHomeLibraryRecentSections(ctx, f.library, "Legacy Movies", "movies")
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = f.repo.DeleteGeneratedHomeLibraryRecentSections(context.Background(), f.library) })
 		if len(created) == 0 {
-			t.Fatal("home without a shared row created no per-library rows")
+			t.Fatal("home without an enabled shared row created no per-library rows")
 		}
 		if err := f.repo.DeleteGeneratedHomeLibraryRecentSections(ctx, f.library); err != nil {
 			t.Fatal(err)
@@ -152,6 +171,29 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	t.Cleanup(func() { _ = f.repo.DeleteGeneratedHomeLibraryRecentSections(context.Background(), f.library) })
 	if len(books) == 0 {
 		t.Fatal("book library created no home rows")
+	}
+}
+
+func TestHasEnabledSharedHomeRecentlyAdded(t *testing.T) {
+	shared := func(enabled bool) *PageSection {
+		return &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: enabled}
+	}
+	movieOnly := &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig("movie"), Enabled: true}
+	tests := []struct {
+		name string
+		home []*PageSection
+		want bool
+	}{
+		{"enabled shared row", []*PageSection{movieOnly, shared(true)}, true},
+		{"disabled shared row", []*PageSection{movieOnly, shared(false)}, false},
+		{"no shared row", []*PageSection{movieOnly}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasEnabledSharedHomeRecentlyAdded(tt.home); got != tt.want {
+				t.Fatalf("hasEnabledSharedHomeRecentlyAdded = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -188,5 +230,44 @@ func TestMergeRecentlyAddedInterleavesAndReportsLeftover(t *testing.T) {
 	}
 	if !leftover {
 		t.Fatal("a merge cut by the limit reported no leftover cards")
+	}
+
+	// A series in both a TV library and a mixed library fills both sides with
+	// the same cards. Each side read one past a page of 2; with only those
+	// cards, nothing exists beyond the page.
+	tv = []*models.MediaItem{tvCard("show-a", 5), tvCard("show-b", 3)}
+	other = []*models.MediaItem{otherCard("show-b", 4), otherCard("show-a", 2)}
+	merged, leftover = mergeRecentlyAdded(tv, other, 2)
+	if want := []string{"show-a", "show-b"}; !slices.Equal(ids(merged), want) {
+		t.Fatalf("duplicate merge = %v, want %v", ids(merged), want)
+	}
+	if leftover {
+		t.Fatal("cards left only as duplicates of merged cards reported leftover")
+	}
+}
+
+func TestMixedRecentRequestedLibraries(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured []int
+		scope      []int
+		want       []int
+		wantOK     bool
+	}{
+		{"no config, every library", nil, nil, nil, true},
+		{"no config, caller scope", nil, []int{3, 5}, []int{3, 5}, true},
+		{"config, every library", []int{3, 5}, nil, []int{3, 5}, true},
+		{"config narrowed by caller", []int{3, 5, 7}, []int{5}, []int{5}, true},
+		{"config and caller disjoint", []int{3}, []int{5}, nil, false},
+		{"caller sees nothing", []int{3}, []int{}, nil, false},
+		{"no config, caller sees nothing", nil, []int{}, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := mixedRecentRequestedLibraries(tt.configured, tt.scope)
+			if ok != tt.wantOK || !slices.Equal(got, tt.want) {
+				t.Fatalf("mixedRecentRequestedLibraries = %v %v, want %v %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
 	}
 }

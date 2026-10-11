@@ -106,6 +106,49 @@ func TestDefaultHomeSectionsKeepBookLibraryRows(t *testing.T) {
 	}
 }
 
+// Beta library types (audiobooks, ebooks, manga, podcasts) keep their old row
+// size; only video rows and the shared home rows use DefaultItemLimit.
+func TestDefaultRowLimitsKeepBetaLibrariesAtOldSize(t *testing.T) {
+	assertLimits := func(t *testing.T, label string, got []*PageSection, want int) {
+		t.Helper()
+		if len(got) == 0 {
+			t.Fatalf("%s: no sections", label)
+		}
+		for _, section := range got {
+			if section.ItemLimit != want {
+				t.Errorf("%s: section %q limit = %d, want %d", label, section.ID, section.ItemLimit, want)
+			}
+		}
+	}
+
+	home := DefaultHomeSections([]*models.MediaFolder{
+		{ID: 7, Name: "Movies", Type: "movies"},
+		{ID: 10, Name: "Books", Type: "audiobooks"},
+	})
+	for _, section := range home {
+		want := DefaultItemLimit
+		if section.ID == "default-continue-listening" {
+			want = betaLibraryItemLimit
+		}
+		if libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(section.Config); ok && libraryID == 10 {
+			want = betaLibraryItemLimit
+		}
+		if section.ItemLimit != want {
+			t.Errorf("home section %q limit = %d, want %d", section.ID, section.ItemLimit, want)
+		}
+	}
+
+	libraryID := 3
+	for _, libraryType := range []string{"audiobooks", "ebooks", "manga", "podcasts"} {
+		assertLimits(t, libraryType+" library page", DefaultLibrarySectionsForType(&libraryID, libraryType), betaLibraryItemLimit)
+		assertLimits(t, libraryType+" generated home rows", generatedHomeLibraryRecentDefaults(libraryID, "Lib", libraryType), betaLibraryItemLimit)
+	}
+	for _, libraryType := range []string{"movies", "series", "mixed"} {
+		assertLimits(t, libraryType+" library page", DefaultLibrarySectionsForType(&libraryID, libraryType), DefaultItemLimit)
+		assertLimits(t, libraryType+" generated home rows", generatedHomeLibraryRecentDefaults(libraryID, "Lib", libraryType), DefaultItemLimit)
+	}
+}
+
 func TestIsSharedHomeRecentlyAddedSection(t *testing.T) {
 	seven := 7
 	tests := []struct {

@@ -2414,12 +2414,9 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	if cfgFilters.FilterType != "" {
 		return nil, 0, false, nil
 	}
-	requested := cfgFilters.LibraryIDs()
-	if len(requested) == 0 {
-		if libraryIDs != nil && len(libraryIDs) == 0 {
-			return nil, 0, false, nil
-		}
-		requested = append([]int(nil), libraryIDs...)
+	requested, ok := mixedRecentRequestedLibraries(cfgFilters.LibraryIDs(), libraryIDs)
+	if !ok {
+		return nil, 0, false, nil
 	}
 	videoOnly := len(recentlyAddedMediaTypes(s.Config)) > 0
 	split, err := catalog.SplitRecentLibraries(ctx, f.pool, requested, videoOnly, filter)
@@ -2434,7 +2431,10 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	if limit <= 0 {
 		limit = 20
 	}
-	tvItems, tvMore, err := f.fetchRecentTVItems(ctx, split.TV, limit, filter)
+	// Each side reads one card past the page. A series in both a TV library
+	// and a mixed library appears on both sides, so only the merged, deduped
+	// set can tell whether a card exists beyond the page.
+	tvItems, _, err := f.fetchRecentTVItems(ctx, split.TV, limit+1, filter)
 	if err != nil {
 		return nil, 0, true, err
 	}
@@ -2445,7 +2445,7 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 		// orders by first_seen_at instead.
 		otherFilters := SectionConfigFilters{FilterLibraryIDs: split.Other}
 		otherSection := s
-		otherSection.ItemLimit = limit
+		otherSection.ItemLimit = limit + 1
 		query, args := buildRecentlyAddedMultiLibraryQuery(otherSection, otherFilters, nil, libraryIDs, filter)
 		rows, err := f.pool.Query(ctx, query, args...)
 		if err != nil {
@@ -2461,10 +2461,33 @@ func (f *Fetcher) fetchMixedRecentlyAdded(
 	merged, leftover := mergeRecentlyAdded(tvItems, otherItems, limit)
 	// total_count is a lower bound, as on the TV path.
 	total := len(merged)
-	if tvMore || leftover || len(otherItems) >= limit {
+	if leftover {
 		total++
 	}
 	return merged, total, true, nil
+}
+
+// mixedRecentRequestedLibraries returns the libraries a mixed recently-added
+// row may read: the section's configured libraries limited to the caller's
+// scope, matching the plain query's buildLibraryScope. A nil caller scope means
+// every library, and an empty result with ok=true means every enabled library.
+// ok is false when the two scopes share no library; the plain query then
+// serves the row.
+func mixedRecentRequestedLibraries(configured, scope []int) (requested []int, ok bool) {
+	switch {
+	case scope != nil && len(scope) == 0:
+		return nil, false
+	case len(configured) == 0:
+		return append([]int(nil), scope...), true
+	case scope == nil:
+		return append([]int(nil), configured...), true
+	}
+	for _, id := range configured {
+		if slices.Contains(scope, id) && !slices.Contains(requested, id) {
+			requested = append(requested, id)
+		}
+	}
+	return requested, len(requested) > 0
 }
 
 // fetchRecentTVItems loads the newest arrival-grouped TV cards from the given
@@ -2520,7 +2543,8 @@ func (f *Fetcher) fetchRecentTVItems(ctx context.Context, tvLibraryIDs []int, li
 // mergeRecentlyAdded interleaves two newest-first lists by added time, keeping
 // the first card for a content ID and stopping at limit. Equal times keep the
 // TV card first so the merge is deterministic. leftover reports that the limit
-// cut cards from either list.
+// cut a card from either list that is not already in merged; duplicates left
+// behind do not count.
 func mergeRecentlyAdded(tv, other []*models.MediaItem, limit int) (merged []*models.MediaItem, leftover bool) {
 	merged = make([]*models.MediaItem, 0, min(limit, len(tv)+len(other)))
 	seen := make(map[string]struct{}, cap(merged))
@@ -2541,7 +2565,11 @@ func mergeRecentlyAdded(tv, other []*models.MediaItem, limit int) (merged []*mod
 			j++
 		}
 	}
-	return merged, i < len(tv) || j < len(other)
+	unseen := func(item *models.MediaItem) bool {
+		_, dup := seen[item.ContentID]
+		return !dup
+	}
+	return merged, slices.ContainsFunc(tv[i:], unseen) || slices.ContainsFunc(other[j:], unseen)
 }
 
 // recentlyAddedTime is the time a recently-added card sorts by: the TV event's
