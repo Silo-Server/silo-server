@@ -755,7 +755,7 @@ func (s *Service) revokeSession(ctx context.Context, endpoint string, a account)
 		if resp.StatusCode == http.StatusOK {
 			return true
 		}
-		if resp.StatusCode < http.StatusInternalServerError || resp.StatusCode >= 600 {
+		if resp.StatusCode != http.StatusTooManyRequests && (resp.StatusCode < http.StatusInternalServerError || resp.StatusCode >= 600) {
 			return false
 		}
 	}

@@ -115,7 +115,7 @@ Disconnect first commits a disabled account, clears its access token and active
 selection, and retains its refresh token with an operation identifier. Fresh and
 pinned token sources reject the disabled account. Provider calls run outside the
 credential lock. Disconnect makes up to three revocation attempts, backing off
-after network failures and HTTP 5xx responses before clearing the refresh token.
+after network failures and HTTP 429 or 5xx responses before clearing the refresh token.
 Cleanup checks the operation identifier, preserving a newer disconnect or
 successful reconnect, another account selection, and newer pending login. A
 failed cleanup commit leaves the account disabled with its retry token.

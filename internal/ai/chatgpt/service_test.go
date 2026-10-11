@@ -489,6 +489,8 @@ func TestDisconnectRetriesTransientRevocation(t *testing.T) {
 	}{
 		{name: "network recovery", network: true, wantCalls: 2, wantRevoked: true},
 		{name: "server recovery", status: http.StatusServiceUnavailable, wantCalls: 2, wantRevoked: true},
+		{name: "rate limit recovery", status: http.StatusTooManyRequests, wantCalls: 2, wantRevoked: true},
+		{name: "persistent rate limit", status: http.StatusTooManyRequests, persistent: true, wantCalls: 3},
 		{name: "server outage", status: http.StatusServiceUnavailable, persistent: true, wantCalls: 3},
 		{name: "network outage", network: true, persistent: true, wantCalls: 3},
 		{name: "client rejection", status: http.StatusBadRequest, persistent: true, wantCalls: 1},
