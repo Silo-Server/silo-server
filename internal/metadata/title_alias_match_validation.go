@@ -42,10 +42,16 @@ func validateMatchByProviderTitleAliases(
 
 	contenders := make([]MatchCandidate, 0, maxTitleAliasValidationCandidates)
 	for _, candidate := range candidates {
+		// Only a remote result can be an exact-title rival. A title-only NFO
+		// echoes the folder title by design, and selection already set aside
+		// ID-less candidates once remote results exist.
+		if providerIDRichness(candidate.ProviderIDs) == 0 || candidateCorroboratingSourceCount(candidate) == 0 {
+			continue
+		}
 		if similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, hints.Year); similarity == 1 {
 			return nil, nil
 		}
-		if candidate.Year != hints.Year || providerIDRichness(candidate.ProviderIDs) == 0 ||
+		if candidate.Year != hints.Year ||
 			len(candidate.ConflictingProviderIDKeys) > 0 ||
 			!candidateTypeMatchesHint(hints.Type, candidate.ContentType) {
 			continue

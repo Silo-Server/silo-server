@@ -277,3 +277,20 @@ func TestValidateMatchByProviderTitleAliasesAsksEverySourceProvider(t *testing.T
 		t.Fatalf("detail calls tvdb=%d tmdb=%d, want 1 each", tvdb.detailCallCount(), tmdb.detailCallCount())
 	}
 }
+
+func TestValidateMatchByProviderTitleAliasesIgnoresTitleOnlyNFOCandidate(t *testing.T) {
+	t.Parallel()
+	// A title-only movie.nfo echoes the folder title; it is not a remote
+	// exact-title rival and must not veto the alias check.
+	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}}
+	candidates := NormalizeCandidates([]SearchResult{
+		seoulSpringSearchResult("919207", 2023),
+		{Name: "首尔之春", Year: 2023, Provider: "nfo"},
+	}, "movie")
+
+	winner, errs := validateMatchByProviderTitleAliases(context.Background(),
+		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en")
+	if winner == nil || winner.ProviderIDs["tmdb"] != "919207" || len(errs) != 0 {
+		t.Fatalf("winner = %v, errs = %v; want 919207 confirmed despite the NFO candidate", winner, errs)
+	}
+}
