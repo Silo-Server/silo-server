@@ -753,6 +753,7 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	// Attach here rather than at the call sites so both the token routes and the
 	// grant routes attribute their bytes to the viewer.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -952,6 +953,7 @@ func remuxRunsOnTranscodeNodeV3(claims *streamtoken.Claims) bool {
 
 func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, forwardToken string) {
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -974,6 +976,7 @@ func validAudioV2RemuxClaims(claims *streamtoken.Claims) bool {
 func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) {
 	// See serveDirectPlayClaims: shared by the token and grant routes.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -1005,6 +1008,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	s.touchTranscodeSession(r, claims)
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/master.m3u8", chi.URLParam(r, "token"))
 }
@@ -1015,6 +1019,7 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/segment/"+name, chi.URLParam(r, "token"))

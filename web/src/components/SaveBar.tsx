@@ -6,7 +6,7 @@ import "@/styles/admin-settings.css";
 
 interface SaveBarProps {
   dirtyCount: number;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   onDiscard: () => void;
   isSaving: boolean;
   saveLabel?: string;
@@ -129,7 +129,11 @@ export function SaveBar({
                 <Button variant="ghost" className="h-11 lg:h-8" onClick={onDiscard}>
                   {discardLabel}
                 </Button>
-                <Button className="h-11 lg:h-8" onClick={() => onSave()} disabled={saveDisabled}>
+                <Button
+                  className="h-11 lg:h-8"
+                  onClick={() => void Promise.resolve(onSave()).catch(() => {})}
+                  disabled={saveDisabled}
+                >
                   {saveText}
                 </Button>
               </span>
@@ -169,7 +173,7 @@ export function SaveBar({
             </Button>
             <Button
               size="sm"
-              onClick={() => onSave()}
+              onClick={() => void Promise.resolve(onSave()).catch(() => {})}
               disabled={saveDisabled}
               className="rounded-full bg-[var(--settings-accent)] text-[#15151a] hover:bg-[var(--settings-accent)] hover:brightness-110"
             >

@@ -160,7 +160,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-async function setup(waitForRows = true, entry = "/admin/home-rows") {
+async function setup(waitForRows = true, entry = "/admin/sections") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -267,7 +267,7 @@ describe("admin section captured snapshots", () => {
     ).toBeVisible();
     revision = 2;
     fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
-    await within(dialog).findByText(/Home rows changed since you opened this/);
+    await within(dialog).findByText(/These rows changed since you opened this/);
     expect(writes[0]!.args.headers?.["If-Match"]).toBe('"rev-1"');
     expect(writes[0]!.args.body?.reset_profiles).toBe(false);
     expect(dialog).toBeInTheDocument();
@@ -331,7 +331,7 @@ describe("admin section captured snapshots", () => {
       return implementation(operation, args);
     });
     try {
-      await setup(false, "/admin/home-rows?page=7");
+      await setup(false, "/admin/sections?page=7");
       await screen.findByRole("button", { name: "More for Movie row" });
       await chooseMoreAction("Restore defaults…");
       const dialog = await screen.findByRole("dialog", {
@@ -623,7 +623,7 @@ describe("admin Home rows list", () => {
     rows = rows.map((row) => (row.id === "a" ? { ...row, title: "Renamed elsewhere" } : row));
     fireEvent.click(screen.getByRole("switch", { name: "Original A is on for everyone" }));
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Home rows changed since you opened this page.");
+    expect(banner).toHaveTextContent("These rows changed since you opened this page.");
     expect(writes).toEqual([]);
     expect(screen.getByRole("switch", { name: "Original A is on for everyone" })).toBeChecked();
     fireEvent.click(within(banner).getByRole("button", { name: "Reload rows" }));
@@ -719,7 +719,7 @@ describe("admin Home rows list", () => {
         }
       )(mocks.request.getMockImplementation()!),
     );
-    await setup(false, "/admin/home-rows?page=7");
+    await setup(false, "/admin/sections?page=7");
     await screen.findByRole("button", { name: "More for Movie row" });
     expect(screen.getByRole("button", { name: "Movies" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("These rows show above the full Movies grid.")).toBeInTheDocument();

@@ -179,7 +179,7 @@ describe("Your collections card menu", () => {
 
     const dialog = await screen.findByRole("alertdialog", { name: "Stop sharing Rainy days?" });
     expect(dialog).toHaveAccessibleDescription(
-      "Maya and Leo lose it, including Home rows they made from it.",
+      "Maya and Leo lose it, including rows they made from it.",
     );
     expect(v2Recorder.writes()).toEqual([]);
     await userEvent.click(within(dialog).getByRole("button", { name: "Stop sharing" }));

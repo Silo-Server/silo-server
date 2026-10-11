@@ -807,6 +807,8 @@ export interface BrowseItem {
   rating_rt_audience?: number | null;
   original_language?: string;
   overview: string;
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;
@@ -1034,6 +1036,9 @@ export interface TimeRange {
 export type MarkerKind = "intro" | "credits" | "recap" | "preview";
 
 export interface MarkerOccurrence {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;
@@ -1187,6 +1192,8 @@ export interface ItemDetail {
   air_timezone?: string | null;
 
   // Presigned image URLs.
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;
@@ -1300,6 +1307,7 @@ export interface EpisodeListItem {
   imdb_id?: string;
   tmdb_id?: string;
   tvdb_id?: string;
+  still_is_episode_still?: boolean;
   still_url: string;
   still_thumbhash: string;
   user_data?: LeafItemUserData;
@@ -2744,6 +2752,7 @@ export interface AdminSession {
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
   source_video_resolution?: string;
+  source_video_height?: number;
   source_audio_codec?: string;
   source_audio_channels: number | null;
   source_audio_language?: string;
@@ -2788,6 +2797,10 @@ export interface OperationalLogEntry {
 }
 
 export interface AuditLogEntry {
+  action?: string;
+  target_type?: string;
+  target_id?: string;
+  changes?: { field: string; before?: string; after?: string }[];
   id: number;
   timestamp: string;
   client_ip: string;
@@ -4298,6 +4311,10 @@ export interface StreamNode {
   hw_accel_override?: string | null;
   /** Comma-separated render device paths pinned to this node; null inherits. */
   hw_device_override?: string | null;
+  /** This node's own prepared-download directory; absent when inherited. */
+  download_artifact_dir_override?: string | null;
+  /** This node's own prepared-download budget in bytes (0 for none); absent when inherited. */
+  download_artifact_max_bytes_override?: number | null;
   /**
    * Human-readable note describing how this node's hardware got worse at the
    * last capability refetch: a backend that used to pass its probe and now
@@ -4334,6 +4351,10 @@ export interface UpdateNodeRequest {
   // empty string) restores inheritance of the cluster-wide playback setting.
   hw_accel_override?: string | null;
   hw_device_override?: string | null;
+  // Same convention: null restores the inherited directory or budget. The
+  // directory applies when the node restarts.
+  download_artifact_dir_override?: string | null;
+  download_artifact_max_bytes_override?: number | null;
 }
 
 export interface CheckNodeResponse {
@@ -4416,6 +4437,8 @@ export interface SectionItem {
   position_seconds?: number;
   duration_seconds?: number;
   progress_updated_at?: string;
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;

@@ -301,3 +301,48 @@ func TestResolveBackwardCompatLegacyUserAdded(t *testing.T) {
 		t.Fatalf("legacy user-added not resolved correctly: %+v", resolved)
 	}
 }
+
+func TestResolve_ReplacesRawSectionTypeTitle(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "Hot Right Now", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "3", Position: 2, SectionType: "format_showcase", Title: "format_showcase", Config: json.RawMessage(`{"format":"4k","sort":"recent"}`)},
+	}
+
+	result := Resolve(admin, nil)
+	if result[0].Title != "Trending This Week" {
+		t.Errorf("raw-key title = %q, want %q", result[0].Title, "Trending This Week")
+	}
+	if result[1].Title != "Hot Right Now" {
+		t.Errorf("custom title = %q, want unchanged", result[1].Title)
+	}
+	if result[2].Title != "New in 4K" {
+		t.Errorf("most specific preset = %q, want %q", result[2].Title, "New in 4K")
+	}
+}
+
+// TestResolveForSettings_RawKeyAdminTitleIsNotARename: an admin row saved with
+// the raw section_type key gets the preset name in both Title and DefaultTitle,
+// so settings does not report a rename the profile never made.
+func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+	}
+	overrides := []ProfileSectionOverride{{SectionID: "2", Title: "My trending"}}
+
+	result := ResolveForSettings(admin, overrides)
+	got := map[string][2]string{}
+	for _, r := range result {
+		got[r.ID] = [2]string{r.Title, r.DefaultTitle}
+	}
+	want := map[string][2]string{
+		"1": {"Trending This Week", "Trending This Week"},
+		"2": {"My trending", "Trending This Week"},
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("section %s (title, default title) = %q, want %q", id, got[id], w)
+		}
+	}
+}

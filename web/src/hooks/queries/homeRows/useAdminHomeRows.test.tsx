@@ -144,7 +144,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup(initialEntry = "/admin/home-rows") {
+function setup(initialEntry = "/admin/sections") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -193,19 +193,19 @@ describe("useAdminHomeRows", () => {
   });
 
   it("reads the page from ?page= and falls back to Home for an unknown page", async () => {
-    const library = setup("/admin/home-rows?page=7");
+    const library = setup("/admin/sections?page=7");
     await ready(library.result);
     expect(library.result.current.adapter.page).toEqual({ kind: "library", libraryId: 7 });
     expect(library.result.current.adapter.rows.map((entry) => entry.id)).toEqual(["lib"]);
     library.unmount();
 
-    const unknown = setup("/admin/home-rows?page=99");
+    const unknown = setup("/admin/sections?page=99");
     await ready(unknown.result);
     expect(unknown.result.current.adapter.page).toEqual({ kind: "home" });
   });
 
   it("writes the page to ?page= when the admin switches pages", async () => {
-    const { result } = setup("/admin/home-rows?keep=1");
+    const { result } = setup("/admin/sections?keep=1");
     await ready(result);
     act(() => result.current.adapter.setPage({ kind: "library", libraryId: 7 }));
     await waitFor(() => expect(result.current.params.get("page")).toBe("7"));
@@ -547,7 +547,7 @@ describe("useAdminHomeRows", () => {
       error: new Error("Libraries unavailable"),
       refetch,
     });
-    const { result } = setup("/admin/home-rows?page=7");
+    const { result } = setup("/admin/sections?page=7");
     await waitFor(() => expect(result.current.adapter.status).toBe("error"));
     expect(result.current.adapter.error).toBe("Libraries unavailable");
     expect(result.current.adapter.canEdit).toBe(false);
@@ -581,13 +581,13 @@ describe("useAdminHomeRows", () => {
       expect(home.result.current.adapter.capabilities.libraryCopies).toBe(false);
       home.unmount();
 
-      const library = setup("/admin/home-rows?page=7");
+      const library = setup("/admin/sections?page=7");
       await ready(library.result);
       expect(library.result.current.adapter.capabilities.libraryCopies).toBe(true);
     });
 
     it("adds a new row to this page and the others in one request, and finds it here", async () => {
-      const { result } = setup("/admin/home-rows?page=7");
+      const { result } = setup("/admin/sections?page=7");
       await ready(result);
       let created!: { newIds: string[] };
       await act(async () => {
@@ -617,7 +617,7 @@ describe("useAdminHomeRows", () => {
     });
 
     it("adds a hero row to this page only", async () => {
-      const { result } = setup("/admin/home-rows?page=7");
+      const { result } = setup("/admin/sections?page=7");
       await ready(result);
       mocks.request.mockImplementationOnce(async (operation: string, args: Args) => {
         calls.push({ operation, args });
@@ -643,7 +643,7 @@ describe("useAdminHomeRows", () => {
           config: { window: "7d" },
         }),
       ];
-      const { result } = setup("/admin/home-rows?page=7");
+      const { result } = setup("/admin/sections?page=7");
       await ready(result);
       await act(async () => {
         await result.current.adapter.copyToLibraries("lib", [7, 8, 9]);
@@ -664,7 +664,7 @@ describe("useAdminHomeRows", () => {
     });
 
     it("refuses to copy a row that changed since the page loaded", async () => {
-      const { result } = setup("/admin/home-rows?page=7");
+      const { result } = setup("/admin/sections?page=7");
       await ready(result);
       libraryRows = libraryRows.map((entry) => ({ ...entry, title: "Renamed elsewhere" }));
       await act(async () => {
@@ -684,7 +684,7 @@ describe("useAdminHomeRows", () => {
           config: { filter_library_ids: [7] },
         }),
       ];
-      const { result } = setup("/admin/home-rows?page=7");
+      const { result } = setup("/admin/sections?page=7");
       await ready(result);
       await act(async () => {
         await expect(result.current.adapter.copyToLibraries("lib", [8])).rejects.toThrow(

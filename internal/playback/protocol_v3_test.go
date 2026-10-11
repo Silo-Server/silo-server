@@ -1786,8 +1786,8 @@ func TestPlanPlaybackV3ResolvesToneMapRecipeOnce(t *testing.T) {
 	}
 }
 
-// TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks verifies unsafe or uncertain sources are handled explicitly.
-func TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T) {
+// TestPlanPlaybackV3ClassifiesDolbyOnlyAndFreezesAmbiguousFallbacks verifies unsafe or uncertain sources are handled explicitly.
+func TestPlanPlaybackV3ClassifiesDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
@@ -1801,8 +1801,18 @@ func TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T
 		wantKind      tonemap.SourceKind
 		wantPreflight bool
 	}{
-		{name: "profile 5", mutate: func(track *models.VideoTrack) { track.DVProfile = 5 }, wantTerminal: true},
-		{name: "explicit id 0", mutate: func(track *models.VideoTrack) { track.DVBLCompatID = 0 }, wantTerminal: true},
+		{name: "profile 5", mutate: func(track *models.VideoTrack) {
+			track.DVProfile, track.DVBLCompatID = 5, 0
+			track.VideoRangeType = "DOVI"
+			track.ColorRange, track.ColorPrimaries, track.ColorTransfer, track.ColorSpace = "", "", "", ""
+		}, wantKind: tonemap.SourceDolbyVision},
+		{name: "profile 5 without RPU", mutate: func(track *models.VideoTrack) {
+			track.DVProfile, track.DVBLCompatID, track.DVRPUPresent = 5, 0, false
+		}, wantTerminal: true},
+		{name: "explicit id 0", mutate: func(track *models.VideoTrack) { track.DVBLCompatID = 0 }, wantKind: tonemap.SourceDolbyVision, wantPreflight: true},
+		{name: "explicit id 0 with untagged transfer", mutate: func(track *models.VideoTrack) {
+			track.DVProfile, track.DVBLCompatID, track.ColorTransfer = 8, 0, ""
+		}, wantTerminal: true},
 		{name: "absent base", mutate: func(track *models.VideoTrack) { track.DVBLPresent = false }, wantTerminal: true},
 		{name: "id 2 SDR base", mutate: func(track *models.VideoTrack) {
 			track.DVProfile, track.DVBLCompatID = 8, 2
@@ -1836,6 +1846,60 @@ func TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T
 			}
 			if result.Plan == nil || result.ToneMapSourceKind != tt.wantKind || result.ToneMapPreflightRequired != tt.wantPreflight {
 				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+// TestPlanPlaybackV3DolbyVisionOnlyBaseNeedsAnRPUExecutor verifies that a
+// Profile 5 source plans a tone map only on an executor that applies its RPU,
+// and otherwise keeps the HDR refusal instead of a wrong-colored conversion.
+func TestPlanPlaybackV3DolbyVisionOnlyBaseNeedsAnRPUExecutor(t *testing.T) {
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	tests := []struct {
+		name         string
+		capabilities tonemap.Capabilities
+		wantMode     tonemap.Mode
+	}{
+		{name: "VAAPI cannot apply an RPU", capabilities: tonemap.Capabilities{
+			{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVAAPI, Filter: tonemap.HardwareFilterVAAPI, SourceKinds: tonemap.StandardSourceKinds()},
+		}},
+		{name: "QSV OpenCL applies the RPU", capabilities: tonemap.Capabilities{
+			{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL, SourceKinds: tonemap.AllSourceKinds()},
+		}, wantMode: tonemap.ModeHardware},
+		{name: "software tonemapx applies the RPU", capabilities: tonemap.Capabilities{
+			{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVAAPI, Filter: tonemap.HardwareFilterVAAPI, SourceKinds: tonemap.StandardSourceKinds()},
+			{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: tonemap.AllSourceKinds()},
+		}, wantMode: tonemap.ModeSoftware},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			track := &file.VideoTracks[0]
+			track.DVProfile, track.DVBLCompatID = 5, 0
+			track.DVConfigPresent, track.DVBLCompatIDPresent, track.DVBLPresent, track.DVRPUPresent = true, true, true, true
+			track.VideoRangeType = "DOVI"
+			track.ColorRange, track.ColorPrimaries, track.ColorTransfer, track.ColorSpace = "", "", "", ""
+			req := validStartRequestV3()
+			req.QualityPreference = "1080p"
+			result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, HardwareToneMapEnabled: true, SoftwareToneMapEnabled: true},
+				Registry: registry, ToneMapCapabilities: tt.capabilities})
+			if tt.wantMode == "" {
+				if result.Terminal == nil || result.Terminal.Reason != TerminalHDRTranscodeUnsupportedV3 {
+					t.Fatalf("result = %s, want hdr_transcode_unsupported", ExplainPlannerResultV3(result))
+				}
+				return
+			}
+			if result.Plan == nil || result.ToneMapMode != tt.wantMode || result.ToneMapSourceKind != tonemap.SourceDolbyVision || result.ToneMapPreflightRequired {
+				t.Fatalf("result = %s, want a %s Dolby Vision tone map", ExplainPlannerResultV3(result), tt.wantMode)
+			}
+			if result.Plan.EffectiveRecipe.DynamicRange != DynamicRangeSDRV3 || !hasDegradationWarningV3(result.Plan.DegradationWarnings, DegradationWarningHDRToneMappedV3) {
+				t.Fatalf("plan = %#v", result.Plan)
 			}
 		})
 	}
@@ -2832,7 +2896,7 @@ func TestPlanPlaybackV3AbandonsStripForAnUnstrippableSource(t *testing.T) {
 func TestPlanPlaybackV3ToneMapEscapeRequiresExecutableTranscode(t *testing.T) {
 	file := unstrippableProfile7FixtureV3()
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},

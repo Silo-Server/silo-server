@@ -82,7 +82,7 @@ describe("collection rows", () => {
     for (const libraryId of [null, 7]) {
       const editor = SERVER_SCOPE.paths.edit("c 1/x", { libraryId });
       const path = addRowPath("c 1/x", { kind: "library", libraryId: 2 }, editor);
-      expect(path.startsWith("/admin/home-rows?")).toBe(true);
+      expect(path.startsWith("/admin/sections?")).toBe(true);
       const params = paramsOf(path);
       expect(params.get("page")).toBe("2");
       expect(params.get("add")).toBe("collection:library:c 1/x");

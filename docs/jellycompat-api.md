@@ -170,7 +170,12 @@ requests list the members.
 real detail are hydrated from the catalog; list responses no longer invent
 media-source IDs or person IDs from titles. When `Fields` requests
 `MediaSourceCount`, library, Latest, and NextUp lists report the number of
-present, accessible versions of each movie or episode.
+present, accessible versions of each movie or episode. When it requests
+`Width`, `Height`, or `IsHD`, the same lists report the first video track of
+the version the item's detail response lists first (the widest), so a client
+can show quality across a library without fetching each item. `IsHD` means
+720 lines and up, on lists and detail alike, as in Jellyfin; series and seasons
+carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
@@ -244,6 +249,29 @@ unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
+
+`GET` and `HEAD /Items/{id}/Download` serve the original file through the
+native direct download, the same service as `/api/v2/direct-download`, so they
+follow its rules. Both answer `403` when **Allow downloads** is off, the
+account's download permission is off, or the policy engine refuses the
+download, and `404` for a file outside the viewer's library or quality scope.
+The server and per-user download bandwidth limits pace the transfer. Like
+native downloads, each API server process applies them on its own, to its
+native and Jellyfin downloads together. As with the native
+direct download, these requests create no download record and do not count
+toward the concurrent or per-period download limits: a Jellyfin client
+registers nothing with the server, so there is no download to list, count, or
+revoke. Stream bitrate limits apply to playback, not downloads, as on the
+native API. The response carries the same `ETag` as a `Static=true` stream of
+the file, for clients that resume with `If-Range`.
+
+Every playable item reports `CanDownload: true`, and every account's policy
+reports `EnableContentDownloading: true`, whatever the account may download.
+Infuse refuses Direct Play of an item it believes it cannot download, so the
+download rules act on the `Download` route alone, and a client may offer a
+download that the route then refuses. A client that saves a file
+from a `Static=true` stream URL looks the same as playback and follows the
+playback rules.
 
 Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
 member on single-item reads and on list reads that request the field and
@@ -339,10 +367,11 @@ gain this Dolby Vision-preserving route. Original-file direct play is unchanged.
 When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
 an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
 accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
-RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does, and removes a profile 7
+enhancement layer's NAL units with `filter_units`. The client receives the
 HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
 tone mapping. The strip runs only where the remux routing policy allows: on
-the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+the API server when its FFmpeg has both filters (FFmpeg 7.1 or later), or on a
 transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.

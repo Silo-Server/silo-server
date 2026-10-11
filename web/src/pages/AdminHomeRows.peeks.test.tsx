@@ -201,7 +201,7 @@ afterEach(() => {
 const newClient = () =>
   new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 
-async function setup(entry = "/admin/home-rows", client = newClient()) {
+async function setup(entry = "/admin/sections", client = newClient()) {
   const view = render(
     <MemoryRouter initialEntries={[entry]}>
       <QueryClientProvider client={client}>
@@ -291,7 +291,7 @@ describe("Home rows poster peeks", () => {
 
   it("asks for the library's titles on a library page", async () => {
     rows.push(stored("lib", { scope: "library", library_id: "7", title: "Movies added" }));
-    await setup("/admin/home-rows?page=7");
+    await setup("/admin/sections?page=7");
     reveal("Movies added");
     await waitFor(() => expect(peekRequests()).toHaveLength(1));
     expect(peekRequests()[0]!.body).toMatchObject({ library_id: "7", item_limit: 3 });
@@ -355,7 +355,7 @@ describe("Home rows poster peeks", () => {
     await waitFor(() => expect(posterSources("Recently Added")).toHaveLength(2));
     unmount();
 
-    await setup("/admin/home-rows", client);
+    await setup("/admin/sections", client);
     reveal("Recently Added");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -366,7 +366,7 @@ describe("Home rows poster peeks", () => {
     cleanup();
 
     outlivePeekFreshness();
-    await setup("/admin/home-rows", client);
+    await setup("/admin/sections", client);
     reveal("Recently Added");
     await waitFor(() => expect(peekRequests()).toHaveLength(2));
   });

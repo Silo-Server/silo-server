@@ -516,3 +516,89 @@ func TestJellyfinPersonReadsMatchNativeVisibilityPostgres(t *testing.T) {
 		}
 	})
 }
+
+func TestPersonSearchMatchesWordStartsPostgres(t *testing.T) {
+	pool := collectionSortTestPool(t)
+	ctx := t.Context()
+	prefix := "person-words-" + uuid.NewString()
+	word := "hacks" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	names := []string{
+		word,
+		"Lark " + word + "haw",
+		"Chad T" + word + "ton",
+		"Jean-" + word,
+		"O'" + word,
+		word + " Smithers",
+		"A " + word + " Smithers",
+		"Erik GROẞ" + strings.ToUpper(word[5:]),
+		"Jane  Doe" + word[5:],
+		"A Jane Doe" + word[5:],
+	}
+	baseID := time.Now().UnixNano()
+	ids := make([]int64, len(names))
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanup, `DELETE FROM item_people WHERE person_id = ANY($1)`, ids)
+		_, _ = pool.Exec(cleanup, `DELETE FROM people WHERE id = ANY($1)`, ids)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+	})
+	for i, name := range names {
+		ids[i] = baseID + int64(i)
+		contentID := fmt.Sprintf("%s-%d", prefix, i)
+		exec(`INSERT INTO people(id, name) VALUES ($1, $2)`, ids[i], name)
+		exec(`INSERT INTO media_items(content_id, type, title) VALUES ($1, 'movie', 'Synthetic title')`, contentID)
+		exec(`INSERT INTO item_people(id, content_id, person_id, kind) VALUES ($1, $2, $1, 1)`, ids[i], contentID)
+	}
+	repo := NewPersonRepository(pool)
+	for _, tc := range []struct {
+		name, query string
+		want        []int64 // want[0] must rank first; the rest in any order.
+	}{
+		{"word starts only, exact first", strings.ToUpper(word), []int64{ids[0], ids[1], ids[3], ids[4], ids[5], ids[6]}},
+		{"partial last word", word + " smi", []int64{ids[6], ids[5]}},
+		{"words in any order", "smithers " + word, []int64{ids[6], ids[5]}},
+		{"exact name ignores extra spaces", word + "  smithers", []int64{ids[5], ids[6]}},
+		{"repeated words", word + " " + strings.ToUpper(word), []int64{ids[6], ids[0], ids[1], ids[3], ids[4], ids[5]}},
+		{"leading apostrophe", "'" + word, []int64{ids[4]}},
+		{"leading hyphen", "-" + word, []int64{ids[3]}},
+		{"database case folding", "groß" + word[5:], []int64{ids[7]}},
+		{"exact name keeps its own spacing", "jane  doe" + word[5:], []int64{ids[8], ids[9]}},
+		{"mid-word fragment", word[1:], nil},
+		{"wildcards are literal", "%" + word[1:], nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			people, err := repo.SearchScoped(t.Context(), tc.query, 20, "", AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]int64, len(people))
+			for i, p := range people {
+				got[i] = p.ID
+			}
+			if len(got) != len(tc.want) || (len(got) > 0 && got[0] != tc.want[0]) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for _, id := range tc.want {
+				if !slices.Contains(got, id) {
+					t.Fatalf("got %v, missing %d", got, id)
+				}
+			}
+		})
+	}
+	// An empty query lists people and must bind no unread parameter.
+	for _, scope := range []string{"", "movie"} {
+		if people, err := repo.SearchScoped(ctx, "  ", 1, scope, AccessFilter{}); err != nil || len(people) != 1 {
+			t.Fatalf("empty query in scope %q: %+v, %v", scope, people, err)
+		}
+	}
+	if people, err := repo.SearchAlphabetical(ctx, "", 1, AccessFilter{}); err != nil || len(people) != 1 {
+		t.Fatalf("empty v1 query: %+v, %v", people, err)
+	}
+}

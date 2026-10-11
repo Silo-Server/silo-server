@@ -35,6 +35,10 @@ vi.mock("@/lib/recipes", async () => ({
   ...(await vi.importActual<typeof import("@/lib/recipes")>("@/lib/recipes")),
   fetchRecipeCatalog: async () => recipeCatalogFixture,
 }));
+vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
+  useExtendedQueryRules: () => true,
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
@@ -192,7 +196,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function setup(entry = "/admin/home-rows") {
+async function setup(entry = "/admin/sections") {
   render(
     <MemoryRouter initialEntries={[entry]}>
       <QueryClientProvider
@@ -231,12 +235,12 @@ describe("admin Home rows page", () => {
     await expectPhoneLayout("Home");
   });
 
-  it("is titled Home rows and says who sees the rows", async () => {
+  it("is titled Sections and says who sees them", async () => {
     await setup();
-    expect(screen.getByRole("heading", { level: 1, name: "Home rows" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Sections" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The rows everyone sees on Home and on library pages. Profiles can still hide, rename or reorder them.",
+        "The sections everyone sees on Home and on library pages. Profiles can still hide, rename or reorder them.",
       ),
     ).toBeInTheDocument();
   });
@@ -285,7 +289,7 @@ describe("Add row", () => {
 
   it("adds to the library page it is opened on and hides the Home-only library filter", async () => {
     rows.push(stored("lib", { scope: "library", library_id: "7", position: 2 }));
-    await userEvent.click(await setup("/admin/home-rows?page=7"));
+    await userEvent.click(await setup("/admin/sections?page=7"));
     const dialog = await screen.findByRole("dialog", { name: "Add a row to Movies" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Recently added" }));
     const form = await screen.findByRole("dialog", { name: "Recently added" });
@@ -478,7 +482,10 @@ describe("Edit row", () => {
     const picker = await screen.findByRole("dialog", { name: "Change what this row shows" });
     await userEvent.click(within(picker).getByRole("button", { name: "Mood picks, Mind-bending" }));
     const form = await screen.findByRole("dialog", { name: "Edit row" });
-    expect(within(form).getByRole("radio", { name: "Mind-bending" })).toBeChecked();
+    const mindBending = within(form).getByRole("radio", { name: /^Mind-bending/ });
+    expect(mindBending).toBeChecked();
+    // The mood's card states its rule, from the server's preset description.
+    expect(mindBending).toHaveTextContent("Science Fiction or Mystery, rated 7.0+ on TMDB");
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]!.args.body).toMatchObject({

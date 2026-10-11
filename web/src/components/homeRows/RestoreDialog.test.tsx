@@ -122,7 +122,7 @@ describe("RestoreDialog", () => {
 
     rerender(<Harness onConfirm={onConfirm} onReload={onReload} conflict />);
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Home rows changed since you opened this. Reload to see the current rows, then try again.",
+      "These rows changed since you opened this. Reload to see the current rows, then try again.",
     );
     expect(screen.queryByRole("button", { name: "Restore defaults" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Reload rows" }));

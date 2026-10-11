@@ -258,3 +258,41 @@ describe("ActionBar shuffle", () => {
     expect(screen.queryByRole("menuitem", { name: "Shuffle" })).toBeNull();
   });
 });
+
+describe("ActionBar collection eligibility", () => {
+  it.each(["movie", "series"])("keeps Add to Collection for %s", async (type) => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId={`${type}-1`} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.getByRole("menuitem", { name: "Add to Collection" })).toBeInTheDocument();
+  });
+
+  it.each(["season", "episode"])("hides Add to Collection for %s", async (type) => {
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId={`${type}-1`}
+          canAddToCollection={false}
+          isAdmin
+          watchedLabel="Mark Watched"
+          onToggleWatched={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.queryByRole("menuitem", { name: "Add to Collection" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark Watched" })).toBeInTheDocument();
+  });
+
+  it("omits an empty overflow menu when collection membership is unavailable", () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="season-1" canAddToCollection={false} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTitle("More")).toBeNull();
+  });
+});

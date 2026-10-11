@@ -16,31 +16,33 @@ type AdminNodesReadService interface {
 	ReadAdminNodes(context.Context) ([]*nodepool.Node, error)
 }
 type AdminNode struct {
-	ConfigETag                 string          `json:"config_etag,omitempty" doc:"Original stored configuration validator for guarded edit/delete; excludes live health samples."`
-	ID                         ID              `json:"id"`
-	Name                       string          `json:"name"`
-	Type                       string          `json:"type" enum:"proxy,transcode"`
-	URL                        string          `json:"url"`
-	Enabled                    bool            `json:"enabled"`
-	PublicURL                  *string         `json:"public_url,omitempty"`
-	Healthy                    bool            `json:"healthy"`
-	ActiveJobs                 int             `json:"active_jobs"`
-	Group                      *string         `json:"group"`
-	MaxJobs                    *int            `json:"max_jobs"`
-	MaxBandwidthKbps           *int            `json:"max_bandwidth_kbps"`
-	EgressKbps                 int             `json:"egress_kbps"`
-	LastHealthCheck            NullableInstant `json:"last_health_check"`
-	CreatedAt                  Instant         `json:"created_at"`
-	Capabilities               json.RawMessage `json:"capabilities,omitempty" doc:"Last stored worker capability document, preserving its owning protocol schema."`
-	CapabilitiesHash           *string         `json:"capabilities_hash,omitempty"`
-	CapabilitiesRefreshedAt    *Instant        `json:"capabilities_refreshed_at,omitempty"`
-	LastStats                  json.RawMessage `json:"last_stats,omitempty" doc:"Worker resource sample stored at the last health check."`
-	HWAccelOverride            *string         `json:"hw_accel_override,omitempty"`
-	HWDeviceOverride           *string         `json:"hw_device_override,omitempty"`
-	CapabilityDrift            *string         `json:"capability_drift,omitempty"`
-	CapabilityDriftBaseline    json.RawMessage `json:"capability_drift_baseline,omitempty"`
-	AdvertisedCapabilitiesHash *string         `json:"advertised_capabilities_hash,omitempty" doc:"Absent when not checked in this process; empty when checked but no hash was advertised."`
-	PhysicalGPUKeys            []string        `json:"physical_gpu_keys,omitempty"`
+	ConfigETag                       string          `json:"config_etag,omitempty" doc:"Original stored configuration validator for guarded edit/delete; excludes live health samples."`
+	ID                               ID              `json:"id"`
+	Name                             string          `json:"name"`
+	Type                             string          `json:"type" enum:"proxy,transcode"`
+	URL                              string          `json:"url"`
+	Enabled                          bool            `json:"enabled"`
+	PublicURL                        *string         `json:"public_url,omitempty"`
+	Healthy                          bool            `json:"healthy"`
+	ActiveJobs                       int             `json:"active_jobs"`
+	Group                            *string         `json:"group"`
+	MaxJobs                          *int            `json:"max_jobs"`
+	MaxBandwidthKbps                 *int            `json:"max_bandwidth_kbps"`
+	EgressKbps                       int             `json:"egress_kbps"`
+	LastHealthCheck                  NullableInstant `json:"last_health_check"`
+	CreatedAt                        Instant         `json:"created_at"`
+	Capabilities                     json.RawMessage `json:"capabilities,omitempty" doc:"Last stored worker capability document, preserving its owning protocol schema."`
+	CapabilitiesHash                 *string         `json:"capabilities_hash,omitempty"`
+	CapabilitiesRefreshedAt          *Instant        `json:"capabilities_refreshed_at,omitempty"`
+	LastStats                        json.RawMessage `json:"last_stats,omitempty" doc:"Worker resource sample stored at the last health check."`
+	HWAccelOverride                  *string         `json:"hw_accel_override,omitempty"`
+	HWDeviceOverride                 *string         `json:"hw_device_override,omitempty"`
+	DownloadArtifactDirOverride      *string         `json:"download_artifact_dir_override,omitempty" doc:"This node's own prepared-download directory; absent when inherited."`
+	DownloadArtifactMaxBytesOverride *int64          `json:"download_artifact_max_bytes_override,omitempty" doc:"This node's own prepared-download budget in bytes (0 for none); absent when inherited."`
+	CapabilityDrift                  *string         `json:"capability_drift,omitempty"`
+	CapabilityDriftBaseline          json.RawMessage `json:"capability_drift_baseline,omitempty"`
+	AdvertisedCapabilitiesHash       *string         `json:"advertised_capabilities_hash,omitempty" doc:"Absent when not checked in this process; empty when checked but no hash was advertised."`
+	PhysicalGPUKeys                  []string        `json:"physical_gpu_keys,omitempty"`
 	// NetworkAccess is keyed by provider slug ("tailscale"). Only proxy nodes
 	// report it; a transcode node never does because clients never reach one.
 	NetworkAccess map[string]AdminNodeNetworkAccess `json:"network_access,omitempty" doc:"Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers."`
@@ -73,7 +75,7 @@ func compareNodePosition(a, b adminNodePosition) int {
 	return cmp.Or(cmp.Compare(a.Type, b.Type), cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
 }
 func adminNodeOf(n *nodepool.Node) AdminNode {
-	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys}
+	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys}
 	if n.LastHealthCheck != nil {
 		out.LastHealthCheck = NullableInstant{Valid: true, Time: NewInstant(*n.LastHealthCheck)}
 	}

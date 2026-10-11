@@ -187,7 +187,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function setup(entry = "/admin/home-rows?page=7") {
+async function setup(entry = "/admin/sections?page=7") {
   render(
     <MemoryRouter initialEntries={[entry]}>
       <QueryClientProvider
@@ -239,7 +239,7 @@ const LIMIT_NOTE = "You can add a row to up to 100 pages at once.";
 
 describe("Add to these library pages", () => {
   it("is not offered on Home", async () => {
-    const form = await pickTrending("/admin/home-rows");
+    const form = await pickTrending("/admin/sections");
     expect(within(form).queryByRole("group", { name: "Add to these library pages" })).toBeNull();
     expect(within(form).getByRole("button", { name: "Add row" })).toBeInTheDocument();
   });
@@ -344,7 +344,7 @@ describe("Add to these library pages", () => {
 
 describe("Add to other libraries…", () => {
   it("is not offered on Home or for rows whose settings belong to one page", async () => {
-    await setup("/admin/home-rows");
+    await setup("/admin/sections");
     let menu = await openRowMenu("Trending on Home");
     expect(within(menu).queryByRole("menuitem", { name: "Add to other libraries…" })).toBeNull();
     await userEvent.keyboard("{Escape}");
@@ -457,7 +457,7 @@ describe("Add to other libraries…", () => {
     cleanup();
 
     // No other library holds shows, so a shows-only row has nowhere to go.
-    await setup("/admin/home-rows?page=8");
+    await setup("/admin/sections?page=8");
     const tvMenu = await openRowMenu("Recently Added TV");
     expect(within(tvMenu).queryByRole("menuitem", { name: "Add to other libraries…" })).toBeNull();
   });

@@ -211,6 +211,36 @@ func TestHandleUpdateNodeAcceptsAndClearsHWOverrides(t *testing.T) {
 	}
 }
 
+// The prepared-download storage overrides arrived after /api/v1 froze, so the
+// v1 node routes neither accept nor return them; /api/v2 owns them.
+func TestV1NodeRoutesLeaveStorageOverridesToV2(t *testing.T) {
+	dir, budget := "/mnt/downloads", int64(5e11)
+	stored := &nodepool.Node{ID: 1, Name: "gpu-1", DownloadArtifactDirOverride: &dir, DownloadArtifactMaxBytesOverride: &budget}
+	repo := &stubNodeRepository{nodes: []*nodepool.Node{stored}, updateResult: stored}
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+
+	recorder := httptest.NewRecorder()
+	awaitNodeUpdate(t, handler, recorder, `{"name":"gpu-1","download_artifact_dir_override":"/elsewhere","download_artifact_max_bytes_override":0}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if repo.updated.DownloadArtifactDirOverride != nil || repo.updated.DownloadArtifactMaxBytesOverride != nil {
+		t.Fatalf("v1 update passed storage overrides on: %+v", repo.updated)
+	}
+	if body := recorder.Body.String(); strings.Contains(body, "download_artifact") {
+		t.Fatalf("v1 update response carries storage overrides: %s", body)
+	}
+
+	list := httptest.NewRecorder()
+	handler.HandleListNodes(list, httptest.NewRequest(http.MethodGet, "/admin/nodes", nil))
+	if body := list.Body.String(); strings.Contains(body, "download_artifact") {
+		t.Fatalf("v1 list carries storage overrides: %s", body)
+	}
+	if stored.DownloadArtifactDirOverride == nil {
+		t.Fatal("hiding the fields from v1 changed the stored node")
+	}
+}
+
 func equalStringPointer(a, b *string) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

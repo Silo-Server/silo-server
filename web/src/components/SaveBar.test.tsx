@@ -11,6 +11,19 @@ function renderBar(props: Partial<Parameters<typeof SaveBar>[0]> = {}) {
 }
 
 describe("SaveBar", () => {
+  it.each(["settings", "page"] as const)(
+    "handles a rejected async save at the %s click boundary",
+    async (placement) => {
+      const onSave = vi.fn().mockRejectedValue(new Error("412 precondition failed"));
+      renderBar({ onSave, placement });
+
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(onSave).toHaveBeenCalledExactlyOnceWith();
+      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+    },
+  );
+
   it("stays hidden while the tab is clean", () => {
     const { container } = renderBar({ dirtyCount: 0 });
 
@@ -31,9 +44,9 @@ describe("SaveBar", () => {
   });
 
   it("does not pass the click event to a save callback that accepts selected keys", async () => {
-    const onSave = vi.fn((selectedKeys?: string[]) =>
-      selectedKeys?.includes("artwork.storage_backend"),
-    );
+    const onSave = vi.fn((selectedKeys?: string[]) => {
+      selectedKeys?.includes("artwork.storage_backend");
+    });
     renderBar({ onSave });
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));

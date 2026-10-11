@@ -165,6 +165,24 @@ func (r *DeliveryRepository) BulkInsert(ctx context.Context, tx pgx.Tx, deliveri
 	return inserted, nil
 }
 
+// HasRequestFulfilled reports whether the account's profile already has a
+// request.fulfilled delivery for requestID: the key of the at-most-once
+// index notification_deliveries_account_profile_request_key. The type is a
+// literal so the planner can use that partial index.
+func (r *DeliveryRepository) HasRequestFulfilled(ctx context.Context, userID int, profileID, requestID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notification_deliveries
+			WHERE type = '`+DeliveryTypeRequestFulfilled+`'
+			  AND user_id = $1 AND profile_id = $2 AND reason_flags->>'request_id' = $3)`,
+		userID, profileID, requestID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check request.fulfilled delivery: %w", err)
+	}
+	return exists, nil
+}
+
 // LockInboxProfiles orders the per-profile writer locks held until commit.
 // Callers issuing multiple BulkInsert calls in one transaction must lock their
 // complete recipient union first. The insert trigger then assigns timestamps

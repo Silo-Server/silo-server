@@ -24,11 +24,10 @@
               "key": "ca_imdb",
               "display_name": "Critically Acclaimed",
               "icon": "🏆",
-              "description_short": "8.0+ rated by IMDb.",
+              "description_short": "Rated 8.0+ on TMDB with 500+ votes.",
               "description_long": "",
               "default_params": {
-                "min_score": 8,
-                "source": "imdb"
+                "min_score": 8
               }
             }
           ],
@@ -44,7 +43,7 @@
               "key": "ff_default",
               "display_name": "Forgotten Favorites",
               "icon": "🕰️",
-              "description_short": "In your library, haven't been watched in a year.",
+              "description_short": "Rated 7.0+ on TMDB with 100+ votes, and not watched in the past year.",
               "description_long": "",
               "default_params": {
                 "lookback_days": 365
@@ -113,7 +112,7 @@
               "key": "hidden_gems_default",
               "display_name": "Hidden Gems",
               "icon": "💎",
-              "description_short": "Highly rated titles in your library that no one's watched.",
+              "description_short": "Rated 7.5+ on TMDB with 100+ votes, and watched twice or less.",
               "description_long": "",
               "default_params": {
                 "max_play_count": 2,
@@ -213,7 +212,7 @@
               "key": "genre_roulette_weekly",
               "display_name": "Genre Roulette",
               "icon": "🎰",
-              "description_short": "A different genre from your library every week.",
+              "description_short": "A different genre every week, rated 6.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "rotation_cadence": "weekly"
@@ -433,7 +432,7 @@
               "key": "mood_feel_good",
               "display_name": "Feel-Good Comedies",
               "icon": "😄",
-              "description_short": "Feel-Good Comedies",
+              "description_short": "Comedy or Family, rated 6.5+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "feel_good"
@@ -443,7 +442,7 @@
               "key": "mood_mind_bending",
               "display_name": "Mind-Bending Sci-Fi",
               "icon": "🌀",
-              "description_short": "Mind-Bending Sci-Fi",
+              "description_short": "Science Fiction or Mystery, rated 7.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "mind_bending"
@@ -453,7 +452,7 @@
               "key": "mood_comfort",
               "display_name": "Comfort Rewatches",
               "icon": "🛋️",
-              "description_short": "Comfort Rewatches",
+              "description_short": "Comedy, Romance or Family, rated 6.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "comfort"
@@ -463,7 +462,7 @@
               "key": "mood_edge_of_seat",
               "display_name": "Edge of Your Seat",
               "icon": "😬",
-              "description_short": "Edge of Your Seat",
+              "description_short": "Thriller or Action, rated 6.5+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "edge_of_seat"
@@ -473,7 +472,7 @@
               "key": "mood_tearjerker",
               "display_name": "Tearjerkers",
               "icon": "😢",
-              "description_short": "Tearjerkers",
+              "description_short": "Drama or Romance, rated 7.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "tearjerker"
@@ -483,7 +482,7 @@
               "key": "mood_quiet_sunday",
               "display_name": "Quiet Sunday Cinema",
               "icon": "☕",
-              "description_short": "Quiet Sunday Cinema",
+              "description_short": "Drama or Documentary, rated 7.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "quiet_sunday"
@@ -493,7 +492,7 @@
               "key": "mood_date_night",
               "display_name": "Date Night",
               "icon": "💕",
-              "description_short": "Date Night",
+              "description_short": "Romance or Comedy, rated 6.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "date_night"
@@ -503,7 +502,7 @@
               "key": "mood_after_midnight",
               "display_name": "After Midnight",
               "icon": "🌙",
-              "description_short": "After Midnight",
+              "description_short": "Horror or Thriller, rated 6.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "mood": "after_midnight"
@@ -522,7 +521,7 @@
               "key": "short_watches_default",
               "display_name": "Short & Sweet",
               "icon": "⏱️",
-              "description_short": "Well-rated movies under 95 minutes.",
+              "description_short": "Movies of 95 minutes or less, rated 6.0+ on TMDB with 100+ votes.",
               "description_long": "",
               "default_params": {
                 "max_minutes": 95

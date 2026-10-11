@@ -143,7 +143,7 @@ const ROW_KINDS: Record<string, RowKind> = {
   mood_collection: {
     group: "moods",
     label: "Mood picks",
-    sentence: "A row built around a feeling.",
+    sentence: "Genres that fit a feeling, rated well on TMDB. New picks each day.",
   },
   seasonal_themed: {
     group: "moods",
@@ -163,28 +163,32 @@ const ROW_KINDS: Record<string, RowKind> = {
   hidden_gems: {
     group: "moods",
     label: "Hidden gems",
-    sentence: "Well rated, but rarely watched.",
+    sentence: "Rated 7.5+ on TMDB with 100+ votes, and watched twice or less. New picks each day.",
+    personal: true,
   },
   critically_acclaimed: {
     group: "moods",
     label: "Critically acclaimed",
-    sentence: "Titles rated highest by critics.",
+    sentence: "Rated 8.0+ on TMDB with 500+ votes. New picks each day.",
   },
   forgotten_favorites: {
     group: "moods",
     label: "Forgotten favorites",
-    sentence: "Titles nobody has watched in a year.",
+    sentence:
+      "Rated 7.0+ on TMDB with 100+ votes, and not watched in the past year. New picks each day.",
+    personal: true,
   },
   genre_roulette: {
     group: "moods",
     label: "Genre roulette",
-    sentence: "A different genre every week.",
+    sentence: "A different genre every week, rated 6.0+ on TMDB with 100+ votes.",
   },
   random: { group: "moods", label: "Surprise me", sentence: "A random mix from your libraries." },
   short_watches: {
     group: "moods",
     label: "Short & sweet",
-    sentence: "Well-rated movies under 95 minutes.",
+    sentence:
+      "Movies of 95 minutes or less, rated 6.0+ on TMDB with 100+ votes. New picks each day.",
   },
   anniversaries: {
     group: "moods",

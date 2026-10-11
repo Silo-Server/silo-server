@@ -47,9 +47,9 @@ describe("RequestPosterCard (discover variant)", () => {
     expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
     const card = container.firstElementChild;
     expect(card).toHaveClass("media-card", "group/card");
-    // A missing poster falls back to the library's plain title placeholder.
+    // A missing poster shows the default artwork, as on library cards.
     const artwork = card?.querySelector(".media-card-image");
-    expect(artwork).toHaveTextContent("Test Movie");
+    expect(artwork?.querySelector(".default-artwork .lucide-film")).not.toBeNull();
     expect(artwork?.querySelector("[style]")).toBeNull();
 
     for (const link of screen.getAllByRole("link", { name: /Test Movie/ })) {
@@ -137,6 +137,9 @@ describe("RequestPosterCard (discover variant)", () => {
 
     expect(movieMarkup).toContain(">Movie<");
     expect(seriesMarkup).toContain(">Series<");
+    // The default artwork's mark follows the type too.
+    expect(movieMarkup).toContain("lucide-film");
+    expect(seriesMarkup).toContain("lucide-tv");
   });
 
   it("marks a title already in the library as Available and links to it", () => {
@@ -204,15 +207,15 @@ describe("RequestPosterCard (discover variant)", () => {
     expect(screen.getByRole("link", { name: "Test Movie (Movie · 2024)" })).toBeInTheDocument();
   });
 
-  it("shows the title in place of a poster that fails to load", () => {
-    render(
+  it("shows the default artwork in place of a poster that fails to load", () => {
+    const { container } = render(
       <MemoryRouter>
         <RequestPosterCard variant="discover" item={{ ...requestable, poster_path: "/p.jpg" }} />
       </MemoryRouter>,
     );
     fireEvent.error(screen.getByRole("img", { name: "Test Movie" }));
     expect(screen.queryByRole("img", { name: "Test Movie" })).not.toBeInTheDocument();
-    expect(screen.getAllByText("Test Movie").length).toBeGreaterThan(1);
+    expect(container.querySelector(".media-card-image .default-artwork")).not.toBeNull();
   });
 
   it("fills a grid cell when fluid", () => {

@@ -150,6 +150,7 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		"unverified profile": {access.ErrProfileUnverified, http.StatusForbidden, "profile_unverified", ""},
 		"unknown profile":    {access.ErrProfileNotFound, http.StatusNotFound, "not_found", ""},
 		"resolver failure":   {errors.New("boom"), http.StatusInternalServerError, "internal_error", ""},
+		"policy timeout":     {errPolicyEvalTimeout, http.StatusServiceUnavailable, CodeServiceUnavailable, ReasonViewerAccessUnavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/x", nil)

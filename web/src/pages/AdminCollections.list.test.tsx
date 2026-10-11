@@ -73,9 +73,7 @@ let items: AdminCollection[];
 let observers: Array<{ callback: IntersectionObserverCallback; targets: Set<Element> }>;
 
 function rowOf(title: string): HTMLElement {
-  const row = screen
-    .getAllByRole("listitem")
-    .find((item) => within(item).queryByText(title, { exact: true }));
+  const row = screen.getByText(title, { exact: true }).closest("li");
   if (!row) throw new Error(`No row titled ${title}`);
   return row;
 }
@@ -122,7 +120,7 @@ function renderPage(path = "/admin/collections", client = new QueryClient()) {
           <Route path="/admin/collections/:id/edit" element={<Editor />} />
           <Route path="/admin/collections/new" element={<Editor />} />
           <Route path="/catalog" element={<Where />} />
-          <Route path="/admin/home-rows" element={<Where />} />
+          <Route path="/admin/sections" element={<Where />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -642,7 +640,7 @@ describe("AdminCollections List: rows that show a collection", () => {
     const home = within(menu).getByRole("menuitem", { name: "Add to Home…" });
     expect(home).toHaveAccessibleDescription("A row on everyone's Home");
     await user.click(home);
-    expect(location()).toBe("/admin/home-rows?page=home&add=collection%3Alibrary%3Astudio-ghibli");
+    expect(location()).toBe("/admin/sections?page=home&add=collection%3Alibrary%3Astudio-ghibli");
   });
 
   it("adds a collection as a row above a library's grid, its own libraries first", async () => {
@@ -660,9 +658,7 @@ describe("AdminCollections List: rows that show a collection", () => {
         .map((item) => item.textContent),
     ).toEqual(["TV Shows", "Movies", "Kids"]);
     await user.click(within(submenu).getByRole("menuitem", { name: "Kids" }));
-    expect(location()).toBe(
-      "/admin/home-rows?page=2&add=collection%3Alibrary%3Aimdb-top-250-shows",
-    );
+    expect(location()).toBe("/admin/sections?page=2&add=collection%3Alibrary%3Aimdb-top-250-shows");
   });
 
   it("can't add a hidden collection as a row, and says why", async () => {
@@ -685,7 +681,7 @@ describe("AdminCollections List: rows that show a collection", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Delete Best Picture Winners?" });
     expect(
       await within(dialog).findByRole("link", { name: "Open row: Best Picture" }),
-    ).toHaveAttribute("href", "/admin/home-rows?page=home&edit=s-home");
+    ).toHaveAttribute("href", "/admin/sections?page=home&edit=s-home");
     expect(dialog).toHaveTextContent("Home · row 6 of 9");
     await user.click(within(dialog).getByRole("button", { name: "Delete it and its 1 row" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
@@ -758,7 +754,7 @@ describe("AdminCollections List peeks", () => {
   const peekCalls = () =>
     v2Recorder.callsOf("GET /api/v2/library/{id}/collections/{collection_id}/items");
 
-  it("reads only on-screen rows, at most four at a time, and not again within five minutes", async () => {
+  it("reads only on-screen rows, at most four at a time, in a large list", async () => {
     items = Array.from({ length: 200 }, (_, index) =>
       stored(`Collection ${String(index).padStart(3, "0")}`),
     );
@@ -778,18 +774,18 @@ describe("AdminCollections List peeks", () => {
         }),
     );
     const client = new QueryClient();
-    const { unmount } = renderPage("/admin/collections", client);
+    renderPage("/admin/collections", client);
     await screen.findByText("Collection 000");
     const onScreen = Array.from({ length: 8 }, (_, index) => `Collection 00${index}`);
     reveal(...onScreen);
 
     await waitFor(() => expect(peekCalls()).toHaveLength(PEEK_MAX_IN_FLIGHT));
-    while (answers.length > 0) {
+    for (let completed = 0; completed < onScreen.length; completed += 1) {
+      await waitFor(() => expect(answers.length).toBeGreaterThan(0));
       await act(async () => answers.shift()!());
-      await waitFor(() => undefined);
     }
+    await waitFor(() => expect(client.isFetching()).toBe(0));
     await waitFor(() => expect(peekCalls()).toHaveLength(8));
-    while (answers.length > 0) await act(async () => answers.shift()!());
     expect(most).toBeLessThanOrEqual(PEEK_MAX_IN_FLIGHT);
     expect(new Set(peekCalls().map((call) => call.path))).toEqual(
       new Set(
@@ -800,6 +796,20 @@ describe("AdminCollections List peeks", () => {
       ),
     );
     expect(peekCalls().every((call) => call.query?.limit === 3)).toBe(true);
+  });
+
+  it("does not read fresh peeks again when their rows remount within five minutes", async () => {
+    items = Array.from({ length: 8 }, (_, index) => stored(`Collection 00${index}`));
+    const onScreen = items.map((item) => item.title);
+    v2Recorder.answer("GET /api/v2/library/{id}/collections/{collection_id}/items", async () => ({
+      items: [{ content_id: "m1", title: "Past Lives", poster_url: "p.jpg" }],
+    }));
+    const client = new QueryClient();
+    const { unmount } = renderPage("/admin/collections", client);
+    await screen.findByText("Collection 000");
+    reveal(...onScreen);
+    await waitFor(() => expect(peekCalls()).toHaveLength(onScreen.length));
+    await waitFor(() => expect(client.isFetching()).toBe(0));
 
     // Back to the page within the stale time: the same rows on screen read nothing.
     unmount();

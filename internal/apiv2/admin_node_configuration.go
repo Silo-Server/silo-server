@@ -34,6 +34,10 @@ type AdminNodeUpdateBody struct {
 	MaxBandwidthKbps *int    `json:"max_bandwidth_kbps,omitempty" maximum:"2147483647" minimum:"-2147483648"`
 	HWAccelOverride  *string `json:"hw_accel_override,omitempty" nullable:"true" maxLength:"128"`
 	HWDeviceOverride *string `json:"hw_device_override,omitempty" nullable:"true" maxLength:"8192"`
+	// The node fixes its artifact directory at startup, so a change applies
+	// when it restarts.
+	DownloadArtifactDirOverride      *string `json:"download_artifact_dir_override,omitempty" nullable:"true" maxLength:"4096" doc:"Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts."`
+	DownloadArtifactMaxBytesOverride *int64  `json:"download_artifact_max_bytes_override,omitempty" nullable:"true" minimum:"-1" doc:"Storage budget in bytes for this node's prepared download files; 0 means no budget. Null or -1 restores download.artifact_max_bytes."`
 }
 
 func (b *AdminNodeUpdateBody) UnmarshalJSON(data []byte) error {

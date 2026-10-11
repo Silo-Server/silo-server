@@ -189,11 +189,11 @@ describe("Starter packs", () => {
     expect(screen.getByRole("button", { name: "Add 4 collections" })).toBeEnabled();
   });
 
-  it("says where new lists land and that no Home rows are added", async () => {
+  it("says where new lists land and that no sections are added", async () => {
     renderDialog();
     await checked();
     expect(screen.getByText(/New lists land under/)).toHaveTextContent(
-      "New lists land under No heading on each library's Collections tab, ready to move into a shelf in Arrange. “Already there” lists aren't touched. No Home rows are added unless you turn on hero banners.",
+      "New lists land under No heading on each library's Collections tab, ready to move into a shelf in Arrange. “Already there” lists aren't touched. No sections are added unless you turn on hero banners.",
     );
   });
 

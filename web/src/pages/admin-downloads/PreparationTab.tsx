@@ -21,18 +21,21 @@ import { toast } from "sonner";
 import type {
   AdminDownloadPreparation,
   AdminDownloadPreparationAction,
-  AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 import type { OperationalLogEntry } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAdminDownloadPreparationAction } from "@/hooks/queries/admin/downloadPreparations";
+import {
+  useAdminDownloadPreparationAction,
+  useAdminDownloadPreparations,
+} from "@/hooks/queries/admin/downloadPreparations";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { formatTime } from "@/lib/datetime";
 import { formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
 import { activityMethodMeta } from "@/pages/adminActivityPresentation";
+import { CHECKBOX } from "./controls";
 import {
   PREPARATION_STATES,
   canPausePreparation,
@@ -68,8 +71,6 @@ import {
 const GRID =
   "grid-cols-[16px_minmax(180px,1.6fr)_minmax(190px,1.5fr)_minmax(100px,0.8fr)_minmax(200px,1.5fr)_minmax(150px,1fr)_112px]";
 
-const CHECKBOX = "accent-primary size-3.5 cursor-pointer disabled:cursor-default";
-
 /** Runs one administrator action and reports its outcome in a toast. */
 function usePreparationActions() {
   const mutation = useAdminDownloadPreparationAction();
@@ -98,15 +99,9 @@ function usePreparationActions() {
   return { run, isPending: mutation.isPending, pendingIds };
 }
 
-export default function AdminDownloadPreparationsPanel({
-  list,
-  isLoading,
-  isError,
-}: {
-  list: AdminDownloadPreparationList | undefined;
-  isLoading: boolean;
-  isError: boolean;
-}) {
+/** The preparation queue: running, queued, retrying and paused jobs, and recent failures. */
+export default function PreparationTab() {
+  const { data: list, isLoading, isError } = useAdminDownloadPreparations();
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<PreparationState | null>(null);
   const [workerFilter, setWorkerFilter] = useState<string | null>(null);

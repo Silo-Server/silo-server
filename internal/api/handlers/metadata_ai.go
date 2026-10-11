@@ -58,7 +58,7 @@ func NewMetadataAIHandler(service *translation.Service) *MetadataAIHandler {
 // show or hide their entry points.
 // GET /api/v1/metadata/ai/status
 func (h *MetadataAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	view := h.Status()
+	view := h.Status(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
 		metadataAIStatusEnabledKey: view.Enabled,
 		"on_view":                  view.OnView,

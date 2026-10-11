@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import DefaultArtwork from "@/components/DefaultArtwork";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -219,6 +220,8 @@ function TasteSeedCard({
   onToggle: (contentId: string) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
+  // Keyed by URL so a re-signed poster is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
 
   return (
@@ -242,18 +245,17 @@ function TasteSeedCard({
             : undefined
         }
       >
-        {item.poster_url ? (
+        {item.poster_url && failedUrl !== item.poster_url ? (
           <img
             src={item.poster_url}
             alt=""
             className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
             loading="lazy"
             onLoad={() => setLoaded(true)}
+            onError={() => setFailedUrl(item.poster_url ?? null)}
           />
         ) : (
-          <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-xs">
-            <span className="line-clamp-3 font-medium">{item.title || "No Poster"}</span>
-          </div>
+          !thumbhashUrl && <DefaultArtwork mediaType={item.type} />
         )}
 
         {/* Dim overlay when unselected to make selected posters pop */}

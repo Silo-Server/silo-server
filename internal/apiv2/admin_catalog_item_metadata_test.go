@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ type fakeAdminItemMetadata struct {
 	id            string
 	mode          adminjob.ItemRefreshMode
 	update        handlers.UpdateItemMetadataRequest
+	clear         []string
 }
 
 func (f *fakeAdminItemMetadata) CreateItemMetadataRefresh(_ context.Context, id string, mode adminjob.ItemRefreshMode, userID int) (*models.AdminJob, error) {
@@ -24,9 +26,9 @@ func (f *fakeAdminItemMetadata) CreateItemMetadataRefresh(_ context.Context, id 
 	f.id, f.mode, f.userID = id, mode, userID
 	return &models.AdminJob{ID: "item-refresh-1", JobType: adminjob.JobTypeItemRefresh, Status: adminjob.StatusQueued, CreatedByUserID: userID, RequestedAt: fixedTime()}, nil
 }
-func (f *fakeAdminItemMetadata) UpdateCatalogItemMetadata(_ context.Context, id string, req handlers.UpdateItemMetadataRequest) (*catalogsvc.ItemDetail, error) {
+func (f *fakeAdminItemMetadata) UpdateCatalogItemMetadata(_ context.Context, id string, req handlers.UpdateItemMetadataRequest, cleared []string) (*catalogsvc.ItemDetail, error) {
 	f.calls++
-	f.id, f.update = id, req
+	f.id, f.update, f.clear = id, req, cleared
 	return &catalogsvc.ItemDetail{ContentID: id, Title: "Updated", Type: "movie"}, nil
 }
 func TestAdminItemMetadataTransport(t *testing.T) {
@@ -41,8 +43,14 @@ func TestAdminItemMetadataTransport(t *testing.T) {
 		t.Fatalf("refresh: %d %s %#v", rec.Code, rec.Body, f)
 	}
 	rec = do(t, h, "PATCH", path+"/metadata", `{"overview":"","genres":[],"year":0,"title":null}`, bearer(memberToken))
-	if rec.Code != 200 || f.update.Overview == nil || *f.update.Overview != "" || f.update.Genres == nil || len(*f.update.Genres) != 0 || f.update.Year == nil || *f.update.Year != 0 || f.update.Title != nil || !strings.Contains(rec.Body.String(), `"title":"Updated"`) {
+	if rec.Code != 200 || f.update.Overview == nil || *f.update.Overview != "" || f.update.Genres == nil || len(*f.update.Genres) != 0 || f.update.Year == nil || *f.update.Year != 0 || f.update.Title != nil || len(f.clear) != 0 || !strings.Contains(rec.Body.String(), `"title":"Updated"`) {
 		t.Fatalf("update: %d %s %#v", rec.Code, rec.Body, f.update)
+	}
+	// An explicit null clears a nullable member; omission and a null on a
+	// member that cannot be cleared leave the value alone.
+	rec = do(t, h, "PATCH", path+"/metadata", `{"rating_imdb":null,"release_date":null,"air_date":null,"rating_tmdb":6.5,"year":null}`, bearer(memberToken))
+	if rec.Code != 200 || !slices.Equal(f.clear, []string{"rating_imdb", "release_date", "air_date"}) || f.update.RatingIMDB != nil || f.update.RatingTMDB == nil || *f.update.RatingTMDB != 6.5 || f.update.Year != nil {
+		t.Fatalf("clear: %d %s clear=%v %#v", rec.Code, rec.Body, f.clear, f.update)
 	}
 	before := f.calls
 	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))

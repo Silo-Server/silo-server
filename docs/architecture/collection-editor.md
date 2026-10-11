@@ -93,7 +93,7 @@ change forward or stops at the conflict.
 
 ## Smart rules and the live preview
 
-A Smart collection's Contents is the Home rows rule sentence (`RuleBuilder`), with the libraries
+A Smart collection's Contents is Add row's rule sentence (`RuleBuilder`), with the libraries
 inside it: a server collection needs at least one, and a personal one with none matches every
 library the profile can see. Rules about the viewer (Watched and the like) are offered only on a
 personal collection. A rule the builder can't show stays as a locked line and is saved unchanged
@@ -190,9 +190,9 @@ personal collection searches every library the profile can see. The search is a 
 not the access check: the personal item route refuses a title the acting profile can't see, and a
 server collection's members are filtered per viewer when they are read.
 
-## Links into Home rows
+## Links into the row pages
 
-Both Home rows pages (`/admin/home-rows` and `/settings/home-screen`) take link parameters next to
+Both row pages (admin Sections at `/admin/sections`, and `/settings/home-screen`) take link parameters next to
 `?page=`, read by `web/src/lib/homeRows/rowLinks.ts` and followed by
 `web/src/components/homeRows/useRowLinks.ts`. Each page reads them once and drops them from the
 address, so a reload doesn't repeat them.
@@ -210,9 +210,9 @@ address, so a reload doesn't repeat them.
 - `?edit=<rowId>` opens that row in Edit row; a row that is gone gets a toast.
 - `?return=<path>` makes the dialog's back link "Back to *collection*" and, after Add row, goes to
   that path with a toast that offers to move the new row (`?edit=` on the same page). Both replace
-  the Home rows history entry. Settings > Home Screen queues its saves, so there it goes back only
+  the row page's history entry. Settings > Home Screen queues its saves, so there it goes back only
   once the save lands and the row is on the page, even when that takes a later read because the
-  one after the save failed; a failed save keeps the viewer on Home rows with the save's error
+  one after the save failed; a failed save keeps the viewer on Home Screen with the save's error
   toast. The toast's position counts the page's rows when the add lands, not when the dialog
   opened. A link that arrives while the dialog is open starts a fresh dialog on its target. After Add row the navigation state carries `addedRow` (the
   `AddedRowState` type: new row id, surface, page and position) so
@@ -230,19 +230,19 @@ its "On Home and the _Kids_ page" (turned-off rows left out). Rows profiles add 
 are not listed, because the route reads the administrator page layouts only. When the collections
 capabilities don't report `section_references`, the list is left out and Add as a row stays.
 
-- **Add as a row** goes to admin Home rows with `?page=…&add=collection:library:<id>` and, from the
-  editor, `?return=` set to the editor's own URL (see Links into Home rows). The List's Add to Home
+- **Add as a row** goes to admin Sections with `?page=…&add=collection:library:<id>` and, from the
+  editor, `?return=` set to the editor's own URL (see Links into the row pages). The List's Add to Home
   and Add to a library page send no `return`, because the List's address is not a collection page
-  the allowlist accepts; Home rows keeps its own after-add step. With unsaved changes the editor
+  the allowlist accepts; Sections keeps its own after-add step. With unsaved changes the editor
   asks first: Save and continue saves and goes only once nothing is left unsaved (artwork that
   failed to upload stays in the editor with its error), Discard changes drops the draft (titles
   stay), Cancel stays. Discard changes is off when the collection is saved as hidden, since only
   saving would show it. Save and continue is off whenever Save is, including while a field
   changed in both places waits for Keep mine or Use theirs. A collection not created yet, or one hidden from its Collections tab,
   can't be added, because a row couldn't open its See all; the button says why.
-- **Back from Home rows**, the `addedRow` state names the new row, which is highlighted once the
-  rows list includes it. The editor sends Home rows the List view it was opened from as history
-  state, and Home rows hands that state back with `addedRow`, so the editor's Back still reaches
+- **Back from Sections**, the `addedRow` state names the new row, which is highlighted once the
+  rows list includes it. The editor sends Sections the List view it was opened from as history
+  state, and Sections hands that state back with `addedRow`, so the editor's Back still reaches
   that view.
 - **Hiding** a collection rows show asks first, naming the pages the rows are on, as the List does
   with its `row_count`. While the rows list hasn't loaded (or failed), the List's `row_count` for

@@ -83,7 +83,7 @@ describe("safeReturnPath", () => {
 describe("homeRowsPath", () => {
   it("opens a row on the page it is on", () => {
     expect(homeRowsPath("admin", { kind: "home" }, { edit: "row-1" })).toBe(
-      "/admin/home-rows?page=home&edit=row-1",
+      "/admin/sections?page=home&edit=row-1",
     );
     expect(homeRowsPath("profile", { kind: "library", libraryId: 7 }, { edit: "own 1" })).toBe(
       "/settings/home-screen?page=7&edit=own+1",

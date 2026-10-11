@@ -155,8 +155,20 @@ func (h PlaybackRequestHeaders) clientInfo() playback.ClientInfo {
 	return info.Normalized()
 }
 
+// PlaybackDeviceHeaders declare the client's device on a playback start. A
+// successful start records it in the profile's device registry, as a settings
+// read does; they do not change the playback device X-Device-ID names.
+// Unlike the settings operations they carry no length limits: an over-long
+// value is clamped when recorded, and must never refuse playback.
+type PlaybackDeviceHeaders struct {
+	SiloDeviceID       string `header:"X-Silo-Device-Id" doc:"The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)" example:"iphone-1"`
+	SiloDeviceName     string `header:"X-Silo-Device-Name" doc:"Optional display name recorded on the device registry (first 120 characters)" example:"Living room"`
+	SiloDevicePlatform string `header:"X-Silo-Device-Platform" doc:"Optional platform recorded on the device registry (first 40 characters)" example:"iOS"`
+}
+
 type PlaybackStartInput struct {
 	PlaybackRequestHeaders
+	PlaybackDeviceHeaders
 	Body PlaybackStartBody
 }
 type PlaybackCapabilitiesOutput struct {
@@ -345,6 +357,7 @@ func registerPlayback(reg *Registry) {
 		if _, err := validationRequest.NormalizeAndValidate(); err != nil {
 			return nil, validationProblem("body", "invalid", err.Error())
 		}
+		caller.DeclaredDevice = handlers.NewDeviceMetadata(in.SiloDeviceID, in.SiloDeviceName, in.SiloDevicePlatform)
 		response, err := reg.deps.Playback.StartPlaybackV2(ctx, caller, request)
 		if err != nil {
 			return nil, playbackProblem(err)

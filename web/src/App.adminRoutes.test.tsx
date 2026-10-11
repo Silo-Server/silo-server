@@ -42,7 +42,7 @@ vi.mock("@/hooks/useAuth", async () => {
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 
 vi.mock("@/components/AdminLayout", () => ({ default: () => <Outlet /> }));
-vi.mock("@/pages/AdminHomeRows", () => ({ default: () => <div>Home rows page</div> }));
+vi.mock("@/pages/AdminHomeRows", () => ({ default: () => <div>Sections page</div> }));
 
 import App from "@/App";
 
@@ -51,23 +51,23 @@ describe("App admin Home rows routes", () => {
     appRouter = null;
   });
 
-  it("serves the Home rows page at /admin/home-rows", async () => {
-    initialEntry = "/admin/home-rows";
+  it("serves the Sections page at /admin/sections", async () => {
+    initialEntry = "/admin/sections";
 
     render(<App />);
 
-    expect(await screen.findByText("Home rows page")).toBeInTheDocument();
-    expect(appRouter?.state.location.pathname).toBe("/admin/home-rows");
+    expect(await screen.findByText("Sections page")).toBeInTheDocument();
+    expect(appRouter?.state.location.pathname).toBe("/admin/sections");
   });
 
-  it("sends the old /admin/sections links to Home rows, keeping the query", async () => {
-    initialEntry = "/admin/sections?page=page-2#rows";
+  it("sends /admin/home-rows links to Sections, keeping the query", async () => {
+    initialEntry = "/admin/home-rows?page=page-2#rows";
 
     render(<App />);
 
-    expect(await screen.findByText("Home rows page")).toBeInTheDocument();
+    expect(await screen.findByText("Sections page")).toBeInTheDocument();
     expect(appRouter?.state.location).toMatchObject({
-      pathname: "/admin/home-rows",
+      pathname: "/admin/sections",
       search: "?page=page-2",
       hash: "#rows",
     });
