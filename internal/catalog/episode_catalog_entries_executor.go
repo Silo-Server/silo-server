@@ -1022,9 +1022,12 @@ func buildEpisodeCatalogBitrateClause(rule QueryRule, argIdx int) (string, []any
 	}
 }
 
+// episodeCatalogEntrySortJoin adds the series title and episode numbers that
+// break air-date ties; episode_catalog_entries stores neither.
 func episodeCatalogEntrySortJoin(field string) string {
 	if field == querySortReleaseDate || field == querySortLastAirDate {
-		return " JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id"
+		return " JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id" +
+			" JOIN media_items sort_series ON sort_series.content_id = ece.series_id"
 	}
 	return ""
 }
@@ -1042,7 +1045,11 @@ func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	case "added_at":
 		return fmt.Sprintf("ORDER BY ece.added_at %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "release_date", "last_air_date":
-		return fmt.Sprintf("ORDER BY ece.episode_air_date %s NULLS LAST, ece.series_id ASC, sort_episode.season_number %s, sort_episode.episode_number %s, ece.episode_id ASC", dir, dir, dir), true
+		return fmt.Sprintf(
+			"ORDER BY ece.episode_air_date %[1]s NULLS LAST, %[2]s ASC, ece.series_id ASC, sort_episode.season_number %[1]s, sort_episode.episode_number %[1]s, ece.episode_id ASC",
+			dir,
+			mediaItemSortKeySQL("sort_series"),
+		), true
 	case "year":
 		return fmt.Sprintf("ORDER BY ece.year %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "content_rating":

@@ -22,6 +22,7 @@ const episodeCatalogSelectBody = `(
 		e.content_id,
 		e.air_date AS episode_air_date,
 		e.series_id AS episode_series_id,
+		LOWER(COALESCE(NULLIF(BTRIM(si.sort_title), ''), si.title)) AS episode_series_sort_key,
 		e.season_number AS episode_season_number,
 		e.episode_number,
 		'episode'::text AS type,

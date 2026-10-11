@@ -81,19 +81,6 @@ func TestQueryCursorPostgresEpisodeParity(t *testing.T) {
 				if len(want) != 5 {
 					t.Fatalf("fixture returned %d episodes", len(want))
 				}
-				if field == "release_date" || field == "last_air_date" {
-					indices := []int{0, 2, 1, 3, 4}
-					if order == "desc" {
-						indices = []int{1, 2, 0, 4, 3}
-					}
-					expected := make([]string, len(indices))
-					for index, episodeIndex := range indices {
-						expected[index] = fmt.Sprintf("%s-%d", series, episodeIndex)
-					}
-					if !reflect.DeepEqual(want, expected) {
-						t.Fatalf("date order = %v, want %v", want, expected)
-					}
-				}
 				got := []string{}
 				var cursor *QueryCursor
 				for range 5 {

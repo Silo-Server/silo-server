@@ -15,14 +15,15 @@ func TestBuildSortPlan_EpisodeDateOrder(t *testing.T) {
 					t.Fatal(err)
 				}
 				direction := strings.ToUpper(order)
-				want := fmt.Sprintf("ORDER BY mi.episode_air_date %s NULLS LAST, mi.episode_series_id ASC, mi.episode_season_number %s, mi.episode_number %s, mi.content_id ASC", direction, direction, direction)
+				want := fmt.Sprintf("ORDER BY mi.episode_air_date %[1]s NULLS LAST, mi.episode_series_sort_key ASC, mi.episode_series_id ASC, mi.episode_season_number %[1]s, mi.episode_number %[1]s, mi.content_id ASC", direction)
 				if plan.OrderBy != want {
 					t.Fatalf("order = %q, want %q", plan.OrderBy, want)
 				}
-				if len(plan.terms) != 5 {
-					t.Fatalf("cursor terms = %d, want 5", len(plan.terms))
+				kinds := []string{cursorKindDate, cursorKindText, cursorKindText, cursorKindNumber, cursorKindNumber, cursorKindText}
+				if len(plan.terms) != len(kinds) {
+					t.Fatalf("cursor terms = %d, want %d", len(plan.terms), len(kinds))
 				}
-				for index, kind := range []string{cursorKindDate, cursorKindText, cursorKindNumber, cursorKindNumber, cursorKindText} {
+				for index, kind := range kinds {
 					if plan.terms[index].kind != kind {
 						t.Fatalf("cursor term %d kind = %q, want %q", index, plan.terms[index].kind, kind)
 					}
