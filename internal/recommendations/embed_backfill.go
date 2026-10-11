@@ -30,10 +30,18 @@ const (
 	// the provider refuses do not count.
 	maxConsecutiveEmbedFailures = 3
 
-	// embedProbeText is embedded once when a run's first refused input comes
-	// before anything is stored, to tell a refused input from a provider that
-	// refuses every input. The admin connection check sends the same text.
+	// embedProbeText is embedded when a run's first refused input comes
+	// before anything is stored, and again after maxRefusalsBeforeProbe
+	// inputs in a row are refused, to tell refused inputs from a provider
+	// that refuses every input. The admin connection check sends the same
+	// text.
 	embedProbeText = "silo connection test"
+
+	// maxRefusalsBeforeProbe is how many inputs in a row the provider may
+	// refuse, with nothing stored and no probe in between, before the run
+	// probes it again: a provider whose key is revoked mid-run (Gemini
+	// answers a bad key with 400) looks like it refuses each input.
+	maxRefusalsBeforeProbe = 3
 
 	// An item whose text the provider rejects is retried shortened to
 	// embedRetryRunes, then to embedRetryShortRunes, when the text is longer
@@ -157,6 +165,15 @@ func (r *refusedEmbedInputs) has(itemID, text string) bool {
 	return ok && hash == sha256.Sum256([]byte(text))
 }
 
+func (r *refusedEmbedInputs) remove(itemID string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.texts, itemID)
+}
+
 func (r *refusedEmbedInputs) reset() {
 	if r == nil {
 		return
@@ -236,6 +253,10 @@ type embedBackfill struct {
 	lastErr error
 	// probed records that the provider embedded embedProbeText in this run.
 	probed bool
+	// unconfirmed lists the items refused since the last stored vector or
+	// successful probe. A failed probe shows the provider was down for them,
+	// so they are counted as failures and not remembered as refused.
+	unconfirmed []string
 	// stored lists the items stored since profiles with signals on them were
 	// last marked stale.
 	stored []string
@@ -463,12 +484,12 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 			// local model answers an over-long input with, which the
 			// shortened retries also got.
 			if embeddings.InputRefused(err) {
-				if err := b.checkProviderAcceptsInput(ctx); err != nil {
-					b.counts.Failed++
-					return err
-				}
 				b.counts.Skipped++
 				b.refused.add(item.ContentID, texts[i])
+				b.unconfirmed = append(b.unconfirmed, item.ContentID)
+				if err := b.checkProviderAcceptsInput(ctx); err != nil {
+					return err
+				}
 				slog.WarnContext(ctx, "skipping item, provider refused its text", "component", "recommendations", "item_id", item.ContentID, "error", err)
 				continue
 			}
@@ -535,21 +556,31 @@ func (b *embedBackfill) embedText(ctx context.Context, text string) ([]float32, 
 	return vectors[0], nil
 }
 
-// checkProviderAcceptsInput is called after a refused input. Until the run
-// has stored a vector, it embeds embedProbeText once, and returns an error
-// that ends the run when that fails too: a provider that refuses every input
-// (Gemini answers a bad API key with 400) is down, not the items.
+// checkProviderAcceptsInput is called after a refused input. It embeds
+// embedProbeText when the run has stored nothing and not probed yet, or when
+// maxRefusalsBeforeProbe inputs in a row were refused since the last stored
+// vector or probe. When the probe fails too, the provider refuses every
+// input (Gemini answers a bad API key with 400): the unconfirmed refusals
+// become failures, retried next run, and the returned error ends the run.
 func (b *embedBackfill) checkProviderAcceptsInput(ctx context.Context) error {
-	if b.probed || b.counts.Embedded > 0 {
+	firstCheck := !b.probed && b.counts.Embedded == 0
+	if !firstCheck && len(b.unconfirmed) < maxRefusalsBeforeProbe {
 		return nil
 	}
 	if _, err := b.embedText(ctx, embedProbeText); err != nil {
+		for _, itemID := range b.unconfirmed {
+			b.refused.remove(itemID)
+		}
+		b.counts.Skipped -= len(b.unconfirmed)
+		b.counts.Failed += len(b.unconfirmed)
+		b.unconfirmed = nil
 		if stop := runStopError(ctx, err); stop != nil {
 			return stop
 		}
 		return providerUnavailable(err)
 	}
 	b.probed = true
+	b.unconfirmed = nil
 	return nil
 }
 
@@ -568,6 +599,7 @@ func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector
 	}
 	b.counts.Embedded++
 	b.stored = append(b.stored, item.ContentID)
+	b.unconfirmed = nil
 	return true, nil
 }
 

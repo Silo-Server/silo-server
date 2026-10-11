@@ -477,9 +477,10 @@ func TestBackfillSkipsRefusedInputs(t *testing.T) {
 		if err := b.run(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
-		// The first batch falls back to single calls, with one probe after
-		// the first refusal; the other two batches succeed.
-		if b.counts.Embedded != 26 || b.counts.Skipped != 4 || b.counts.Failed != 0 || calls != 14 {
+		// The first batch falls back to single calls, with a probe after
+		// the first refusal and another after three more in a row; the
+		// other two batches succeed.
+		if b.counts.Embedded != 26 || b.counts.Skipped != 4 || b.counts.Failed != 0 || calls != 15 {
 			t.Fatalf("counts=%+v calls=%d", b.counts, calls)
 		}
 		for id := range bad {
@@ -500,6 +501,28 @@ func TestBackfillSkipsRefusedInputs(t *testing.T) {
 		// The item is not recorded as refused, so the next run tries it again.
 		if b.refused.has("item-0000", "item-0000") {
 			t.Fatal("recorded an item the provider was down for")
+		}
+	})
+
+	t.Run("a key revoked mid-run stops the run", func(t *testing.T) {
+		calls := 0
+		// The provider answers the first batch, then refuses everything.
+		b := newTestBackfill(newFakeEmbeddingStore(testIDs("item-", 30)...), refusingEmbedder(func(string) bool { return calls > 1 }, &calls), nil)
+		err := b.run(context.Background(), false)
+		// The first batch, the second batch, three items refused one at a
+		// time, then the probe.
+		if calls != 6 || !errors.Is(err, testRefusal) || !strings.HasPrefix(err.Error(), "embedding provider unavailable: ") {
+			t.Fatalf("calls=%d error=%v", calls, err)
+		}
+		// The three items the provider refused while it was down are
+		// failures to retry, not refused inputs the catch-up holds back.
+		if b.counts.Embedded != 10 || b.counts.Skipped != 0 || b.counts.Failed != maxRefusalsBeforeProbe {
+			t.Fatalf("counts=%+v", b.counts)
+		}
+		for _, id := range testIDs("item-", 30)[10:13] {
+			if b.refused.has(id, id) {
+				t.Fatalf("recorded %s as refused", id)
+			}
 		}
 	})
 }

@@ -91,8 +91,11 @@ fails before anything was stored. An input the provider refuses at every
 length (a 4xx answer other than 401, 403, 404, 408 and 429) counts as skipped
 and is not a failure: refused items cannot stop a run, and a run whose only
 misses are refused inputs completes. The first refusal before anything is
-stored is followed by one call with a fixed test text, and a provider that
-refuses that too, as Gemini does a bad API key with 400, stops the run. Each
+stored, and every third refusal in a row after a stored vector or a test, is
+followed by one call with a fixed test text. A provider that refuses that too,
+as Gemini does a bad API key with 400 (including a key revoked mid-run), stops
+the run, and the refusals since the last stored vector or test count as
+failures that the next run retries, not as refused inputs. Each
 server remembers in memory the items it saw refused, with a hash of their
 text, and its catch-up passes skip them until the text changes; the nightly
 or a manual embedding run clears the record and retries them, and so does a
