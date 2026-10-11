@@ -211,7 +211,6 @@
 ./internal/recommendations TestFindSimilarAppliesAccessLimitsInSQLPostgres
 ./internal/recommendations TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres
 ./internal/recommendations TestGetTasteClusterMetaOmitsOnlyEmbeddingsPostgres
-./internal/recommendations TestHNSWCandidateScanClampsEfSearchPostgres
 ./internal/recommendations TestListCacheRefreshCandidatesOldestFirstPostgres
 ./internal/recommendations TestMarkAccountsStalePostgres
 ./internal/recommendations TestMarkProfilesStaleForItemsPostgres

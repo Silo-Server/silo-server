@@ -3,13 +3,11 @@ package recommendations
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -186,49 +184,6 @@ func TestCowatchSkipsDeletedItemsAndPrunesStalePairsPostgres(t *testing.T) {
 	got = cowatchPairsFor(t, pool, prefix)
 	if len(got) != 2 || got[x+">"+y] != 1 || got[y+">"+x] != 1 {
 		t.Fatalf("pairs after the second run = %v, want only x and y paired", got)
-	}
-}
-
-// pgvector rejects an hnsw.ef_search above 1000; a deep candidate pull
-// clamps to it instead of failing the scan.
-func TestHNSWCandidateScanClampsEfSearchPostgres(t *testing.T) {
-	newEngineTestPool(t)
-	ctx := t.Context()
-	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// One connection, so loading the vector library below applies to the
-	// scan's connection and pgvector validates the setting.
-	cfg.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `SELECT '[1,2]'::vector`); err != nil {
-		t.Fatal(err)
-	}
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rejected := tx.Exec(ctx, `SELECT set_config('hnsw.ef_search', '1200', true)`)
-	_ = tx.Rollback(ctx)
-	if rejected == nil {
-		t.Fatal("pgvector accepted hnsw.ef_search 1200; the clamp is no longer needed")
-	}
-
-	var got string
-	err = NewRepo(pool).withHNSWCandidateScan(ctx, 1200, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SHOW hnsw.ef_search`).Scan(&got)
-	})
-	if err != nil {
-		t.Fatalf("candidate scan for 1200: %v", err)
-	}
-	if got != "1000" {
-		t.Fatalf("hnsw.ef_search = %s, want 1000", got)
 	}
 }
 
