@@ -428,14 +428,14 @@ With recommendations disabled the Reader serves no personal rows (the main
 For You row, cluster rows, Because You Watched, Similar Users), even ones
 still cached from before, and reads fall back to the global and default rows.
 Watch Tonight's discover-mode cards skip the taste profile the same way and
-come from the global rows.
+come from the cached Popular row and the live Recently Added row.
 
 The Reader serves cached rows, except the default rows on Discover and their
-section pages, and the Recently Added row Watch Tonight falls back to for a
-cold profile, which therefore still fills once the cached global rows expire
-with recommendations disabled; home and library sections keep the cached
-Recently Added row instead, since a library has its own shelves. The other live query
-is the server's top genre, for a taste-match section with no genre and no
+section pages, and the Recently Added row Watch Tonight and its
+discover-mode cards fall back to for a cold profile, which therefore still
+fills once the cached global rows expire with recommendations disabled; home
+and library sections keep the cached Recently Added row instead, since a
+library has its own shelves. The other live query is the server's top genre, for a taste-match section with no genre and no
 matching cluster; it is the same for every viewer and reads the whole
 catalog, so each server reuses it for 10 minutes, serving an expired genre
 while a background read refreshes it. The standalone popular and recently-added list endpoints

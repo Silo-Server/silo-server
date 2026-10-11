@@ -72,6 +72,7 @@ type discoverCardsRepo interface {
 	FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, map[string][]string, error)
 	GetItemAllGenres(ctx context.Context, itemIDs []string) (map[string][]string, error)
 	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]recommendations.ScoredItem, error)
+	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]recommendations.ScoredItem, error)
 	FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 }
 
@@ -318,7 +319,7 @@ func (h *RecommendationsHandler) buildContinueCards(ctx context.Context, userID 
 // buildDiscoverCards returns recommendation candidates for discover mode.
 // It searches the user's taste profile against the full embedded library,
 // optionally requiring at least one selected genre match, and falls back to
-// cold-start caches when no taste profile is available or recommendations
+// the cold-start rows when no taste profile is available or recommendations
 // are disabled, which serve no personal candidates. Every candidate is one
 // the viewer can see, of a type recommendation rows offer.
 func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, genres []string, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool, error) {
@@ -365,7 +366,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 		// emptied by hydration, and so do types the rows no longer offer,
 		// such as books cached before they left them.
 		var err error
-		candidates, err = keepRecommendable(ctx, repo, h.buildColdStartDiscoverCandidates(ctx, repo), filter)
+		candidates, err = keepRecommendable(ctx, repo, h.buildColdStartDiscoverCandidates(ctx, repo, filter, excludeIDs, poolSize), filter)
 		if err != nil {
 			return nil, true, err
 		}
@@ -398,7 +399,12 @@ func recommendationCardItems(candidates []recommendations.ScoredItem, excludeIDs
 	return merged
 }
 
-func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Context, repo discoverCardsRepo) []recommendations.ScoredItem {
+// buildColdStartDiscoverCandidates returns the cached Popular row and up to
+// limit titles of the live Recently Added row the viewer can see, leaving out
+// excludeIDs. Recently Added is read live, as Watch Tonight's fallback reads
+// it, so the cards still fill on a fresh server or with recommendations
+// disabled, when nothing builds or renews the cached rows.
+func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Context, repo discoverCardsRepo, filter catalog.AccessFilter, excludeIDs map[string]struct{}, limit int) []recommendations.ScoredItem {
 	byID := make(map[string]recommendations.ScoredItem)
 
 	popular, err := repo.GetRecommendationCache(
@@ -415,15 +421,9 @@ func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Co
 		byID[item.MediaItemID] = item
 	}
 
-	recentlyAdded, err := repo.GetRecommendationCache(
-		ctx,
-		recommendations.GlobalCacheUserID,
-		recommendations.GlobalCacheProfileID,
-		recommendations.RecTypeRecentlyAdded,
-		"",
-	)
+	recentlyAdded, err := repo.ListDefaultRowItems(ctx, filter, recommendations.RecTypeRecentlyAdded, mapKeys(excludeIDs), limit)
 	if err != nil {
-		slog.WarnContext(ctx, "WatchTonightCards: recently added cache unavailable", "component", "api", "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: recently added unavailable", "component", "api", "error", err)
 	}
 	for _, item := range recentlyAdded {
 		if existing, exists := byID[item.MediaItemID]; !exists || item.Score > existing.Score {
