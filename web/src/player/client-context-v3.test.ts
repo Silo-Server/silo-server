@@ -203,6 +203,13 @@ describe("browser decode engine capabilities", () => {
     expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
   });
 
+  it("leaves HDR to HDR-preserving routes on an HDR display", () => {
+    // The engine tone-maps to SDR; claiming managed range here would take HDR
+    // sources off the remux that keeps them HDR.
+    const deliveries = buildDeliveriesV3({ ...probe, hdr: true }, "test", engine);
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
   it("carries the engine codecs in the device-level lists the planner reads first", () => {
     const capabilities = buildClientCapabilitiesV3(probe, engine);
     expect(capabilities.codecs_audio).toContain("truehd");

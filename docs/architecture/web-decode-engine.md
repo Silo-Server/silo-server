@@ -20,8 +20,11 @@ The engine adds to the existing `declared`-tier capability block
   (WebCodecs AAC, Opus, MP3, FLAC; the bundled FFmpeg decoders for `ac3`,
   `eac3`, `dts`, `truehd`, `mlp`; uncompressed PCM).
 - `original_http` gains the validated claims `client_selected_audio_track_v1`
-  and, when WebGPU is available, `client_managed_dynamic_range_v1`
-  (see [playback-protocol-v3.md](playback-protocol-v3.md) §3 and §4).
+  and, when WebGPU is available and the display is SDR,
+  `client_managed_dynamic_range_v1`
+  (see [playback-protocol-v3.md](playback-protocol-v3.md) §3 and §4). The
+  engine presents only SDR, so on an HDR display (`dynamic-range: high`) the
+  claim stays off and HDR sources keep the routes that preserve HDR.
 - The device-level `client_capabilities` lists carry the same additions,
   because the planner reads them before narrowing each route by its delivery
   class. `progressive` and `hls` keep the media element's own lists, so remux
