@@ -2,8 +2,8 @@ package catalog
 
 import (
 	"slices"
-	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -15,9 +15,9 @@ const fieldImagesLocked = 10
 // non-empty localized fields override the base — localization rows are
 // legitimately partial (an AI translation carries only overview/tagline; a
 // provider row may lack a tagline or logo), and an empty field must fall back
-// to the base value rather than blank it. Base artwork copied from a local
-// sidecar is language-neutral and outranks provider artwork, so a localized
-// image never replaces it (see keepsLocalArtwork).
+// to the base value rather than blank it. Base artwork served from a cached
+// copy of a local sidecar is language-neutral and outranks provider artwork,
+// so a localized image never replaces it.
 func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocalization) *models.MediaItem {
 	localized := cloneMediaItem(item)
 	if localized == nil || loc == nil {
@@ -36,17 +36,17 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 		localized.Tagline = loc.Tagline
 	}
 	imagesLocked := slices.Contains(item.LockedFields, fieldImagesLocked)
-	if !imagesLocked && loc.PosterPath != "" && !keepsLocalArtwork(item.PosterPath, item.PosterSourcePath) {
+	if !imagesLocked && loc.PosterPath != "" && !artworkkey.IsLocal(item.PosterPath) {
 		localized.PosterPath = loc.PosterPath
 		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash
 	}
-	if !imagesLocked && loc.BackdropPath != "" && !keepsLocalArtwork(item.BackdropPath, item.BackdropSourcePath) {
+	if !imagesLocked && loc.BackdropPath != "" && !artworkkey.IsLocal(item.BackdropPath) {
 		localized.BackdropPath = loc.BackdropPath
 		localized.BackdropSourcePath = loc.BackdropSourcePath
 		localized.BackdropThumbhash = loc.BackdropThumbhash
 	}
-	if !imagesLocked && loc.LogoPath != "" && !keepsLocalArtwork(item.LogoPath, item.LogoSourcePath) {
+	if !imagesLocked && loc.LogoPath != "" && !artworkkey.IsLocal(item.LogoPath) {
 		localized.LogoPath = loc.LogoPath
 		localized.LogoSourcePath = loc.LogoSourcePath
 	}
@@ -66,20 +66,12 @@ func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalizati
 	if loc.Overview != "" {
 		localized.Overview = loc.Overview
 	}
-	if !imagesLocked && loc.PosterPath != "" && !keepsLocalArtwork(season.PosterPath, season.PosterSourcePath) {
+	if !imagesLocked && loc.PosterPath != "" && !artworkkey.IsLocal(season.PosterPath) {
 		localized.PosterPath = loc.PosterPath
 		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash
 	}
 	return localized
-}
-
-// keepsLocalArtwork reports whether a base artwork slot shows a copy of a
-// local sidecar (a file:// source, mirroring metadata.isLocalImageSourcePath).
-// An empty path means the copy is not cached yet, so a localized image may
-// still fill the slot.
-func keepsLocalArtwork(path, sourcePath string) bool {
-	return path != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(sourcePath)), "file://")
 }
 
 // applyEpisodeLocalization merges a localization onto a clone of episode; see

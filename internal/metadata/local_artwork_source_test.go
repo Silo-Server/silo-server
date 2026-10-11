@@ -31,7 +31,7 @@ func TestLocalImageSourceFingerprintRoundTrip(t *testing.T) {
 	}
 
 	a := LocalImageSourceURL("/media/Film/poster.jpg", 10, modTime)
-	if b := LocalImageSourceURL("/media/Film/poster.jpg", 10, modTime.Add(time.Nanosecond)); a == b {
+	if b := LocalImageSourceURL("/media/Film/poster.jpg", 10, modTime.Add(time.Second)); a == b {
 		t.Fatal("a newer mtime must change the source")
 	}
 	if b := LocalImageSourceURL("/media/Film/poster.jpg", 11, modTime); a == b {

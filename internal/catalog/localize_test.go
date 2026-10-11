@@ -91,14 +91,15 @@ func TestApplyItemLocalizationKeepsManuallySelectedArtwork(t *testing.T) {
 	}
 }
 
-// Base artwork copied from a local sidecar is language-neutral and outranks
-// provider art, so a viewer in another language keeps it. A localized slot
-// still fills base art that is remote, or local art not cached yet.
+// Base artwork served from a cached copy of a local sidecar is
+// language-neutral and outranks provider art, so a viewer in another language
+// keeps it. A localized slot still fills base art that is remote, including a
+// slot whose local copy is not cached yet and still serves earlier remote art.
 func TestApplyItemLocalizationKeepsLocalSidecarArtwork(t *testing.T) {
 	item := baseItem()
 	item.PosterPath = "local/movies/c1/0badf00d/poster/original.webp"
 	item.PosterSourcePath = "file:///media/Film/Poster.JPG?v=12-1"
-	item.BackdropPath = ""
+	item.BackdropPath = "tmdb/movies/1/backdrop/original.webp"
 	item.BackdropSourcePath = "file:///media/Film/fanart.jpg?v=12-1"
 	item.LogoSourcePath = "tmdb://logo.png"
 	loc := &models.MediaItemLocalization{
@@ -119,7 +120,7 @@ func TestApplyItemLocalizationKeepsLocalSidecarArtwork(t *testing.T) {
 		t.Errorf("localized poster replaced local art: path %q source %q", got.PosterPath, got.PosterSourcePath)
 	}
 	if got.BackdropPath != "backdrops/fr.jpg" {
-		t.Errorf("uncached local backdrop should let the localized backdrop fill the slot, got %q", got.BackdropPath)
+		t.Errorf("a slot still serving remote art should take the localized backdrop, got %q", got.BackdropPath)
 	}
 	if got.LogoPath != "logos/fr.png" {
 		t.Errorf("remote base logo should take the localized logo, got %q", got.LogoPath)

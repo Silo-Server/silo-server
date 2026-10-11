@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -83,13 +84,12 @@ func parseSeasonSidecar(ctx context.Context, seasonDirs []string, seasonNumber i
 // findSeasonPoster returns the source of a season's artwork: poster, folder,
 // or cover inside the season folder first, then the Kodi-style seasonNN-poster
 // (or season-specials-poster) in the series root. Names match ignoring case.
-// Generic names count only in a real season folder inside a series root: in a
-// flat layout the episodes' folder is the series root, whose poster.jpg is
-// the series' own art, and in a shared folder it belongs to no one series.
+// In a flat layout the episodes' folder is the series root itself, whose
+// poster.jpg is the series' own art, so it is not searched as a season folder.
 func (f *sidecarFinder) findSeasonPoster(seasonDirs []string, seriesRoots []string, seasonNumber int) string {
 	for _, name := range []string{"poster", "folder", "cover"} {
 		for _, dir := range seasonDirs {
-			if !insideAnyRoot(dir, seriesRoots) {
+			if slices.Contains(seriesRoots, dir) {
 				continue
 			}
 			if source := f.find(dir, name); source != "" {
@@ -109,16 +109,6 @@ func (f *sidecarFinder) findSeasonPoster(seasonDirs []string, seriesRoots []stri
 		}
 	}
 	return ""
-}
-
-// insideAnyRoot reports whether dir lies strictly below one of roots.
-func insideAnyRoot(dir string, roots []string) bool {
-	for _, root := range roots {
-		if rel, err := filepath.Rel(root, dir); err == nil && rel != "." && filepath.IsLocal(rel) {
-			return true
-		}
-	}
-	return false
 }
 
 // GetEpisodes reads <basename>.nfo and <basename>-thumb (or <basename>) image

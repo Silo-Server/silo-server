@@ -246,23 +246,37 @@ func TestPersistSeasonsAndEpisodesKeepsCachedLocalArtworkUntilSidecarIsGone(t *t
 	}
 }
 
-// When the sidecar's own folder is gone too (a moved or deleted item), a
-// library root that still lists entries shows the library is mounted.
-func TestLocalArtworkRetentionReadsLibraryRoot(t *testing.T) {
+// When the sidecar's own folder is gone too (a moved or deleted item), the
+// nearest existing folder up to the library root decides: one that lists
+// entries shows the library is mounted.
+func TestLocalArtworkRetentionReadsNearestFolderUpToLibraryRoot(t *testing.T) {
+	gone := func(roots []string, source string) bool {
+		retention := (&MetadataService{}).newLocalArtworkRetention(context.Background(), "movie-1")
+		retention.rootsLoaded = true
+		retention.roots = roots
+		return retention.sidecarGone(source)
+	}
+
 	library := filepath.Join(t.TempDir(), "library")
 	mkdirAll(t, library)
-	source := "file://" + filepath.Join(library, "Moved Film", "poster.jpg") + "?v=1-1"
-	retention := &localArtworkRetention{ctx: context.Background(), rootsLoaded: true, roots: []string{library}}
-
-	if retention.sidecarGone(source) {
+	moved := "file://" + filepath.Join(library, "Moved Film", "poster.jpg") + "?v=1-1"
+	if gone([]string{library}, moved) {
 		t.Fatal("an empty library root looks unmounted; the local copy must stay")
 	}
 	writeTestBytes(t, filepath.Join(library, "Other Film", "Other Film.mkv"))
-	if !retention.sidecarGone(source) {
+	if !gone([]string{library}, moved) {
 		t.Fatal("a mounted library root without the folder confirms the sidecar is gone")
 	}
-	retention.roots = []string{filepath.Join(library, "Other Film")}
-	if retention.sidecarGone(source) {
+	if gone([]string{filepath.Join(t.TempDir(), "elsewhere")}, moved) {
 		t.Fatal("a root that does not hold the sidecar proves nothing about it")
+	}
+
+	// A library root holding several mount points: one disk's empty mount
+	// point keeps its art even though the root lists the other disk.
+	disks := filepath.Join(t.TempDir(), "media")
+	writeTestBytes(t, filepath.Join(disks, "disk1", "Film A", "Film A.mkv"))
+	mkdirAll(t, filepath.Join(disks, "disk2"))
+	if gone([]string{disks}, "file://"+filepath.Join(disks, "disk2", "Film B", "poster.jpg")+"?v=1-1") {
+		t.Fatal("an unmounted disk under a shared root must keep its local copy")
 	}
 }

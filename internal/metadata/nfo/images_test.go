@@ -2,6 +2,7 @@ package nfo
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -215,8 +216,8 @@ func TestGetImagesSizeCapMatchesRemoteImages(t *testing.T) {
 	writeImageFile(t, moviePath)
 	// A poster at the 25 MiB cap is used; a backdrop one byte over is skipped
 	// and the next backdrop name takes its place.
-	writeSizedFile(t, filepath.Join(dir, "poster.jpg"), metadata.MaxLocalArtworkBytes)
-	writeSizedFile(t, filepath.Join(dir, "fanart.jpg"), metadata.MaxLocalArtworkBytes+1)
+	writeSizedFile(t, filepath.Join(dir, "poster.jpg"), metadata.MaxArtworkSourceBytes)
+	writeSizedFile(t, filepath.Join(dir, "fanart.jpg"), metadata.MaxArtworkSourceBytes+1)
 	writeImageFile(t, filepath.Join(dir, "backdrop.jpg"))
 
 	p := NewProvider()
@@ -424,5 +425,74 @@ func TestGetImagesFingerprintChangesWhenFileIsReplaced(t *testing.T) {
 	}
 	if sidecarPath(t, after[0].URL) != poster {
 		t.Fatalf("replaced poster path = %q, want %q", sidecarPath(t, after[0].URL), poster)
+	}
+}
+
+// With poster.jpg and a stray Poster.JPG side by side, the documented
+// spelling wins, as it did before names matched ignoring case.
+func TestGetImagesPrefersExactSpelling(t *testing.T) {
+	dir := t.TempDir()
+	moviePath := filepath.Join(dir, "Film.mkv")
+	writeImageFile(t, moviePath)
+	writeImageFile(t, filepath.Join(dir, "Poster.JPG"))
+	writeImageFile(t, filepath.Join(dir, "Poster.jpg"))
+	writeImageFile(t, filepath.Join(dir, "poster.jpg"))
+
+	p := NewProvider()
+	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
+		ContentType:               "movie",
+		RepresentativeFilePath:    moviePath,
+		PrimarySidecarSearchPaths: []string{dir},
+	})
+	if err != nil {
+		t.Fatalf("GetImages: %v", err)
+	}
+	if got := sidecarPath(t, imagesByType(images)[metadata.ImagePoster].URL); got != filepath.Join(dir, "poster.jpg") {
+		t.Fatalf("poster = %q, want poster.jpg", got)
+	}
+}
+
+// A flat folder of many movies shares one listing across requests instead of
+// being listed again for every movie; adding a sidecar changes the folder's
+// mtime, so the next request sees it.
+func TestGetImagesLargeFolderSeesNewSidecars(t *testing.T) {
+	dir := t.TempDir()
+	for i := range sharedListingMinEntries {
+		writeImageFile(t, filepath.Join(dir, fmt.Sprintf("Movie %03d.mkv", i)))
+	}
+	moviePath := filepath.Join(dir, "Movie 007.mkv")
+	p := NewProvider()
+	req := metadata.ImageRequest{ContentType: "movie", RepresentativeFilePath: moviePath}
+	images, err := p.GetImages(context.Background(), req)
+	if err != nil || len(images) != 0 {
+		t.Fatalf("GetImages before adding art = %+v, %v", images, err)
+	}
+
+	// The listing is shared while the folder's mtime is unchanged, so a file
+	// added without changing it is not seen yet.
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	poster := filepath.Join(dir, "MOVIE 007-poster.png")
+	writeImageFile(t, poster)
+	if err := os.Chtimes(dir, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	images, err = p.GetImages(context.Background(), req)
+	if err != nil || len(images) != 0 {
+		t.Fatalf("GetImages with an unchanged folder mtime = %+v, %v; want the shared listing", images, err)
+	}
+
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(dir, later, later); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	images, err = p.GetImages(context.Background(), req)
+	if err != nil {
+		t.Fatalf("GetImages: %v", err)
+	}
+	if got := sidecarPath(t, imagesByType(images)[metadata.ImagePoster].URL); got != poster {
+		t.Fatalf("poster = %q, want the sidecar added after the first listing", got)
 	}
 }

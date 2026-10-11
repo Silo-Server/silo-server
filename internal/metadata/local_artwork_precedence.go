@@ -7,8 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // Local sidecar artwork outranks remote providers regardless of where the
@@ -46,16 +50,19 @@ type localArtworkRetention struct {
 
 	rootsLoaded bool
 	roots       []string
+	// mounted memoizes, per sidecar folder, whether the nearest existing
+	// folder at or above it lists entries.
+	mounted map[string]bool
 }
 
 func (s *MetadataService) newLocalArtworkRetention(ctx context.Context, contentID string) *localArtworkRetention {
-	return &localArtworkRetention{ctx: ctx, service: s, contentID: contentID}
+	return &localArtworkRetention{ctx: ctx, service: s, contentID: contentID, mounted: make(map[string]bool)}
 }
 
-// keep reports whether a slot holding cached artwork from existingSource, a
-// local sidecar, should ignore the remote incoming path this refresh chose.
+// keep reports whether a slot serving a cached copy of a local sidecar should
+// ignore the remote incoming path this refresh chose.
 func (r *localArtworkRetention) keep(incoming, existingPath, existingSource string) bool {
-	if !isCachedImagePath(existingPath) ||
+	if !artworkkey.IsLocal(existingPath) ||
 		!isLocalImageSourcePath(existingSource) ||
 		!isRemoteImageSourcePath(incoming) ||
 		r.sidecarGone(existingSource) {
@@ -96,11 +103,14 @@ func (s *MetadataService) keepUnconfirmedLocalItemArtwork(ctx context.Context, i
 // longer supplies artwork:
 //   - the file is still on disk, so discovery saw it and passed it over (it no
 //     longer qualifies, another sidecar now wins, or local artwork is off);
-//   - the file is missing while its folder, or the library root holding it,
-//     lists entries, so the library is mounted and the file was removed.
+//   - the file is missing and the nearest existing folder above it, searching
+//     no higher than the library root, lists entries: the library is mounted
+//     and the file or its folder was removed.
 //
-// A missing file under an empty or missing folder and root is what an
-// unmounted library looks like, so the local copy stays.
+// An unmounted share leaves its mount point empty or missing, so a missing file
+// under an empty or missing folder keeps the local copy. Stopping at the
+// library root means a parent of several mounts cannot vouch for one of them.
+// Without a known library root only the file's own folder counts.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
@@ -113,40 +123,55 @@ func (r *localArtworkRetention) sidecarGone(source string) bool {
 	if !errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
-	if dirListsEntries(filepath.Dir(path)) {
-		return true
+	dir := filepath.Dir(path)
+	if mounted, ok := r.mounted[dir]; ok {
+		return mounted
 	}
-	for _, root := range r.libraryRoots() {
-		if localImagePathWithinRoots(path, []string{root}) && dirListsEntries(root) {
-			return true
+	mounted := r.nearestFolderListsEntries(dir, r.rootsContaining(path))
+	r.mounted[dir] = mounted
+	return mounted
+}
+
+// nearestFolderListsEntries walks up from dir to the first folder that exists,
+// going no higher than the library roots, and reports whether it lists
+// entries.
+func (r *localArtworkRetention) nearestFolderListsEntries(dir string, roots []string) bool {
+	for {
+		probe := rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
+		if probe.Reachable {
+			return !probe.Empty
+		}
+		if probe.ErrorCode != rootcheck.ErrCodeNotFound || len(roots) == 0 || slices.Contains(roots, dir) {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// rootsContaining returns the item's library roots that hold path.
+func (r *localArtworkRetention) rootsContaining(path string) []string {
+	if !r.rootsLoaded {
+		r.rootsLoaded = true
+		roots, err := r.service.configuredNamingRootsForContent(r.ctx, r.contentID, 0)
+		if err != nil {
+			slog.DebugContext(r.ctx, "metadata: cannot load library roots to check local artwork", "component", "metadata",
+				"content_id", r.contentID, "error", err)
+		}
+		for _, root := range roots {
+			if root = filepath.Clean(strings.TrimSpace(root)); filepath.IsAbs(root) {
+				r.roots = append(r.roots, root)
+			}
 		}
 	}
-	return false
-}
-
-func (r *localArtworkRetention) libraryRoots() []string {
-	if r.rootsLoaded {
-		return r.roots
+	var containing []string
+	for _, root := range r.roots {
+		if localImagePathWithinRoots(path, []string{root}) {
+			containing = append(containing, root)
+		}
 	}
-	r.rootsLoaded = true
-	roots, err := r.service.configuredNamingRootsForContent(r.ctx, r.contentID, 0)
-	if err != nil {
-		slog.DebugContext(r.ctx, "metadata: cannot load library roots to check local artwork", "component", "metadata",
-			"content_id", r.contentID, "error", err)
-		return nil
-	}
-	r.roots = roots
-	return roots
-}
-
-// dirListsEntries reports whether dir can be read and holds at least one
-// entry. An unmounted mount point is typically an empty directory.
-func dirListsEntries(dir string) bool {
-	f, err := os.Open(dir)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-	names, err := f.Readdirnames(1)
-	return err == nil && len(names) > 0
+	return containing
 }

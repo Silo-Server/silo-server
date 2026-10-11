@@ -1093,7 +1093,7 @@ func localImagePathWithinRoots(path string, roots []string) bool {
 
 // readLocalImageFile reads a sidecar image with the same guards as discovery:
 // Lstat rejects symlinked leaves and non-regular files, the opened handle is
-// fstat-re-checked, and reads cap at MaxLocalArtworkBytes. ENOENT/EPERM
+// fstat-re-checked, and reads cap at MaxArtworkSourceBytes. ENOENT/EPERM
 // map to the stable-failure texts matched by isStableProviderImageFailure.
 func readLocalImageFile(path string) ([]byte, error) {
 	classify := func(err error) error {
@@ -1113,8 +1113,8 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if info.Size() > MaxLocalArtworkBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxLocalArtworkBytes, path)
+	if info.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -1135,15 +1135,15 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if stat.Size() > MaxLocalArtworkBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxLocalArtworkBytes, path)
+	if stat.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
-	data, err := io.ReadAll(io.LimitReader(file, MaxLocalArtworkBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, MaxArtworkSourceBytes+1))
 	if err != nil {
 		return nil, classify(err)
 	}
-	if len(data) > MaxLocalArtworkBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxLocalArtworkBytes, path)
+	if len(data) > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("local image read failed: empty file %s", path)

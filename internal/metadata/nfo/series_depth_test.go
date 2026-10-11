@@ -358,6 +358,28 @@ func TestGetSeasons_FlatLayoutKeepsSeriesPosterOffSeasons(t *testing.T) {
 	}
 }
 
+// Season folder art does not depend on the series root being known: a show
+// whose root is not a validated sidecar location still finds it.
+func TestGetSeasons_SeasonFolderPosterWithoutSeriesRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s1 := filepath.Join(root, "Season 01")
+	writeTestFile(t, filepath.Join(s1, "Cover.jpg"), "img")
+
+	p := NewProvider()
+	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+		ContentType:          "series",
+		SeasonDirectoryPaths: map[int][]string{1: {s1}},
+	})
+	if err != nil {
+		t.Fatalf("GetSeasons: %v", err)
+	}
+	if len(seasons) != 1 || sidecarPath(t, seasons[0].PosterPath) != filepath.Join(s1, "Cover.jpg") {
+		t.Fatalf("seasons = %#v, want Season 01/Cover.jpg", seasons)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Provider: GetEpisodes
 // ---------------------------------------------------------------------------

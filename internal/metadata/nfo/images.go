@@ -7,7 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
@@ -24,10 +27,6 @@ var localArtworkExtensions = []string{".jpg", ".jpeg", ".png", ".webp", ".tbn", 
 // search paths, which upstream code restricts to single-content observed roots
 // (canUseObservedRootForDirectorySidecars), so one folder.jpg in a flat
 // multi-movie folder attaches to none of them.
-//
-// A series has no media file of its own: its request lists every episode file,
-// so basename art such as "S01E01-poster.jpg" belongs to an episode and never
-// becomes series art.
 func itemArtworkNames(contentType string, imageType metadata.ImageType) (suffixes, names []string) {
 	switch imageType {
 	case metadata.ImagePoster:
@@ -46,9 +45,6 @@ func itemArtworkNames(contentType string, imageType metadata.ImageType) (suffixe
 		suffixes = []string{"-logo", "-clearlogo"}
 		names = []string{"logo", "clearlogo"}
 	}
-	if contentType == typeSeries {
-		suffixes = nil
-	}
 	return suffixes, names
 }
 
@@ -60,6 +56,9 @@ func itemArtworkNames(contentType string, imageType metadata.ImageType) (suffixe
 // directly. Local art applies even when no .nfo file is present.
 func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]metadata.RemoteImage, error) {
 	searchDirs := compactNFOPaths(req.PrimarySidecarSearchPaths)
+	// A series has no media file of its own: its request lists every episode
+	// file, so basename art such as "S01E01-poster.jpg" belongs to an episode
+	// and never becomes series art.
 	var mediaFiles []string
 	if req.ContentType != typeSeries {
 		mediaFiles = compactNFOPaths(append([]string{req.RepresentativeFilePath}, req.AllGroupFilePaths...))
@@ -128,36 +127,111 @@ func (f *sidecarFinder) listing(dir string) map[string][]string {
 	if listing, ok := f.listings[dir]; ok {
 		return listing
 	}
-	entries, err := os.ReadDir(dir)
+	listing, err := listDirectory(dir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		slog.WarnContext(f.ctx, "nfo: cannot list folder for sidecar artwork", "component", "metadata",
 			"dir", dir, "error", err)
-	}
-	listing := make(map[string][]string, len(entries))
-	for _, entry := range entries {
-		lower := strings.ToLower(entry.Name())
-		listing[lower] = append(listing[lower], entry.Name())
 	}
 	f.listings[dir] = listing
 	return listing
 }
 
 // find returns the file:// source of the first usable image in dir whose name
-// is name plus a supported extension, ignoring case.
+// is name plus a supported extension, ignoring case. An entry spelled exactly
+// as asked wins over other spellings of the same name.
 func (f *sidecarFinder) find(dir, name string) string {
 	listing := f.listing(dir)
 	if len(listing) == 0 {
 		return ""
 	}
-	lowerName := strings.ToLower(name)
 	for _, ext := range localArtworkExtensions {
-		for _, entry := range listing[lowerName+ext] {
+		exact := name + ext
+		spellings := listing[strings.ToLower(exact)]
+		if slices.Contains(spellings, exact) {
+			if source := f.usableSource(filepath.Join(dir, exact)); source != "" {
+				return source
+			}
+		}
+		for _, entry := range spellings {
+			if entry == exact {
+				continue
+			}
 			if source := f.usableSource(filepath.Join(dir, entry)); source != "" {
 				return source
 			}
 		}
 	}
 	return ""
+}
+
+// Listings of large folders are shared across requests. A folder holding one
+// title is cheap to list for each request, but a flat folder of many movies
+// would otherwise be listed again for every movie in it. A shared listing is
+// used only while the folder's mtime is unchanged (adding, removing or
+// renaming an entry changes it) and for at most sharedListingTTL.
+const (
+	sharedListingMinEntries = 256
+	sharedListingMaxDirs    = 8
+	sharedListingTTL        = time.Minute
+)
+
+type sharedListing struct {
+	modTime time.Time
+	expires time.Time
+	names   map[string][]string
+}
+
+var sharedListings = struct {
+	sync.Mutex
+	dirs map[string]sharedListing
+}{dirs: make(map[string]sharedListing)}
+
+// listDirectory returns dir's entries keyed by lower-cased name, each key's
+// entries sorted so the choice among case variants is stable.
+func listDirectory(dir string) (map[string][]string, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	sharedListings.Lock()
+	cached, ok := sharedListings.dirs[dir]
+	sharedListings.Unlock()
+	if ok && cached.modTime.Equal(info.ModTime()) && now.Before(cached.expires) {
+		return cached.names, nil
+	}
+
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := d.Readdirnames(-1)
+	_ = d.Close()
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string][]string, len(entries))
+	for _, entry := range entries {
+		lower := strings.ToLower(entry)
+		names[lower] = append(names[lower], entry)
+	}
+	for _, spellings := range names {
+		if len(spellings) > 1 {
+			slices.Sort(spellings)
+		}
+	}
+	if len(entries) >= sharedListingMinEntries {
+		sharedListings.Lock()
+		if _, ok := sharedListings.dirs[dir]; !ok && len(sharedListings.dirs) >= sharedListingMaxDirs {
+			for key := range sharedListings.dirs {
+				delete(sharedListings.dirs, key)
+				break
+			}
+		}
+		sharedListings.dirs[dir] = sharedListing{modTime: info.ModTime(), expires: now.Add(sharedListingTTL), names: names}
+		sharedListings.Unlock()
+	}
+	return names, nil
 }
 
 // usableSource returns the fingerprinted source for path, or "" when the file
@@ -180,9 +254,9 @@ func (f *sidecarFinder) usableSource(path string) string {
 		slog.DebugContext(f.ctx, "nfo: skipping sidecar artwork that is not a regular file", attrs...)
 	case info.Size() == 0:
 		slog.DebugContext(f.ctx, "nfo: skipping empty sidecar artwork", attrs...)
-	case info.Size() > metadata.MaxLocalArtworkBytes:
+	case info.Size() > metadata.MaxArtworkSourceBytes:
 		slog.WarnContext(f.ctx, "nfo: skipping sidecar artwork over the size limit",
-			append(attrs, "size_bytes", info.Size(), "limit_bytes", metadata.MaxLocalArtworkBytes)...)
+			append(attrs, "size_bytes", info.Size(), "limit_bytes", metadata.MaxArtworkSourceBytes)...)
 	default:
 		return metadata.LocalImageSourceURL(path, info.Size(), info.ModTime())
 	}

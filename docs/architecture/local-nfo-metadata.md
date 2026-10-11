@@ -70,7 +70,11 @@ library files are never served directly, and API nodes never need filesystem
 access to libraries.
 
 Discovery lists each folder once per request and matches names ignoring case,
-so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems. Names in
+so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems; an entry
+spelled exactly as listed below wins over other spellings. Listings of folders
+with 256 or more entries (a flat folder of many movies) are shared across
+requests for up to a minute while the folder's mtime is unchanged, so such a
+folder is not listed again for every movie in it. Names in
 precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 `.gif` (the formats libvips decodes; `.tbn` is a JPEG):
 
@@ -89,18 +93,20 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   `S01E01-poster.jpg` never becomes series art. Silo stores one backdrop, so
   the first match wins.
 - Generic names attach only in folders that hold a single content group; a
-  shared `folder.jpg` in a flat multi-movie folder applies to none. Season
-  folder names count only in a folder below the series root, so a flat
-  series' own `poster.jpg` is not reused as every season's poster.
+  shared `folder.jpg` in a flat multi-movie folder applies to none. A season
+  folder that is the series root itself (a flat series) is not searched for
+  season names, so the series' own `poster.jpg` is not reused as every
+  season's poster.
 - Files must be regular (symlinked leaves are rejected), non-empty, and at most
-  25 MiB (`metadata.MaxLocalArtworkBytes`, the same cap as provider
-  downloads). Skips an admin can fix (symlink, oversize, unreadable) log at
+  25 MiB (`metadata.MaxArtworkSourceBytes`, which also caps provider
+  downloads in `internal/imagecache`). Skips an admin can fix (symlink, oversize, unreadable) log at
   warn level; the rest at debug.
 
 Caching and refresh:
 
-- Sources are recorded as `file://<absolute-logical-path>?v=<size>-<mtimeNs>`
-  in `*_source_path` columns. The fingerprint exists only to change the source
+- Sources are recorded as `file://<absolute-logical-path>?v=<size>-<mtime>`
+  (mtime in whole seconds, so mounts reporting different sub-second precision
+  agree) in `*_source_path` columns. The fingerprint exists only to change the source
   path when a file is replaced under the same name: the changed source
   re-queues the image-cache job (`EnqueueBatch` requeues on a different
   `source_path`), and the processor strips the fingerprint before confining
@@ -130,16 +136,21 @@ sits in the chain.
 - Seasons and episodes: `accumulateSeasonResults`/`accumulateEpisodeResults`
   merge first-provider-wins, except that a local poster or still replaces a
   remote one from an earlier provider (`internal/metadata/local_artwork_precedence.go`).
-- A refresh that does not rediscover cached local art keeps it unless the
-  sidecar is confirmed gone: the file is still on disk but no longer offered
-  (renamed out of the naming rules, replaced by a better match, or local
-  metadata disabled), or the file is missing while its folder or library root
-  lists entries. A missing file under an empty or missing folder and root is
-  what an unmounted library looks like, so the local copy stays.
+- A refresh that does not rediscover a slot's cached local copy (a `local/`
+  key with a `file://` source) keeps it unless the sidecar is confirmed gone:
+  the file is still on disk but no longer offered (renamed out of the naming
+  rules, replaced by a better match, or local metadata disabled), or the file
+  is missing and the nearest existing folder above it, searching no higher
+  than the library root, lists entries. An unmounted share leaves its mount
+  point empty or missing, so the local copy stays; stopping at the library
+  root keeps a parent of several mounts from vouching for one of them.
+  Folder probes go through `internal/rootcheck` with its timeout.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
-  cached base art whose source is local, so a viewer in another language sees
-  the same local art.
+  base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
+  another language sees the same local art. A slot whose local copy is not
+  cached yet still serves its earlier art, which a localized image may
+  replace.
 
 **Deployment constraint:** the host running the metadata image-cache processor
 must mount the media libraries at the same paths as the scanner/metadata

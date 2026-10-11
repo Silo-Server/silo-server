@@ -408,7 +408,7 @@ func TestProcessLocalImageSizeCapMatchesRemoteImages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := f.Truncate(MaxLocalArtworkBytes + 1); err != nil {
+	if err := f.Truncate(MaxArtworkSourceBytes + 1); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	_ = f.Close()
