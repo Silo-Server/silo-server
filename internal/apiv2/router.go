@@ -974,7 +974,7 @@ type HomeDismissalService interface {
 // HomeSectionService is the slice of *handlers.SectionHandler the
 // viewer-facing home reads use.
 type HomeSectionService interface {
-	HomeLayout(ctx context.Context) (handlers.SectionLayoutView, error)
+	HomeLayoutWithItems(ctx context.Context, viewer handlers.SectionViewer, includeItems int) (handlers.HomeLayoutView, error)
 	HomeSections(ctx context.Context, viewer handlers.SectionViewer) (handlers.SectionsView, error)
 	HomeSectionItems(ctx context.Context, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
 }

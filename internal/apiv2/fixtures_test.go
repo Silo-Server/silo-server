@@ -445,7 +445,7 @@ func fixtureCases() []fixtureCase {
 		{name: "get_home_layout_ok", operationID: opGetHomeLayout,
 			scenario: "The home page's section layout for the acting profile, without items.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
-			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SectionLayout"},
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
 		{name: "get_home_layout_profile_header_required", operationID: opGetHomeLayout,
 			scenario: "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: bearer(memberToken),
@@ -1753,7 +1753,24 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCollectionCapabilityFixtureCases()...)
 	cases = append(cases, personalCollectionContainsFixtureCases()...)
 	cases = append(cases, loginSessionFixtureCases()...)
-	return append(cases, adminDownloadStorageFixtureCases()...)
+	cases = append(cases, adminDownloadStorageFixtureCases()...)
+	return append(cases, homeLayoutItemsFixtureCases()...)
+}
+
+// homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
+// first sections, and the include_items bound.
+func homeLayoutItemsFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
+			scenario: "The home layout with the cards of its first section, artwork presigned at the requested size.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&image_size=medium", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
+		{name: "get_home_layout_include_items_out_of_range", operationID: opGetHomeLayout,
+			scenario: "An include_items above the maximum of 4 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=5", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // personalCollectionContainsFixtureCases pin the collection list marked for

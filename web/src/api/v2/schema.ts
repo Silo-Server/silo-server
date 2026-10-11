@@ -8057,7 +8057,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The home page's section layout for the acting profile, without items. */
+    /** The home page's section layout for the acting profile; include_items also answers the cards of the first sections. */
     get: operations["getHomeLayout"];
     put?: never;
     post?: never;
@@ -23659,6 +23659,12 @@ export interface components {
        * @example series:severance
        */
       series_id?: string;
+    };
+    HomeLayout: {
+      /** @description The first include_items sections with their cards, in display order, each exactly as getHomeSectionItems answers it for the same viewer and image_size. A section whose cards failed to load or were not ready in time is absent; fetch it with getHomeSectionItems. Empty, never null */
+      included_sections: components["schemas"]["Section"][];
+      /** @description Empty, never null */
+      sections: components["schemas"]["SectionLayoutEntry"][];
     };
     ImageCapabilities: {
       /** @description Whether the current principal may use the capability */
@@ -103804,7 +103810,12 @@ export interface operations {
   };
   getHomeLayout: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone */
+        include_items?: number;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -103822,7 +103833,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SectionLayout"];
+          "application/json": components["schemas"]["HomeLayout"];
         };
       };
       /** @description Bad Request */

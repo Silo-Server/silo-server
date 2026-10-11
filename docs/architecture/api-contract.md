@@ -1529,8 +1529,16 @@ The pinned web carousel requests a bounded teaser and links to the full collecti
 `getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
 gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
 `RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
-shape as a library page with scope=home, so the layout, section, and card reads reuse
-`SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+shape as a library page with scope=home, so the section and card reads reuse
+`SectionLayoutEntry`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+`getHomeLayout` answers its own `HomeLayout` rather than `SectionLayout`: besides `sections` it
+carries `included_sections`, so the library layout's contract stays unchanged. With
+`include_items=N` (0 to 4, default 0) and an optional `image_size`, the layout also answers the
+first N sections in display order, each identical to its `getHomeSectionItems` answer for the
+same viewer and `image_size` (no cross-row duplicate filter). The rows are fetched in parallel
+under a fixed budget measured from the start of their item fetches; a row that errors or is not
+ready in time is left out rather than failing or delaying the layout, and the client reads it
+from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
