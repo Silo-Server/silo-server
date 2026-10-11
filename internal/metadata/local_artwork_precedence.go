@@ -36,6 +36,23 @@ func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
 	}
 }
 
+// refreshWritesLocalizationOnly reports whether a refresh of req.ContentID in
+// req.Language writes only localization rows (canonicalWriteLanguage). Local
+// sidecar art is language-neutral and belongs to the base rows, so such a
+// refresh sets local season and episode art aside and the localization rows
+// take the provider's localized art, as item localization rows already do.
+func (s *MetadataService) refreshWritesLocalizationOnly(ctx context.Context, req ProcessRequest) bool {
+	if s == nil || s.itemRepo == nil || req.ContentID == "" {
+		return false
+	}
+	item, err := s.itemRepo.GetByID(ctx, req.ContentID)
+	if err != nil || item == nil {
+		return false
+	}
+	_, canonical := canonicalWriteLanguage(req, item, intSliceToFields(item.LockedFields))
+	return !canonical
+}
+
 // localArtworkRetention keeps cached local artwork through a refresh that did
 // not rediscover it. A library mount that is down, or a sidecar that is
 // briefly unreadable, yields no local candidate; without this, rated remote

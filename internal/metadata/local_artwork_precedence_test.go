@@ -288,3 +288,94 @@ func TestLocalArtworkRetentionKeepsArtInUnreadableFolder(t *testing.T) {
 		t.Fatal("an unreadable folder must keep the cached local copy")
 	}
 }
+
+// seasonArtProvider is a series provider that answers with fixed seasons.
+type seasonArtProvider struct {
+	slug     string
+	metadata *MetadataResult
+	seasons  []SeasonResult
+}
+
+func (p *seasonArtProvider) Slug() string       { return p.slug }
+func (p *seasonArtProvider) Name() string       { return p.slug }
+func (p *seasonArtProvider) ForTypes() []string { return []string{"series"} }
+
+func (p *seasonArtProvider) GetMetadata(context.Context, MetadataRequest) (*MetadataResult, error) {
+	if p.metadata == nil {
+		return &MetadataResult{}, nil
+	}
+	cp := *p.metadata
+	return &cp, nil
+}
+
+func (p *seasonArtProvider) GetSeasons(context.Context, SeasonsRequest) ([]SeasonResult, error) {
+	return append([]SeasonResult(nil), p.seasons...), nil
+}
+
+func (p *seasonArtProvider) GetEpisodes(context.Context, EpisodesRequest) ([]EpisodeResult, error) {
+	return nil, nil
+}
+
+// A refresh in a language other than the series' canonical one writes only
+// localization rows. Local season art belongs to the base row, so it must not
+// displace the provider's localized season poster there; the canonical
+// refresh still puts the local poster first.
+func TestLocalizationRefreshKeepsProviderSeasonPoster(t *testing.T) {
+	const (
+		seriesID    = "series:tvdb:1"
+		seasonID    = "season-1"
+		localPoster = "file:///media/Show/season01-poster.jpg?v=1-1"
+	)
+	h := newTestHarness()
+	ctx := context.Background()
+	seasonRepo := newFakeSeasonRepo()
+	localizations := newFakeSeasonLocalizationRepo()
+	h.service.seasonRepo = seasonRepo
+	h.service.episodeRepo = newFakeEpisodeRepo()
+	h.service.seasonLocalizationRepo = localizations
+	h.service.SetAutoCacheImages(true)
+	h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set(seriesID, &models.MediaItemProviderID{ContentID: seriesID, ItemType: "series", Provider: "tvdb", ProviderID: "1"})
+	h.service.providerIDRepo = providerRepo
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: seriesID, Type: "series", Title: "Show", Status: "matched", TvdbID: "1",
+		DefaultMetadataLanguage: "en",
+		Studios:                 []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+		ContentID: seasonID, SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1",
+		PosterPath: "tvdb/series/1/seasons/1/poster/original.webp", PosterSourcePath: "tvdb://en-season-1.jpg",
+	}
+
+	refresh := func(language, remotePoster string) {
+		t.Helper()
+		remote := &seasonArtProvider{
+			slug:     "tvdb",
+			metadata: &MetadataResult{HasMetadata: true, Title: "Show"},
+			seasons:  []SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: remotePoster}},
+		}
+		local := &seasonArtProvider{slug: "local-art", seasons: []SeasonResult{{SeasonNumber: 1, PosterPath: localPoster}}}
+		if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+			ContentID: seriesID, Mode: ModeManualRefresh, Language: language,
+		}, []Provider{remote, local}); err != nil {
+			t.Fatalf("%s refresh: %v", language, err)
+		}
+	}
+
+	refresh("fr", "tvdb://fr-season-1.jpg")
+	loc := localizations.localizations[seasonLocalizationKey(seasonID, "fr")]
+	if loc == nil || loc.PosterSourcePath != "tvdb://fr-season-1.jpg" {
+		t.Fatalf("fr season localization = %+v, want the provider's French poster", loc)
+	}
+	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].PosterSourcePath; got != "tvdb://en-season-1.jpg" {
+		t.Fatalf("a localization refresh changed the base season poster source to %q", got)
+	}
+
+	refresh("en", "tvdb://en-season-1.jpg")
+	if got := seasonRepo.seasons[seasonKey(seriesID, 1)].PosterSourcePath; got != localPoster {
+		t.Fatalf("canonical refresh: base season poster source = %q, want the local poster", got)
+	}
+}

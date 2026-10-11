@@ -1969,6 +1969,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err != nil {
 			return nil, err
 		}
+		localizationOnly := s.refreshWritesLocalizationOnly(ctx, req)
 		seasonResults := make(map[int]*SeasonResult)
 		for _, p := range seasonChain {
 			ep, ok := p.(EpisodeProvider)
@@ -2000,7 +2001,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					"provider", p.Slug(), "error", err)
 				continue
 			}
-			if !s.localArtworkUsable() {
+			if !s.localArtworkUsable() || localizationOnly {
 				dropLocalSeasonArtwork(seasons)
 			}
 			accumulateSeasonResults(seasonResults, seasons)
@@ -2057,7 +2058,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						continue
 					}
-					if !s.localArtworkUsable() {
+					if !s.localArtworkUsable() || localizationOnly {
 						dropLocalEpisodeArtwork(episodes)
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
@@ -2377,6 +2378,33 @@ func refreshFollowUpContentID(reqContentID string, result *ProcessResult) string
 	return reqContentID
 }
 
+// canonicalWriteLanguage returns the language an item's base row carries after
+// a refresh in req.Language, and whether the refresh writes the base row at
+// all; otherwise it writes only localization rows.
+//
+// Adoption restamps default_metadata_language to req.Language while the merge
+// rewrites the language-bearing text (title, overview). Field locks win over
+// adoption: if BOTH are locked, nothing would actually be rewritten, and
+// restamping would permanently mislabel the old-language text as the new
+// language (the quick-refresh mismatch predicate would never flag the item
+// again). Fall back to the non-adopting behavior in that case — keep the
+// existing stamp and let the fetch route to the localization tables like any
+// other non-canonical refresh.
+func canonicalWriteLanguage(req ProcessRequest, existing *models.MediaItem, locked []MetadataField) (string, bool) {
+	adoptLanguage := req.AdoptLanguage
+	if adoptLanguage && isFieldLocked(locked, FieldName) && isFieldLocked(locked, FieldOverview) {
+		adoptLanguage = false
+	}
+	canonicalLanguage := strings.TrimSpace(req.Language)
+	if !adoptLanguage && existing != nil && strings.TrimSpace(existing.DefaultMetadataLanguage) != "" {
+		canonicalLanguage = strings.TrimSpace(existing.DefaultMetadataLanguage)
+	}
+	if canonicalLanguage == "" {
+		canonicalLanguage = "en"
+	}
+	return canonicalLanguage, existing == nil || strings.EqualFold(req.Language, canonicalLanguage)
+}
+
 // mergeAndPersist handles the final merge into existing item and DB persistence.
 func (s *MetadataService) mergeAndPersist(
 	ctx context.Context,
@@ -2549,27 +2577,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
-	// Adoption restamps default_metadata_language to req.Language while the
-	// merge below rewrites the language-bearing text (title, overview). Field
-	// locks win over adoption: if BOTH are locked, nothing would actually be
-	// rewritten, and restamping would permanently mislabel the old-language
-	// text as the new language (the quick-refresh mismatch predicate would
-	// never flag the item again). Fall back to the non-adopting behavior in
-	// that case — keep the existing stamp and let the fetch route to the
-	// localization tables like any other non-canonical refresh.
-	adoptLanguage := req.AdoptLanguage
-	if adoptLanguage && isFieldLocked(locked, FieldName) && isFieldLocked(locked, FieldOverview) {
-		adoptLanguage = false
-	}
-
-	canonicalLanguage := strings.TrimSpace(req.Language)
-	if !adoptLanguage && existingItem != nil && strings.TrimSpace(existingItem.DefaultMetadataLanguage) != "" {
-		canonicalLanguage = strings.TrimSpace(existingItem.DefaultMetadataLanguage)
-	}
-	if canonicalLanguage == "" {
-		canonicalLanguage = "en"
-	}
-	isCanonicalWrite := existingItem == nil || strings.EqualFold(req.Language, canonicalLanguage)
+	canonicalLanguage, isCanonicalWrite := canonicalWriteLanguage(req, existingItem, locked)
 
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
