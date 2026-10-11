@@ -79,13 +79,14 @@ function ActivateDeviceRequest() {
   const loginHref = `/login?redirect=${encodeURIComponent(redirectTarget)}`;
 
   // keepOnError leaves the last known details on screen when a refresh
-  // fails, for the reloads after a decision and while watching.
+  // fails, for the reloads after a decision and while watching. Returns the
+  // details it loaded, or null.
   const loadDetails = useCallback(
-    async (keepOnError = false) => {
+    async (keepOnError = false): Promise<DeviceLoginDetails | null> => {
       if (!token && !code) {
         setDetails(null);
         setLoadError(null);
-        return;
+        return null;
       }
       try {
         const result = await v2("GET /api/v2/auth/device", {
@@ -93,14 +94,16 @@ function ActivateDeviceRequest() {
         });
         setDetails(result);
         setLoadError(null);
+        return result;
       } catch (error) {
         if (keepOnError) {
-          return;
+          return null;
         }
         setDetails(null);
         setLoadError(
           error instanceof V2ProblemError && error.status === 404 ? "not_found" : "failed",
         );
+        return null;
       }
     },
     [code, token],
@@ -140,6 +143,9 @@ function ActivateDeviceRequest() {
   async function handleDecision(action: "approve" | "deny") {
     setActing(true);
     setActionError(null);
+    const failure =
+      action === "approve" ? "Couldn't sign in the TV. Try again." : "Couldn't decline. Try again.";
+    let refused = false;
     try {
       const body = token ? { token } : { code };
       if (action === "approve") {
@@ -151,8 +157,6 @@ function ActivateDeviceRequest() {
         await v2("POST /api/v2/auth/device/deny", { body });
       }
     } catch (error) {
-      // A conflict or gone means the request moved on; the reload shows why.
-      const moved = error instanceof V2ProblemError && [404, 409, 410].includes(error.status);
       if (
         error instanceof V2ProblemError &&
         error.status === 403 &&
@@ -161,15 +165,18 @@ function ActivateDeviceRequest() {
         // Only the account's own login session decides for a TV, never an
         // admin viewing as someone; trying again cannot help.
         setActionError(impersonationText);
-      } else if (!moved) {
-        setActionError(
-          action === "approve"
-            ? "Couldn't sign in the TV. Try again."
-            : "Couldn't decline. Try again.",
-        );
+      } else if (error instanceof V2ProblemError && [404, 409, 410].includes(error.status)) {
+        // Usually the request moved on and the reload shows why. If it is
+        // still pending, the server refused the decision itself.
+        refused = true;
+      } else {
+        setActionError(failure);
       }
     } finally {
-      await loadDetails(true);
+      const current = await loadDetails(true);
+      if (refused && (current === null || current.status === "pending")) {
+        setActionError(failure);
+      }
       setActing(false);
       setFocusResult(true);
     }
@@ -212,6 +219,10 @@ function ActivateDeviceRequest() {
       : null;
   const serverHost = window.location.host;
   const deviceName = details?.device_name || "this device";
+  // This page approves only a TV sign-in. A remote-playback request comes from
+  // a Silo app sending playback to the TV, and that app approves it for its
+  // own profile.
+  const signInRequest = details?.client_purpose === "device_login" && !details.temporary;
   const shownCode = formatDeviceCode(details?.user_code || code);
   const requestedAgo = formatRelativeTime(details?.requested_at);
   const deviceLine = [
@@ -224,15 +235,19 @@ function ActivateDeviceRequest() {
   let resultMessage = "";
   switch (details?.status) {
     case "approved":
-      resultMessage = approvedHere
-        ? "Done. Your TV is signing in."
-        : "This TV was approved and is finishing sign-in.";
-      break;
     case "consumed":
-      resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
+      if (!signInRequest) {
+        resultMessage = "This request was approved in the Silo app.";
+      } else if (details.status === "approved") {
+        resultMessage = approvedHere
+          ? "Done. Your TV is signing in."
+          : "This TV was approved and is finishing sign-in.";
+      } else {
+        resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
+      }
       break;
     case "denied":
-      resultMessage = "This sign-in was declined.";
+      resultMessage = signInRequest ? "This sign-in was declined." : "This request was declined.";
       break;
     case "canceled":
       resultMessage = "This TV stopped waiting. Start again on the TV.";
@@ -298,7 +313,9 @@ function ActivateDeviceRequest() {
           ) : details ? (
             <div className="space-y-5">
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Sign in {deviceName}?</h2>
+                <h2 className="text-lg font-semibold">
+                  {signInRequest ? `Sign in ${deviceName}?` : `Play on ${deviceName}?`}
+                </h2>
                 {deviceLine ? <p className="text-muted-foreground text-sm">{deviceLine}</p> : null}
               </div>
 
@@ -323,7 +340,35 @@ function ActivateDeviceRequest() {
               ) : null}
 
               {details.status === "pending" ? (
-                !user ? (
+                !signInRequest ? (
+                  <div className="space-y-4">
+                    <p className="text-sm">
+                      This request comes from the Silo app that sent playback to this TV. Approve it
+                      in that app.
+                    </p>
+                    <p className="text-muted-foreground text-sm">
+                      The TV plays with the profile chosen in the app instead of signing in, so this
+                      page can&apos;t approve it.
+                    </p>
+                    {user && !isImpersonating ? (
+                      <>
+                        {actionError ? (
+                          <p className="text-destructive text-sm" role="alert">
+                            {actionError}
+                          </p>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          disabled={acting}
+                          onClick={() => void handleDecision("deny")}
+                        >
+                          Not now
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : !user ? (
                   <div className="space-y-3">
                     <p className="text-sm">Sign in to {serverName} to approve this TV.</p>
                     {appLink ? (
