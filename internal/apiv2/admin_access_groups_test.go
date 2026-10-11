@@ -126,6 +126,31 @@ func TestAdminAccessGroupProfileLimit(t *testing.T) {
 	}
 }
 
+// Clients detect profile limits on groups and accounts through the admin
+// users capabilities, as older servers reject max_profiles on a group.
+func TestAdminAccountCapabilitiesAdvertiseProfileLimits(t *testing.T) {
+	read := func(deps Dependencies) any {
+		t.Helper()
+		reply := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/users/capabilities", "", actingRequestAdmin)
+		if reply.Code != http.StatusOK {
+			t.Fatalf("%d %s", reply.Code, reply.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(reply.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body["profile_limits"]
+	}
+	deps := requestDeps(fixtureRequests())
+	if got := read(deps); got != false {
+		t.Errorf("without access groups: profile_limits = %v, want false", got)
+	}
+	deps.AdminAccessGroups = fixtureAdminAccessGroups()
+	if got := read(deps); got != true {
+		t.Errorf("with access groups: profile_limits = %v, want true", got)
+	}
+}
+
 func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
 	f := fixtureAdminAccessGroups()
 	deps := requestDeps(fixtureRequests())

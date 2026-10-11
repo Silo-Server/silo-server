@@ -1187,6 +1187,10 @@
             "description": "Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override",
             "type": "boolean"
           },
+          "profile_limits": {
+            "description": "Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit",
+            "type": "boolean"
+          },
           "profile_sections": {
             "description": "Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout",
             "type": "boolean"
@@ -1220,6 +1224,7 @@
           "default_profile",
           "exact_identity_filter",
           "access_groups",
+          "profile_limits",
           "password_reset_link",
           "password_reset_email",
           "ownership_transfer",

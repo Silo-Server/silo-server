@@ -57,6 +57,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	DefaultProfile       bool `json:"default_profile"`
 	ExactIdentityFilter  bool `json:"exact_identity_filter"`
 	AccessGroups         bool `json:"access_groups"`
+	ProfileLimits        bool `json:"profile_limits" doc:"Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit"`
 	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
 	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
@@ -248,6 +249,7 @@ func registerAdminAccounts(reg *Registry) {
 			out.Body.OwnershipTransfer = out.Body.Available
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
+		out.Body.ProfileLimits = out.Body.AccessGroups
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
 		out.Body.AccountDevices = reg.deps.AdminAccountDevices != nil
 		out.Body.LoginSessions = reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable()
