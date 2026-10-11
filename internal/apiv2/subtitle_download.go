@@ -29,7 +29,7 @@ type SubtitleDownloadResult struct {
 type SubtitleDownloadOutput struct{ Body SubtitleDownloadResult }
 
 func registerSubtitleDownloads(reg *Registry) {
-	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/download", "downloadSubtitle", "subtitles", "Download the selected provider result for an accessible file. Send once: content deduplication does not replay an upstream provider request or recover an uncertain response."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/download", "downloadSubtitle", "subtitles", "Download the selected provider result for an accessible file. Send once: content deduplication does not replay an upstream provider request or recover an uncertain response."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	Register(reg, op, func(ctx context.Context, in *SubtitleDownloadInput) (*SubtitleDownloadOutput, error) {
 		id, p := in.Body.MediaFileID.positive("body.media_file_id")
 		if p != nil {

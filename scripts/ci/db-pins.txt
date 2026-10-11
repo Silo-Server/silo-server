@@ -115,6 +115,14 @@
 # variants out of retirement.
 ./internal/catalog TestCollectionCollageReadsKeepActiveVariantsDB
 
+# Personal smart collection collages: a list read serves recorded collages
+# with one statement and never runs the collections' queries.
+./internal/catalog TestPersonalCollectionCollageListReadsSkipSmartQueriesDB
+
+# Shared personal collections: a listing resolves each other owner's access
+# once, and a profile's own collections resolve nobody.
+./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
+
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100
 # and 1000, with one DELETE per sync.
@@ -130,13 +138,27 @@
 # Corrected matches preserve destination IDs and remove rejected source IDs.
 ./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
 
+# A corrected Identify moves a series and its anchored children in one rename.
+./internal/metadata TestIdentify_CorrectedSeriesMovesWithItsChildren
+./internal/metadata TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState
+./internal/metadata TestRenameContentIDsMergesLeftoverAvailability
+
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 ./internal/sections TestNextUpModeStatementBudgetPostgres
 
+# Server collection rows: a cached row costs one revision read, which shows an
+# edit on the next read, and lists what the collection's page lists.
+./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB
+
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
+
+# Subtree file reads bound file_path on the folder path index under a generic
+# plan, and match the same literal paths as a prefix LIKE.
+./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
 
 # Book scans (beta): unchanged files skip without per-file or literary-works
 # queries.
@@ -184,3 +206,30 @@
 ./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
 ./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
 ./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB
+
+# Profile PIN proofs are invalidated by every PIN writer, including older nodes.
+./internal/userstore/pgstore TestPostgresProfilePINRevision
+./internal/userstore/pgstore TestPostgresProfileEditsStillBumpAccountRevision
+./internal/userstore/pgstore TestPostgresRawPINWriteAdvancesPINRevision
+
+# Jellyfin password#PIN sign-ins share the per-profile PIN lockout.
+./internal/jellycompat TestLoginPINAttemptsShareProfileLimitDB
+
+# Log partitions: migration 028 and partman cut the same UTC periods on a
+# server whose TimeZone is not UTC, so no write falls into the default.
+./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
+
+# Search normalization: the number-token function keeps its output and stays
+# inlinable.
+./migrations TestSearchNumberTokenInlinesPostgres
+
+# Indexes left invalid by an interrupted concurrent build are rebuilt without
+# blocking reads or writes on their tables.
+./internal/database TestInvalidIndexRebuildKeepsTablesAvailablePostgres
+
+# Pool connections run with JIT off unless the server, database, role or
+# DATABASE_URL already chose jit.
+./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
+
+# Operational log pages: a cursor prunes the partitions newer than it.
+./internal/opslog TestListCursorPrunesNewerPartitionsDB

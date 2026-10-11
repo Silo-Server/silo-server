@@ -53,7 +53,11 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 				return
 			}
 			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
-			if err != nil || !active {
+			if err != nil {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
+			if !active {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}

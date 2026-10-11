@@ -43,9 +43,9 @@ import { useAdminTaskJobs } from "@/hooks/queries/admin/taskJobs";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { toast } from "sonner";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 import { USER_DATABASE_BACKEND_OPTIONS } from "./databaseSettingOptions";
 import { cleanPath } from "./settingsPathDefaults";
@@ -64,10 +64,11 @@ import {
   type LogRetentionBucketPolicy,
   type LogRetentionBucketRow,
 } from "./logRetentionPolicy";
+import { keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
 
 type SettingsForm = ReturnType<typeof useSettingsForm>;
 
-const REDIS_KEYS = ["redis.url"];
+const REDIS_KEYS = ["redis.url", "redis.db"];
 
 const DATABASE_KEYS = [
   "database.max_connections",
@@ -269,6 +270,9 @@ function RedisGroup({
     if (form.dirtyCount === 0) setEnabledOverride(null);
   }
   const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
+  // URL edits go through the page's secret editors, which drop a keystroke
+  // that arrives while a save is in flight.
+  const urlDraft = { ...form, setValue: secrets.setSecret, resetValue: secrets.keepSaved };
 
   async function handleCheckConnection() {
     try {
@@ -298,11 +302,13 @@ function RedisGroup({
         onChange={(value) => {
           if (value === "true") {
             setEnabledOverride(true);
+            // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
+            form.resetValue("redis.db");
             return;
           }
           setEnabledOverride(false);
-          form.setValue("redis.url", "");
+          stageRedisUrl(form, "");
         }}
         disabled={managedByEnv}
         restartRequired={restartKeys.has("redis.url")}
@@ -317,11 +323,28 @@ function RedisGroup({
             label="Connection URL"
             value={redisUrl}
             configured={configured}
-            onKeep={() => secrets.keepSaved("redis.url")}
-            onChange={(v) => secrets.setSecret("redis.url", v)}
+            onKeep={() => keepSavedRedisUrl(urlDraft)}
+            onChange={(v) => stageRedisUrl(urlDraft, v)}
             hint={managedByEnv ? "Value supplied by REDIS_URL" : "redis://host:6379"}
             disabled={managedByEnv || secrets.disabled}
             restartRequired={restartKeys.has("redis.url")}
+          />
+          {/*
+            The server reports the number in use here while none is saved: the
+            one in the URL, or in REDIS_URL when the environment supplies it.
+          */}
+          <SettingField
+            label="Database number"
+            type="number"
+            description={
+              managedByEnv
+                ? "Set by REDIS_URL"
+                : "Replaces the number in the URL. Installs sharing one Redis each need their own."
+            }
+            value={form.getValue("redis.db")}
+            onChange={(v) => form.setValue("redis.db", v)}
+            disabled={managedByEnv}
+            restartRequired={restartKeys.has("redis.db")}
           />
           {/*
             Env-managed URLs stay checkable: the field is read-only so nothing

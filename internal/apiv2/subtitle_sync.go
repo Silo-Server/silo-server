@@ -180,7 +180,7 @@ func registerSubtitleSync(reg *Registry) {
 		return &SubtitleSyncStatusOutput{Body: SubtitleSyncStatus{Capability: Capability{State: configuredEnabledCapabilityState(available, available)}, AutoSync: auto, External: external}}, nil
 	})
 
-	start := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/stored/{id}/sync", "syncStoredSubtitle", "subtitles", "Align a stored subtitle to its file's audio."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}
+	start := Operation{Operation: humaOp(http.MethodPost, Prefix+"/subtitles/stored/{id}/sync", "syncStoredSubtitle", "subtitles", "Align a stored subtitle to its file's audio."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}
 	start.DefaultStatus = http.StatusAccepted
 	start.Description = "Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access only: the stored bytes never change, and the timing can always be reset. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list."
 	Register(reg, start, func(ctx context.Context, in *StoredSubtitleIDInput) (*SubtitleSyncRequestOutput, error) {
@@ -197,7 +197,7 @@ func registerSubtitleSync(reg *Registry) {
 		return out, nil
 	})
 
-	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/subtitles/stored/{id}/sync", "getStoredSubtitleSync", "subtitles", "Read a stored subtitle's timing and latest sync job, and the validator for setStoredSubtitleTiming. Requires file access."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+	read := Operation{Operation: humaOp(http.MethodGet, Prefix+"/subtitles/stored/{id}/sync", "getStoredSubtitleSync", "subtitles", "Read a stored subtitle's timing and latest sync job, and the validator for setStoredSubtitleTiming. Requires file access."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	Register(reg, read, func(ctx context.Context, in *StoredSubtitleIDInput) (*SubtitleSyncReadOutput, error) {
 		id, access, p := reg.subtitleSyncAccess(ctx, in.ID)
 		if p != nil {
@@ -213,7 +213,7 @@ func registerSubtitleSync(reg *Registry) {
 		return out, nil
 	})
 
-	timing := Operation{Operation: humaOp(http.MethodPut, Prefix+"/subtitles/stored/{id}/timing", "setStoredSubtitleTiming", "subtitles", "Replace a stored subtitle's timing correction."), Class: ClassProfileScoped, ProfileOptional: true, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	timing := Operation{Operation: humaOp(http.MethodPut, Prefix+"/subtitles/stored/{id}/timing", "setStoredSubtitleTiming", "subtitles", "Replace a stored subtitle's timing correction."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	timing.Description = "Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getStoredSubtitleSync, and file access. The stored bytes never change."
 	Register(reg, timing, func(ctx context.Context, in *SubtitleTimingInput) (*SubtitleTimingOutput, error) {
 		id, access, p := reg.subtitleSyncAccess(ctx, in.ID)

@@ -13,6 +13,7 @@ import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useDeleteProfile, useProfiles } from "@/hooks/queries/profiles";
 import { ProfileEditorDialog } from "@/components/profiles/ProfileEditorDialog";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
+import { pinLockoutMessage } from "@/components/profiles/pinLockout";
 import { getProfileToken } from "@/api/client";
 import { buildProfileAccessSummary } from "@/lib/profile-management";
 import { HouseholdStreamsPanel } from "@/components/profiles/HouseholdStreamsPanel";
@@ -223,8 +224,13 @@ export default function ProfilesSettings() {
                 selectProfile(savedProfile, response.profile_token);
                 return;
               }
-            } catch {
-              toast.error("Profile saved, but PIN verification failed");
+            } catch (err) {
+              const lockout = pinLockoutMessage(err);
+              toast.error(
+                lockout
+                  ? `Profile saved. ${lockout}`
+                  : "Profile saved, but PIN verification failed",
+              );
               return;
             }
           }

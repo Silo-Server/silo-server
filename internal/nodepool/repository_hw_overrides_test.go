@@ -282,3 +282,44 @@ func equalStringPtr(a, b *string) bool {
 	}
 	return *a == *b
 }
+
+// Per-node prepared-download storage: a directory and a budget, each set,
+// read back, left alone by unrelated edits, and cleared by its sentinel or a
+// JSON null.
+func TestRepositoryUpdateArtifactStorageOverridesRoundTrip(t *testing.T) {
+	pool := newNodeTestPool(t)
+	ctx := context.Background()
+	repo := NewRepository(pool)
+	node := createTestNode(t, repo, "artifact-storage")
+	if node.DownloadArtifactDirOverride != nil || node.DownloadArtifactMaxBytesOverride != nil {
+		t.Fatalf("new node already carries storage overrides: %+v", node)
+	}
+	dir, budget := "/mnt/downloads", int64(500_000_000_000)
+	updated, err := repo.Update(ctx, node.ID, UpdateNodeInput{DownloadArtifactDirOverride: &dir, DownloadArtifactMaxBytesOverride: &budget})
+	if err != nil {
+		t.Fatalf("set storage overrides: %v", err)
+	}
+	if updated.DownloadArtifactDirOverride == nil || *updated.DownloadArtifactDirOverride != dir ||
+		updated.DownloadArtifactMaxBytesOverride == nil || *updated.DownloadArtifactMaxBytesOverride != budget {
+		t.Fatalf("storage overrides = %v / %v", updated.DownloadArtifactDirOverride, updated.DownloadArtifactMaxBytesOverride)
+	}
+	none := int64(0)
+	if updated, err = repo.Update(ctx, node.ID, UpdateNodeInput{DownloadArtifactMaxBytesOverride: &none}); err != nil || updated.DownloadArtifactMaxBytesOverride == nil || *updated.DownloadArtifactMaxBytesOverride != 0 {
+		t.Fatalf("budget 0 (no budget) = %v (%v)", updated.DownloadArtifactMaxBytesOverride, err)
+	}
+	var input UpdateNodeInput
+	if err := json.Unmarshal([]byte(`{"download_artifact_dir_override":null,"download_artifact_max_bytes_override":null}`), &input); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repo.Update(ctx, node.ID, input)
+	if err != nil {
+		t.Fatalf("clear storage overrides: %v", err)
+	}
+	if cleared.DownloadArtifactDirOverride != nil || cleared.DownloadArtifactMaxBytesOverride != nil {
+		t.Fatalf("null did not restore inheritance: %v / %v", cleared.DownloadArtifactDirOverride, cleared.DownloadArtifactMaxBytesOverride)
+	}
+	relative := "relative/dir"
+	if err := (UpdateNodeInput{DownloadArtifactDirOverride: &relative}).Validate(); !errors.Is(err, ErrInvalidNodeInput) {
+		t.Fatalf("relative directory accepted: %v", err)
+	}
+}

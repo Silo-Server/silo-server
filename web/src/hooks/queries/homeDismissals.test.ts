@@ -173,7 +173,7 @@ describe("home dismissal query hooks", () => {
       itemId: "ep-1",
     });
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Show dropped",
+      "Removed from Continue Watching and Next Up",
       expect.objectContaining({
         action: expect.objectContaining({
           label: "Undo",

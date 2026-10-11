@@ -3,6 +3,9 @@
  * site sends the operation's method, path, and body, and projects the
  * fixture body onto the shape its consumers read.
  */
+// TODO: this file redefines window.location, which is not configurable in VM
+// contexts, so it runs on the threads pool (THREADS_TESTS in vite.config.ts).
+// Make it VM-safe and drop it from that list.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getDeviceLoginOk from "../../../../contracts/api/v2/fixtures/get_device_login_ok.json";

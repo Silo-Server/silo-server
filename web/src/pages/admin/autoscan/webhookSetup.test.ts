@@ -29,8 +29,8 @@ describe("triggersFor", () => {
   // the host ignores is how "I followed the steps" bug reports start.
   it("offers the import triggers the host actually consumes", () => {
     const labels = triggersFor("sonarr").map((t) => t.label);
-    expect(labels).toContain("On Import");
-    expect(labels).toContain("On Upgrade");
+    expect(labels).toContain("On File Import");
+    expect(labels).toContain("On File Upgrade");
     expect(labels).toContain("On Rename");
   });
 
@@ -45,8 +45,8 @@ describe("triggersFor", () => {
 
   it("marks import and upgrade as required, rename as optional", () => {
     const byLabel = new Map(triggersFor("sonarr").map((t) => [t.label, t.required]));
-    expect(byLabel.get("On Import")).toBe(true);
-    expect(byLabel.get("On Upgrade")).toBe(true);
+    expect(byLabel.get("On File Import")).toBe(true);
+    expect(byLabel.get("On File Upgrade")).toBe(true);
     expect(byLabel.get("On Rename")).toBe(false);
   });
 

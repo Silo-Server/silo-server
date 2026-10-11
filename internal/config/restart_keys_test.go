@@ -18,6 +18,7 @@ func TestRestartRequired(t *testing.T) {
 		{"userdb.backend", true},
 		{"s3.public_endpoint", true},
 		{"redis.url", true},
+		{RedisDBSettingKey, true},
 		{"recommendations.enabled", true},
 		// Legacy AI aliases classify like their canonical keys.
 		{"subtitle_ai.max_concurrent_jobs", true},

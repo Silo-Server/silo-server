@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -29,7 +30,7 @@ func (h *MarkersHandler) GetMarkers(ctx context.Context, access catalog.AccessFi
 	if err != nil {
 		return FileMarkersView{}, err
 	}
-	return fileMarkers(populateFileMarkers(ctx, h.MarkerPopulation, file)), nil
+	return h.fileMarkersView(ctx, populateFileMarkers(ctx, h.MarkerPopulation, file)), nil
 }
 
 func (h *MarkersHandler) SetMarkers(ctx context.Context, access catalog.AccessFilter, target MarkerTarget, changes MarkerChanges) (FileMarkersView, error) {
@@ -94,6 +95,9 @@ func markerServiceError(err error) error {
 // applyManualMarkers is shared by the legacy adapter and the typed service.
 // Validate every segment before the one atomic writer call.
 func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.MediaFile, changes MarkerChanges) (FileMarkersView, error) {
+	if err := h.ensureMarkerEditable(ctx, file); err != nil {
+		return FileMarkersView{}, err
+	}
 	if h.Writer == nil {
 		return FileMarkersView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker writing is not configured")
 	}
@@ -136,5 +140,34 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
 	h.maybeContribute(refreshed, sets)
-	return fileMarkers(refreshed), nil
+	return h.fileMarkersView(ctx, refreshed), nil
+}
+
+// v2-only projection; the legacy writer retains its frozen response shape.
+func (h *MarkersHandler) fileMarkersView(ctx context.Context, file *models.MediaFile) FileMarkersView {
+	view := fileMarkers(file)
+	if h.ThumbnailQueuer != nil {
+		h.ThumbnailQueuer.QueueFileIDs(ctx, []int{file.ID})
+	}
+	if h.MarkerImageURLs != nil {
+		view.MarkerPreviews = catalog.BuildMarkerPreviews(ctx, file, h.MarkerImageURLs.ResolveURLs)
+	}
+	return view
+}
+
+func (h *MarkersHandler) ensureMarkerEditable(ctx context.Context, file *models.MediaFile) error {
+	if h.Libraries == nil {
+		return apiError(http.StatusServiceUnavailable, "unavailable", "Marker library access is not configured")
+	}
+	library, err := h.Libraries.GetByID(ctx, file.MediaFolderID)
+	if err != nil {
+		return markerServiceError(err)
+	}
+	if library == nil {
+		return apiError(http.StatusNotFound, "not_found", "Media library not found")
+	}
+	if !librarykind.IsMovie(library.Type) && !librarykind.IsTV(library.Type) && !librarykind.IsMixed(library.Type) {
+		return apiError(http.StatusUnprocessableEntity, "validation_failed", "Markers can only be edited in Movie and Series libraries")
+	}
+	return nil
 }

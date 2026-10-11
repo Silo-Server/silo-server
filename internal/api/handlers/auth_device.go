@@ -180,7 +180,7 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.PollDeviceLogin(r.Context(), req.DeviceCode)
+	result, err := h.PollDeviceLogin(auth.WithClientDevice(r.Context(), r.Header), req.DeviceCode)
 	if err != nil {
 		writeAPIError(w, err)
 		return

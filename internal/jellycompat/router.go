@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -145,6 +146,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
+	playbackHandler.downloads = deps.Downloads
+	playbackHandler.accessFilter = deps.AccessFilterFn
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {
@@ -550,7 +553,12 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build LoginResolver from auth service if not provided
 	if deps.LoginResolver == nil && deps.AuthService != nil && deps.UserStoreProvider != nil && deps.SessionStore != nil {
-		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now)
+		pinAttempts := deps.ProfilePINAttempts
+		if pinAttempts == nil {
+			pinAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
+		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
+			WithPINAttempts(pinAttempts)
 	}
 
 	if deps.Authenticator == nil && deps.SessionStore != nil {

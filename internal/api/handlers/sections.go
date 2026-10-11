@@ -40,7 +40,6 @@ type SectionHandler struct {
 	UserRepo              *auth.UserRepository
 	AccessGroups          access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	DetailSvc             *catalog.DetailService
-	Settings              catalog.SettingsStore
 	CollectionRepo        *catalog.LibraryCollectionRepository
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
 	EbookProgress         EbookReaderProgressLister
@@ -106,6 +105,12 @@ type createSectionRequest struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
+	// ValidateRecipe runs the section type's own config check. Only /api/v2
+	// sets it; the frozen /api/v1 routes keep accepting what they always did.
+	ValidateRecipe bool `json:"-"`
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
+	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
+	V1Rules bool `json:"-"`
 }
 
 type updateSectionRequest struct {
@@ -116,6 +121,10 @@ type updateSectionRequest struct {
 	ItemLimit   *int            `json:"item_limit"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Enabled     *bool           `json:"enabled"`
+	// ValidateRecipe: see createSectionRequest.
+	ValidateRecipe bool `json:"-"`
+	// V1Rules: see createSectionRequest.
+	V1Rules bool `json:"-"`
 }
 
 type reorderSectionsRequest struct {
@@ -165,7 +174,7 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 }
 
 // validateSectionConfig checks config requirements for the given section type.
-func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage, v1Rules bool) (string, bool) {
 	if sectionType == sections.SectionCollection {
 		collectionConfig := sections.ParseCollectionConfig(config)
 		if strings.TrimSpace(collectionConfig.LibraryCollectionID) == "" {
@@ -197,9 +206,29 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		}
 	}
 	if sectionType == sections.SectionCustomFilter || sectionType == sections.SectionGenre || sectionType == sections.SectionRandom || len(config) > 0 {
-		if _, err := sections.ParseQueryDefinition(config); err != nil {
+		def, err := sections.ParseQueryDefinition(config)
+		if err != nil {
 			return err.Error(), false
 		}
+		if v1Rules {
+			if err := catalog.ValidateV1Rules(def); err != nil {
+				return err.Error(), false
+			}
+		}
+	}
+	return "", true
+}
+
+// validateRecipeConfig runs the section type's own recipe check, which bulk
+// create and profile saves also run; validateSectionConfig only checks the
+// keys every section type shares.
+func validateRecipeConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+	rec, ok := recipes.Get(string(sectionType))
+	if !ok {
+		return "", true
+	}
+	if err := rec.Validate(config); err != nil {
+		return err.Error(), false
 	}
 	return "", true
 }
@@ -255,6 +284,7 @@ func (h *SectionHandler) HandleCreateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 
 	resp, err := h.CreateAdminSection(r.Context(), req)
 	if err != nil {
@@ -272,6 +302,7 @@ func (h *SectionHandler) HandleUpdateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.UpdateAdminSection(r.Context(), id, req)
 	if err != nil {
 		writeAPIError(w, adminSectionServiceError(err))
@@ -359,29 +390,31 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge       *int                   `json:"-"`
-	AdvisorySource    string                 `json:"-"`
-	Status            string                 `json:"status"`
-	ShowStatus        string                 `json:"show_status,omitempty"`
-	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64               `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                   `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                   `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                 `json:"original_language,omitempty"`
-	Overview          string                 `json:"overview,omitempty"`
-	PositionSeconds   *float64               `json:"position_seconds,omitempty"`
-	DurationSeconds   *float64               `json:"duration_seconds,omitempty"`
-	ProgressUpdatedAt *string                `json:"progress_updated_at,omitempty"`
-	PosterURL         string                 `json:"poster_url,omitempty"`
-	PosterThumbhash   string                 `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                 `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                 `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                 `json:"logo_url,omitempty"`
-	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges            []string               `json:"badges,omitempty"`
-	ItemSource        string                 `json:"item_source,omitempty"`
-	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent     *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	AdvisoryAge            *int                   `json:"-"`
+	AdvisorySource         string                 `json:"-"`
+	Status                 string                 `json:"status"`
+	ShowStatus             string                 `json:"show_status,omitempty"`
+	RatingIMDB             *float64               `json:"rating_imdb,omitempty"`
+	RatingTMDB             *float64               `json:"rating_tmdb,omitempty"`
+	RatingRTCritic         *int                   `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience       *int                   `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage       string                 `json:"original_language,omitempty"`
+	Overview               string                 `json:"overview,omitempty"`
+	PositionSeconds        *float64               `json:"position_seconds,omitempty"`
+	DurationSeconds        *float64               `json:"duration_seconds,omitempty"`
+	ProgressUpdatedAt      *string                `json:"progress_updated_at,omitempty"`
+	PosterIsEpisodeStill   *bool                  `json:"-"`
+	BackdropIsEpisodeStill *bool                  `json:"-"`
+	PosterURL              string                 `json:"poster_url,omitempty"`
+	PosterThumbhash        string                 `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                 `json:"backdrop_url,omitempty"`
+	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                 `json:"logo_url,omitempty"`
+	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	Badges                 []string               `json:"badges,omitempty"`
+	ItemSource             string                 `json:"item_source,omitempty"`
+	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
 }
 
 type resolvedSectionResponse struct {
@@ -523,6 +556,25 @@ func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, homeSectionItemsResponse{Section: section})
 }
 
+// loadProfileSectionOverrides fails closed so a settings outage cannot restore
+// a hidden row or replace the profile's chosen collection with the server row.
+func (h *SectionHandler) loadProfileSectionOverrides(ctx context.Context, userID int, profileID, scope, libraryID string) ([]sections.ProfileSectionOverride, error) {
+	if h.StoreProvider == nil || profileID == "" {
+		return nil, nil
+	}
+	store, err := h.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "accessing user store for profile sections", "component", "api", "scope", scope, "error", err)
+		return nil, err
+	}
+	overrides, err := store.ListSectionOverrides(ctx, profileID, scope, libraryID)
+	if err != nil {
+		slog.ErrorContext(ctx, "loading profile section overrides", "component", "api", "scope", scope, "error", err)
+		return nil, err
+	}
+	return toSectionOverrides(overrides), nil
+}
+
 func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sections.ResolvedSection, []int, catalog.AccessFilter, string, error) {
 	profileID := apimw.GetProfileID(ctx)
 	userID := apimw.GetUserID(ctx)
@@ -540,13 +592,9 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		}
 	}
 
-	var overrides []sections.ProfileSectionOverride
-	if h.StoreProvider != nil && profileID != "" {
-		store, storeErr := h.StoreProvider.ForUser(ctx, userID)
-		if storeErr == nil {
-			userOverrides, _ := store.ListSectionOverrides(ctx, profileID, "home", "")
-			overrides = toSectionOverrides(userOverrides)
-		}
+	overrides, err := h.loadProfileSectionOverrides(ctx, userID, profileID, adminSectionScopeHome, "")
+	if err != nil {
+		return nil, nil, catalog.AccessFilter{}, profileID, err
 	}
 
 	resolved := sections.Resolve(adminSections, overrides)
@@ -605,14 +653,9 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 		}
 	}
 
-	var overrides []sections.ProfileSectionOverride
-	if h.StoreProvider != nil && profileID != "" {
-		store, storeErr := h.StoreProvider.ForUser(ctx, userID)
-		if storeErr == nil {
-			libStr := strconv.Itoa(libraryID)
-			userOverrides, _ := store.ListSectionOverrides(ctx, profileID, "library", libStr)
-			overrides = toSectionOverrides(userOverrides)
-		}
+	overrides, err := h.loadProfileSectionOverrides(ctx, userID, profileID, adminSectionScopeLibrary, strconv.Itoa(libraryID))
+	if err != nil {
+		return nil, catalog.AccessFilter{}, profileID, err
 	}
 
 	resolved := sections.Resolve(adminSections, overrides)
@@ -687,14 +730,24 @@ type SectionOverridesQuery struct {
 // The addressed library must be visible before reading or changing its
 // profile override set, even when individual section configs name no libraries.
 func (h *SectionHandler) requireOverrideLibrary(ctx context.Context, scope, libraryID string) error {
+	id, err := overrideLibraryID(scope, libraryID)
+	if err != nil || id == 0 {
+		return err
+	}
+	return h.requireViewableLibrary(ctx, id)
+}
+
+// overrideLibraryID is the library a library page's override set names, or
+// 0 for any other page.
+func overrideLibraryID(scope, libraryID string) (int, error) {
 	if scope != "library" {
-		return nil
+		return 0, nil
 	}
 	id, err := strconv.Atoi(libraryID)
 	if err != nil || id <= 0 {
-		return apiError(http.StatusBadRequest, "bad_request", "Library ID is required")
+		return 0, apiError(http.StatusBadRequest, "bad_request", "Library ID is required")
 	}
-	return h.requireViewableLibrary(ctx, id)
+	return id, nil
 }
 
 // ListProfileOverrides lists the profile's saved overrides for one page; the
@@ -705,6 +758,11 @@ func (h *SectionHandler) ListProfileOverrides(ctx context.Context, q SectionOver
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return nil, err
 	}
+	return h.listProfileOverrides(ctx, q)
+}
+
+// listProfileOverrides is ListProfileOverrides after the library check.
+func (h *SectionHandler) listProfileOverrides(ctx context.Context, q SectionOverridesQuery) ([]userstore.SectionOverride, error) {
 	if h.StoreProvider == nil {
 		return []userstore.SectionOverride{}, nil
 	}
@@ -745,23 +803,43 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// adminOnlyRecipeError refuses a new section of an admin-only recipe
+// (Editor's picks) from a profile that is not an admin. The code and message
+// are the frozen v1 ones from when a server setting decided this.
+func adminOnlyRecipeError() *APIError {
+	return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+}
+
+// userAddedRecipe is the recipe a stored user-added override runs, read the
+// way the resolver reads it.
+func userAddedRecipe(o userstore.SectionOverride) string {
+	if o.UserSectionType != "" {
+		return o.UserSectionType
+	}
+	return o.SectionType
+}
+
 // SaveProfileOverrides replaces the profile's override set for one page:
-// the recipe gate on user-added sections (registered recipe, admin-only
-// recipes need the admin role or the allow-custom setting, config validated
-// by the recipe), then the store write. v1 PUT /profile/sections and v2
-// replaceProfileSectionOverrides both call it; a failure is an *APIError
-// carrying the v1 status, code and message.
+// the recipe gate on user-added sections (registered recipe, config
+// validated by the recipe, and a profile that is not an admin may keep but
+// not add a section of an admin-only recipe), then the store write. v1 PUT
+// /profile/sections and v2 replaceProfileSectionOverrides both call it; a
+// failure is an *APIError carrying the v1 status, code and message.
 func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite) error {
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
+	return h.saveProfileOverrides(ctx, q, writes, apimw.IsAdmin(ctx))
+}
+
+// saveProfileOverrides is SaveProfileOverrides after the library check, with
+// the role the recipe gate checks passed in: the caller's for the profile's
+// own routes, the owning account's for an administrator's write.
+func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite, isAdmin bool) error {
 	// Gate: validate user-added overrides before touching the store.
-	allowCustom := false
-	if h.Settings != nil {
-		v, _ := h.Settings.Get(ctx, SectionsAllowProfileCustomSettingKey)
-		allowCustom = v == "true"
-	}
-	isAdmin := apimw.IsAdmin(ctx)
+	// ID -> recipe of the admin-only sections a non-admin sends; each must
+	// already be saved on this page with the same recipe.
+	keptAdminOnly := make(map[string]string)
 
 	type trendingCandidate struct {
 		id     string
@@ -845,8 +923,11 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 		if !ok {
 			return apiError(http.StatusBadRequest, "unknown_recipe", "section_type not registered: "+recipeType)
 		}
-		if rec.Definition().AdminOnly && !isAdmin && !allowCustom {
-			return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+		if rec.Definition().AdminOnly && !isAdmin {
+			if o.ID == "" {
+				return adminOnlyRecipeError()
+			}
+			keptAdminOnly[o.ID] = recipeType
 		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
@@ -885,6 +966,12 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 	}
 	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, retainedSectionIDs); err != nil {
 		return err
+	}
+	for id, recipeType := range keptAdminOnly {
+		old, ok := existingByID[id]
+		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
+			return adminOnlyRecipeError()
+		}
 	}
 	for id, write := range sourceWrites {
 		old, ok := existingByID[id]
@@ -1059,6 +1146,11 @@ func (h *SectionHandler) ResetProfileOverrides(ctx context.Context, q SectionOve
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
+	return h.resetProfileOverrides(ctx, q)
+}
+
+// resetProfileOverrides is ResetProfileOverrides after the library check.
+func (h *SectionHandler) resetProfileOverrides(ctx context.Context, q SectionOverridesQuery) error {
 	if h.StoreProvider == nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "User store not available")
 	}
@@ -1151,6 +1243,12 @@ func (h *SectionHandler) ResolveProfileSectionSettings(ctx context.Context, user
 			return nil, err
 		}
 	}
+	return h.resolveProfileSectionSettings(ctx, userID, profileID, scope, libraryID, filter)
+}
+
+// resolveProfileSectionSettings is ResolveProfileSectionSettings after the
+// library check.
+func (h *SectionHandler) resolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter catalog.AccessFilter) ([]sections.ResolvedSection, error) {
 	adminSections, err := h.repo.ListByScope(ctx, scope, libraryID)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -1193,42 +1291,8 @@ func sectionAllowedByAccess(section sections.ResolvedSection, filter catalog.Acc
 		return true
 	}
 
-	if filter.AllowedLibraryIDs != nil {
-		return intSlicesIntersect(configLibraryIDs, filter.AllowedLibraryIDs)
-	}
-
-	for _, libraryID := range configLibraryIDs {
-		if !intSliceContains(filter.DisabledLibraryIDs, libraryID) {
-			return true
-		}
-	}
-	return false
-}
-
-func intSlicesIntersect(left, right []int) bool {
-	if len(left) == 0 || len(right) == 0 {
-		return false
-	}
-
-	set := make(map[int]struct{}, len(right))
-	for _, value := range right {
-		set[value] = struct{}{}
-	}
-	for _, value := range left {
-		if _, ok := set[value]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func intSliceContains(values []int, target int) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	_, none := filter.LibraryScope(configLibraryIDs)
+	return !none
 }
 
 // applyDiversityFilter removes items from sections whose recipe has
@@ -1645,32 +1709,41 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		ContentID: item.ContentID,
 		// The resolver validated the item's own hint against this profile, so
 		// its answer replaces the unvalidated one carried by the item.
-		PlayContentID:     resolvedPlayContentID,
-		Type:              item.Type,
-		Title:             item.Title,
-		Year:              item.Year,
-		Runtime:           item.Runtime,
-		Genres:            item.Genres,
-		Keywords:          item.Keywords,
-		Studios:           item.Studios,
-		Networks:          item.Networks,
-		ContentRating:     item.ContentRating,
-		AdvisoryAge:       item.AdvisoryAge,
-		AdvisorySource:    item.AdvisorySource,
-		Status:            item.Status,
-		ShowStatus:        item.ShowStatus,
-		RatingIMDB:        item.RatingIMDB,
-		RatingTMDB:        item.RatingTMDB,
-		RatingRTCritic:    item.RatingRTCritic,
-		RatingRTAudience:  item.RatingRTAudience,
-		OriginalLanguage:  item.OriginalLanguage,
-		Overview:          item.Overview,
-		PosterThumbhash:   item.PosterThumbhash,
-		BackdropThumbhash: item.BackdropThumbhash,
-		OverlaySummary:    overlaySummary,
-		UserState:         userState,
+		PlayContentID:          resolvedPlayContentID,
+		Type:                   item.Type,
+		Title:                  item.Title,
+		Year:                   item.Year,
+		Runtime:                item.Runtime,
+		Genres:                 item.Genres,
+		Keywords:               item.Keywords,
+		Studios:                item.Studios,
+		Networks:               item.Networks,
+		ContentRating:          item.ContentRating,
+		AdvisoryAge:            item.AdvisoryAge,
+		AdvisorySource:         item.AdvisorySource,
+		Status:                 item.Status,
+		ShowStatus:             item.ShowStatus,
+		RatingIMDB:             item.RatingIMDB,
+		RatingTMDB:             item.RatingTMDB,
+		RatingRTCritic:         item.RatingRTCritic,
+		RatingRTAudience:       item.RatingRTAudience,
+		OriginalLanguage:       item.OriginalLanguage,
+		Overview:               item.Overview,
+		PosterThumbhash:        item.PosterThumbhash,
+		BackdropThumbhash:      item.BackdropThumbhash,
+		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,
+		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
+		OverlaySummary:         overlaySummary,
+		UserState:              userState,
 	}
 	if meta != nil {
+		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
+			// Items from queries that don't mark provenance compare their
+			// artwork with the episode's still. The episode query marks it on
+			// the item, so a cached item keeps the provenance of its own paths.
+			resp.PosterIsEpisodeStill = new(*meta.EpisodeStillPath != "" && item.PosterPath == *meta.EpisodeStillPath)
+			resp.BackdropIsEpisodeStill = new(*meta.EpisodeStillPath != "" && item.BackdropPath == *meta.EpisodeStillPath)
+		}
 		if meta.SeriesID != nil {
 			resp.SeriesID = *meta.SeriesID
 		}

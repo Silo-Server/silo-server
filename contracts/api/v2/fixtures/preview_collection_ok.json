@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "content_id": "movie:heat-1995",
+      "title": "Heat",
+      "type": "movie",
+      "poster_url": "https://img.example.test/heat.jpg"
+    },
+    {
+      "content_id": "movie:ronin-1998",
+      "title": "Ronin",
+      "type": "movie"
+    }
+  ],
+  "total": 2
+}

@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
 import type { createMemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import adminAccountImpersonate from "../../../contracts/api/v2/fixtures/admin_account_impersonate.json";
 import eventsSocketTicket from "../../../contracts/api/v2/fixtures/events_socket_ticket.json";
@@ -145,6 +145,12 @@ async function boot(server: FakeServer) {
 
 describe("app boot request budget", () => {
   let server: FakeServer;
+
+  // Login is a lazy route. Loading its module first keeps the suspended
+  // route from outlasting settle(), which waits on requests, not imports.
+  beforeAll(async () => {
+    await import("@/pages/Login");
+  });
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });

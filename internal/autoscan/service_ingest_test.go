@@ -181,6 +181,7 @@ func TestIngestChangesSuppressedDuplicates(t *testing.T) {
 	store := webhookTestStore()
 	q := &recordingQueuer{}
 	svc := NewService(store, &fakeProvider{}, passthroughConnRes{}, fakeResolver{}, q, denySuppressor{}, nil)
+	svc.observe = observeUnchangedFile
 
 	result, err := svc.IngestChanges(context.Background(), ChangeIngest{
 		SourceID:          "s1",

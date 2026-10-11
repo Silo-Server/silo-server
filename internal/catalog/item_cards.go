@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -112,7 +113,7 @@ func (s *DetailService) GetItemCardsByIDs(ctx context.Context, contentIDs []stri
 			RatingRTAudience:  localized.RatingRTAudience,
 			Studios:           localized.Studios,
 			Networks:          localized.Networks,
-			Countries:         localized.Countries,
+			Countries:         lang.UniqueCountries(localized.Countries),
 			FirstAirDate:      localized.FirstAirDate,
 			LastAirDate:       localized.LastAirDate,
 			ReleaseDate:       localized.ReleaseDate,

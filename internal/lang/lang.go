@@ -212,9 +212,11 @@ func CanonicalCountry(value string) string {
 	return region.String()
 }
 
-// CanonicalCountries returns a copy of values with each entry canonicalized
-// and empties dropped. Preserves nil so callers can keep the SQL NULL
-// distinction from an empty array.
+// CanonicalCountries returns a copy of values with each entry canonicalized,
+// empties dropped, and repeats removed (first occurrence wins). Providers
+// spell the same country differently (TMDB "US", TVDB "usa"), so two codes
+// that differ before canonicalization can collapse to one. Preserves nil so
+// callers can keep the SQL NULL distinction from an empty array.
 func CanonicalCountries(values []string) []string {
 	if values == nil {
 		return nil
@@ -225,6 +227,26 @@ func CanonicalCountries(values []string) []string {
 		if c != "" {
 			out = append(out, c)
 		}
+	}
+	return UniqueCountries(out)
+}
+
+// UniqueCountries returns values with exact repeats removed, keeping the
+// first occurrence's position. It does not canonicalize, so read paths can
+// clean rows stored with duplicate codes without rewriting values an admin
+// entered by hand. Preserves nil.
+func UniqueCountries(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
 	}
 	return out
 }

@@ -304,7 +304,10 @@ export default function Home() {
             <p className="text-muted-foreground text-sm">
               Your home screen is empty. Customize it by adding sections to display your media.
             </p>
-            <Link to="/settings/home" className="text-primary text-sm font-medium hover:underline">
+            <Link
+              to="/settings/home-screen"
+              className="text-primary text-sm font-medium hover:underline"
+            >
               Customize Home Screen
             </Link>
           </div>

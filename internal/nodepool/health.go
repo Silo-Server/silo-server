@@ -38,6 +38,9 @@ type healthResponse struct {
 	// Build is the node's own build identity, carried opaquely for the same
 	// reason as the sample: it is display data for the nodes dashboard.
 	Build json.RawMessage `json:"build"`
+	// Artifacts is the node's measurement of its prepared-download directory,
+	// carried opaquely like the sample; the downloads package reads it.
+	Artifacts json.RawMessage `json:"artifacts"`
 	// NetworkAccess is the node's report about the network access provider
 	// plugins running beside it, keyed by provider slug. Unlike the sample it
 	// is decoded here, because stream URL selection routes on it: an overlay
@@ -129,7 +132,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	attribution := trimJSONNull(hr.Attribution)
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
-	if system == nil && gpu == nil && attribution == nil && build == nil {
+	artifacts := trimJSONNull(hr.Artifacts)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
 		return nil
 	}
 	payload := struct {
@@ -138,7 +142,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		Attribution json.RawMessage `json:"attribution,omitempty"`
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
 		Build       json.RawMessage `json:"build,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build}
+		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil

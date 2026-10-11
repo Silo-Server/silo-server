@@ -70,6 +70,10 @@ type EnqueueImageCacheJobInput struct {
 	ImageType         string
 	SeasonNumber      *int
 	EpisodeNumber     *int
+	// RequeueSucceeded runs the job again even when an earlier job for the
+	// same source succeeded. Callers set it when the target holds no cached
+	// copy, for example after an item was rebuilt under the same content ID.
+	RequeueSucceeded bool
 }
 
 type ImageCacheJobRepository struct {
@@ -216,17 +220,29 @@ func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []Enq
 		return 0, nil
 	}
 
+	// The requeue flag is one statement parameter, so inputs that ask for it
+	// go in their own statements.
+	var plain, requeue []EnqueueImageCacheJobInput
+	for _, in := range valid {
+		if requeueSucceeded || in.RequeueSucceeded {
+			requeue = append(requeue, in)
+		} else {
+			plain = append(plain, in)
+		}
+	}
 	total := 0
-	for start := 0; start < len(valid); start += 250 {
-		end := start + 250
-		if end > len(valid) {
-			end = len(valid)
+	for _, group := range []struct {
+		inputs  []EnqueueImageCacheJobInput
+		requeue bool
+	}{{plain, false}, {requeue, true}} {
+		for start := 0; start < len(group.inputs); start += 250 {
+			end := min(start+250, len(group.inputs))
+			affected, err := r.enqueueBatchChunk(ctx, group.inputs[start:end], group.requeue)
+			if err != nil {
+				return total, err
+			}
+			total += affected
 		}
-		affected, err := r.enqueueBatchChunk(ctx, valid[start:end], requeueSucceeded)
-		if err != nil {
-			return total, err
-		}
-		total += affected
 	}
 	return total, nil
 }

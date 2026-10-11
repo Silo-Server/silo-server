@@ -149,6 +149,7 @@
     "available_qualities": [
       {
         "label": "original",
+        "display_name": "Original",
         "height": 1080,
         "bitrate_kbps": 8000,
         "preserves_source": true

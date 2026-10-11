@@ -124,31 +124,23 @@ const staleID = (id: string, title: string) => ({
   last_seen_at: "2026-03-23T21:00:00Z",
 });
 
-// renderPage wraps the page in the providers it needs at runtime: a
+// page wraps AdminLibraries in the providers it needs at runtime: a
 // QueryClientProvider for the (mocked) TanStack hooks, and a MemoryRouter for
 // the <Link>s inside AdminLibraries. Without QueryClientProvider, even fully
 // mocked useQuery hooks throw "No QueryClient set" during render.
-const renderPage = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-};
+const newTestQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-const renderInteractivePage = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-};
+const page = (client: QueryClient) => (
+  <QueryClientProvider client={client}>
+    <MemoryRouter>
+      <AdminLibraries />
+    </MemoryRouter>
+  </QueryClientProvider>
+);
+
+const renderPage = () => renderToStaticMarkup(page(newTestQueryClient()));
+
+const renderInteractivePage = () => render(page(newTestQueryClient()));
 
 // Radix Select opens through pointer capture, which jsdom lacks.
 if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCapture) {
@@ -382,6 +374,29 @@ describe("AdminLibraries", () => {
     expect(ambiguousRootsHeader()).toHaveTextContent("1");
     expect(screen.getByText("/media/movies/Inception (2010)")).toBeInTheDocument();
     expect(screen.queryByText("Failed to load ambiguous roots for this library.")).toBeNull();
+  });
+
+  it("settles while libraries are still loading", () => {
+    // An unstable `[]` fallback re-ran the reorder-state effect on every render
+    // until the libraries arrived, which crashed the embedded Autoscan tab. The
+    // loop runs synchronously inside render, so a regression has to throw here
+    // to fail the test instead of hanging the worker.
+    let calls = 0;
+    mocks.useAdminLibraries.mockImplementation(() => {
+      calls += 1;
+      if (calls > 20) throw new Error("AdminLibraries re-rendered in a loop while loading");
+      return { data: undefined, isLoading: true };
+    });
+    const client = newTestQueryClient();
+    const view = render(page(client));
+    calls = 0;
+    mocks.useAdminLibraries.mockClear();
+
+    // Any unrelated update (another query resolving) re-renders the page once.
+    view.rerender(page(client));
+
+    expect(screen.getByText("Loading libraries...")).toBeInTheDocument();
+    expect(mocks.useAdminLibraries).toHaveBeenCalledTimes(1);
   });
 
   it("queries and styles Ambiguous Roots per selected library", async () => {

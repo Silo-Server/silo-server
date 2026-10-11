@@ -122,8 +122,13 @@ func NewPreparationReader(pool *pgxpool.Pool, profileNames ProfileNamesFunc) *Pr
 // Available reports whether the reader can serve lists.
 func (r *PreparationReader) Available() bool { return r != nil && r.pool != nil }
 
-// The unready predicate matches download_artifacts_unready_idx. A running job
-// whose lease expired is queued again, as the claim query treats it.
+// preparingArtifactPredicate selects rows a preparation is still working
+// toward (or that failed): neither ready nor expired. It matches
+// download_artifacts_unready_idx.
+const preparingArtifactPredicate = `status NOT IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready', 'expired')`
+
+// A running job whose lease expired is queued again, as the claim query
+// treats it.
 const preparationStatesCTE = `WITH listed AS (
 	SELECT a.*,
 	       CASE WHEN a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
@@ -133,7 +138,7 @@ const preparationStatesCTE = `WITH listed AS (
 	            WHEN a.next_retry_at > now() THEN 'retrying'
 	            ELSE 'queued' END AS state
 	FROM download_artifacts a
-	WHERE a.status NOT IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')
+	WHERE a.` + preparingArtifactPredicate + `
 	  AND (a.status <> 'failed' OR a.completed_at >= now() - make_interval(secs => $1))
 )`
 

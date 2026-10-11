@@ -1,77 +1,35 @@
-import { useAdminTaskJobs } from "@/hooks/queries/admin/taskJobs";
-import { v2, V2ProblemError } from "@/api/v2/request";
-import { adminJobFromV2 } from "@/api/v2/libraries";
-import { requiredETag } from "@/api/personalCollections";
 import {
-  fetchAdminCollections,
-  fetchAdminGroups,
-  fetchAdminCollectionSnapshot,
-  adminCreateBody,
-  adminUpdateBody,
-  saveAdminArtwork,
   adminMutationMessage,
-  adminImportBody,
+  fetchAdminCollections,
+  fetchAdminCollectionSnapshot,
   templateApplyBody,
   templateResultFromV2,
 } from "@/api/adminCollections";
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { ApiClientError } from "@/api/client";
-import type {
-  CreateLibraryCollectionRequest,
-  ImportMDBListCollectionRequest,
-  ImportTMDBCollectionRequest,
-  ImportTMDBListCollectionRequest,
-  ImportTraktCollectionRequest,
-  UpdateLibraryCollectionRequest,
-} from "@/api/types";
+import { requiredETag } from "@/api/v2/etag";
+import { adminJobFromV2 } from "@/api/v2/libraries";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import { useAdminTaskJobs } from "@/hooks/queries/admin/taskJobs";
 import type {
   ApplyCollectionTemplateBundleJobRequest,
   ApplyCollectionTemplateBundleRequest,
 } from "@/lib/collectionTemplates";
-import { adminKeys, sectionKeys } from "../keys";
-import { invalidateAdminCollectionQueries } from "../collectionSurfaceRefresh";
+import { SERVER_SCOPE } from "@/lib/collections/scope";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { toast } from "sonner";
 import { runBulkDelete, type BulkDeleteProgress } from "../bulkDelete";
+import { invalidateAdminCollectionQueries } from "../collectionSurfaceRefresh";
+import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
 
-function isLikelyRequestTimeout(error: unknown): boolean {
-  if (error instanceof ApiClientError) {
-    return (
-      error.status === 408 || error.status === 502 || error.status === 503 || error.status === 504
-    );
-  }
-  return error instanceof TypeError;
-}
-
-function applyTemplateBundleErrorMessage(error: unknown): string {
-  if (isLikelyRequestTimeout(error)) {
-    return "The apply request timed out. Silo may still be creating collections; refresh in a minute.";
-  }
-  return error instanceof Error ? error.message : "Failed to apply defaults";
-}
-
-export function useAdminCollectionSnapshot(id?: string) {
-  return useQuery({
-    queryKey: ["admin", "collections", "edit", id],
-    queryFn: () => fetchAdminCollectionSnapshot(id!),
-    enabled: !!id,
-  });
-}
 export function useAdminCollectionCapabilities(enabled = true) {
   return useQuery({
-    queryKey: ["admin", "collections", "capabilities"],
+    queryKey: SERVER_SCOPE.keys.capabilities,
     queryFn: () => v2("GET /api/v2/admin/collections/capabilities"),
     enabled,
     staleTime: Infinity,
   });
-}
-function showArtworkErrors(result: { artworkErrors: string[] }) {
-  if (result.artworkErrors.length)
-    toast.warning("Collection saved, but artwork could not be saved", {
-      description: result.artworkErrors.join(". "),
-    });
 }
 
 export function useAdminCollections(libraryId?: number) {
@@ -83,86 +41,34 @@ export function useAdminCollections(libraryId?: number) {
   });
 }
 
-export function useAdminCollectionGroups(libraryId?: number) {
-  return useQuery({
-    queryKey: adminKeys.collectionGroups(libraryId),
-    queryFn: () => fetchAdminGroups(libraryId!).then((data) => data.groups),
-    staleTime: ADMIN_STALE_TIME,
-    enabled: libraryId !== undefined,
-  });
-}
-
-export function useCreateAdminCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      body,
-      poster,
-      backdrop,
-    }: {
-      body: CreateLibraryCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-    }) => {
-      return v2("POST /api/v2/admin/collections", { body: adminCreateBody(body) }).then((value) =>
-        saveAdminArtwork(value, body, poster, backdrop),
-      );
-    },
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      toast.success("Collection created");
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to save");
-    },
-  });
-}
-
-export function useApplyCollectionTemplateBundle() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      bundleId,
-      body,
-    }: {
-      bundleId: string;
-      body: ApplyCollectionTemplateBundleRequest;
-    }) =>
+/**
+ * A starter pack's dry run: what applying the pack to these libraries would
+ * create, keep and leave out. It never deletes existing collections, and
+ * carries `featured` only when the admin asked for hero banners.
+ */
+export function starterPackDryRunQuery(
+  packId: string,
+  body: Pick<ApplyCollectionTemplateBundleRequest, "library_ids" | "featured">,
+) {
+  return queryOptions({
+    queryKey: adminKeys.starterPackDryRun(packId, body),
+    queryFn: () =>
       v2("POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply", {
-        path: { bundle_id: bundleId },
-        body: templateApplyBody(body),
+        path: { bundle_id: packId },
+        body: templateApplyBody({ ...body, dry_run: true, delete_existing: false }),
       }).then(templateResultFromV2),
-    onSuccess: (result) => {
-      if (!result.dry_run) {
-        const created = result.created.length;
-        const deleted = result.deleted?.length ?? 0;
-        const syncQueued = result.sync_queued?.length ?? 0;
-        const failed = result.failed.length;
-        const deleteFailed = result.delete_failed?.length ?? 0;
-        const failureCount = failed + deleteFailed;
-        if (created > 0 || deleted > 0 || syncQueued > 0) {
-          const message = [
-            deleted > 0 ? `Deleted ${deleted}` : "",
-            created > 0 ? `created ${created}` : "",
-            syncQueued > 0 ? `queued ${syncQueued} syncs` : "",
-            failureCount > 0 ? `${failureCount} failed` : "",
-          ]
-            .filter(Boolean)
-            .join("; ");
-          toast.success(message);
-        }
-        void invalidateAdminCollectionQueries(queryClient);
-        void queryClient.invalidateQueries({ queryKey: sectionKeys.all });
-      }
-    },
-    onError: (error) => {
-      toast.error(applyTemplateBundleErrorMessage(error));
-    },
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/** A collection job, polled every 2 seconds until it ends. */
+export function collectionJobQuery(jobId: string | null) {
+  return queryOptions({
+    queryKey: ["admin", "collection-job", jobId],
+    queryFn: () => v2("GET /api/v2/admin/collection-jobs/{job_id}", { path: { job_id: jobId! } }),
+    enabled: !!jobId,
+    refetchInterval: (query) => (query.state.data?.terminal ? false : 2000),
   });
 }
 
@@ -186,14 +92,13 @@ export function useQueueCollectionTemplateBundleApply() {
       queryClient.setQueryData(["admin", "collection-job", "accepted"], job.id);
       void queryClient.invalidateQueries({ queryKey: adminKeys.jobs("template_bundle_apply") });
       void queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
-      toast.success("Applying collection defaults in the background");
     },
     onError: (error) => {
       if (error instanceof V2ProblemError && error.status === 409) {
-        toast.error("A collection defaults apply is already running");
+        toast.error("A starter pack is already being added. Try again when it finishes.");
         return;
       }
-      toast.error(error instanceof Error ? error.message : "Failed to queue collection defaults");
+      toast.error(error instanceof Error ? error.message : "Couldn't add the starter pack");
     },
   });
 }
@@ -206,13 +111,7 @@ export function useTemplateBundleApplyJobs() {
     staleTime: Infinity,
   });
   const listed = useAdminTaskJobs("template_bundle_apply", 10);
-  const job = useQuery({
-    queryKey: ["admin", "collection-job", accepted.data],
-    queryFn: () =>
-      v2("GET /api/v2/admin/collection-jobs/{job_id}", { path: { job_id: accepted.data! } }),
-    enabled: !!accepted.data,
-    refetchInterval: (query) => (query.state.data?.terminal ? false : 2000),
-  });
+  const job = useQuery(collectionJobQuery(accepted.data));
   const current = job.data
     ? {
         ...adminJobFromV2(job.data),
@@ -231,60 +130,50 @@ export function useTemplateBundleApplyJobs() {
   };
 }
 
-export function useUpdateAdminCollection() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      id,
-      etag,
-      body,
-      poster,
-      backdrop,
-      removeArtwork,
-    }: {
-      id: string;
-      etag: string;
-      body: UpdateLibraryCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-      removeArtwork?: ("poster" | "backdrop")[];
-    }) =>
-      v2("PATCH /api/v2/admin/collections/{id}", {
-        path: { id },
-        headers: { "If-Match": requiredETag(etag) },
-        body: adminUpdateBody(body),
-      }).then((value) => saveAdminArtwork(value, body, poster, backdrop, removeArtwork)),
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      toast.success("Collection saved");
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(adminMutationMessage(error, "Failed to save"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+/**
+ * A list's one-field change. It reads the collection fresh for its ETag and
+ * type, then sends only `collection_type` and `field`, so nothing else on the
+ * collection can be overwritten by a stale list.
+ */
+export async function patchAdminCollectionField(
+  id: string,
+  field: { visibility: "visible" | "hidden" } | { featured: boolean },
+) {
+  const { collection, etag } = await fetchAdminCollectionSnapshot(id);
+  await v2("PATCH /api/v2/admin/collections/{id}", {
+    path: { id },
+    headers: { "If-Match": requiredETag(etag) },
+    body: { collection_type: collection.collection_type, ...field },
   });
 }
 
-export function useDeleteAdminCollection() {
+/** The list's Collections tab switch. */
+export function useSetAdminCollectionVisibility() {
   const queryClient = useQueryClient();
-
   return useMutation({
     retry: false,
-    mutationFn: ({ id, libraryId, etag }: { id: string; libraryId: number; etag: string }) =>
-      v2("DELETE /api/v2/admin/collections/{id}", {
-        path: { id },
-        headers: { "If-Match": requiredETag(etag) },
-      }).then(() => libraryId),
-    onSuccess: (_libraryId) => {
-      toast.success("Collection deleted");
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    mutationFn: ({ id, visible }: { id: string; visible: boolean }) =>
+      patchAdminCollectionField(id, { visibility: visible ? "visible" : "hidden" }),
     onError: (error) => {
-      toast.error(adminMutationMessage(error, "Failed to delete"));
-      void invalidateAdminCollectionQueries(queryClient);
+      toast.error(SERVER_SCOPE.errorMessage(error, "Couldn't change it"));
     },
+    onSettled: () => SERVER_SCOPE.invalidate(queryClient),
+  });
+}
+
+/** Arrange's Pin to the start of its shelf (`featured`). Settles once the lists are read again. */
+export function useSetAdminCollectionPin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      patchAdminCollectionField(id, { featured: pinned }),
+    onError: (error, { pinned }) => {
+      toast.error(
+        SERVER_SCOPE.errorMessage(error, pinned ? "Couldn't pin it" : "Couldn't unpin it"),
+      );
+    },
+    onSettled: () => SERVER_SCOPE.invalidate(queryClient),
   });
 }
 
@@ -312,11 +201,8 @@ export function useDeleteAdminCollections() {
           if (error instanceof V2ProblemError && error.status === 404) {
             return "deleted";
           }
-          if (
-            error instanceof V2ProblemError &&
-            error.status === 409 &&
-            error.problemType === "collection_in_use"
-          ) {
+          // 409 (problem type "conflict"): a row still shows it.
+          if (error instanceof V2ProblemError && error.status === 409) {
             return "kept";
           }
           return "failed";
@@ -349,174 +235,4 @@ export function useDeleteAdminCollections() {
   });
 
   return { ...mutation, progress };
-}
-
-export function useSyncAdminCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({ id, libraryId }: { id: string; libraryId: number }) =>
-      v2("POST /api/v2/admin/collections/{id}/sync", { path: { id } }).then((data) => ({
-        data,
-        libraryId,
-      })),
-    onSuccess: ({ data, libraryId: _libraryId }) => {
-      toast.success(
-        data.status === "warning" ? "Collection synced with warnings" : "Collection synced",
-      );
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Sync failed");
-    },
-  });
-}
-
-export function useImportMDBListCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      body,
-      poster,
-      backdrop,
-    }: {
-      body: ImportMDBListCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-    }) => {
-      return v2("POST /api/v2/admin/collections/import/mdblist", {
-        body: adminImportBody(body),
-      }).then(async (result) => ({
-        ...result,
-        ...(await saveAdminArtwork(result.collection, body, poster, backdrop)),
-      }));
-    },
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      toast.success(
-        result.sync_run?.status === "warning"
-          ? "MDBList imported with warnings"
-          : "MDBList imported",
-      );
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Import failed");
-    },
-  });
-}
-
-export function useImportTMDBCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      body,
-      poster,
-      backdrop,
-    }: {
-      body: ImportTMDBCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-    }) => {
-      return v2("POST /api/v2/admin/collections/import/tmdb", { body: adminImportBody(body) }).then(
-        async (result) => ({
-          ...result,
-          ...(await saveAdminArtwork(result.collection, body, poster, backdrop)),
-        }),
-      );
-    },
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      toast.success(
-        result.sync_run?.status === "warning"
-          ? "TMDB collection imported with warnings"
-          : "TMDB collection imported",
-      );
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Import failed");
-    },
-  });
-}
-
-export function useImportTMDBListCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      body,
-      poster,
-      backdrop,
-    }: {
-      body: ImportTMDBListCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-    }) => {
-      return v2("POST /api/v2/admin/collections/import/tmdb-list", {
-        body: adminImportBody(body),
-      }).then(async (result) => ({
-        ...result,
-        ...(await saveAdminArtwork(result.collection, body, poster, backdrop)),
-      }));
-    },
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      toast.success(
-        result.sync_run?.status === "warning"
-          ? "TMDB list imported with warnings"
-          : "TMDB list imported",
-      );
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Import failed");
-    },
-  });
-}
-
-export function useImportTraktCollection() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      body,
-      poster,
-      backdrop,
-    }: {
-      body: ImportTraktCollectionRequest;
-      poster?: File | null;
-      backdrop?: File | null;
-    }) => {
-      return v2("POST /api/v2/admin/collections/import/trakt", {
-        body: {
-          ...adminImportBody(body),
-          profile_id: body.profile_id === undefined ? undefined : String(body.profile_id),
-        },
-      }).then(async (result) => ({
-        ...result,
-        ...(await saveAdminArtwork(result.collection, body, poster, backdrop)),
-      }));
-    },
-    onSuccess: (result) => {
-      showArtworkErrors(result);
-      const statusMessages: Record<string, string> = {
-        warning: "Trakt collection imported with warnings",
-        failed: "Trakt collection imported but sync failed",
-      };
-      const status = result.sync_run?.status ?? "";
-      toast.success(statusMessages[status] ?? "Trakt collection imported");
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Import failed");
-    },
-  });
 }

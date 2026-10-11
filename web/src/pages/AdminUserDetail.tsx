@@ -13,6 +13,7 @@ import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
+import { LoginSessionsPanel } from "@/components/sessions/LoginSessionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -197,6 +198,13 @@ function AdminUserDetailPage() {
       <div className="page-shell min-w-0 space-y-6 py-4 sm:py-6">
         {actionError && <p role="alert">{actionError}</p>}
         {!available && <p role="status">User administration is unavailable.</p>}
+        {available && manageable && !editor && (
+          <p role="status">
+            Changes to this account are unavailable: the server's response arrived without a strong
+            ETag, which saving requires. A reverse proxy that removes or rewrites the ETag header
+            causes this.
+          </p>
+        )}
         <UserDetailHeader
           user={account}
           groupName={groupName}
@@ -231,7 +239,7 @@ function AdminUserDetailPage() {
               available={available}
             />
           </TabsContent>
-          <TabsContent value="sign-in" className="min-w-0">
+          <TabsContent value="sign-in" className="min-w-0 space-y-6">
             <AdminUserSignIn
               user={account}
               manageable={manageable}
@@ -239,6 +247,9 @@ function AdminUserDetailPage() {
               passwordOpen={passwordOpen}
               onPasswordOpenChange={setPasswordOpen}
             />
+            {capabilities.data?.login_sessions && (
+              <LoginSessionsPanel adminUser={account} manageable={manageable} />
+            )}
           </TabsContent>
           <TabsContent value="activity" className="min-w-0">
             <ActivityTab user={account} />
