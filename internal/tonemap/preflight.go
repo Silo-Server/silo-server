@@ -575,13 +575,7 @@ func inspectPreflightOutput(ctx context.Context, ffprobePath, outputPath string,
 			ColorPrimaries string           `json:"color_primaries"`
 			SideData       []sideDataRecord `json:"side_data_list"`
 		} `json:"streams"`
-		Frames []struct {
-			ColorRange     string           `json:"color_range"`
-			ColorSpace     string           `json:"color_space"`
-			ColorTransfer  string           `json:"color_transfer"`
-			ColorPrimaries string           `json:"color_primaries"`
-			SideData       []sideDataRecord `json:"side_data_list"`
-		} `json:"frames"`
+		Frames []preflightFrame `json:"frames"`
 	}
 	if err := decodeCommandJSON(output, &payload); err != nil || len(payload.Streams) != 1 {
 		return fmt.Errorf("%w: tone-map preflight output metadata unavailable", ErrSourcePreflightRejected)

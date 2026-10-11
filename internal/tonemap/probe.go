@@ -26,7 +26,12 @@ const (
 	// pipeline is fully supported once initialized.
 	nvencProbeCommandTimeout = 30 * time.Second
 	probeNegativeTTL         = 15 * time.Second
-	probeTimeoutSlack        = time.Second
+	// probeUnsettledDolbyVisionTTL retries a Dolby Vision smoke that failed
+	// for a reason other than a refused apply_dovi option. It is longer than
+	// probeNegativeTTL because an RPU path that keeps failing that way would
+	// otherwise rerun the whole device matrix every 15 seconds.
+	probeUnsettledDolbyVisionTTL = 5 * time.Minute
+	probeTimeoutSlack            = time.Second
 	// probeEndpointSlack covers what a capability endpoint spends around the
 	// tone-map matrix itself: one bounded hardware detection walk (30s in
 	// playback.hwAccelWalkTimeout), the transformation registry's three 3s
@@ -113,13 +118,16 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		}
 		probeCtx, cancel := context.WithTimeout(context.Background(), ProbeTotalTimeout(hardwareBackend, hardwareDevice))
 		defer cancel()
-		result, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
+		result, dolbyVisionUnsettled, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
 		if err != nil {
 			return nil, err
 		}
 		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
-		if !probeCapabilitiesComplete(result, hardwareBackend) {
+		switch {
+		case !probeCapabilitiesComplete(result, hardwareBackend):
 			entry.expiresAt = now().Add(probeNegativeTTL)
+		case dolbyVisionUnsettled:
+			entry.expiresAt = now().Add(probeUnsettledDolbyVisionTTL)
 		}
 		probeCache.Lock()
 		probeCache.entries[key] = entry
@@ -151,28 +159,41 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 
 // probeWithRunner preserves deadline and cancellation failures from any
 // bounded FFmpeg command. Ordinary FFmpeg failures still mean the executor is
-// genuinely unsupported and produce a completed empty inventory.
+// genuinely unsupported and produce a completed empty inventory. The Dolby
+// Vision kind is outside that inventory, so its smoke counts as a settled
+// refusal only when FFmpeg rejects the apply_dovi option; any other failure,
+// such as a busy device, is reported as unsettled so the result is retried
+// after probeUnsettledDolbyVisionTTL.
 func probeWithRunner(
 	ctx context.Context,
 	ffmpegPath, hardwareBackend, hardwareDevice string,
 	run CommandRunner,
-) (Capabilities, error) {
+) (Capabilities, bool, error) {
 	var transientErr error
+	dolbyVisionUnsettled := false
 	trackingRunner := func(commandCtx context.Context, name string, args ...string) ([]byte, error) {
 		output, err := run(commandCtx, name, args...)
 		if commandErr := commandCtx.Err(); commandErr != nil {
 			transientErr = errors.Join(transientErr, commandErr)
 		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			transientErr = errors.Join(transientErr, err)
+		} else if err != nil && dolbyVisionSmokeCommand(args) && !hasToken(output, "option 'apply_dovi'") {
+			dolbyVisionUnsettled = true
 		}
 		return output, err
 	}
 	capabilities := ProbeWithRunner(ctx, ffmpegPath, hardwareBackend, hardwareDevice, trackingRunner)
 	transientErr = errors.Join(transientErr, ctx.Err())
 	if transientErr != nil {
-		return nil, transientErr
+		return nil, false, transientErr
 	}
-	return capabilities, nil
+	return capabilities, dolbyVisionUnsettled, nil
+}
+
+// dolbyVisionSmokeCommand reports whether a probe command smoke-tests RPU
+// reshaping, which only the Dolby Vision kind's filter graphs request.
+func dolbyVisionSmokeCommand(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool { return strings.Contains(arg, "apply_dovi=1") })
 }
 
 // probeCacheKey binds reusable capabilities to the resolved FFmpeg binary and

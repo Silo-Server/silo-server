@@ -131,6 +131,7 @@
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestArtifactEnsureQueuedRoundTripsToneMapRecipe
 ./internal/downloads TestSubscriptionQualityPostgres
 ./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
 ./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
