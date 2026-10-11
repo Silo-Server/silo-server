@@ -378,9 +378,12 @@ library sections, which scope the whole row to their libraries.
   row it was opened from; a row they hide keeps its cached title and order.
 - **Rotation.** Reads rotate the main row and the cluster rows daily, after
   filtering and before trimming; Because You Watched, Similar Users, Watch
-  Tonight and the global and default rows stay in rank order. For a window of `limit` items, when the row is longer and `limit`
-  is above 10, the first `min(10, limit/2)` stay, and the other
-  `take = limit − pin` are drawn from the next `2 × take`, the title at tail
+  Tonight and the global and default rows stay in rank order. The served
+  window is 20 items whatever a read's limit, so a page of any limit,
+  Discover and a row's "see all" page agree on its order: a shorter page
+  serves the window's first titles. A row of at most 20 titles keeps its
+  order; in a longer one the first 10 titles stay, and the other
+  `take = 10` are drawn from the next `2 × take`, the title at tail
   index `i` with weight `1/(i+5)`: the draw keeps the `take` largest
   `ln(u)·(i+5)`, with `u` from `sha256(userID|profileID|rowKey|date|itemID)`.
   The draws keep rank order and the titles not drawn follow them, so
@@ -389,7 +392,7 @@ library sections, which scope the whole row to their libraries.
   `YYYY-MM-DD`, so rows change once a day at 00:00 UTC. The draw needs no
   shared state: every node serves the same rotation, whatever its time
   zone. Home and library sections rotate the main and taste-match rows
-  like a 20-item page.
+  the same way.
 - **Titles.** Row titles come from one vocabulary in
   `internal/recommendations/titles.go`: For You, `Because you enjoy
   <label>`, Because You Watched, Profiles Like You Enjoyed, Popular on This

@@ -99,13 +99,13 @@ func rotationUniform(seedKey, day, itemID string) float64 {
 }
 
 // rotatePersonalRows rotates the read's personal rows, the main row and the
-// cluster rows, for a window of served items and the server's current day.
-// Every other row keeps its order.
-func (rr *rowRead) rotatePersonalRows(rows []ForYouRow, served int) []ForYouRow {
+// cluster rows, for a served window of ServedRowSize items and the server's
+// current day. Every other row keeps its order.
+func (rr *rowRead) rotatePersonalRows(rows []ForYouRow) []ForYouRow {
 	date := rr.reader.today()
 	for i := range rows {
 		if key := rows[i].personalKey; key != "" {
-			rows[i].Items = rotateTail(rows[i].Items, served, rotationSeedKey(rr.userID, rr.profileID, key), date)
+			rows[i].Items = rotateTail(rows[i].Items, ServedRowSize, rotationSeedKey(rr.userID, rr.profileID, key), date)
 		}
 	}
 	return rows

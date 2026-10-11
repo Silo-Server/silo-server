@@ -148,14 +148,12 @@ func (r *Reader) signalReader() *SignalReader {
 
 // GetForYouMain returns the first row the recommendations page should display.
 func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	limit = normalizeRecommendationLimit(limit)
-	return r.forYouMain(ctx, userID, profileID, limit, limit, filter)
+	return r.forYouMain(ctx, userID, profileID, normalizeRecommendationLimit(limit), filter)
 }
 
-// forYouMain returns the page's first row, rotated for a window of served
-// items and trimmed to limit.
-func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, served, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, served, filter)
+// forYouMain returns the page's first row trimmed to limit.
+func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +167,7 @@ func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, s
 // GetForYouRows returns the remaining recommendations-page rows after the main row.
 func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, limit, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +182,7 @@ func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string
 // It is GetForYouMain and GetForYouRows in one read.
 func (r *Reader) GetForYouPage(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, limit, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -235,10 +233,9 @@ func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID st
 // scopes the row to its libraries and trims it to its own item limit
 // afterwards, and trimming first would leave a library's row short or empty.
 
-// SectionForYouMain is GetForYouMain's row for a home or library section,
-// rotated like a page of the default size.
+// SectionForYouMain is GetForYouMain's row for a home or library section.
 func (r *Reader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*ForYouRow, error) {
-	return r.forYouMain(ctx, userID, profileID, ServedRowSize, CacheCandidateLimit, filter)
+	return r.forYouMain(ctx, userID, profileID, CacheCandidateLimit, filter)
 }
 
 // SectionForYouFill returns what a library's For You section serves after
@@ -457,7 +454,7 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 		if err != nil {
 			return nil, err
 		}
-		rows = trimRows(read.rotatePersonalRows(rows, ServedRowSize), CacheCandidateLimit)
+		rows = trimRows(read.rotatePersonalRows(rows), CacheCandidateLimit)
 		if len(rows) == 0 {
 			// This cluster's cached items were entirely filtered out (e.g.
 			// access restrictions) — try the next-strongest cluster instead of
@@ -500,17 +497,21 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 // rows by its cold-start level. A profile with no positive title, or no taste
 // profile, is level 0 and gets only the global rows, even when personal rows
 // from an earlier taste profile are still cached. The personal rows are
-// rotated for a window of served items (see rotateTail), and a cluster row
-// whose title a heavier one already has is told apart or hidden (see
-// distinguishClusterRows). The rows are not trimmed.
-func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, served int, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx, false, served)
+// rotated for a served window of ServedRowSize items (see rotateTail), and a
+// cluster row whose title a heavier one already has is told apart or hidden
+// (see distinguishClusterRows). The rows are not trimmed.
+//
+// The served window does not follow the read's limit: a page of any limit,
+// Discover and a row's see-all page then agree on each row's order and on
+// which rows are hidden.
+func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx, false)
 }
 
 // forYouPageRows is getForYouPageRows for this read. With liveDefaults the
 // global rows are the cached Popular row and the live default rows (see
 // defaultRows) rather than the cached Recently Added row.
-func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool, served int) ([]ForYouRow, error) {
+func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]ForYouRow, error) {
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 	if r.personalOff {
 		globalRows, err := rr.globalRows(ctx, liveDefaults)
@@ -559,7 +560,7 @@ func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool, served
 		return nil, err
 	}
 	// A hidden cluster row was built, so it does not count as missing.
-	rows = distinguishClusterRows(rr.rotatePersonalRows(rows, served), clusters, served)
+	rows = distinguishClusterRows(rr.rotatePersonalRows(rows), clusters)
 
 	switch {
 	case missingPersonalized:
@@ -719,7 +720,7 @@ const clusterRepeatJaccard = 0.5
 // has no such genre, or whose cached title its cluster no longer has (the
 // clusters were rebuilt after the row was cached), keeps its title. Other
 // rows, and the order of every row kept, are unchanged.
-func distinguishClusterRows(rows []ForYouRow, clusters []TasteCluster, served int) []ForYouRow {
+func distinguishClusterRows(rows []ForYouRow, clusters []TasteCluster) []ForYouRow {
 	byIndex := make(map[int]TasteCluster, len(clusters))
 	for _, c := range clusters {
 		byIndex[c.ClusterIdx] = c
@@ -742,7 +743,7 @@ func distinguishClusterRows(rows []ForYouRow, clusters []TasteCluster, served in
 	for _, i := range order {
 		same := slices.IndexFunc(kept, func(k int) bool { return rows[k].Label == rows[i].Label })
 		if same >= 0 {
-			if servedJaccard(rows[i].Items, rows[kept[same]].Items, served) > clusterRepeatJaccard {
+			if servedJaccard(rows[i].Items, rows[kept[same]].Items, ServedRowSize) > clusterRepeatJaccard {
 				hidden[i] = true
 				continue
 			}
@@ -796,9 +797,9 @@ func renameClusterRow(row *ForYouRow, cluster TasteCluster, rows []ForYouRow, ke
 // those reads do not show, such as one hidden as a repeat, keeps its cached
 // title and order.
 func (rr *rowRead) asServed(ctx context.Context, row *ForYouRow) error {
-	// The page rows as Discover reads them, a row of ServedRowSize items;
-	// the default rows it adds do not change a personal row.
-	rows, err := rr.forYouPageRows(ctx, false, ServedRowSize)
+	// The page rows as Discover reads them; the default rows it adds do not
+	// change a personal row.
+	rows, err := rr.forYouPageRows(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -942,7 +943,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	read := r.newRowRead(userID, profileID, filter)
 
 	// 1. For-you rows (personalized + cold-start blended, already filtered).
-	forYouRows, err := read.forYouPageRows(ctx, true, limit)
+	forYouRows, err := read.forYouPageRows(ctx, true)
 	if err != nil {
 		return nil, err
 	}

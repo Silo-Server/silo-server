@@ -324,7 +324,7 @@ func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 				},
 			}
 			r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-			rows, err := r.getForYouPageRows(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{})
+			rows, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -361,7 +361,7 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}).WithPersonalRows(false)
 	ctx := t.Context()
 
-	rows, err := r.getForYouPageRows(ctx, 7, "p1", ServedRowSize, catalog.AccessFilter{})
+	rows, err := r.getForYouPageRows(ctx, 7, "p1", catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestForYouPageAsksForMissingRowsOnlyWithPositiveSignals(t *testing.T) {
 			}
 			refresher := &countingReadRefresher{}
 			r := &Reader{repo: repo, refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-			if _, err := r.getForYouPageRows(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{}); err != nil {
+			if _, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{}); err != nil {
 				t.Fatal(err)
 			}
 			if refresher.calls != tc.wantRefresh {
