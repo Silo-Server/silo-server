@@ -143,6 +143,43 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	}
 }
 
+// A clean shutdown removes the output directory and its plan record. The
+// rebuilt session plans again from the verified index, waiting for the check
+// a cold process hasn't run yet, and gets the same plan.
+func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
+	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, verified, nil)
+	first := plannedOpts()
+	first.OutputDir = t.TempDir()
+	original := resolveCopyPlan(first)
+	if original == nil {
+		t.Fatal("no plan with a verified index")
+	}
+
+	// A cold process: the cache has no result yet, and the full check gives
+	// the same index.
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	previous := loadVerifiedKeyframeIndex
+	verifiedLoads := 0
+	loadVerifiedKeyframeIndex = func(string) (keyframes.Index, error) { verifiedLoads++; return verified, nil }
+	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
+
+	rebuilt := plannedOpts()
+	rebuilt.OutputDir = t.TempDir()
+	rebuilt.Reconstructed = true
+	again := resolveCopyPlan(rebuilt)
+	if again == nil || !slices.Equal(again.durations, original.durations) || verifiedLoads != 1 {
+		t.Fatalf("rebuilt plan = %+v after %d verified loads, want the original %+v", again, verifiedLoads, original)
+	}
+
+	// A first start still doesn't wait for the check.
+	fresh := plannedOpts()
+	fresh.OutputDir = t.TempDir()
+	if plan := resolveCopyPlan(fresh); plan != nil || verifiedLoads != 1 {
+		t.Fatalf("a first start planned (%v) or waited for the check (%d loads)", plan != nil, verifiedLoads)
+	}
+}
+
 func TestCopySegmentPlanManifest(t *testing.T) {
 	plan := &copySegmentPlan{durations: []float64{2.6, 5.2, 0.4}}
 	got := string(plan.manifest(plannedOpts(), "segment/", "token=abc"))

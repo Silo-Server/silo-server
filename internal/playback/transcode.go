@@ -58,7 +58,10 @@ type TranscodeOpts struct {
 	// durable because a reconstructed session must keep serving the playlist
 	// the player already has.
 	KeyframePlaylist bool
-	SeekSeconds      float64
+	// Reconstructed marks a session rebuilt from its recipe after its server
+	// or node lost it. It isn't durable: each rebuild sets it.
+	Reconstructed bool
+	SeekSeconds   float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
 	// FFmpeg performs exactly one demuxer seek; this origin keeps response and
