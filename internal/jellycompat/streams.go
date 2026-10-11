@@ -2630,6 +2630,21 @@ func withNegotiatedClientInfo(ctx context.Context, playSession *PlaybackSession)
 	return playback.WithClientInfo(ctx, info)
 }
 
+// fillReconstructedClientInfo labels a recipe card that is about to rebuild a
+// native session. Cards minted before client metadata was recorded (and the
+// direct/remux fallback cards built from scratch) carry none; the current
+// compat request identifies the client, so the reconstructed session keeps its
+// label and JF pill. A card minted from the User-Agent alone, by a binary that
+// didn't yet name the client from PlaybackInfo, still takes the name.
+func fillReconstructedClientInfo(card *playback.RecipeCard, info playback.ClientInfo) {
+	card.IsJellyfinCompat = info.IsCompat
+	if card.ClientName == "" && card.ClientUserAgent == "" {
+		card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
+	} else if card.ClientName == "" && info.Name != "" {
+		card.ClientName, card.ClientVersion = info.Name, info.Version
+	}
+}
+
 func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
 	playSession, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
@@ -2652,15 +2667,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			}
 			if h.tm != nil {
 				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
-				// Cards minted before client metadata was recorded (and the
-				// direct/remux fallback cards built here from scratch) carry
-				// none; the current compat request identifies the client, so
-				// the reconstructed session keeps its label and JF pill.
-				info := playback.ClientInfoFromContext(ctx)
-				card.IsJellyfinCompat = info.IsCompat
-				if card.ClientName == "" && card.ClientUserAgent == "" {
-					card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
-				}
+				fillReconstructedClientInfo(&card, playback.ClientInfoFromContext(ctx))
 				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {

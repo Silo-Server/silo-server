@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -120,6 +121,71 @@ func TestEnsureUpstreamPlaybackNamesClientFromPlaybackInfo(t *testing.T) {
 			}
 			if got.UserAgent != tt.request.UserAgent || !got.IsCompat {
 				t.Fatalf("native session lost the request's user agent or compat flag: %+v", got)
+			}
+		})
+	}
+}
+
+// TestStaticStreamNamesClientFromPlaybackInfo follows one play from
+// PlaybackInfo to the stream request that starts its native session: the
+// stream request sends no MediaBrowser header, so the session takes the name
+// PlaybackInfo recorded.
+func TestStaticStreamNamesClientFromPlaybackInfo(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	handler.deviceProfiles = NewDeviceProfileStore(time.Hour, nil)
+	mgr := &clientInfoRecordingManager{testCompatSessionManager: handler.sessionMgr.(*testCompatSessionManager)}
+	handler.sessionMgr = mgr
+	result := postPlaybackInfoForDevice(t, handler, routeID, "web-device")
+	if len(result.MediaSources) == 0 {
+		t.Fatal("PlaybackInfo returned no media sources")
+	}
+
+	rec := serveStaticStream(handler, routeID,
+		"Static=true&MediaSourceId="+result.MediaSources[0].ID+"&PlaySessionId="+result.PlaySessionID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stream status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if mgr.startCalls != 1 {
+		t.Fatalf("StartSession calls = %d, want 1", mgr.startCalls)
+	}
+	if got := mgr.started; got.Name != "Jellyfin Web" || got.Version != "10.11.6" {
+		t.Fatalf("native session client = %q %q, want Jellyfin Web 10.11.6", got.Name, got.Version)
+	}
+}
+
+func TestFillReconstructedClientInfo(t *testing.T) {
+	const agent = "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/79.0"
+	request := playback.ClientInfo{Name: "Jellyfin Web", Version: "10.11.6", UserAgent: "request-agent", IsCompat: true}
+	tests := []struct {
+		name string
+		card playback.RecipeCard
+		want playback.RecipeCard
+	}{
+		{
+			name: "card with no client metadata",
+			card: playback.RecipeCard{},
+			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: "request-agent", IsJellyfinCompat: true},
+		},
+		{
+			name: "card named from the User-Agent alone",
+			card: playback.RecipeCard{ClientUserAgent: agent},
+			want: playback.RecipeCard{ClientName: "Jellyfin Web", ClientVersion: "10.11.6", ClientUserAgent: agent, IsJellyfinCompat: true},
+		},
+		{
+			name: "card that already names its client",
+			card: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent},
+			want: playback.RecipeCard{ClientName: "Findroid", ClientVersion: "0.15.0", ClientUserAgent: agent, IsJellyfinCompat: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			card := tt.card
+			fillReconstructedClientInfo(&card, request)
+			if card.ClientName != tt.want.ClientName || card.ClientVersion != tt.want.ClientVersion ||
+				card.ClientUserAgent != tt.want.ClientUserAgent || card.IsJellyfinCompat != tt.want.IsJellyfinCompat {
+				t.Fatalf("card client = %q %q %q compat=%v, want %q %q %q compat=%v",
+					card.ClientName, card.ClientVersion, card.ClientUserAgent, card.IsJellyfinCompat,
+					tt.want.ClientName, tt.want.ClientVersion, tt.want.ClientUserAgent, tt.want.IsJellyfinCompat)
 			}
 		})
 	}
