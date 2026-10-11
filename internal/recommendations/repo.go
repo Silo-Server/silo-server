@@ -1419,14 +1419,17 @@ type StaleProfile struct {
 	ProfileID string
 }
 
-// GetStaleProfiles returns profiles where stale_at > updated_at, oldest mark
-// first. A refresh that fails marks its profile again, so a profile that keeps
-// failing moves behind the others instead of taking the whole batch.
+// GetStaleProfiles returns profiles with a stale mark, oldest mark first. A
+// refresh that fails marks its profile again, so a profile that keeps failing
+// moves behind the others instead of taking the whole batch. Only a full
+// refresh clears a mark (ClearStaleAt): the nightly taste job stores the
+// taste vector as of its start but does not rebuild cached rows, so a mark it
+// passed over stays pending although it is older than updated_at.
 func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id
 		FROM   user_taste_profiles
-		WHERE  stale_at IS NOT NULL AND stale_at > updated_at
+		WHERE  stale_at IS NOT NULL
 		ORDER  BY stale_at, user_id, profile_id
 		LIMIT  $1`, limit)
 	if err != nil {

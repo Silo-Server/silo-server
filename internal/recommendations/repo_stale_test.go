@@ -148,6 +148,26 @@ func TestStaleMarkSetMidRefreshSurvivesItsClear(t *testing.T) {
 	}
 }
 
+// The nightly taste job rebuilds only the taste vector, stored as of its
+// start. A mark set before it (an access change, say) still needs the cached
+// rows rebuilt, so it stays pending until a full refresh clears it.
+func TestTasteJobLeavesAPendingMarkForTheSweep(t *testing.T) {
+	p := newStaleTestProfile(t)
+	p.mark()
+	p.upsert(p.now()) // the taste job reaches the profile after the mark
+	if !p.pending() {
+		t.Fatal("the taste job's write hid a pending stale mark")
+	}
+	started := p.now()
+	p.upsert(started)
+	if err := p.repo.ClearStaleAt(context.Background(), p.userID, p.profile, started); err != nil {
+		t.Fatal(err)
+	}
+	if p.pending() {
+		t.Fatal("a full refresh left the mark pending")
+	}
+}
+
 // MarkProfileStale moves a pending mark forward instead of keeping the older
 // one, which a refresh already running could clear.
 func TestMarkProfileStaleAdvancesAPendingMark(t *testing.T) {

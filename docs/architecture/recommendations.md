@@ -124,8 +124,11 @@ A refresh takes a cluster-wide advisory lock for the profile, then records the
 database time it started, stores the taste profile with that time as
 `updated_at`, and clears only stale marks set before it. A mark set during the
 refresh survives, and a failed refresh marks the profile stale again, so the
-stale sweep retries both. The scheduled taste and cache jobs take the same
-lock per profile and skip a profile another server is refreshing. Storing
+stale sweep retries both. The sweep takes every profile with a mark; only a
+full refresh clears one, so a mark the nightly taste job passes over (it stores
+the vector but rebuilds no cached rows) stays pending. The scheduled taste and
+cache jobs take the same lock per profile and skip a profile another server is
+refreshing. Storing
 embeddings marks stale the profiles with signals on those titles (every profile
 when the user store is outside Postgres, where that query cannot see
 favorites, watchlist or progress), so a profile
