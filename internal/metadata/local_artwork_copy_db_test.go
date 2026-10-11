@@ -276,11 +276,12 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 }
 
 // TestLocalArtworkRetriesWithoutLibraryRootDB pins how a claimer that cannot
-// serve a local job records it. A server missing the library root (absent, or
-// an empty mount point) releases the job without counting an attempt and
-// without the week-long stable-failure delay. A file missing under a root the
-// server does see stays a stable failure, and confinement still rejects a
-// symlink escaping the root.
+// serve a local job records it. A server without the file's storage mounted
+// (the library root absent, an empty mount point, or a share nested in a
+// present root) releases the job without counting an attempt and without the
+// week-long stable-failure delay, and waits longer when that repeats. A file
+// missing from a folder the server does see stays a stable failure, and
+// confinement still rejects a symlink escaping the root.
 func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	ctx := context.Background()
@@ -361,9 +362,9 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		assertDeferred(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"))
 	})
 
-	t.Run("file missing under a present root", func(t *testing.T) {
+	t.Run("file missing from a mounted folder", func(t *testing.T) {
 		root := t.TempDir()
-		writeSidecar(t, filepath.Join(root, "Other", "poster.jpg"))
+		writeSidecar(t, filepath.Join(root, "Film", "Film.mkv"))
 		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"), "local image missing")
 	})
 

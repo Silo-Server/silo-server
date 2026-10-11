@@ -395,15 +395,14 @@ Caching and refresh:
   path and roots are resolved, so a legitimately symlinked root stays valid
   while an intermediate directory symlink escaping a root is rejected). When
   the re-check or the read fails, the processor applies the retention rule
-  below to the file's folder, through `internal/rootcheck`: unless the nearest
-  existing folder at or above it, no higher than the library root, lists
-  entries, the storage is not mounted on this server (an empty mount point,
-  also one nested inside a present root, a missing or unreadable folder, or
-  one that does not answer in time). The job then goes back to the queue
-  without counting an attempt, for a server that has the mount: after 10
-  minutes, or an hour when it was last deferred for the same reason, so
-  storage no server mounts any more stays cheap. A manual refresh on such a
-  server reports its artwork as still pending. Otherwise
+  below through `internal/rootcheck`: unless the file's own folder answers and
+  lists entries, the storage is not mounted on this server (a missing folder
+  or an empty mount point, also for a share nested inside a present root, or
+  a folder that cannot be read or does not answer in time). The job then goes
+  back to the queue without counting an attempt, for a server that has the
+  mount: after 10 minutes, or an hour when it was last deferred for the same
+  reason, so storage no server mounts any more stays cheap. A manual refresh
+  on such a server reports its artwork as still pending. Otherwise
   missing/unreadable/out-of-root and
   structurally-unusable (non-regular, over-cap) paths are stable failures with
   a long retry deferral; recovery is refresh-driven — the provider-artwork

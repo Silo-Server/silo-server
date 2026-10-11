@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -144,33 +143,29 @@ func (p *ImageCacheProcessor) waitLocalArtworkCopies() {
 
 // deferLocalJobWithoutStorage releases a local job this server cannot serve
 // because the storage holding its file is not mounted here. It applies the
-// rule a refresh uses before dropping cached local art: the nearest existing
-// folder at or above the file's folder, searching no higher than the library
-// root, must list entries. An unmounted share leaves its mount point empty or
-// missing, also when it is nested inside a root that is present, and a folder
-// that cannot be read or does not answer in time counts as absent too. The
-// job goes back to the queue without counting an attempt, for a server that
-// has the mount. When the folder is there, the failure is about the file and
-// the caller records it as usual.
+// rule a refresh uses before dropping cached local art (sidecarGone): only the
+// file's own folder, answering and listing entries, shows the storage is
+// mounted. An unmounted share leaves that folder missing or its mount point
+// empty, also when the share is nested inside a library root that is present,
+// and an unreadable or unresponsive folder proves nothing either. The job goes
+// back to the queue without counting an attempt, for a server that has the
+// mount. When the folder lists entries, the failure is about the file and the
+// caller records it as usual.
 func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, job *models.MetadataImageCacheJob, path string, roots []string) bool {
 	deferrer, ok := p.jobs.(imageCacheJobDeferrer)
 	if !ok {
 		return false
 	}
-	var containing []string
-	for _, root := range roots {
-		root = filepath.Clean(strings.TrimSpace(root))
-		if localImagePathWithinRoots(path, []string{root}) {
-			containing = append(containing, root)
-		}
-	}
-	// A canceled job must not read as an unresponsive mount; each probe
-	// keeps its own timeout.
-	folders := &localArtworkRetention{ctx: context.WithoutCancel(ctx), probes: make(map[string]rootcheck.Result)}
-	if len(containing) == 0 || folders.nearestFolderListsEntries(filepath.Dir(path), containing) {
+	if !localImagePathWithinRoots(path, roots) {
 		return false
 	}
-	errText := localImageStorageUnavailable + ": " + filepath.Dir(path)
+	// A canceled job must not read as an unresponsive mount; the probe keeps
+	// its own timeout.
+	dir := filepath.Dir(path)
+	if folder := rootcheck.ProbeWithTimeout(context.WithoutCancel(ctx), dir, rootcheck.DefaultProbeTimeout); folder.Reachable && !folder.Empty {
+		return false
+	}
+	errText := localImageStorageUnavailable + ": " + dir
 	writeCtx, cancel := terminalJobContext(ctx)
 	defer cancel()
 	if err := deferrer.DeferClaimed(writeCtx, job.ID, job.LockedBy, errText, imageCacheRootUnavailableRetry, imageCacheRootUnavailableRepeatRetry); err != nil {
