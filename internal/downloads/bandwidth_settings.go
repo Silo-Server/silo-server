@@ -8,8 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// BandwidthRates reads only the two non-secret authoritative settings. Reading
-// each chunk avoids stale config caches or missed pubsub on an active transfer.
+// BandwidthRates reads only the two non-secret authoritative settings. The
+// manager caches the result, so active transfers pick up edits without relying
+// on a pubsub delivery or a request that reloads the service config.
 func BandwidthRates(pool *pgxpool.Pool) func(context.Context) (int64, int64, error) {
 	return func(ctx context.Context) (int64, int64, error) {
 		rows, err := pool.Query(ctx, `SELECT key,value FROM server_settings WHERE key IN ('download.server_bandwidth_mbps','download.user_bandwidth_mbps')`)
