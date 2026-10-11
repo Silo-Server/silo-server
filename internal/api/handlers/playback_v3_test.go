@@ -7074,7 +7074,7 @@ func TestRefreshNodeCapabilitiesDropsReportFetchedBeforeInvalidation(t *testing.
 }
 
 func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
-	probeTimeoutMillis := int64(137000)
+	probeTimeoutMillis := int64(161000)
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ProbeRequestTimeoutMillis: probeTimeoutMillis})
 	}))
@@ -7090,14 +7090,14 @@ func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
 	// The node's own figure is what this path exists to use. It has to exceed
 	// what the cluster setting prices, or the floor below it would be answering
 	// and this would pass without the target node being consulted at all.
-	if cluster := playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device/one"); cluster >= 137*time.Second {
-		t.Fatalf("fixture is inert: the cluster price %s must stay under the node's 137s", cluster)
+	if cluster := playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device/one"); cluster >= 161*time.Second {
+		t.Fatalf("fixture is inert: the cluster price %s must stay under the node's 161s", cluster)
 	}
-	if got, want := handler.remoteToneMapProbeTimeoutV3(remote.URL), 137*time.Second; got != want {
+	if got, want := handler.remoteToneMapProbeTimeoutV3(remote.URL), 161*time.Second; got != want {
 		t.Fatalf("remote probe timeout = %s, want target node budget %s", got, want)
 	}
 	request := transcodenode.TranscodeStartRequest{ToneMapMode: tonemap.ModeHardware}
-	if got, want := handler.remotePlaybackTransportTimeout(remote.URL, request), 137*time.Second+playback.ManifestStartupTimeout; got != want {
+	if got, want := handler.remotePlaybackTransportTimeout(remote.URL, request), 161*time.Second+playback.ManifestStartupTimeout; got != want {
 		t.Fatalf("remote start timeout = %s, want target node budget %s", got, want)
 	}
 

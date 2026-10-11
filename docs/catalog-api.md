@@ -624,6 +624,33 @@ list without fetching the episode first. The season comes from the same query
 that chose the target. The field is absent when there is no play target or the
 target is not an episode; a client that finds it absent fetches the episode as
 before. Cards do not carry it, and the frozen v1 detail does not expose it.
+## Episode spoiler protection
+
+Two profile settings in the settings contract let a viewer hide episode details
+until they start an episode: `catalog.hide_unwatched_episode_images` blurs the
+episode still, and `catalog.hide_unwatched_episode_overviews` hides the episode
+description. Both default to off and roam with the profile.
+
+The server does not change catalog responses for these settings: every episode
+payload keeps its image and overview, so cached catalog data stays shared across
+profiles. Clients apply the settings. An episode counts as unwatched while its
+`user_data` is missing, or `played` is false and it is not in progress
+(`is_in_progress` absent or false and no positive `position_seconds`). Series and season
+artwork and overviews are not affected. Detect support from the settings contract
+capabilities (`manifest_revision` 17 or later).
+
+The v2 API reports image provenance after artwork fallback selection:
+`poster_is_episode_still` and `backdrop_is_episode_still` on catalog cards and
+details, and `still_is_episode_still` on episode rows. `true` identifies an episode
+still; `false` identifies other artwork (or no image). An absent field means the
+source is unknown, including responses from older servers. Protect unknown images
+conservatively when spoiler protection is enabled; older responses cannot guarantee
+that fallback series artwork remains visible. Select the provenance belonging to
+the URL actually displayed, including when falling back from a backdrop to a poster.
+
+`GET /api/v2/images/capabilities` advertises `episode_still_provenance: true`.
+Provenance does not depend on the viewer's spoiler preferences. The frozen v1
+response fields remain unchanged.
 
 ## Collection membership titles
 
@@ -843,7 +870,10 @@ sources the item lacks. Locking the rating field freezes all of them. A
 refresh never removes a source a provider stopped reporting. Identify is the
 exception: it matches the item to a different title, so the sources the new
 match reports replace the stored set, and a source it does not report is
-removed.
+removed. An administrator who clears `rating_imdb`, `rating_tmdb`,
+`rating_rt_critic` or `rating_rt_audience` in a metadata edit also removes the
+item's `imdb`, `tmdb`, `rt_critic` or `rt_audience` source, so the title page
+doesn't show the cleared rating from a plugin's score.
 
 Plugins send them under `ratings.sources` in a metadata item, as
 `{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`

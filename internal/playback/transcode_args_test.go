@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,6 +313,61 @@ func TestValidateToneMapOptsAcceptsVideoToolbox(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("VideoToolbox tone-map recipe rejected: %v", err)
+	}
+}
+
+// TestDolbyVisionBaseGraphsApplyTheRPU verifies that a Profile 5 style base
+// reaches FFmpeg only through filters told to apply its RPU, with or without
+// subtitle burn-in, and that a frozen recipe naming a filter that cannot apply
+// one is refused before FFmpeg starts.
+func TestDolbyVisionBaseGraphsApplyTheRPU(t *testing.T) {
+	revision := tonemap.SourceRevision{MediaFileID: 1, FileSize: 1, FileModifiedUnixNano: 1, FileHash: "hash", ProbeUpdatedUnixNano: 1, StreamSignature: "stream"}
+	tests := []struct {
+		name    string
+		mode    tonemap.Mode
+		hwAccel string
+		filter  string
+		want    string
+	}{
+		{name: "software", mode: tonemap.ModeSoftware, hwAccel: "none", filter: tonemap.SoftwareFilterBT2390, want: "tonemapx=tonemap=bt2390:apply_dovi=1"},
+		{name: "QSV", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, want: "tonemap_opencl=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390:peak=100:desat=0:apply_dovi=1"},
+		{name: "NVENC", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, want: "tonemap_cuda=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=1"},
+	}
+	for _, tt := range tests {
+		for _, burnIn := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s burn-in %t", tt.name, burnIn), func(t *testing.T) {
+				opts := TranscodeOpts{
+					InputPath: "/media/dovi.mkv", OutputDir: t.TempDir(), SourceVideoBitDepth: 10,
+					TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", HWAccel: tt.hwAccel,
+					ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tt.mode,
+					ToneMapSourceKind: tonemap.SourceDolbyVision, ToneMapFilter: tt.filter,
+					ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: revision,
+				}
+				if burnIn {
+					opts.SubtitleBurnIn, opts.SubtitleTrackIndex, opts.SubtitleCodec = true, 0, "subrip"
+				}
+				if err := validateToneMapOpts(opts); err != nil {
+					t.Fatalf("Dolby Vision recipe rejected: %v", err)
+				}
+				joined := strings.Join(buildFFmpegArgs(opts), " ")
+				if !strings.Contains(joined, tt.want) {
+					t.Fatalf("args missing %q: %s", tt.want, joined)
+				}
+				if !strings.Contains(joined, "sidedata=mode=delete:type=DOVI_METADATA") {
+					t.Fatalf("Dolby Vision metadata survives the conversion: %s", joined)
+				}
+			})
+		}
+	}
+
+	err := validateToneMapOpts(TranscodeOpts{
+		TargetCodecVideo: "h264", HWAccel: "vaapi", ToneMapPolicy: tonemap.PolicyHardwareOnly,
+		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourceDolbyVision,
+		ToneMapFilter: tonemap.HardwareFilterVAAPI, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+		ToneMapSourceRevision: revision,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Dolby Vision RPU") {
+		t.Fatalf("VAAPI Dolby Vision recipe error = %v, want refusal", err)
 	}
 }
 

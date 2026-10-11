@@ -223,6 +223,7 @@ type Dependencies struct {
 	AdminCatalogTransfer          AdminCatalogTransferService
 	AdminCatalogSearch            AdminCatalogSearchService
 	AdminSettingsChecks           AdminSettingsCheckService
+	ChatGPT                       ChatGPTService
 	AdminSettingsInspection       AdminSettingsInspectionService
 	AdminResourceSampler          AdminResourceSampler
 	AdminTaskJobs                 AdminTaskJobsService
@@ -1111,7 +1112,7 @@ type CatalogTrailerService interface {
 // MetadataAIService is the slice of *handlers.MetadataAIHandler the
 // capability and on-view translation use.
 type MetadataAIService interface {
-	Status() handlers.MetadataAIStatusView
+	Status(context.Context) handlers.MetadataAIStatusView
 	TranslateOnView(ctx context.Context, filter mediacatalog.AccessFilter, contentID, targetLanguage string, requestedBy *int) (*translation.Job, error)
 }
 

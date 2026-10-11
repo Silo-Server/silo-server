@@ -42,8 +42,9 @@ func TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs(t *testing.T) {
 	}
 }
 
-// TestResolveSourceRejectsDolbyOnlyAndPreflightsAmbiguousMetadata verifies unsafe signals are rejected or checked.
-func TestResolveSourceRejectsDolbyOnlyAndPreflightsAmbiguousMetadata(t *testing.T) {
+// TestResolveSourceClassifiesDolbyOnlyAndPreflightsAmbiguousMetadata verifies
+// that RPU-only bases need an RPU executor and unsafe signals are rejected or checked.
+func TestResolveSourceClassifiesDolbyOnlyAndPreflightsAmbiguousMetadata(t *testing.T) {
 	base := SourceMetadata{
 		DynamicRange: DynamicRangeDolbyVision, DVProfile: 7, DVBLCompatID: 6,
 		DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true, DVRPUPresent: true,
@@ -55,8 +56,21 @@ func TestResolveSourceRejectsDolbyOnlyAndPreflightsAmbiguousMetadata(t *testing.
 		want          SourceKind
 		wantPreflight bool
 	}{
-		{name: "profile 5", mutate: func(source *SourceMetadata) { source.DVProfile = 5 }, want: ""},
-		{name: "explicit id 0", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 0 }, want: ""},
+		{name: "profile 5", mutate: func(source *SourceMetadata) { source.DVProfile = 5; source.DVBLCompatID = 0 }, want: SourceDolbyVision},
+		{name: "profile 5 with untagged color", mutate: func(source *SourceMetadata) {
+			source.DVProfile, source.DVBLCompatID = 5, 0
+			source.ColorRange, source.ColorPrimaries, source.ColorTransfer, source.ColorSpace = "pc", "", "", ""
+		}, want: SourceDolbyVision},
+		{name: "profile 5 without RPU", mutate: func(source *SourceMetadata) {
+			source.DVProfile = 5
+			source.DVBLCompatID = 0
+			source.DVRPUPresent = false
+		}, want: ""},
+		{name: "profile 5 legacy row", mutate: func(source *SourceMetadata) { source.DVProfile = 5; source.DVConfigPresent = false }, want: ""},
+		{name: "explicit id 0", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 0 }, want: SourceDolbyVision, wantPreflight: true},
+		{name: "explicit id 0 without RPU", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 0; source.DVRPUPresent = false }, want: ""},
+		{name: "explicit id 0 with untagged transfer", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 0; source.ColorTransfer = "unknown" }, want: ""},
+		{name: "explicit id 0 with SDR transfer", mutate: func(source *SourceMetadata) { source.DVBLCompatID = 0; source.ColorTransfer = "bt709" }, want: ""},
 		{name: "absent base layer", mutate: func(source *SourceMetadata) { source.DVBLPresent = false }, want: ""},
 		{name: "legacy row lacks presence flags", mutate: func(source *SourceMetadata) { source.DVConfigPresent = false; source.DVBLCompatIDPresent = false }, want: ""},
 		{name: "legacy row lacks config presence flag", mutate: func(source *SourceMetadata) { source.DVConfigPresent = false }, want: ""},
@@ -160,7 +174,10 @@ func TestFiltersDeclareBT709Output(t *testing.T) {
 		"software hlg": SoftwareFilter(SourceHLG, "tonemap"),
 		"qsv":          QSVFilter(SourcePQ),
 		"vaapi":        VAAPIFilter(SourcePQ),
-		"cuda":         CUDAFilter(),
+		"cuda":         CUDAFilter(SourcePQ),
+		"software dv":  SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
+		"qsv dv":       QSVFilter(SourceDolbyVision),
+		"cuda dv":      CUDAFilter(SourceDolbyVision),
 	} {
 		t.Run(name, func(t *testing.T) {
 			for _, token := range []string{"bt709", "format="} {
@@ -190,5 +207,44 @@ func TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper(t *testing.T) 
 		if !strings.Contains(hable, required) {
 			t.Fatalf("Hable filter %q lacks %q", hable, required)
 		}
+	}
+}
+
+// TestDolbyVisionGraphsApplyTheRPU pins RPU application to the Dolby Vision
+// kind: standard bases keep their validated graphs, and only filters that can
+// apply an RPU may carry the kind.
+func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
+	for name, filter := range map[string]string{
+		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
+		"qsv":      QSVFilter(SourceDolbyVision),
+		"cuda":     CUDAFilter(SourceDolbyVision),
+	} {
+		if !strings.Contains(filter, "apply_dovi=1") {
+			t.Errorf("%s Dolby Vision filter %q does not apply the RPU", name, filter)
+		}
+	}
+	for name, filter := range map[string]string{
+		"software": SoftwareFilter(SourcePQ, SoftwareFilterBT2390),
+		"qsv":      QSVFilter(SourcePQ),
+	} {
+		if strings.Contains(filter, "apply_dovi") {
+			t.Errorf("%s PQ filter %q changed its Dolby Vision handling", name, filter)
+		}
+	}
+	if got := CUDAFilter(SourcePQ); !strings.Contains(got, "apply_dovi=0") {
+		t.Errorf("CUDA PQ filter %q must keep Dolby Vision processing off", got)
+	}
+	for _, filter := range []string{SoftwareFilterBT2390, HardwareFilterOpenCL, HardwareFilterCUDA} {
+		if !FilterAppliesDolbyVision(filter) {
+			t.Errorf("FilterAppliesDolbyVision(%q) = false", filter)
+		}
+	}
+	for _, filter := range []string{SoftwareFilterHable, HardwareFilterVAAPI, HardwareFilterVideoToolbox, ""} {
+		if FilterAppliesDolbyVision(filter) {
+			t.Errorf("FilterAppliesDolbyVision(%q) = true", filter)
+		}
+	}
+	if !ValidSourceKind(SourceDolbyVision) || slices.Contains(StandardSourceKinds(), SourceDolbyVision) {
+		t.Fatal("Dolby Vision must be a valid but non-standard source kind")
 	}
 }

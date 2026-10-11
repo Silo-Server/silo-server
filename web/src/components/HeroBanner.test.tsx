@@ -18,6 +18,12 @@ const playbackMocks = vi.hoisted(() => ({
   toggleActivePlayback: vi.fn(),
 }));
 
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
+}));
+
 vi.mock("@/hooks/useAmbientColor", () => ({
   useAmbientColor: () => undefined,
 }));
@@ -173,6 +179,8 @@ describe("formatHeroMetadata", () => {
 
 describe("HeroBanner", () => {
   beforeEach(() => {
+    spoilerPrefs.hideImages = false;
+    spoilerPrefs.hideOverviews = false;
     playbackMocks.controller = null;
     playbackMocks.toggleActivePlayback.mockClear();
     vi.stubGlobal("matchMedia", () => ({
@@ -185,6 +193,55 @@ describe("HeroBanner", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("hides unwatched episode descriptions and reveals started episodes", () => {
+    spoilerPrefs.hideImages = true;
+    spoilerPrefs.hideOverviews = true;
+    const episode = movieSlide({
+      type: "episode",
+      backdrop_url: "/episode-still.jpg",
+      backdrop_is_episode_still: true,
+      overview: "The culprit is revealed",
+      user_state: { played: false, is_favorite: false, in_watchlist: false },
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={[episode]} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("The culprit is revealed")).not.toBeInTheDocument();
+    expect(
+      document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
+    ).toContain("blur(24px)");
+
+    rerender(
+      <MemoryRouter>
+        <HeroBanner items={[{ ...episode, position_seconds: 120 }]} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("The culprit is revealed")).toBeInTheDocument();
+    expect(
+      document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
+    ).not.toContain("blur(");
+  });
+
+  it("preserves the series backdrop on an unwatched episode", () => {
+    spoilerPrefs.hideImages = true;
+    render(
+      <MemoryRouter>
+        <HeroBanner
+          items={[
+            movieSlide({
+              type: "episode",
+              backdrop_url: "/series-art.jpg",
+              backdrop_is_episode_still: false,
+            }),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector("img")?.getAttribute("style")).not.toContain("blur(");
   });
 
   it("names the ken burns tokens literally so tailwind keeps them", () => {
