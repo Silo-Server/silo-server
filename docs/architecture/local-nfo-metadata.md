@@ -98,10 +98,11 @@ search-by-title fails. Conflict policy by mode:
 - manual Identify: the user's choice wins; the NFO provider is skipped for the
   whole operation. The choice is sticky: every Identify (including the one a
   split runs for its target) sets `media_items.identity_chosen_at` in the
-  transaction that writes the identity it chose, renames and merges carry it
-  along, and a
-  later manual refresh whose NFO names a different identity keeps the chosen
-  one. Running Identify again is how an admin changes it.
+  transaction that writes the identity it chose, and also in the one that
+  moves the item when the choice has a different anchor. Renames and merges
+  carry it along, and a later manual refresh whose NFO names a different
+  identity keeps the chosen one. Running Identify again is how an admin
+  changes it.
 
 Whenever a run keeps an identity the NFO's IDs contradict, it logs the
 conflict and leaves the NFO provider out of every phase of that run (series,
