@@ -265,6 +265,12 @@ func HasHDR10Plus(sideData []SideData) bool {
 	return hasHDR10Plus(sideData)
 }
 
+// Dolby Vision range types whose base layer also carries HDR10+ metadata.
+const (
+	rangeTypeDOVIWithHDR10Plus   = "DOVIWithHDR10Plus"
+	rangeTypeDOVIWithELHDR10Plus = "DOVIWithELHDR10Plus"
+)
+
 // RangeTypeWithHDR10Plus returns the video range type of a stored track
 // whose primary stream has been found to carry HDR10+ metadata. A track that
 // names Dolby Vision only in its range type, as older probes and seeded rows
@@ -272,10 +278,10 @@ func HasHDR10Plus(sideData []SideData) bool {
 func RangeTypeWithHDR10Plus(track models.VideoTrack) string {
 	if track.DVProfile <= 0 {
 		switch rangeType := strings.TrimSpace(track.VideoRangeType); {
-		case strings.EqualFold(rangeType, "DOVIWithHDR10"), strings.EqualFold(rangeType, "DOVIWithHDR10Plus"):
-			return "DOVIWithHDR10Plus"
-		case strings.EqualFold(rangeType, "DOVIWithEL"), strings.EqualFold(rangeType, "DOVIWithELHDR10Plus"):
-			return "DOVIWithELHDR10Plus"
+		case strings.EqualFold(rangeType, "DOVIWithHDR10"), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
+			return rangeTypeDOVIWithHDR10Plus
+		case strings.EqualFold(rangeType, "DOVIWithEL"), strings.EqualFold(rangeType, rangeTypeDOVIWithELHDR10Plus):
+			return rangeTypeDOVIWithELHDR10Plus
 		case strings.HasPrefix(strings.ToLower(rangeType), "dovi"):
 			return rangeType
 		}
@@ -310,12 +316,12 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 			return "DOVI"
 		case 7:
 			if hdr10Plus {
-				return "DOVIWithELHDR10Plus"
+				return rangeTypeDOVIWithELHDR10Plus
 			}
 			return "DOVIWithEL"
 		case 8:
 			if hdr10Plus {
-				return "DOVIWithHDR10Plus"
+				return rangeTypeDOVIWithHDR10Plus
 			}
 			switch compatID {
 			case 1:
