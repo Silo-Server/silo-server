@@ -375,12 +375,14 @@ func applyArtifactParams(m *OfflineManifest, a *Artifact, file *models.MediaFile
 // prepared plan gave that track, and stays valid unless the source has since
 // changed at that position.
 func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.MediaFile) {
+	// A nil inventory was never frozen; an empty one froze a prepared file
+	// with no audio and must not be rebuilt from a later probe.
 	tracks := a.PreparedAudioTracks
-	if len(tracks) == 0 {
+	if tracks == nil {
 		tracks = preparedAudioTracks(file, a)
 	}
 	if len(tracks) == 0 {
-		if file != nil {
+		if file != nil || a.PreparedAudioTracks != nil {
 			// No source track was decodable, so the prepared file has no audio.
 			m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio = nil, nil, ""
 		}
