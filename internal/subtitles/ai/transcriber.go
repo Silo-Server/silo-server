@@ -276,7 +276,7 @@ func (t *WhisperTranscriber) transcribeChunk(
 		Timeout:  timeout,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("%w: %w", errAudioRequest, err)
 	}
 	// Each chunk is read exactly once; deleting it as we go caps disk usage
 	// at one extraction rather than extraction + retranscription leftovers.
