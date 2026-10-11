@@ -9,8 +9,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// An Identify mark survives later writes of the item row, a content-id rename
-// carries it along, and a failed Identify can clear it.
+// An Identify mark survives later writes of the item row, and a content-id
+// rename carries it along.
 func TestIdentityChoiceSurvivesUpsertAndRenameDB(t *testing.T) {
 	pool := newAdvisoryAgeTestPool(t)
 	ctx := context.Background()
@@ -45,12 +45,6 @@ func TestIdentityChoiceSurvivesUpsertAndRenameDB(t *testing.T) {
 	}
 	if chosen, err := repo.IdentityChosen(ctx, renamed); err != nil || !chosen {
 		t.Fatalf("IdentityChosen after rename = %v, %v; want true", chosen, err)
-	}
-	if err := repo.ClearIdentityChoice(ctx, renamed); err != nil {
-		t.Fatalf("ClearIdentityChoice: %v", err)
-	}
-	if chosen, err := repo.IdentityChosen(ctx, renamed); err != nil || chosen {
-		t.Fatalf("IdentityChosen after clear = %v, %v; want false", chosen, err)
 	}
 	if chosen, err := repo.IdentityChosen(ctx, "missing-"+contentID); err != nil || chosen {
 		t.Fatalf("IdentityChosen for a missing item = %v, %v; want false", chosen, err)

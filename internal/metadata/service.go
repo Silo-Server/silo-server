@@ -2440,7 +2440,7 @@ func (s *MetadataService) mergeAndPersist(
 	seasons []SeasonResult,
 	episodes []EpisodeResult,
 	contentType string,
-) (_ *ProcessResult, retErr error) {
+) (*ProcessResult, error) {
 	// Quarantined IDs are unsafe for deduplication, canonical ID derivation, and
 	// persistence regardless of whether this is a new item or a refresh.
 	for key := range accumulator.quarantinedProviderIDKeys {
@@ -2510,21 +2510,6 @@ func (s *MetadataService) mergeAndPersist(
 	// item would drop its field locks.
 	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
 		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
-	}
-	// Record the admin's choice before anything below can move the item: a
-	// rename or merge carries the mark along, and a failure here leaves the
-	// item where the admin found it, so retrying the Identify is safe. If the
-	// Identify fails later, the mark comes off again (identify_sticky.go).
-	if req.Mode == ModeIdentify && contentID != "" {
-		undo, err := s.recordIdentityChoice(ctx, contentID)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if retErr != nil {
-				undo(contentID)
-			}
-		}()
 	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
@@ -2659,12 +2644,13 @@ func (s *MetadataService) mergeAndPersist(
 				existingResult.Year = 0
 			}
 		}
+		if mergeMode == MergeFillEmpty {
+			accumulator.localLists.keepStoredLists(accumulator, existingResult)
+			s.keepStoredLocalCredits(ctx, contentID, accumulator)
+		}
 		mergeLocked := locked
 		if !req.enrichmentOnly {
 			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
-		}
-		if mergeMode == MergeFillEmpty {
-			accumulator.localLists.keepStoredLists(accumulator, existingResult)
 		}
 		if isCanonicalWrite {
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
@@ -2765,6 +2751,7 @@ func (s *MetadataService) mergeAndPersist(
 		existingItem,
 		len(durableIDs) == 0,
 		contentType,
+		req.Mode == ModeIdentify,
 	)
 	if err != nil {
 		return nil, err
@@ -2911,16 +2898,21 @@ func (s *MetadataService) persistItemAndProviderIDs(
 	existingItem *models.MediaItem,
 	missingDurableIDs bool,
 	contentType string,
+	identityChosen bool,
 ) (string, error) {
 	if item == nil || strings.TrimSpace(item.ContentID) == "" {
 		return "", fmt.Errorf("content_id is required")
 	}
 	if itemRepo, ok := s.itemRepo.(*catalog.ItemRepository); ok && s.dbPool != nil {
 		if providerRepo, ok := s.providerIDRepo.(*catalog.ProviderIDRepository); ok && providerRepo != nil {
-			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
+			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen)
 		}
 	}
-	return s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
+	contentID, err := s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
+	if err == nil && identityChosen {
+		err = s.recordIdentityChoice(ctx, contentID)
+	}
+	return contentID, err
 }
 
 func (s *MetadataService) persistItemAndProviderIDsTx(
@@ -2933,9 +2925,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	existingItem *models.MediaItem,
 	missingDurableIDs bool,
 	contentType string,
+	identityChosen bool,
 ) (string, error) {
 	contentID := item.ContentID
-	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs)
+	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen)
 	if err == nil {
 		return contentID, nil
 	}
@@ -2951,7 +2944,7 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 		return "", fmt.Errorf("persisting provider IDs for %s: %w", contentID, err)
 	}
 	item.ContentID = reboundTo
-	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs); retryErr != nil {
+	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen); retryErr != nil {
 		return "", fmt.Errorf("persisting provider IDs after conflict recovery for %s: %w", reboundTo, retryErr)
 	}
 	return reboundTo, nil
@@ -2963,6 +2956,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	providerRepo *catalog.ProviderIDRepository,
 	item *models.MediaItem,
 	providerIDs map[string]string,
+	identityChosen bool,
 ) error {
 	tx, err := s.dbPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -2975,6 +2969,13 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	}
 	if providerRepo != nil {
 		if err := providerRepo.ReplaceByContentIDTx(ctx, tx, item.ContentID, item.Type, providerIDs); err != nil {
+			return err
+		}
+	}
+	// An Identify's choice commits with the identity it chose
+	// (identify_sticky.go).
+	if identityChosen {
+		if err := itemRepo.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}

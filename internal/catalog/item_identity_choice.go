@@ -21,14 +21,14 @@ func (r *ItemRepository) MarkIdentityChosen(ctx context.Context, contentID strin
 	return nil
 }
 
-// ClearIdentityChoice removes the Identify mark, for an Identify that failed
-// after recording it.
-func (r *ItemRepository) ClearIdentityChoice(ctx context.Context, contentID string) error {
-	if _, err := r.pool.Exec(ctx,
-		`UPDATE media_items SET identity_chosen_at = NULL WHERE content_id = $1`,
+// MarkIdentityChosenTx is MarkIdentityChosen inside the caller's transaction,
+// so the mark commits only with the identity it records.
+func (r *ItemRepository) MarkIdentityChosenTx(ctx context.Context, tx pgx.Tx, contentID string) error {
+	if _, err := tx.Exec(ctx,
+		`UPDATE media_items SET identity_chosen_at = NOW() WHERE content_id = $1`,
 		contentID,
 	); err != nil {
-		return fmt.Errorf("clearing identity choice for %s: %w", contentID, err)
+		return fmt.Errorf("marking identity chosen for %s: %w", contentID, err)
 	}
 	return nil
 }

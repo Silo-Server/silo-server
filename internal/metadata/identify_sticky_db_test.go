@@ -2,9 +2,13 @@ package metadata
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Merging an item an admin identified onto its canonical row keeps the
@@ -44,5 +48,52 @@ func TestCanonicalizeKeepsIdentityChoicePostgres(t *testing.T) {
 	}
 	if !chosen {
 		t.Error("canonical item lost the Identify choice of the item merged onto it")
+	}
+}
+
+// An Identify's mark commits in the transaction that writes the identity:
+// when that write fails, as on a provider-ID conflict, no mark is left.
+func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := context.Background()
+	itemRepo := catalog.NewItemRepository(pool)
+	providerRepo := catalog.NewProviderIDRepository(pool)
+	svc := &MetadataService{dbPool: pool}
+
+	suffix := uuid.NewString()
+	owner, chosen := "identity-tx-owner-"+suffix, "identity-tx-chosen-"+suffix
+	tmdbID := "9" + strings.ReplaceAll(suffix[:8], "-", "")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{owner, chosen})
+	})
+	for _, id := range []string{owner, chosen} {
+		if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	if err := providerRepo.ReplaceByContentID(ctx, owner, map[string]string{"tmdb": tmdbID}); err != nil {
+		t.Fatalf("seed provider id: %v", err)
+	}
+	isChosen := func(id string) bool {
+		t.Helper()
+		var marked bool
+		if err := pool.QueryRow(ctx, `SELECT identity_chosen_at IS NOT NULL FROM media_items WHERE content_id = $1`, id).Scan(&marked); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		return marked
+	}
+
+	item := &models.MediaItem{ContentID: chosen, Type: "movie", Title: "Chosen", SortTitle: "chosen", Status: "matched"}
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"tmdb": tmdbID}, true); err == nil {
+		t.Fatal("persist succeeded although another item owns the provider ID")
+	}
+	if isChosen(chosen) {
+		t.Error("a failed identity write left the Identify mark")
+	}
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"imdb": "tt" + tmdbID}, true); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	if !isChosen(chosen) {
+		t.Error("a committed identity write did not record the Identify mark")
 	}
 }

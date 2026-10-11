@@ -63,8 +63,9 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
   that match by provider ID or by name and kind (IDs, photos, roles) and never
   add people (`internal/metadata/local_precedence.go`). Lists from two remote
   providers still accumulate. In fill-empty writes (scheduled refresh,
-  initial match of a stored item) an NFO list fills an empty stored list but
-  is not added to a stored one; a manual refresh replaces it. The bulk
+  initial match of a stored item) an NFO list, credits included, fills an
+  empty stored list but is not added to or swapped for a stored one; a manual
+  refresh replaces it. The bulk
   enrichment pass has no record of which stored lists came from the NFO, so
   an enrichment-only provider can still add to them.
 - **Locks win in every mode.** The persist merge applies the item's locked
@@ -96,7 +97,9 @@ search-by-title fails. Conflict policy by mode:
   holding that id;
 - manual Identify: the user's choice wins; the NFO provider is skipped for the
   whole operation. The choice is sticky: every Identify (including the one a
-  split runs for its target) sets `media_items.identity_chosen_at`, and a
+  split runs for its target) sets `media_items.identity_chosen_at` in the
+  transaction that writes the identity it chose, renames and merges carry it
+  along, and a
   later manual refresh whose NFO names a different identity keeps the chosen
   one. Running Identify again is how an admin changes it.
 

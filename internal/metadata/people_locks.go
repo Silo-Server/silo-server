@@ -56,3 +56,36 @@ func (s *MetadataService) peopleLocksForMerge(ctx context.Context, contentID str
 	}
 	return locked
 }
+
+// keepStoredLocalCredits prepares a fill-empty write (scheduled refresh,
+// initial match of a stored item): the cast or crew the local provider
+// supplied fills an empty stored group but does not replace a stored one, as
+// keepStoredLists does for the other lists; a manual refresh replaces it. The
+// item row carries no credits, so the stored ones are read. When they cannot
+// be read, the credits stay as stored.
+func (s *MetadataService) keepStoredLocalCredits(ctx context.Context, contentID string, accumulator *MetadataResult) {
+	l := accumulator.localLists
+	if !l.cast && !l.crew {
+		return
+	}
+	repo, ok := s.itemRepo.(metadataItemPeopleRepo)
+	if !ok {
+		return
+	}
+	stored, err := repo.GetPeople(ctx, contentID)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: could not read stored credits; leaving credits unchanged", "component", "metadata",
+			"content_id", contentID, "error", err)
+		accumulator.People = nil
+		return
+	}
+	storedCast, storedCrew := splitPeopleByRole(stored)
+	cast, crew := splitPeopleByRole(accumulator.People)
+	if l.cast && len(storedCast) > 0 {
+		cast = storedCast
+	}
+	if l.crew && len(storedCrew) > 0 {
+		crew = storedCrew
+	}
+	accumulator.People = append(cast, crew...)
+}

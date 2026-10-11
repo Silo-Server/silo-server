@@ -18,7 +18,6 @@ type localPipelineItemRepo struct {
 	mu        sync.Mutex
 	people    map[string][]models.ItemPerson
 	chosen    map[string]bool
-	markErr   error
 	upsertErr error
 }
 
@@ -45,17 +44,7 @@ func (r *localPipelineItemRepo) GetPeople(_ context.Context, contentID string) (
 func (r *localPipelineItemRepo) MarkIdentityChosen(_ context.Context, contentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.markErr != nil {
-		return r.markErr
-	}
 	r.chosen[contentID] = true
-	return nil
-}
-
-func (r *localPipelineItemRepo) ClearIdentityChoice(_ context.Context, contentID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.chosen, contentID)
 	return nil
 }
 
@@ -195,7 +184,8 @@ func TestRefresh_PartialPeopleLockKeepsTheLockedGroup(t *testing.T) {
 		want []string
 	}{
 		{"cast lock, manual", FieldCast, ModeManualRefresh, []string{"Keanu Reeves", "NFO Director"}},
-		{"cast lock, scheduled", FieldCast, ModeScheduledRefresh, []string{"Keanu Reeves", "NFO Director"}},
+		// A scheduled refresh keeps the stored crew: the NFO's only fills an empty group.
+		{"cast lock, scheduled", FieldCast, ModeScheduledRefresh, []string{"Keanu Reeves", "Lana Wachowski"}},
 		{"crew lock, manual", FieldCrew, ModeManualRefresh, []string{"Lock Test Actor", "Lana Wachowski"}},
 	}
 	for _, tc := range cases {
@@ -549,33 +539,9 @@ func TestInitialMatch_StoredItemSkipsNFOForAnotherTitle(t *testing.T) {
 	}
 }
 
-// Identify records the choice before it changes the item, so when that write
-// fails the item is left as it was and the admin can retry.
-func TestIdentify_FailedChoiceRecordLeavesItemUnchanged(t *testing.T) {
-	h, repo := newLocalPipelineHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:949", "Heat", 1995)
-	h.itemRepo.items["movie:tmdb:949"].TmdbID = "949"
-	repo.markErr = errors.New("connection reset")
-
-	remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{HasMetadata: true, Title: "Collateral", Year: 2004, ProviderIDs: map[string]string{"tmdb": "1538"}}}
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:949", ProviderIDs: map[string]string{"tmdb": "1538"}, Language: "en", Mode: ModeIdentify,
-	}, []Provider{remote}); err == nil {
-		t.Fatal("Identify succeeded although recording the choice failed")
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:949")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "Heat" || item.TmdbID != "949" {
-		t.Errorf("item = %q tmdb %q, want it unchanged", item.Title, item.TmdbID)
-	}
-}
-
-// An Identify that fails after recording the choice takes the mark off again,
-// unless the item already carried one from an earlier Identify.
-func TestIdentify_FailedWriteRemovesOnlyItsOwnChoice(t *testing.T) {
+// An Identify whose item write fails records no choice, and leaves one an
+// earlier Identify made.
+func TestIdentify_FailedWriteRecordsNoChoice(t *testing.T) {
 	for _, alreadyChosen := range []bool{false, true} {
 		h, repo := newLocalPipelineHarness()
 		ctx := context.Background()
@@ -593,5 +559,46 @@ func TestIdentify_FailedWriteRemovesOnlyItsOwnChoice(t *testing.T) {
 		if got := repo.chosen["movie:tmdb:949"]; got != alreadyChosen {
 			t.Errorf("already chosen %v: choice after the failed Identify = %v, want %v", alreadyChosen, got, alreadyChosen)
 		}
+	}
+}
+
+// A scheduled refresh lets the NFO's cast fill an empty stored cast but keeps
+// a stored one, while remote crew still refreshes; a manual refresh replaces
+// the stored cast with the NFO's.
+func TestRefresh_NFOCreditsFillOnlyEmptyGroupsUntilManualRefresh(t *testing.T) {
+	cases := []struct {
+		name   string
+		stored []models.ItemPerson
+		mode   RefreshMode
+		want   []string
+	}{
+		{"scheduled, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, ModeScheduledRefresh, []string{"TMDB Actor", "Remote Director"}},
+		{"scheduled, no stored cast", nil, ModeScheduledRefresh, []string{"Local Actor", "Remote Director"}},
+		{"manual, stored cast", []models.ItemPerson{actor("TMDB Actor", "Hero")}, ModeManualRefresh, []string{"Local Actor", "Remote Director"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newLocalPipelineHarness()
+			ctx := context.Background()
+			seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
+			h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+			repo.people["movie:tmdb:100"] = tc.stored
+
+			nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "100"}, metadata: &MetadataResult{HasMetadata: true, People: []models.ItemPerson{actor("Local Actor", "Lead")}}}
+			remote := &remoteStubProvider{slug: "tmdb", metadata: &MetadataResult{
+				HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"},
+				People: []models.ItemPerson{actor("TMDB Actor", "Hero"), crewMember("Remote Director", models.PersonKindDirector)},
+			}}
+			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{ContentID: "movie:tmdb:100", Language: "en", Mode: tc.mode}, []Provider{nfo, remote}); err != nil {
+				t.Fatalf("ProcessWithProviders: %v", err)
+			}
+			item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got := personNames(item.People); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("people = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

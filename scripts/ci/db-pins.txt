@@ -240,3 +240,4 @@
 ./internal/metadata TestLocalTierIsStoredAndResolvedFirst
 ./internal/catalog TestIdentityChoiceSurvivesUpsertAndRenameDB
 ./internal/metadata TestCanonicalizeKeepsIdentityChoicePostgres
+./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres

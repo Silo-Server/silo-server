@@ -31,8 +31,8 @@ func (l *localListFields) record(result *MetadataResult) {
 // keepStoredLists prepares a fill-empty write (initial match of a stored
 // item, scheduled refresh): a list the local provider supplied fills a stored
 // list only when it is empty, like the NFO's scalar fields, instead of being
-// added to it. A manual refresh replaces it. Credits are left alone; the
-// write replaces them wholesale.
+// added to it. A manual refresh replaces it. Credits follow the same rule in
+// keepStoredLocalCredits, which has to read them.
 func (l localListFields) keepStoredLists(accumulator, stored *MetadataResult) {
 	keep := func(supplied bool, local *[]string, storedList []string) {
 		if supplied && len(storedList) > 0 {
