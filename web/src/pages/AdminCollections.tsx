@@ -755,7 +755,7 @@ export default function AdminCollections() {
       <CalmPage
         heading="page"
         title="Collections"
-        subtitle="Server collections everyone can browse on each library's Collections tab and use in Home rows."
+        subtitle="Server collections everyone can browse on each library's Collections tab and use in Sections."
         actions={
           narrow ? null : (
             <>

@@ -97,7 +97,7 @@ func NewLibraryCollectionHandler(
 	httpClient *http.Client,
 ) *LibraryCollectionHandler {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newCollectionImageClient()
 	}
 
 	return &LibraryCollectionHandler{
@@ -290,6 +290,8 @@ type createLibraryCollectionRequest struct {
 	ManagementSource  string          `json:"management_source"`
 	ManagementKey     string          `json:"management_key"`
 	SyncSchedule      string          `json:"sync_schedule"`
+	// V1Rules: see PersonalCollectionPreviewRequest.
+	V1Rules bool `json:"-"`
 }
 
 type updateLibraryCollectionRequest struct {
@@ -314,6 +316,8 @@ type updateLibraryCollectionRequest struct {
 	ManagementSource  *string                `json:"management_source"`
 	ManagementKey     *string                `json:"management_key"`
 	SyncSchedule      *string                `json:"sync_schedule"`
+	// V1Rules: see PersonalCollectionPreviewRequest.
+	V1Rules bool `json:"-"`
 }
 
 type importMDBListRequest struct {
@@ -913,6 +917,7 @@ func (h *LibraryCollectionHandler) HandleCreateAdminCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.createAdminCollection(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
 		writeAPIError(w, err)
@@ -933,6 +938,7 @@ func (h *LibraryCollectionHandler) HandleUpdateAdminCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.updateAdminCollection(r.Context(), collectionID, req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
 		writeAPIError(w, err)
@@ -952,6 +958,7 @@ func (h *LibraryCollectionHandler) HandlePreviewAdminCollection(w http.ResponseW
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 
 	resp, err := h.PreviewAdminCollection(r.Context(), req)
 	if err != nil {
@@ -3280,7 +3287,7 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 			if sourceByType[imageType] == "" {
 				continue
 			}
-			fileData, err = downloadCollectionImageURL(r.Context(), h.httpClient, sourceByType[imageType])
+			fileData, err = downloadCollectionImageURL(adminCollectionImageContext(r.Context()), h.httpClient, sourceByType[imageType])
 			if err != nil {
 				return fmt.Errorf("%s source: %w", imageType, err)
 			}

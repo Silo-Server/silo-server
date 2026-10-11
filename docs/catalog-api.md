@@ -4,10 +4,26 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## Section browsing
+
+Catalog reads with `source=section` resolve the row on the acting profile's
+`home` or `library` page. This includes personal rows and the profile's overrides
+to server rows. Paging uses that effective row's configuration. A row hidden or
+removed by the profile, a row belonging to another profile, or a row in an
+inaccessible library answers `404`, as an unknown section does.
+
 ## People search
 
-`GET /api/v2/catalog/people` (`listPeople`) accepts a name fragment in `q` and
-`limit` from 1 to 100 (default 20). Case-insensitive exact name matches come first;
+`GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
+`limit` from 1 to 100 (default 20). Each whitespace-separated word of `q` must
+start a word of the person's name, case-insensitively and in any order. A word
+starts the name or follows a character that is not a letter or digit, so `hacks`
+matches "Lark Hackshaw" but not "Chad Thackston", and `luc` matches "Jean-Luc".
+A partial last word still matches, which keeps typeahead working. A name
+written without separators, as many Chinese, Japanese, and Korean names are,
+matches only from its start. Only the first eight distinct words count, and a
+repeated word counts once. `%` and `_` are literal. Case-insensitive exact name
+matches come first;
 other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
 
@@ -478,6 +494,47 @@ identity after any count or duration sort. Work grouping chooses the first
 accessible ebook/audiobook edition under the complete source order before applying
 the group cursor. A query cap limits source editions before grouping.
 
+### Rule fields and operators
+
+Catalog query rule groups, `custom_filter` sections, and Smart collections share
+one rule vocabulary (`queryFieldDefs` in `internal/catalog/query_definition.go`).
+Each rule is `{field, op, value}`; an operator a field does not list returns `422`,
+and so does a value of the wrong shape: a span not like `30d` or reaching back before
+PostgreSQL's earliest date (4714 BC), a non-numeric bound,
+a decade that is not a year from 10 on (decade 0 would catch every title with no
+year), a `title` value that is empty or not a string, or a
+`latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
+or an RFC 3339 time.
+
+| Operators | Fields | Value |
+| --- | --- | --- |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
+| `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
+| `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
+
+`not_in_last` keeps titles whose date falls before the span; a title without the
+date matches neither `in_last` nor `not_in_last`, and a title with no runtime
+matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
+show's newest episode, so movies never match them. An episode row never matches
+`latest_episode_added`, and in the `episode` scope `last_air_date` is the
+episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
+still apply when an administrator hides that rating source, so a saved collection
+keeps its members; the web editor only stops offering those fields.
+
+The personalized `last_watched` field also takes `not_in_last`. It counts only
+finished plays: a title the profile never finished counts as finished long ago,
+and a show's last watched date is its most recently finished episode.
+
+`GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
+when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
+Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
+operators, and `not_in_last`. Older servers answer those rules with `422`, so the
+web rule editor offers them only while the flag is true. `/api/v1` keeps its frozen
+rule vocabulary: its catalog requests (including `POST /api/v1/catalog/query`) and
+its section and collection saves and previews refuse those fields and
+`not_in_last` with the errors they gave before.
+
 ### Search continuation
 
 Text searches with a nonempty `q` and the default `query` source accept explicit
@@ -567,6 +624,33 @@ list without fetching the episode first. The season comes from the same query
 that chose the target. The field is absent when there is no play target or the
 target is not an episode; a client that finds it absent fetches the episode as
 before. Cards do not carry it, and the frozen v1 detail does not expose it.
+## Episode spoiler protection
+
+Two profile settings in the settings contract let a viewer hide episode details
+until they start an episode: `catalog.hide_unwatched_episode_images` blurs the
+episode still, and `catalog.hide_unwatched_episode_overviews` hides the episode
+description. Both default to off and roam with the profile.
+
+The server does not change catalog responses for these settings: every episode
+payload keeps its image and overview, so cached catalog data stays shared across
+profiles. Clients apply the settings. An episode counts as unwatched while its
+`user_data` is missing, or `played` is false and it is not in progress
+(`is_in_progress` absent or false and no positive `position_seconds`). Series and season
+artwork and overviews are not affected. Detect support from the settings contract
+capabilities (`manifest_revision` 17 or later).
+
+The v2 API reports image provenance after artwork fallback selection:
+`poster_is_episode_still` and `backdrop_is_episode_still` on catalog cards and
+details, and `still_is_episode_still` on episode rows. `true` identifies an episode
+still; `false` identifies other artwork (or no image). An absent field means the
+source is unknown, including responses from older servers. Protect unknown images
+conservatively when spoiler protection is enabled; older responses cannot guarantee
+that fallback series artwork remains visible. Select the provenance belonging to
+the URL actually displayed, including when falling back from a backdrop to a poster.
+
+`GET /api/v2/images/capabilities` advertises `episode_still_provenance: true`.
+Provenance does not depend on the viewer's spoiler preferences. The frozen v1
+response fields remain unchanged.
 
 ## Collection membership titles
 
@@ -778,13 +862,18 @@ The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 `rating_rt_audience` members are unchanged, keep their own scales, and remain
 the only ratings browse can sort or filter by.
 
-Rating sources follow the same refresh and lock rules as those four members. A
-scheduled refresh only adds sources the item lacks, a manual refresh overwrites
-the sources the providers report, and locking the rating field freezes all of
-them. A refresh never removes a source a provider stopped reporting. Identify
-is the exception: it matches the item to a different title, so the sources the
-new match reports replace the stored set, and a source it does not report is
-removed.
+Rating sources follow the lock rules of those four members, but not their
+scheduled-refresh rule. A manual or scheduled refresh overwrites the sources
+the providers report, so scores and vote counts stay current; the chain's
+provider order picks one entry per source. The bulk enrichment pass only adds
+sources the item lacks. Locking the rating field freezes all of them. A
+refresh never removes a source a provider stopped reporting. Identify is the
+exception: it matches the item to a different title, so the sources the new
+match reports replace the stored set, and a source it does not report is
+removed. An administrator who clears `rating_imdb`, `rating_tmdb`,
+`rating_rt_critic` or `rating_rt_audience` in a metadata edit also removes the
+item's `imdb`, `tmdb`, `rt_critic` or `rt_audience` source, so the title page
+doesn't show the cleared rating from a plugin's score.
 
 Plugins send them under `ratings.sources` in a metadata item, as
 `{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`

@@ -97,6 +97,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/partman"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -824,6 +825,9 @@ func main() {
 	if *migrateOnly {
 		migCtx, migCancel := database.MigrationContext(ctx)
 		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
+		if migErr == nil {
+			migErr = ensureAuditDetailIndexes(migCtx, pool)
+		}
 		migCancel()
 		if migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -841,7 +845,11 @@ func main() {
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql"); migErr != nil {
+		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
+		if migErr == nil {
+			migErr = ensureAuditDetailIndexes(migCtx, pool)
+		}
+		if migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
@@ -1063,7 +1071,9 @@ func main() {
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
-		redisClient, err := cache.NewRedisClientForRole(cfg.Redis, "worker")
+		// Delivery writes run in the background with a short deadline. Honor it
+		// on the sockets too, so a stalled Redis cannot retain their connections.
+		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
 		if err != nil || redisClient == nil {
 			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
@@ -2177,10 +2187,14 @@ func main() {
 		deps.SkippedRootRepo = skippedRootRepo
 		deps.StaleIDRepo = staleIDRepo
 		deps.PersonRepo = personRepo
-		deps.PersonRefreshQueue = worker.NewPersonRefreshWorker(
-			personRefreshService,
-			worker.DefaultPersonRefreshWorkerConfig(),
-		)
+		personRefreshConfig := worker.DefaultPersonRefreshWorkerConfig()
+		personRefreshConfig.ClaimLease = catalog.PersonRefreshAttemptLease
+		personRefreshQueue := worker.NewPersonRefreshWorker(personRefreshService, personRefreshConfig)
+		personRefreshQueue.SetRatePerMinute(cfg.Metadata.PersonRefreshPerMinute)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			personRefreshQueue.SetRatePerMinute(updated.Metadata.PersonRefreshPerMinute)
+		})
+		deps.PersonRefreshQueue = personRefreshQueue
 		deps.PersonRefresher = personRefreshService
 		deps.Refresher = metadataService
 		deps.MetadataService = metadataService
@@ -2427,6 +2441,25 @@ func main() {
 
 	// Step 6: Create playback session manager and wire into dependencies.
 	sessionMgr := playback.NewSessionManager(6, 2) // defaults from plan: max_streams=6, max_transcodes=2
+	if apiRedisClient != nil {
+		// Proxy nodes record the media they serve, so a remote stream outlives a
+		// client that stopped reporting progress while it still pulls media. The
+		// idle sweep waits on this lookup, so it gets a client that gives up at
+		// the sweep's deadline.
+		deliveryRedisClient, deliveryRedisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if deliveryRedisErr != nil {
+			slog.Warn("redis client init failed; node delivery will not keep playback sessions alive", "error", deliveryRedisErr)
+		} else if deliveryRedisClient != nil {
+			defer func() { _ = cache.CloseRedisClient(deliveryRedisClient) }()
+			sessionMgr.SetDeliveryActivityReader(func(ctx context.Context, sessions []playback.Session) (map[string]time.Time, error) {
+				ids := make([]string, len(sessions))
+				for i := range sessions {
+					ids[i] = sessions[i].ID
+				}
+				return nodesessions.RecentDeliveries(ctx, deliveryRedisClient, ids)
+			})
+		}
+	}
 	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
@@ -2496,7 +2529,12 @@ func main() {
 				update.ExpectedFile = file
 				return deps.FileRepo.UpsertMarkers(ctx, file.ID, update)
 			},
-			Notify: deps.MarkerUpdateNotifier.MarkersUpdated,
+			Notify: func(ctx context.Context, file *models.MediaFile) {
+				if chapterThumbService != nil {
+					chapterThumbService.PrepareMarkerFile(ctx, file)
+				}
+				deps.MarkerUpdateNotifier.MarkersUpdated(ctx, file)
+			},
 		})
 	}
 	if chapterThumbService != nil {
@@ -2510,9 +2548,23 @@ func main() {
 			}
 			return "", fmt.Errorf("artwork URL unavailable")
 		})
-		chapterThumbService.SetNotifier(
-			playback.NewChapterThumbnailNotifier(sessionMgr, deps.PlaybackRealtimeHub, chapterThumbnailURLs, 0),
-		)
+		thumbnailNotifier := playback.NewChapterThumbnailNotifier(sessionMgr, deps.PlaybackRealtimeHub, chapterThumbnailURLs, 0, planstore.NewPostgres(deps.DB))
+		if deps.EventBus != nil {
+			publish := func(ctx context.Context, payload string) error {
+				return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: cache.EventMarkerThumbnailReady, Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
+					if event.Type == cache.EventMarkerThumbnailReady {
+						handler(event.Payload)
+					}
+				})
+			}
+			if err := thumbnailNotifier.UseMarkerEventBus(appCtx, publish, subscribe); err != nil {
+				slog.Warn("subscribe marker thumbnail updates failed", "error", err)
+			}
+		}
+		chapterThumbService.SetNotifier(thumbnailNotifier)
 	}
 
 	// Build the reconciler early enough that playback handlers can trigger
@@ -2892,6 +2944,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
 		taskMgr.Register(tasks.NewBackfillMediaItemAliasesTask(catalog.NewItemAliasRepository(deps.DB)))
+		// The backfill reads media files, so it runs only where the scanner
+		// does: those processes have the libraries mounted.
+		if deps.FileRepo != nil {
+			taskMgr.Register(tasks.NewBackfillMatroskaTrackNumbersTask(deps.DB, scanner.NewMatroskaTrackBackfiller(deps.FileRepo)))
+		}
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
@@ -3012,6 +3069,15 @@ func main() {
 					}
 				}
 				_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelDownloadPreparations, event.Name, payload, evt.PublishOptions{AdminOnly: true})
+			})
+			if deps.NodeRepo != nil {
+				artifactMgr.SetStorageNodes(deps.NodeRepo)
+			}
+			artifactMgr.SetStorageNotifier(func(ctx context.Context) {
+				if deps.EventsHub == nil {
+					return
+				}
+				_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelDownloadPreparations, "download_storage.changed", map[string]any{}, evt.PublishOptions{AdminOnly: true})
 			})
 			encodeTask := tasks.NewEncodeDownloadArtifactsTask(artifactMgr)
 			artifactMgr.SetKick(func() { _ = taskMgr.RunTask(appCtx, encodeTask.Key()) })
@@ -3285,12 +3351,13 @@ func main() {
 	var compatServer atomic.Pointer[jellycompat.Server]
 	dropCompatSessions := func(userID int) {
 		if compat := compatServer.Load(); compat != nil {
-			compat.SessionStore().DeleteByUserID(userID)
+			compat.SessionStore().EvictUser(userID)
 		}
 	}
-	// Every replica caches Jellyfin-compatible sessions in memory and serves a
-	// cached one without reading the database, so a revocation is announced on
-	// the admin channel for each replica to drop the account's sessions.
+	// The revoking transaction deletes the account's stored
+	// Jellyfin-compatible sessions, but every replica caches them in memory
+	// and serves a cached one without reading the database, so a revocation
+	// is announced on the admin channel for each replica to drop its copies.
 	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type != cache.EventUserSessionsRevoked {
 			return
@@ -3307,6 +3374,11 @@ func main() {
 			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
+	// Jellyfin-compatible downloads go through the router's download service,
+	// so they meet the same policy and share its bandwidth limiters. It stays
+	// a nil interface when the router builds no service, which refuses them.
+	var compatDownloads jellycompat.DownloadServer
+	deps.OnDownloadService = func(svc *downloads.Service) { compatDownloads = svc }
 
 	distFS, fsErr := fs.Sub(siloweb.DistFS, "dist")
 	if fsErr != nil {
@@ -3556,6 +3628,7 @@ func main() {
 				compatDeps.FileResolver = deps.FileRepo
 				compatDeps.MediaSourceOwners = deps.FileRepo
 			}
+			compatDeps.Downloads = compatDownloads
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 
@@ -4695,4 +4768,9 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
+}
+
+func ensureAuditDetailIndexes(ctx context.Context, pool *pgxpool.Pool) error {
+	return partman.NewManager(pool, "activity_log", partman.Weekly, 2).EnsureIndexes(ctx,
+		"activity_log_action_time_idx", "activity_log_target_time_idx")
 }

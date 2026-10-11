@@ -10,7 +10,7 @@ export function ConflictBanner({ onReload, busy }: { onReload: () => void; busy?
     >
       <CircleAlert aria-hidden className="text-warning size-[18px] shrink-0" />
       <p className="min-w-0 flex-1">
-        Home rows changed since you opened this page. Reload to see the current rows, then try
+        These rows changed since you opened this page. Reload to see the current rows, then try
         again.
       </p>
       <Button size="sm" variant="outline" disabled={busy} onClick={onReload}>

@@ -111,12 +111,12 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("/admin/settings?tab=");
   });
 
-  it("includes a Home rows link in the content navigation", () => {
+  it("includes a Sections link in the content navigation", () => {
     const markup = renderSidebar();
 
-    expect(markup).toContain('href="/admin/home-rows"');
-    expect(markup).toContain(">Home rows<");
-    expect(markup).not.toContain('href="/admin/sections"');
+    expect(markup).toContain('href="/admin/sections"');
+    expect(markup).toContain(">Sections<");
+    expect(markup).not.toContain('href="/admin/home-rows"');
   });
 
   it("hides Policy navigation when the editor capability is unavailable", () => {

@@ -496,7 +496,28 @@ func (r *LibraryItemRepository) ReconcileRelinkedItems(ctx context.Context, fold
 
 // reconcileMemberships limits removal to contentIDs when it is non-nil. With
 // onlyFileless, orphans that still have file rows are left for a scan.
+//
+// Concurrent catalog writers touch the same membership and item rows, so
+// Postgres can pick this transaction as a deadlock victim. It rolls the whole
+// transaction back, and a rerun recomputes from the current rows, so a
+// deadlock is retried rather than failing the scan.
 func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string, onlyFileless bool) (int, int, []string, error) {
+	var (
+		removed, deleted int
+		imageDirs        []string
+	)
+	err := retryOnDeadlock(ctx, func() error {
+		var err error
+		removed, deleted, imageDirs, err = r.reconcileMembershipsOnce(ctx, folderID, contentIDs, protectedPathPrefixes, onlyFileless)
+		return err
+	})
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return removed, deleted, imageDirs, nil
+}
+
+func (r *LibraryItemRepository) reconcileMembershipsOnce(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string, onlyFileless bool) (int, int, []string, error) {
 	args := []any{folderID}
 	itemPredicate := ""
 	if contentIDs != nil {

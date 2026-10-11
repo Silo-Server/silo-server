@@ -1172,6 +1172,44 @@
       "body_file": "admin_discord_test.json"
     },
     {
+      "name": "admin_download_devices",
+      "operation_id": "listAdminDownloadDevices",
+      "scenario": "A stale device with finished and waiting downloads and a series monitor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/devices?stale=true",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminDownloadDevice",
+      "body_file": "admin_download_devices.json"
+    },
+    {
+      "name": "admin_download_entries",
+      "operation_id": "listAdminDownloadEntries",
+      "scenario": "One device's downloads with the account, device name, and where each prepared file is.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/entries?user_id=7&device_id=dev-pixel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminDownloadEntry",
+      "body_file": "admin_download_entries.json"
+    },
+    {
       "name": "admin_download_preparation_capabilities",
       "operation_id": "getAdminDownloadPreparationCapabilities",
       "scenario": "Administrator discovery names the realtime channel and how long failed preparations stay listed.",
@@ -1209,6 +1247,203 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminDownloadPreparationsOutputBody",
       "body_file": "admin_download_preparations.json"
+    },
+    {
+      "name": "admin_download_revoke_device",
+      "operation_id": "revokeAdminDownloads",
+      "scenario": "Revoking every download on one device, pausing its series monitors.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/revoke",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"user_id\":\"7\",\"profile_id\":\"p-maya\",\"device_id\":\"dev-pixel\",\"pause_monitors\":true,\"reason\":\"Lost phone\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadRevokeOutputBody",
+      "body_file": "admin_download_revoke_device.json"
+    },
+    {
+      "name": "admin_download_revoke_mixed",
+      "operation_id": "revokeAdminDownloads",
+      "scenario": "A revoke names download ids or one device, not both.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/revoke",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"dl-1\"],\"device_id\":\"dev-pixel\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_download_revoke_mixed.json"
+    },
+    {
+      "name": "admin_download_storage",
+      "operation_id": "getAdminDownloadStorage",
+      "scenario": "The server and one transcode node: measured disk use, Silo's in-use and cached totals, the node's untracked files, and that its files share the transcode scratch disk.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/storage",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadStorage",
+      "body_file": "admin_download_storage.json"
+    },
+    {
+      "name": "admin_download_storage_capabilities",
+      "operation_id": "getAdminDownloadStorageCapabilities",
+      "scenario": "Administrator discovery names the realtime channel and whether device copies can be listed and revoked.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/storage/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadStorageCapabilitiesOutputBody",
+      "body_file": "admin_download_storage_capabilities.json"
+    },
+    {
+      "name": "admin_download_storage_cleanup",
+      "operation_id": "cleanUpAdminDownloadStorageLocation",
+      "scenario": "Clean-up at one node frees what is past its cache period or over the budget or disk ceiling.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/storage/locations/node:9/cleanup",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadStorageCleanupOutputBody",
+      "body_file": "admin_download_storage_cleanup.json"
+    },
+    {
+      "name": "admin_download_storage_delete",
+      "operation_id": "deleteAdminDownloadStorageFiles",
+      "scenario": "One outcome per distinct file: a cached file is deleted, an in-use file is refused without include_in_use, and an unknown one is not found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/storage/files/delete",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-dune\",\"art-oppenheimer\",\"art-gone\",\"art-dune\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadStorageDeleteOutputBody",
+      "body_file": "admin_download_storage_delete.json"
+    },
+    {
+      "name": "admin_download_storage_delete_invalid_id",
+      "operation_id": "deleteAdminDownloadStorageFiles",
+      "scenario": "A file id outside the artifact id alphabet is rejected before any file is touched.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/storage/files/delete",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"../etc\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_download_storage_delete_invalid_id.json"
+    },
+    {
+      "name": "admin_download_storage_events",
+      "operation_id": "listAdminDownloadStorageEvents",
+      "scenario": "History lists an automatic cache expiry and an administrator's revocation of a device's downloads, one batch per row.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/storage/events?days=30",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminDownloadStorageEvent",
+      "body_file": "admin_download_storage_events.json"
+    },
+    {
+      "name": "admin_download_storage_files",
+      "operation_id": "listAdminDownloadStorageFiles",
+      "scenario": "A cached file with the time its cache period ends, and an in-use file kept only for a device not seen in 19 days.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/storage/files?location=node:9&sort=size",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminDownloadStorageFile",
+      "body_file": "admin_download_storage_files.json"
+    },
+    {
+      "name": "admin_download_storage_untracked_delete",
+      "operation_id": "deleteAdminDownloadStorageUntrackedFiles",
+      "scenario": "Deleting untracked files reports how many files and bytes were removed.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/storage/locations/node:9/untracked/delete",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadStorageUntrackedOutputBody",
+      "body_file": "admin_download_storage_untracked_delete.json"
     },
     {
       "name": "admin_episode_intro_redetect",
@@ -12297,6 +12532,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "precondition_required.json"
+    },
+    {
+      "name": "prepare_download_again",
+      "operation_id": "prepareDownloadAgain",
+      "scenario": "A finished download whose server file expired returns to preparing with the same revision.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/downloads/entry-1/prepare",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner",
+          "X-Silo-Device-Id": "device-one"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DownloadEntry",
+      "body_file": "prepare_download_again.json"
     },
     {
       "name": "preview_collection_ok",

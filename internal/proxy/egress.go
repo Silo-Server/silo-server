@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"sync"
@@ -74,22 +75,32 @@ func (m *egressMeter) RateKbps() int {
 // this replaced.
 const meterChunk int64 = 256 << 10
 
-// meteredResponseWriter counts every byte written to the client. Chunked
-// ReaderFrom delegation preserves both sendfile and the rolling rate window.
+// meteredResponseWriter counts every byte written to the client and reports
+// playback media delivery as it flows. Chunked ReaderFrom delegation preserves
+// sendfile, the rolling rate window, and delivery records during a long
+// transfer.
 type meteredResponseWriter struct {
 	http.ResponseWriter
-	meter *egressMeter
+	meter    *egressMeter
+	delivery *deliveryRecorder
+}
+
+func (w *meteredResponseWriter) WriteHeader(status int) {
+	w.delivery.wroteHeader(status)
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *meteredResponseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.meter.Add(int64(n))
+	w.delivery.wroteBody(int64(n))
 	return n, err
 }
 
 func (w *meteredResponseWriter) ReadFrom(src io.Reader) (int64, error) {
 	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, meterChunk, func(n int64, _ error) {
 		w.meter.Add(n)
+		w.delivery.wroteBody(n)
 	})
 }
 
@@ -110,9 +121,16 @@ func (w *meteredResponseWriter) Flush() {
 func (w *meteredResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // meterEgress wraps stream handlers so their responses count toward the
-// node's measured egress bandwidth.
+// node's measured egress bandwidth, and playback responses toward the
+// delivery records the API's idle sweep reads (see noteDelivery).
 func (s *Server) meterEgress(next http.Handler) http.Handler {
+	return meterStream(s.egress, func(sessionID string) { s.tracker.RecordDelivery(sessionID) }, next)
+}
+
+func meterStream(meter *egressMeter, recordDelivery func(sessionID string), next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&meteredResponseWriter{ResponseWriter: w, meter: s.egress}, r)
+		delivery := &deliveryRecorder{record: recordDelivery}
+		r = r.WithContext(context.WithValue(r.Context(), deliveryRecorderKey{}, delivery))
+		next.ServeHTTP(&meteredResponseWriter{ResponseWriter: w, meter: meter, delivery: delivery}, r)
 	})
 }

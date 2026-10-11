@@ -27,9 +27,12 @@ export async function expectPhoneLayout(pageName: string) {
   const dock = screen.getByRole("region", { name: "Page actions" });
   expect(within(dock).getByRole("button", { name: "More" })).toBeInTheDocument();
   const pills = screen.getByRole("group", { name: "Page" });
-  expect(pills).toHaveClass("overflow-x-auto", "max-sm:basis-full");
+  expect(pills).toHaveClass("overflow-x-auto");
+  expect(pills.parentElement).toHaveClass("max-sm:basis-full");
   // A column that can't shrink below the pills would push the list past the screen's edge.
-  expect(pills.parentElement?.parentElement).toHaveClass("grid-cols-[minmax(0,1fr)]");
+  expect(pills.parentElement?.parentElement?.parentElement).toHaveClass(
+    "grid-cols-[minmax(0,1fr)]",
+  );
 
   await userEvent.click(within(dock).getByRole("button", { name: "Add row" }));
   const picker = await screen.findByRole("dialog", { name: `Add a row to ${pageName}` });

@@ -708,7 +708,7 @@ function WhatWillHappen({
           aren't touched.{" "}
           {heroesOn
             ? "Hero banners are added to the pages you picked below."
-            : "No Home rows are added unless you turn on hero banners."}
+            : "No sections are added unless you turn on hero banners."}
         </span>
       </p>
     </div>

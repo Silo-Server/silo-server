@@ -1237,6 +1237,44 @@ func (r *PostgresRepository) GetListMediaItems(ctx context.Context, mediaItemIDs
 	return result, nil
 }
 
+// GetMediaTitles loads the display titles of movies, series and episodes by
+// media item id; see MediaTitles. Unknown ids are absent from the result.
+func (r *PostgresRepository) GetMediaTitles(ctx context.Context, mediaItemIDs []string) (map[string]MediaTitles, error) {
+	result := make(map[string]MediaTitles, len(mediaItemIDs))
+	if len(mediaItemIDs) == 0 {
+		return result, nil
+	}
+	// An id in both tables is read as the episode, so one row comes back per id.
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.content_id, m.type, m.title, COALESCE(m.year, 0), '', 0
+		FROM media_items m
+		WHERE m.content_id = ANY($1)
+			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = m.content_id)
+		UNION ALL
+		SELECT e.content_id, 'episode', COALESCE(e.title, ''), COALESCE(s.year, 0),
+			COALESCE(s.title, ''), COALESCE(s.year, 0)
+		FROM episodes e
+		LEFT JOIN media_items s ON s.content_id = e.series_id
+		WHERE e.content_id = ANY($1)
+	`, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get media titles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var titles MediaTitles
+		if err := rows.Scan(&id, &titles.Kind, &titles.Title, &titles.Year, &titles.SeriesTitle, &titles.SeriesYear); err != nil {
+			return nil, fmt.Errorf("scan media titles: %w", err)
+		}
+		result[id] = titles
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate media titles: %w", err)
+	}
+	return result, nil
+}
+
 const mediaDurationQuery = `
 		SELECT COALESCE(MAX(duration), 0)
 		FROM media_files

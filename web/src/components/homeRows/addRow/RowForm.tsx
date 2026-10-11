@@ -4,9 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PreviewState } from "@/hooks/queries/homeRows/useRowPreview";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
-import type { RecipeCatalogResponse } from "@/lib/recipes";
+import { findMatchingPreset, type RecipeCatalogResponse } from "@/lib/recipes";
 import { ruleSortSummary } from "@/lib/homeRows/describe";
 import {
+  findRecipe,
   savedTitle,
   withCollection,
   withRules,
@@ -172,6 +173,18 @@ export function RowForm({
     onLibraryPage,
   };
   const fallbackTitle = collectionChoices.current?.title;
+  const def = findRecipe(catalog, draft.sectionType);
+  // Collection, rule and Editor's Picks rows show their own control instead.
+  // A preset describes the row only while the row sets nothing beyond the
+  // preset's params; a custom rating floor would make its text wrong.
+  const matched =
+    def && !CONTROL_KINDS.has(draft.sectionType)
+      ? findMatchingPreset(def, draft.config)
+      : undefined;
+  const preset =
+    matched && Object.keys(draft.config).every((key) => key in matched.default_params)
+      ? matched
+      : undefined;
   let nameHelp: string | null = null;
   if (draft.sectionType === "collection" && draft.titleFollowsVariant) {
     nameHelp = "Starts as the collection's name.";
@@ -186,6 +199,7 @@ export function RowForm({
       liveLabel={liveLabel}
       offText={previewOffText}
       countUpTo={rules ? draft.itemLimit : undefined}
+      rule={preset?.description_short}
     />
   );
   const showsLine = shows ? <ShowsSummary sectionType={draft.sectionType} {...shows} /> : null;
@@ -204,7 +218,12 @@ export function RowForm({
         </>
       )}
       {family ? (
-        <VariantChoice sectionType={draft.sectionType} config={draft.config} onChange={onVariant} />
+        <VariantChoice
+          sectionType={draft.sectionType}
+          config={draft.config}
+          presets={def?.presets}
+          onChange={onVariant}
+        />
       ) : null}
       <ParamFields {...fieldProps} slot="primary" />
       <div className="grid gap-2">

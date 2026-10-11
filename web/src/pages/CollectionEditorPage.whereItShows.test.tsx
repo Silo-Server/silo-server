@@ -166,7 +166,7 @@ function showPage(entry: string | { pathname: string; search: string; state: unk
   const router = createMemoryRouter(
     [
       { path: "/admin/collections", element: <Where /> },
-      { path: "/admin/home-rows", element: <Where /> },
+      { path: "/admin/sections", element: <Where /> },
       {
         element: <CollectionEditorPage scope="server" />,
         children: [{ path: "/admin/collections/new" }, { path: "/admin/collections/:id/edit" }],
@@ -199,10 +199,10 @@ describe("rows that show a server collection", () => {
     const home = await within(group).findByRole("link", {
       name: "Studio Ghibli, Home · row 6 of 9",
     });
-    expect(home).toHaveAttribute("href", "/admin/home-rows?page=home&edit=s-home");
+    expect(home).toHaveAttribute("href", "/admin/sections?page=home&edit=s-home");
     expect(
       within(group).getByRole("link", { name: "Ghibli Favorites, Kids page · row 3 of 7" }),
-    ).toHaveAttribute("href", "/admin/home-rows?page=2&edit=s-kids");
+    ).toHaveAttribute("href", "/admin/sections?page=2&edit=s-kids");
     expect(group).toHaveTextContent("2 rows");
     expect(group).toHaveTextContent(ROWS_NOT_LISTED);
   });
@@ -294,7 +294,7 @@ describe("Add as a row", () => {
     showPage(EDITOR);
     const menu = await openAddAsRow(user);
     await user.click(within(menu).getByRole("menuitem", { name: "Kids page" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/home-rows\?/));
+    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     const params = homeRowsParams();
     expect(params.get("page")).toBe("2");
     expect(params.get("add")).toBe("collection:library:c1");
@@ -349,7 +349,7 @@ describe("Add as a row", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
     expect(dialog).toHaveTextContent("as a row on the Kids page.");
     await user.click(within(dialog).getByRole("button", { name: "Discard changes" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/home-rows\?/));
+    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     expect(homeRowsParams().get("page")).toBe("2");
     expect(v2Recorder.writes()).toHaveLength(0);
   });
@@ -364,7 +364,7 @@ describe("Add as a row", () => {
     });
     const menu = await openAddAsRow(user);
     await user.click(within(menu).getByRole("menuitem", { name: "Home" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/home-rows\?/));
+    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     expect(router.state.location.state).toEqual({ returnTo });
   });
 
@@ -382,7 +382,7 @@ describe("Add as a row", () => {
     expect(discard).toBeDisabled();
     expect(discard).toHaveAccessibleDescription(DISCARD_KEEPS_IT_HIDDEN);
     await user.click(within(dialog).getByRole("button", { name: "Save and continue" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/home-rows\?/));
+    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     const [patch] = v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}");
     expect(patch!.body).toMatchObject({ visibility: "visible" });
   });
@@ -435,7 +435,7 @@ describe("Add as a row", () => {
     await user.click(within(menu).getByRole("menuitem", { name: "Home" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
     await user.click(within(dialog).getByRole("button", { name: "Save and continue" }));
-    await waitFor(() => expect(location()).toMatch(/^\/admin\/home-rows\?/));
+    await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     const [patch] = v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}");
     expect(patch!.body).toMatchObject({ title: "Studio Ghibli Films" });
     expect(homeRowsParams().get("add")).toBe("collection:library:c1");
@@ -514,11 +514,11 @@ describe("deleting a collection rows show", () => {
     );
     expect(within(dialog).getByRole("link", { name: "Open row: Studio Ghibli" })).toHaveAttribute(
       "href",
-      "/admin/home-rows?page=home&edit=s-home",
+      "/admin/sections?page=home&edit=s-home",
     );
     expect(
       within(dialog).getByRole("link", { name: "Open row: Ghibli Favorites" }),
-    ).toHaveAttribute("href", "/admin/home-rows?page=2&edit=s-kids");
+    ).toHaveAttribute("href", "/admin/sections?page=2&edit=s-kids");
   });
 
   it("deletes each row with a fresh token, then the collection", async () => {

@@ -157,12 +157,13 @@ type previewExecutor interface {
 }
 
 type CatalogResolver struct {
-	browseRepo     *BrowseRepository
-	itemRepo       *ItemRepository
-	episodeRepo    *EpisodeRepository
-	searchProvider CatalogSearchProvider
-	storeProvider  userstore.UserStoreProvider
-	facets         facetFetcher
+	browseRepo      *BrowseRepository
+	itemRepo        *ItemRepository
+	episodeRepo     *EpisodeRepository
+	searchProvider  CatalogSearchProvider
+	storeProvider   userstore.UserStoreProvider
+	sectionResolver SectionResolver
+	facets          facetFetcher
 	// previewExecutorForScope, when non-nil, is used by previewQuerySource
 	// instead of the default queryExecutorForScope. Tests inject a stub here
 	// to observe how many times the executor is asked for a result page.
@@ -207,6 +208,27 @@ func (r *CatalogResolver) WithUserStoreProvider(provider userstore.UserStoreProv
 		return nil
 	}
 	r.storeProvider = provider
+	return r
+}
+
+// SectionDefinition is a row after the acting profile's overrides are applied.
+type SectionDefinition struct {
+	SectionType string
+	Title       string
+	ItemLimit   int
+	Config      json.RawMessage
+}
+
+// SectionResolver shares the page's visibility and configuration with catalog
+// paging, including rows that exist only in the profile's settings.
+type SectionResolver interface {
+	ResolveCatalogSection(context.Context, CatalogRequest) (SectionDefinition, error)
+}
+
+func (r *CatalogResolver) WithSectionResolver(resolver SectionResolver) *CatalogResolver {
+	if r != nil {
+		r.sectionResolver = resolver
+	}
 	return r
 }
 
@@ -1693,8 +1715,7 @@ func validateCatalogQueryRequest(req CatalogRequest, allowPersonalizedSorts bool
 		return fmt.Errorf("%w: source %q is not supported yet", ErrInvalidCatalogRequest, req.Source)
 	}
 	return validateCatalogOverlayQuery(
-		req.SearchQuery,
-		req.Query,
+		req,
 		catalogQueryRuleFields,
 		QuerySortFieldSet(allowPersonalizedSorts),
 		true,
@@ -1711,7 +1732,7 @@ func validateCatalogPersonalRequest(req CatalogRequest, allowPersonalizedSorts b
 	if req.Source == CatalogSourceHistory && allowPersonalizedSorts {
 		sortFields[historyDateViewedSort] = true
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, sortFields, false)
+	return validateCatalogOverlayQuery(req, catalogPersonalRuleFields, sortFields, false)
 }
 
 func validateCatalogPersonRequest(req CatalogRequest) error {
@@ -1721,7 +1742,7 @@ func validateCatalogPersonRequest(req CatalogRequest) error {
 	if req.PersonID <= 0 {
 		return fmt.Errorf("%w: person_id is required", ErrInvalidCatalogRequest)
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogQueryRuleFields, catalogQuerySortFields(), false)
+	return validateCatalogOverlayQuery(req, catalogQueryRuleFields, catalogQuerySortFields(), false)
 }
 
 func validateCatalogSectionRequest(req CatalogRequest) error {
@@ -1756,7 +1777,7 @@ func validateCatalogCollectionRequest(req CatalogRequest, allowPersonalizedSorts
 	if err := validateCatalogExactCollectionRequest(req); err != nil {
 		return err
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
+	return validateCatalogOverlayQuery(req, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
 }
 
 func catalogRequestHasOverlay(req CatalogRequest) bool {
@@ -1773,7 +1794,8 @@ func catalogQueryHasFilter(def QueryDefinition) bool {
 		def.Limit != nil
 }
 
-func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
+func validateCatalogOverlayQuery(req CatalogRequest, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
+	def := req.Query
 	if !IsValidMediaScope(def.MediaScope) {
 		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', 'manga', or 'video'", ErrInvalidCatalogRequest)
 	}
@@ -1792,12 +1814,15 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 			return fmt.Errorf("%w: groups[%d].match must be 'all' or 'any'", ErrInvalidCatalogRequest, i)
 		}
 		for j, rule := range group.Rules {
-			if !ruleFields[rule.Field] {
+			if !ruleFields[rule.Field] || (req.V1Rules && v2RuleFields[rule.Field]) {
 				return fmt.Errorf("%w: groups[%d].rules[%d].field %q is not supported", ErrInvalidCatalogRequest, i, j, rule.Field)
 			}
-			def, ok := queryFieldDefs[rule.Field]
-			if !ok || !def.validOps[rule.Op] {
+			fieldDef, ok := queryFieldDefs[rule.Field]
+			if !ok || !fieldDef.allows(rule.Op) || (req.V1Rules && rule.Op == ruleOpNotInLast) {
 				return fmt.Errorf("%w: groups[%d].rules[%d] is invalid", ErrInvalidCatalogRequest, i, j)
+			}
+			if err := validateRuleValue(rule); err != nil {
+				return fmt.Errorf("%w: groups[%d].rules[%d]: %w", ErrInvalidCatalogRequest, i, j, err)
 			}
 		}
 	}
@@ -1812,7 +1837,7 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 		if !allowRelevance {
 			return fmt.Errorf("%w: relevance sort is only supported for query source", ErrInvalidCatalogRequest)
 		}
-		if strings.TrimSpace(searchQuery) == "" {
+		if strings.TrimSpace(req.SearchQuery) == "" {
 			return fmt.Errorf("%w: relevance sort requires q", ErrInvalidCatalogRequest)
 		}
 		return nil
@@ -1855,6 +1880,15 @@ var catalogQueryRuleFields = map[string]bool{
 	"bitrate":           true,
 	"audio_language":    true,
 	"subtitle_language": true,
+
+	querySortTitle:              true,
+	ruleFieldDecade:             true,
+	querySortRuntime:            true,
+	querySortRatingTMDb:         true,
+	querySortRatingRTCritic:     true,
+	querySortRatingRTAudience:   true,
+	querySortLatestEpisodeAdded: true,
+	querySortLastAirDate:        true,
 }
 
 var catalogPersonalRuleFields = map[string]bool{
@@ -1888,6 +1922,15 @@ var catalogPersonalRuleFields = map[string]bool{
 	"bitrate":           true,
 	"audio_language":    true,
 	"subtitle_language": true,
+
+	querySortTitle:              true,
+	ruleFieldDecade:             true,
+	querySortRuntime:            true,
+	querySortRatingTMDb:         true,
+	querySortRatingRTCritic:     true,
+	querySortRatingRTAudience:   true,
+	querySortLatestEpisodeAdded: true,
+	querySortLastAirDate:        true,
 }
 
 func catalogQuerySortFields() map[string]bool {
@@ -1983,6 +2026,38 @@ func defaultCatalogLibrarySection(libraryID int, sectionID string) (catalogPageS
 
 func (r *CatalogResolver) loadCatalogSection(ctx context.Context, req CatalogRequest) (catalogPageSection, error) {
 	var section catalogPageSection
+	if r.sectionResolver != nil {
+		definition, err := r.sectionResolver.ResolveCatalogSection(ctx, req)
+		if err != nil {
+			return section, err
+		}
+		section = catalogPageSection{ID: req.SectionID, Scope: req.Scope,
+			SectionType: definition.SectionType, Title: definition.Title,
+			ItemLimit: definition.ItemLimit, Config: definition.Config}
+		if req.Scope == "library" {
+			section.LibraryID = new(req.LibraryID)
+		}
+	} else {
+		var err error
+		section, err = r.loadStoredCatalogSection(ctx, req)
+		if err != nil {
+			return section, err
+		}
+	}
+	var collectionCfg struct {
+		LibraryCollectionID string `json:"library_collection_id"`
+		UserCollectionID    string `json:"user_collection_id"`
+	}
+	if len(section.Config) > 0 {
+		_ = json.Unmarshal(section.Config, &collectionCfg)
+	}
+	section.CollectionID = collectionCfg.LibraryCollectionID
+	section.UserCollectionID = collectionCfg.UserCollectionID
+	return section, nil
+}
+
+func (r *CatalogResolver) loadStoredCatalogSection(ctx context.Context, req CatalogRequest) (catalogPageSection, error) {
+	var section catalogPageSection
 	query := `
 		SELECT id, scope, library_id, section_type, title, item_limit, config
 		FROM page_sections
@@ -2017,15 +2092,6 @@ func (r *CatalogResolver) loadCatalogSection(ctx context.Context, req CatalogReq
 		return catalogPageSection{}, err
 	}
 
-	var collectionCfg struct {
-		LibraryCollectionID string `json:"library_collection_id"`
-		UserCollectionID    string `json:"user_collection_id"`
-	}
-	if len(section.Config) > 0 {
-		_ = json.Unmarshal(section.Config, &collectionCfg)
-	}
-	section.CollectionID = collectionCfg.LibraryCollectionID
-	section.UserCollectionID = collectionCfg.UserCollectionID
 	return section, nil
 }
 
@@ -2835,6 +2901,38 @@ func catalogRuleMatchesItem(item *models.MediaItem, rule QueryRule) bool {
 			return false
 		}
 		return compareCatalogNumeric(*item.RatingIMDB, rule.Op, rule.Value)
+	case querySortTitle:
+		return compareCatalogText(item.Title, rule.Op, rule.Value)
+	case ruleFieldDecade:
+		start, ok := decadeStart(rule.Value)
+		if !ok {
+			return false
+		}
+		inDecade := item.Year >= start && item.Year <= start+9
+		if rule.Op == "is" {
+			return inDecade
+		}
+		return !inDecade
+	case querySortRuntime:
+		if item.Runtime <= 0 {
+			return false
+		}
+		return compareCatalogNumeric(float64(item.Runtime), rule.Op, rule.Value)
+	case querySortRatingTMDb:
+		if item.RatingTMDB == nil {
+			return false
+		}
+		return compareCatalogNumeric(*item.RatingTMDB, rule.Op, rule.Value)
+	case querySortRatingRTCritic:
+		if item.RatingRTCritic == nil {
+			return false
+		}
+		return compareCatalogNumeric(float64(*item.RatingRTCritic), rule.Op, rule.Value)
+	case querySortRatingRTAudience:
+		if item.RatingRTAudience == nil {
+			return false
+		}
+		return compareCatalogNumeric(float64(*item.RatingRTAudience), rule.Op, rule.Value)
 	case "added_at":
 		addedAt := item.CreatedAt
 		if item.AddedAt != nil {
@@ -2919,6 +3017,10 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 	if err != nil {
 		return false
 	}
+	if op == ruleOpNotInLast {
+		cutoff, ok := catalogSpanCutoff(value, time.Now().UTC())
+		return ok && actualTime.Before(catalogDateOnly(cutoff))
+	}
 
 	switch op {
 	case "gt", "gte", "lt", "lte", "between", "is", "is_not", "in_last":
@@ -2982,6 +3084,10 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 func compareCatalogTime(actual time.Time, op string, value any) bool {
 	if actual.IsZero() {
 		return false
+	}
+	if op == ruleOpNotInLast {
+		cutoff, ok := catalogSpanCutoff(value, time.Now())
+		return ok && actual.Before(cutoff)
 	}
 
 	switch op {
@@ -3110,6 +3216,48 @@ func catalogStringRange(value any) ([2]string, bool) {
 		return [2]string{fmt.Sprint(v[0]), fmt.Sprint(v[1])}, true
 	default:
 		return [2]string{}, false
+	}
+}
+
+// catalogSpanCutoff reads a not_in_last span ("30d") as the moment it starts,
+// counted back from now.
+func catalogSpanCutoff(value any, now time.Time) (time.Time, bool) {
+	duration, ok := catalogStringValue(value)
+	if !ok {
+		return time.Time{}, false
+	}
+	spec, err := parseDurationSpec(duration)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return spec.cutoffTime(now), true
+}
+
+// compareCatalogText mirrors the title rule in SQL: a case-insensitive match
+// of the whole value or part of it.
+func compareCatalogText(actual, op string, value any) bool {
+	expectedText, ok := value.(string)
+	if !ok {
+		return false
+	}
+	expected := strings.ToLower(strings.TrimSpace(expectedText))
+	actual = strings.ToLower(strings.TrimSpace(actual))
+
+	switch op {
+	case "is":
+		return actual == expected
+	case "is_not":
+		return actual != expected
+	case "contains":
+		return strings.Contains(actual, expected)
+	case ruleOpNotContains:
+		return !strings.Contains(actual, expected)
+	case ruleOpBeginsWith:
+		return strings.HasPrefix(actual, expected)
+	case ruleOpEndsWith:
+		return strings.HasSuffix(actual, expected)
+	default:
+		return false
 	}
 }
 

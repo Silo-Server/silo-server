@@ -264,7 +264,7 @@ describe("HomeRowsPage", () => {
   it("offers Reload rows when the rows changed elsewhere", async () => {
     render(<FakePage initialRows={[makeRow("a")]} conflict={{ scope: "page" }} />);
     const banner = screen.getByRole("alert");
-    expect(banner).toHaveTextContent("Home rows changed since you opened this page.");
+    expect(banner).toHaveTextContent("These rows changed since you opened this page.");
     await userEvent.click(within(banner).getByRole("button", { name: "Reload rows" }));
     expect(harness.reload).toHaveBeenCalled();
   });

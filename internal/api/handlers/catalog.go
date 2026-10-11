@@ -225,6 +225,8 @@ func applyEpisodeBrowseMetadata(resp *itemListResponse, meta episodeBrowseMetada
 	if resp == nil {
 		return
 	}
+	resp.PosterIsEpisodeStill = new(meta.StillPath != "" && resp.posterPath == meta.StillPath)
+	resp.BackdropIsEpisodeStill = new(meta.StillPath != "" && resp.backdropPath == meta.StillPath)
 	resp.SeriesID = meta.SeriesID
 	resp.SeriesTitle = meta.SeriesTitle
 	resp.SeasonNumber = meta.SeasonNumber
@@ -569,7 +571,12 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 	}
 
 	// The filter body is validated before the access filter so an invalid
-	// filter and an unresolvable policy answer in the v1 order.
+	// filter and an unresolvable policy answer in the v1 order. A rule /api/v2
+	// added is refused as v1 refused it before.
+	if err := catalog.ValidateV1Rules(req.FilterConfig); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
+		return
+	}
 	if _, _, err := sections.NewFilterBuilder("mi").Build(req.FilterConfig); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
 		return

@@ -219,6 +219,14 @@ omit both; clients then show the output as unknown rather than inferring it
 from `play_method`, the source container, or the video codec. The frozen
 `/api/v1` bridge does not carry these fields.
 
+`source_video_height: true` advertises an optional `source_video_height` on v2
+session rows: the pixel height of the source's primary video track.
+`source_video_resolution` names the file's size class, so a 3840x1600 file is
+`2160p`, while a transcode's `target_resolution` names its output height
+(`1600p`). A client compares the target height with `source_video_height` to
+tell a full-resolution transcode from a downscale. The frozen `/api/v1` bridge
+does not carry the field.
+
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
 labels observations with playback-session or node identity.
@@ -264,6 +272,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `physical_gpu_keys` | string[] | Stable identities of the GPUs behind this node, derived from `capabilities` (see below). Omitted when the node reports no identifiable GPU. |
 | `last_stats` | object | The node's most recent host resource sample — `{"system": …, "gpu": […]}` in the shape below. Omitted when the node reported none. |
 | `hw_accel_override`, `hw_device_override` | string | This node's own acceleration policy (see below). Omitted when the node inherits the cluster-wide settings, which is the normal case. |
+| `download_artifact_dir_override` | string | This node's own directory for prepared download files. Omitted when the node inherits `download.artifact_dir`, or, when that is blank, uses `download-artifacts` inside its transcode directory. |
+| `download_artifact_max_bytes_override` | int64 | This node's own prepared-download budget in bytes; `0` means no budget. Omitted when the node uses `download.artifact_max_bytes`. |
 | `capability_drift` | string | Human-readable note describing how the node's hardware got worse at the last capability refetch. Omitted when the last refetch found no regression (see below). |
 | `capability_drift_baseline` | object | What that note is waiting on — `{"backends": ["nvenc"], "devices": [{"uuid": "GPU-8a7b…", "aliases": ["GPU-8a7b…", "0000:03:00.0", "/dev/dri/renderD128"]}]}`. Never present without `capability_drift`; absent with it only for a note written before this field existed (see below). Each device carries every stable name it answered to, so it is recognized if it returns renumbered; `uuid` is held apart because it is the only name that can prove a *different* card, a replacement in the same slot inheriting both the slot and the render path. Either key is omitted when empty. |
 | `network_access` | object | The node's last report about the network access provider plugins running beside it, keyed by provider slug — `{"tailscale": {"state": "connected", "origin": "https://proxy-1.tail1234.ts.net", "hostname": "proxy-1.tail1234.ts.net", "updated_at": "…"}}`. `state` is one of `disconnected`, `awaiting_authorization`, `connecting`, `connected`, `error`; `origin`, `hostname` and `updated_at` are omitted when the provider did not report them. Written by the same health check that writes `last_stats`, so it is exactly as fresh as `last_health_check`, and a check that carries no report clears it. Omitted when the node reports no providers. Only proxy nodes report it: clients never talk to transcode nodes. See [proxy origins by access path](#proxy-origins-by-access-path). |
@@ -426,6 +436,16 @@ dashboard uses it to flag a node whose `revision` differs from the server's
 during a rollout — and is omitted on a node predating build reporting. Unlike
 the resource fields it is present on a node that cannot be sampled, so a
 `last_stats` object may carry `build` and nothing else.
+
+`last_stats.artifacts` is the node's latest measurement of its prepared-download
+directory: `measured_at`, `files` and `bytes` (finished files), `partial_files` and
+`partial_bytes` (encodes in progress or left behind), `other_bytes`,
+`fs_used_bytes` and `fs_total_bytes` for the filesystem, `fs_type`,
+`shares_scratch`, `ephemeral`, and `stale` and `error` when the last measurement did
+not finish. It carries no path, for the same reason as `disks`. The node measures at
+most every five minutes, so this can be older than `last_health_check`. Omitted on a
+node predating storage reporting. `GET /api/v2/admin/downloads/storage` presents it
+with the server's own measurement.
 
 ### Scratch admission
 
@@ -639,6 +659,15 @@ indistinguishable from omission.
 dispatch honors a new override immediately; the target node itself picks it up
 on its next config reload — see "Acceleration overrides" above for what waits
 for a restart.
+
+`download_artifact_dir_override` (an absolute path; `null` or empty restores the
+inherited directory) and `download_artifact_max_bytes_override` (bytes, `0` for no
+budget; `null` or `-1` restores `download.artifact_max_bytes`) are writable here too.
+A new budget applies at the next storage maintenance pass. A new directory applies
+when the node restarts; files in the old directory are not moved, so in-use files are
+prepared again and cached ones are dropped. See
+[prepared download storage](architecture/download-storage.md). The frozen
+`/api/v1/admin/nodes` routes neither accept nor return these two fields.
 
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
@@ -1938,6 +1967,94 @@ list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the
 server records it.
 
+### Offline-download storage
+
+These operations show where prepared download files are, how much space they take,
+and which devices hold copies, and let an administrator free space or revoke device
+copies. [Prepared download storage](architecture/download-storage.md) describes the
+retention rule, budgets, measurement, and revocation they act on. Every operation
+requires an acting administrator; the mutations are refused in demo mode.
+
+`GET /api/v2/admin/downloads/storage/capabilities` reports `available`, the realtime
+channel (`download_preparations`), and `devices` and `revocation` when device copies
+can be listed and revoked.
+
+`GET /api/v2/admin/downloads/storage` returns one entry per location, the server
+first and then transcode nodes by name, plus the settings that govern them
+(`cache_hours`, `disk_ceiling_percent`, `default_budget_bytes`,
+`stale_device_days`), `preparing_jobs`, and `freed_last_30_days_bytes`. A location
+carries its `key` (`server` or `node:<id>`), `name`, `online`, `dir` (for a node,
+the directory it was last listed in, which is the one it uses), `dir_source` (where
+the configured directory comes from), `pending_dir` (a node's configured directory
+when it differs from `dir`; the node moves there when it restarts), the latest on-disk `usage` (absent until one is reported), what Silo's
+records say is `in_use` and `cached` (files and bytes), `waiting_downloads`,
+`stale_waiting_bytes` (in-use bytes kept only for devices not seen within
+`stale_device_days`), `untracked_files` and `untracked_bytes` from the last
+reconciliation, its `budget_bytes` and `budget_source`, `cleanup_backlog` (node
+files queued for deletion), `storage_full` (over its budget or the disk ceiling with
+nothing left to free: a full node gets no new preparations, and while the server is
+full, jobs that would be prepared on it wait), and `replicas_disagree` when API replicas
+report different directories for the server's files.
+
+`GET /api/v2/admin/downloads/storage/files` lists prepared files with their
+`state` (`in_use`, `cached`, or `expired`), recipe, location, size, `last_used_at`,
+a cached file's `expires_at`, and how many downloads are waiting on, downloading, or
+finished with it. Filters: `location`, `state` (ready files by default), `format`,
+`library_id`, `q` (title). `sort` is `size` (default), `last_used`, or `created`.
+Keyset-paged with `limit` and `cursor`.
+
+`POST /api/v2/admin/downloads/storage/files/delete` takes `{"ids": [...]}`
+(1–500) and `include_in_use`, and returns one `{id, outcome, bytes}` per distinct id
+in request order. `outcome` is `deleted`, `requeued` (it was in use and
+`include_in_use` was set: deleted and queued to be prepared again for the waiting
+downloads), `in_use` (refused), `not_found`, `not_ready`, or `failed` (an error
+stopped this file's delete; the other files went ahead, and a file left on disk is
+reported as untracked). Devices that finished keep their copies. A file a download linked in the last minute is refused.
+
+`POST /api/v2/admin/downloads/storage/locations/{location}/cleanup` runs clean-up at
+one location now and returns `freed_bytes`; `0` when nothing was due or another
+replica was already cleaning up. An unknown location is `404`.
+`POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete` lists
+the directory again and deletes files named like Silo's prepared files that no
+prepared-file record accounts for and that nothing has written to for an hour,
+returning `files` and `bytes` deleted and `failed_files` it could not delete (they stay
+untracked); other files in the directory are never touched. It
+answers `404` for an unknown location and `503` when the directory cannot be listed
+(an offline node). Filters and bodies that name an account, library, or node id larger
+than the database holds are `422`.
+
+`GET /api/v2/admin/downloads/storage/events` lists clean-up and revocation history,
+newest first, one row per batch (a maintenance pass or an administrator action) at
+one location for one reason and account:
+`reason`, `location` (`server`, `node:<id>`, or `device`), `count`, `bytes`, up to
+three `titles`, `detail` (an administrator's reason or a note), `actor`, and for
+revocations `account`. Filters: `reason`, `location`, `days` (0–90; 0 for all kept
+history).
+
+`GET /api/v2/admin/downloads/devices` lists every device holding managed downloads,
+across accounts: account, profile, device, `last_seen_at` (last registry sync or
+download request), `stale`, counts of copies by state, `revoked` copies waiting for
+the device, `bytes_on_device` (finished copies, including revoked ones the device has
+not yet confirmed deleting), and active series `monitors`.
+Filters: `q`, `stale`, `platform`; `sort` is `last_seen` (longest unseen first,
+default) or `size`. `GET /api/v2/admin/downloads/entries` lists the managed
+downloads themselves, filtered by `user_id`, `profile_id`, `device_id`, or `status`,
+with where each one's prepared file is and any revocation.
+
+`POST /api/v2/admin/downloads/revoke` takes either `ids` (up to 500 download ids)
+or `user_id`, `profile_id`, and `device_id` for every download on one device, plus
+optional `pause_monitors` (whole-device only) and `reason` (up to 500 characters,
+kept in history). It returns `revoked` (newly revoked; already revoked rows are not
+counted), `bytes` (the size of the revoked copies the device had finished
+downloading), `paused_monitors`, and `download_ids`. The server stops serving
+the files at once; an app that supports revocation deletes its copies at its next
+sync and then deletes the entries (see
+[downloads-api.md](downloads-api.md#93-robustness-rules)).
+
+The `download_preparations` channel also carries `download_storage.changed` (`{}`)
+after a clean-up pass that freed bytes or any of these actions; re-read the
+views that are open.
+
 ### Sequenced administrator playback commands (v2)
 
 `POST /api/v2/admin/sessions/{session_id}/pause`, `/resume`, `/stop` and
@@ -2386,15 +2503,19 @@ submission. No automatic retry, authentication replay or provider update occurs.
 The web edit submission captures identity and input before queueing and refuses
 late completion from another authority or a newer dialog draft.
 
-An update that changes the upstream the plugin is handed clears the poll marker of
-every source bound to it, in the same transaction, so those sources restart from
-now against the new upstream. That upstream is the linked Requests integration
-when there is one, otherwise the connection's base URL: linking, unlinking or
-switching the integration, or changing an unlinked connection's base URL, resets
-markers. Changing the name, kind or API key, or the stored base URL of a linked
-connection, keeps them. The frozen v1 connection update shares this repository
-path. Editing the linked Requests integration itself does not reset markers. A poll that was already running does not restore the old marker; see the
-source update below.
+An update that changes the upstream the plugin is handed clears the poll marker and
+`last_run_at` of every source bound to it, in the same transaction, so those
+sources restart from now against the new upstream and are polled at the next
+cycle instead of after their interval. That upstream is the linked Requests
+integration when there is one, otherwise the connection's base URL: linking,
+unlinking or switching the integration, or changing an unlinked connection's base
+URL, resets markers. Base URLs that differ only in the case of the scheme or host,
+surrounding whitespace, or trailing slashes name the same server and keep them; a
+different port, scheme or path (an escaped slash, `%2F`, included) does not.
+Changing the name, kind or API key, or the stored base URL of a linked connection,
+keeps them. The frozen v1 connection update shares this repository path. Editing
+the linked Requests integration itself does not reset markers. A poll that was
+already running does not restore the old marker; see the source update below.
 
 ### Delete an autoscan connection (v2)
 
@@ -2614,9 +2735,12 @@ delivery mode preserves the stored mode. Rewrites need nonblank from/to values.
 
 An update that changes the bound connection (including unbinding it) or the stored
 source configuration clears the source's poll marker, so the next poll starts from
-now. A marker is the plugin's continuation token for one upstream; replaying it
-against another server can repeat or skip that server's history. Changing only the
-label, enabled state, delivery mode, poll interval or path rewrites keeps the marker.
+now. It clears `last_run_at` too, so the next cycle polls the source instead of
+waiting out its interval, and the source reads as not run until then. A marker is
+the plugin's continuation token for one upstream; replaying it against another
+server can repeat or skip that server's history. Changing only the label, enabled
+state, delivery mode, poll interval or path rewrites keeps the marker and
+`last_run_at`.
 The rule lives in the repository update, so the frozen v1 source update applies it too.
 A poll cycle re-reads each source just before polling it, so an edit made earlier in
 the cycle is honored; a source whose row cannot be read is skipped until the next cycle. A poll already running during the reset cannot write the old
@@ -2898,6 +3022,20 @@ installation without a recorded update or without a repository is 409 (v1 answer
 Success is 200. Non-retryable: no replay identity, and a lost response may follow a
 committed update.
 
+Install, update and upload refuse a package with a `detail` written for the administrator,
+never a URL or checksum. This covers binaries, zip archives, archive links and legacy
+catalog archives. A package that cannot install as listed is 422 `validation_failed`: a
+download whose SHA-256 differs from the catalog's, a catalog index, checksum file or
+download answering 404 or another 4xx, a catalog or checksum file that can't be parsed or
+has no entry for the download, a download address that isn't an http or https link or
+can't be parsed, a catalog entry with no build for this server, a
+`silo_api_version` the server does not support, a binary or archive whose own manifest
+names a different `plugin_id` or `version` than the catalog entry, or a catalog that no
+longer lists the requested version. A catalog, checksum or download host that cannot be
+reached, answers 429 or 5xx, or cuts the response short is 503 `dependency_unavailable`
+with `Retry-After: 30`. Nothing is written in either case; an update leaves the installed
+version in place.
+
 `POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
 and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin
 is only stopped and launches on its next use. A disabled installation is 409. Success is 200
@@ -3004,3 +3142,37 @@ out-of-range numeric query parameters instead of rejecting them. Those routes ar
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
 against `/api/v2`.
+
+### Account and permission audit details (v2)
+
+Successful v2 administrator account and access-group mutations record an audit
+row in the mutation transaction. Actions are `user.created`, `user.updated`,
+`user.deleted`, `access_group.created`, `access_group.updated`, and
+`access_group.deleted`. `target_type` and `target_id` identify the affected
+entity; `user_id` identifies the authenticated subject, and a present
+`impersonator_user_id` identifies the acting administrator. Actor filters use
+`COALESCE(impersonator_user_id, user_id)`.
+
+`changes` lists changed allowlisted identity/policy fields. `before` and `after`
+are optional strings containing canonical JSON values: JSON null represents an
+unset account override, while an absent side represents creation/deletion.
+A password change includes only `{ "field": "password" }`; passwords, hashes,
+tokens, arbitrary request bodies and headers are excluded. Permission arrays
+show the exact prior and resulting membership. Rollbacks record no successful
+domain action, and a repeated identical policy write has no change details.
+
+Audit history and live streams accept `action`, `actor_user_id`, `target_type`,
+and `target_id` alongside existing filters. History cursors bind these filters.
+`GET /api/v2/admin/logs/ws/capabilities` advertises `audit_change_details` and
+`audit_actions`. Historical request rows continue to have no domain details.
+Live rows publish after commit; history remains authoritative if a frame is
+missed. Existing live delivery does not promise gap-free or late-commit traversal.
+The frozen v1 read/socket projections retain their previous fields.
+
+Audit detail index readiness: the additive migration creates metadata-only
+partitioned indexes for action and target filters. Primary API startup and
+`--migrate-only` build historical leaf indexes concurrently and attach them before
+reporting readiness. A failed or canceled build leaves startup incomplete and is
+safe to retry; ordinary request writers remain available on existing API nodes.
+Future partitions inherit the completed parent indexes. Proxy/transcode nodes do
+not run this schema maintenance.

@@ -117,6 +117,9 @@ func TestRequiredNewChildCuration(t *testing.T) {
 			case "child_nulls":
 				patch(seasonID, `{"title":null,"overview":null,"air_date":null}`, admin, ok(seasonID, "season", "Synthetic season"))
 				patch(episodeID, `{"title":null,"runtime":null,"air_date":null}`, admin, ok(episodeID, "episode", "Synthetic episode"))
+				// Null leaves title, overview and runtime alone and clears the air dates.
+				want[seasonID]["air_date"] = nil
+				want[episodeID]["air_date"] = nil
 				changed = []string{seasonID, episodeID}
 			case "child_permissions":
 				patch(seasonID, `{"title":"Must not persist"}`, scenariocatalog.Principal{Class: "primary_profile"}, catalogProblem(403, "permission_denied"))

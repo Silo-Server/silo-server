@@ -422,8 +422,8 @@ export default function AdminHomeRows() {
     >
       <HomeRowsPage
         adapter={adapter}
-        title="Home rows"
-        subtitle="The rows everyone sees on Home and on library pages. Profiles can still hide, rename or reorder them."
+        title="Sections"
+        subtitle="The sections everyone sees on Home and on library pages. Profiles can still hide, rename or reorder them."
         focus={focus}
         collection={(id) =>
           // Unknown until the list loads; after that, a missing id is a deleted collection.

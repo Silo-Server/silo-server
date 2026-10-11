@@ -33,6 +33,7 @@ export function RowPreview({
   liveLabel,
   offText,
   countUpTo,
+  rule,
 }: {
   title: string;
   sectionType: string;
@@ -45,10 +46,13 @@ export function RowPreview({
    * match and how many of them (up to this) the row shows.
    */
   countUpTo?: number;
+  /** What a ready-made row looks for, said when nothing matches it. */
+  rule?: string;
 }) {
   const group = rowKindGroup(sectionType);
   const Icon = GROUP_ICONS[group];
   const message = emptyMessage(state, offText);
+  const lookFor = state.status === "ready" && state.items.length === 0 ? rule : undefined;
   return (
     <section
       aria-label={`Preview of ${title || "this row"}`}
@@ -95,9 +99,10 @@ export function RowPreview({
           >
             <Icon className="size-5" />
           </span>
-          <p className="text-muted-foreground text-sm" role="status">
-            {message}
-          </p>
+          <div className="text-muted-foreground text-sm" role="status">
+            <p>{message}</p>
+            {lookFor ? <p className="mt-0.5 text-[13px]">Looks for: {lookFor}</p> : null}
+          </div>
         </div>
       ) : (
         <div className="flex gap-2.5 overflow-hidden">
