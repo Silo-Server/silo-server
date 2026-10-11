@@ -1568,6 +1568,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		effectiveHints := selectionHints
+		primaryCandidates := candidates
 		winner, matched := trySelection(selectionHints, candidates)
 		// Structured IDs remain decisive and never fall back to a title search.
 		// For title/year identities, try independently parsed path hypotheses only
@@ -1606,16 +1607,32 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 			}
 		}
-		// Last, and once per item: the candidates kept above may still hold the
-		// right result under a title the search didn't return, such as a
-		// regional release title. Its provider details can confirm it.
+		// Last: a search may still hold the right result under a title it didn't
+		// return, such as a regional release title, and the provider's details
+		// can confirm it. Check the primary identity's results, then the
+		// alternate set kept above when one replaced them.
 		if !matched {
-			aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
-				ctx, effectiveHints, candidates, itemChain, searchQuery.Language,
-			)
-			providerMatchErrors = append(providerMatchErrors, aliasErrors...)
-			if aliasWinner != nil {
-				winner, matched = aliasWinner, true
+			type aliasAttempt struct {
+				hints      *MatchHints
+				candidates []MatchCandidate
+			}
+			aliasAttempts := []aliasAttempt{{selectionHints, primaryCandidates}}
+			if effectiveHints != selectionHints {
+				aliasAttempts = append(aliasAttempts, aliasAttempt{effectiveHints, candidates})
+			}
+			for _, attempt := range aliasAttempts {
+				aliasWinner, aliasErrors := validateMatchByProviderTitleAliases(
+					ctx, attempt.hints, attempt.candidates, itemChain, searchQuery.Language,
+				)
+				providerMatchErrors = append(providerMatchErrors, aliasErrors...)
+				if aliasWinner != nil {
+					winner, matched = aliasWinner, true
+					effectiveHints, candidates = attempt.hints, attempt.candidates
+					break
+				}
+				if len(aliasErrors) > 0 {
+					break
+				}
 			}
 		}
 		trustedIDTypeMismatch := false

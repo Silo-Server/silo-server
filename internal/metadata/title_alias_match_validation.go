@@ -29,8 +29,8 @@ const (
 // provider no longer knows it (404) or returns its complete title list without
 // the title. A rival with conflicting provider IDs, a failed fetch, or a partial
 // title list leaves the item unmatched, since it could have listed the title
-// too. A search that already returned an exact-title result was rejected as
-// ambiguous, not as unrelated, and is left alone.
+// too. A search that already returned an exact-title result near the folder's
+// year was rejected as ambiguous, not as unrelated, and is left alone.
 func validateMatchByProviderTitleAliases(
 	ctx context.Context,
 	hints *MatchHints,
@@ -50,7 +50,10 @@ func validateMatchByProviderTitleAliases(
 		if providerIDRichness(candidate.ProviderIDs) == 0 || candidateCorroboratingSourceCount(candidate) == 0 {
 			continue
 		}
-		if similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, hints.Year); similarity == 1 {
+		// An exact title within the release-date window selection tolerates
+		// (or with no year) is a real rival; one from years away is another work.
+		if similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, hints.Year); similarity == 1 &&
+			(candidate.Year == 0 || absYearDelta(candidate.Year, hints.Year) <= 2) {
 			return nil, nil
 		}
 		if candidate.Year != hints.Year || !candidateTypeMatchesHint(hints.Type, candidate.ContentType) {

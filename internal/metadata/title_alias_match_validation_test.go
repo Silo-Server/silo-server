@@ -188,6 +188,26 @@ func TestValidateMatchByProviderTitleAliases(t *testing.T) {
 			aliases: map[string][]string{"919207": {"首尔之春"}},
 		},
 		{
+			name:  "an exact-title result from years away is another work",
+			hints: hints,
+			candidates: []SearchResult{
+				seoulSpringSearchResult("919207", 2023),
+				{Name: "首尔之春", Year: 1990, ProviderIDs: map[string]string{"tmdb": "333"}},
+			},
+			aliases:     map[string][]string{"919207": {"首尔之春"}},
+			wantID:      "919207",
+			wantDetails: 1,
+		},
+		{
+			name:  "an exact-title result within two years is a real rival",
+			hints: hints,
+			candidates: []SearchResult{
+				seoulSpringSearchResult("919207", 2023),
+				{Name: "首尔之春", Year: 2021, ProviderIDs: map[string]string{"tmdb": "333"}},
+			},
+			aliases: map[string][]string{"919207": {"首尔之春"}},
+		},
+		{
 			name:  "a rival the provider no longer knows doesn't block the match",
 			hints: hints,
 			candidates: []SearchResult{
@@ -344,5 +364,52 @@ func TestValidateMatchByProviderTitleAliasesNeedsCompleteRivalTitles(t *testing.
 		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{lone}, "en")
 	if winner == nil {
 		t.Fatalf("want a lone result confirmed by a partial list that contains the title")
+	}
+}
+
+// queryAliasProvider answers searches per query title, so a primary identity
+// and an alternate identity get different result sets.
+type queryAliasProvider struct {
+	aliasProvider
+	byTitle map[string][]SearchResult
+}
+
+func (p *queryAliasProvider) Search(_ context.Context, query SearchQuery) ([]SearchResult, error) {
+	return p.byTitle[query.Title], nil
+}
+
+func TestInitialMatchChecksPrimaryResultsAfterAlternateIdentityFails(t *testing.T) {
+	t.Parallel()
+	harness := newTestHarness()
+	// The alternate identity's exact-title result outscores the primary's
+	// regional-title result but is rejected for its year, which made it the
+	// kept candidate set. The primary result must still get the alias check.
+	provider := &queryAliasProvider{
+		aliasProvider: aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}},
+		byTitle: map[string][]SearchResult{
+			"首尔之春":         {seoulSpringSearchResult("919207", 2023)},
+			"Seoul Spring": {{Name: "Seoul Spring", Year: 2010, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "444"}}},
+		},
+	}
+
+	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		Hints: &MatchHints{
+			Title: "首尔之春", Year: 2023, Type: "movie",
+			AlternateIdentities: []MatchIdentityHint{{Title: "Seoul Spring", Year: 2023, Source: "filename"}},
+		},
+		Mode: ModeInitialMatch,
+	}, []Provider{provider})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders() error = %v", err)
+	}
+	if result == nil || result.Decision == nil || result.Decision.Outcome != "matched" {
+		t.Fatalf("result = %#v, want the primary result confirmed by its alternative titles", result)
+	}
+	item, err := harness.itemRepo.GetByID(context.Background(), result.ContentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.TmdbID != "919207" {
+		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
 	}
 }
