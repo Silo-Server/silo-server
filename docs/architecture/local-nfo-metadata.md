@@ -259,9 +259,10 @@ stable in the background). NFO field edits propagate on **manual refresh only**
 Sidecar images are discovered by the provider's `GetImages`
 (`internal/metadata/nfo/images.go`) and its season and episode lookups
 (`internal/metadata/nfo/series_depth.go`). Clients — including jellycompat —
-always receive the normal presigned `poster_url`/`backdrop_url`/`logo_url`;
-library files are never served directly, and API nodes never need filesystem
-access to libraries.
+always receive the normal presigned `poster_url`/`backdrop_url`/`logo_url`
+(and, on `/api/v2` movie and series detail, `banner_url`, `thumb_url`,
+`clearart_url`, `disc_url` and `backdrop_urls`); library files are never served
+directly, and API nodes never need filesystem access to libraries.
 
 Discovery lists each folder once per request and matches names ignoring case,
 so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems; an entry
@@ -279,16 +280,29 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 | --- | --- |
 | Movie poster | `<basename>-poster`, then `poster`, `folder`, `cover`, `default`, `movie` |
 | Series poster | `poster`, `folder`, `cover`, `default`, `show` |
-| Backdrop | movie `<basename>-fanart`, then `fanart`, `backdrop`, `background`, `art` |
+| Backdrops | movie `<basename>-fanart`, then `fanart`, `backdrop`, `background`, `art`, then the numbered names and `extrafanart/` (below) |
 | Logo | movie `<basename>-logo`, `<basename>-clearlogo`, then `logo`, `clearlogo` |
+| Banner | movie `<basename>-banner`, then `banner` |
+| Thumb (landscape) | movie `<basename>-landscape`, `<basename>-thumb`, then `landscape`, `thumb` |
+| Clear art | movie `<basename>-clearart`, then `clearart` (`art` is a backdrop) |
+| Disc art (movies only) | `<basename>-disc`, `<basename>-cdart`, `<basename>-discart`, then `disc`, `cdart`, `discart` |
 | Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
 | Episode still | `<basename>-thumb`, then `<basename>` |
 
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
-  `S01E01-poster.jpg` never becomes series art. Silo stores one backdrop, so
-  the first match wins.
+  `S01E01-poster.jpg` never becomes series art. Every other slot takes the
+  first match.
+- An item keeps up to 20 backdrops (`metadata.MaxItemBackdrops`), the first
+  match being the primary (`media_items.backdrop_*`) and the rest stored in
+  order in `media_item_backdrops`. After the named backdrops come the numbered
+  families, in Jellyfin's order: `fanart-N` (or Kodi's `fanartN`),
+  `background-N`, `art-N`, `backdropN`, each from 1 to 20 and stopping after
+  three missing numbers in a row (Jellyfin stops after three misses in total,
+  so Silo finds a superset). Then every image in an `extrafanart` folder,
+  sorted by name. Jellyfin's `backdrops` folder holds theme videos and is not
+  read.
 - Generic names attach only in folders that hold a single content group; a
   shared `folder.jpg` in a flat multi-movie folder applies to none. A season
   folder that is the series root itself (a flat series) is not searched for
@@ -355,6 +369,16 @@ sits in the chain.
   leaves local metadata out because the NFO names another title (see
   Identity above), or when the local provider's call failed, cached local art
   is stored artwork like any other and no library folder is probed.
+- Banner, thumb, clear art, disc art and the backdrops after the primary come
+  only from sidecars today, so the rule above has no provider art to fall back
+  to. When a refresh searched the item level and did not return a slot's
+  sidecar, the slot is cleared once the sidecar's folder answers (the file is
+  missing or no longer qualifies) and kept while it does not. A refresh that
+  did not search the item level leaves the slots alone. Their cache jobs and
+  storage follow the poster's; an extra backdrop's job targets its
+  `media_item_backdrops` row (`item_backdrop`), and its local key carries the
+  row ID beside the content hash, so re-caching one backdrop never deletes
+  another's prefix.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
@@ -387,6 +411,15 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 
 - The admin image picker does not surface local art (automatic chain path
   only).
+- Seasons have no banner, thumb or extra backdrops (`seasonNN-fanart`,
+  `seasonNN-banner`, `seasonNN-landscape` and their season-folder forms are not
+  read).
+- NFO `<thumb aspect="banner|landscape|clearart|discart">` and `<fanart>` URLs
+  are not read. A provider that offers banners, thumbs, clear art or disc art
+  returns `RemoteImage` entries of type `ImageBanner`, `ImageThumb`,
+  `ImageClearArt` or `ImageDisc` (plugin image kinds `banner`, `thumb`,
+  `clearart`, `disc`), and `applyBestImages` fills the slot when no sidecar
+  does.
 - Multi-part movies: in a folder holding multiple content groups, only
   `<basename>.nfo` and the stack base name are read; a differently named NFO
   there is not found.

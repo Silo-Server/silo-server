@@ -1,0 +1,112 @@
+package nfo
+
+import (
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/metadata"
+)
+
+// Numbered backdrops follow Jellyfin's LocalImageProvider: each family is
+// tried from 1 to maxNumberedBackdrop and stops after maxBackdropGap numbers in
+// a row are missing. Kodi spells extra fanart without the dash (fanart1.jpg),
+// so a number counts as present under either spelling.
+var numberedBackdropFamilies = [][]string{
+	{"fanart-%d", "fanart%d"},
+	{"background-%d"},
+	{"art-%d"},
+	{"backdrop%d"},
+}
+
+const (
+	maxNumberedBackdrop = 20
+	maxBackdropGap      = 3
+	// extraFanartFolder holds any number of extra backdrops (Kodi). Jellyfin's
+	// backdrops/ folder holds theme videos and is not read.
+	extraFanartFolder = "extrafanart"
+)
+
+// findBackdrops returns the item's backdrop sources in display order, at most
+// metadata.MaxItemBackdrops. The first is the primary backdrop, found by the
+// same precedence findItemArtwork uses: the media file's "-fanart" sidecar,
+// then fanart, backdrop, background and art. The numbered families follow,
+// then every image in extrafanart/, sorted by name.
+func (f *sidecarFinder) findBackdrops(contentType string, searchDirs, mediaFiles []string) []string {
+	var sources []string
+	seen := make(map[string]bool)
+	add := func(source string) bool {
+		if source == "" {
+			return false
+		}
+		if !seen[source] && len(sources) < metadata.MaxItemBackdrops {
+			seen[source] = true
+			sources = append(sources, source)
+		}
+		return true
+	}
+
+	suffixes, names := itemArtworkNames(contentType, metadata.ImageBackdrop)
+	for _, suffix := range suffixes {
+		for _, mediaFile := range mediaFiles {
+			add(f.find(filepath.Dir(mediaFile), mediaBasename(mediaFile)+suffix))
+		}
+	}
+	for _, name := range names {
+		for _, dir := range searchDirs {
+			add(f.find(dir, name))
+		}
+	}
+	for _, dir := range searchDirs {
+		for _, family := range numberedBackdropFamilies {
+			missing := 0
+			for n := 1; n <= maxNumberedBackdrop && missing < maxBackdropGap; n++ {
+				found := false
+				for _, pattern := range family {
+					if add(f.find(dir, fmt.Sprintf(pattern, n))) {
+						found = true
+						break
+					}
+				}
+				if found {
+					missing = 0
+				} else {
+					missing++
+				}
+			}
+		}
+		for _, source := range f.extraFanart(dir) {
+			add(source)
+		}
+	}
+	return sources
+}
+
+// extraFanart returns the usable images in dir's extrafanart folder, sorted by
+// name ignoring case.
+func (f *sidecarFinder) extraFanart(dir string) []string {
+	folders := []string{extraFanartFolder}
+	if listing := f.listing(dir); listing != nil {
+		folders = listing[extraFanartFolder]
+	}
+	var sources []string
+	for _, folder := range folders {
+		entries := f.listing(filepath.Join(dir, folder))
+		names := make([]string, 0, len(entries))
+		for lower := range entries {
+			if slices.Contains(localArtworkExtensions, strings.ToLower(filepath.Ext(lower))) {
+				names = append(names, lower)
+			}
+		}
+		slices.Sort(names)
+		for _, lower := range names {
+			for _, entry := range entries[lower] {
+				if source := f.usableSource(filepath.Join(dir, folder, entry)); source != "" {
+					sources = append(sources, source)
+				}
+			}
+		}
+	}
+	return sources
+}
