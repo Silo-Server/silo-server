@@ -443,9 +443,10 @@ func (s *Service) CompleteLoginWithSettings(ctx context.Context, callbackURL str
 		activationModels, activationErr = s.loginModels(completionCtx, tokens)
 	}
 	// A slow catalog lookup can exhaust the provider deadline after the code
-	// exchange succeeded. Reserve an independent deadline to persist its tokens
-	// and the login outcome, including when activation must be retried.
-	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	// exchange succeeded. The independent save deadline must also outlast an
+	// admitted one-minute refresh and its separate database commit before this
+	// login can acquire the credential lock and persist its accepted tokens.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancelSave()
 	transition, err := s.mutateSettingsWithSnapshot(saveCtx, func(c *credentials, values map[string]string) error {
 		// A newer administrator attempt supersedes this completion, including

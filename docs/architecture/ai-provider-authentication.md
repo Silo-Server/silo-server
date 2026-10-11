@@ -112,9 +112,12 @@ Access token, refresh token, scopes,
 and expiry are committed together. A refresh without a replacement refresh token
 retains the existing token. Accepted refreshes and login exchanges finish under an
 independent, bounded context so request or job cancellation cannot discard a
-replacement. The final database write has its own bounded context. Returned
-scopes and rotated refresh tokens are retained when a successful refresh drops
-plan access; inference stops and reconnect explicitly requests consent. The verified
+replacement. The final database write has its own bounded context.
+Accepted login persistence gets an independent two-minute deadline so it can
+wait for an admitted one-minute refresh and its final database commit before
+acquiring the shared credential lock.
+Returned scopes and rotated refresh tokens are retained when a successful refresh
+drops plan access; inference stops and reconnect explicitly requests consent. The verified
 sign-in identity remains authoritative during refresh; optional refresh ID
 tokens are not used. Only the documented unusable-token errors (`invalid_grant`,
 `invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
