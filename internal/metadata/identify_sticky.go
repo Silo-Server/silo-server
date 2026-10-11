@@ -21,8 +21,8 @@ import (
 // manual refresh lets the file's IDs re-match the item, the recovery path for
 // a corrected NFO, unless an admin chose the stored identity with Identify.
 // Identify marks the item in the transaction that writes the identity it
-// chose, renames and merges carry the mark along, and the choice outranks the
-// file: any declared IDs that do not confirm the stored identity count as a
+// chose, and in any move or merge that commits before that write; renames and
+// merges carry the mark along, and the choice outranks the file: any declared IDs that do not confirm the stored identity count as a
 // conflict, because the refresh would otherwise re-match on them.
 
 // metadataIdentityChoiceRepo records and reads an admin's Identify choice. It

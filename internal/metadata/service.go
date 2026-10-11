@@ -1955,9 +1955,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if !ok {
 			continue
 		}
-		// A manual Identify skips the local hint provider (NFO) across every
-		// phase: its sidecar art is resolved by file path, not by the chosen id,
-		// so a stale poster/fanart must not be re-applied over the user's choice.
+		// When the local hint provider (NFO) is skipped (skipLocalProvider), it
+		// is skipped across every phase: its sidecar art is resolved by file
+		// path, not by the kept id, so a stale poster/fanart must not be
+		// re-applied over that identity.
 		_, isIdentityHinter := p.(IdentityHintProvider)
 		if isIdentityHinter && skipLocalProvider {
 			continue
@@ -2014,8 +2015,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if !ok {
 				continue
 			}
-			// Identify skips the local hint provider (NFO): a stale season.nfo
-			// must not overlay season names on the user's chosen identity.
+			// A skipped local hint provider (NFO): a stale season.nfo must not
+			// overlay season names on the identity the run keeps.
 			_, isIdentityHinter := p.(IdentityHintProvider)
 			if isIdentityHinter && skipLocalProvider {
 				continue
@@ -2077,8 +2078,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					if !ok {
 						continue
 					}
-					// Identify skips the local hint provider (NFO): stale episode
-					// NFOs/thumbs must not overlay the user's chosen identity.
+					// A skipped local hint provider (NFO): stale episode NFOs/thumbs
+					// must not overlay the identity the run keeps.
 					_, isIdentityHinter := p.(IdentityHintProvider)
 					if isIdentityHinter && skipLocalProvider {
 						continue
@@ -9282,25 +9283,13 @@ func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]str
 	return &selectionItem
 }
 
-// applyBuiltinIdentityHints consults the chain's IdentityHintProviders (the
-// built-in NFO provider) and folds their curated tmdb/imdb/tvdb ids into
-// accumulatedIDs ahead of Phase-1 search. Keys in protected (stored durable
-// ids) are never overwritten — a conflict is logged and the stored value
-// kept. The returned map holds the hint values that won a slot in
-// accumulatedIDs, so candidate selection can anchor on them through the
-// trusted-hint machinery.
-func applyBuiltinIdentityHints(
-	ctx context.Context,
-	chain []Provider,
-	query SearchQuery,
-	accumulatedIDs map[string]string,
-	protected map[string]bool,
-) map[string]string {
-	return applyLocalIdentityHints(ctx, collectLocalIdentityHints(ctx, chain, query), accumulatedIDs, protected)
-}
-
-// applyLocalIdentityHints is applyBuiltinIdentityHints for hints already
-// collected from the chain.
+// applyLocalIdentityHints folds the curated tmdb/imdb/tvdb ids the chain's
+// IdentityHintProviders (the built-in NFO provider) declared, as collected by
+// collectLocalIdentityHints, into accumulatedIDs ahead of Phase-1 search. Keys
+// in protected (stored durable ids) are never overwritten — a conflict is
+// logged and the stored value kept. The returned map holds the hint values
+// that won a slot in accumulatedIDs, so candidate selection can anchor on them
+// through the trusted-hint machinery.
 func applyLocalIdentityHints(
 	ctx context.Context,
 	local []localIdentityHint,
