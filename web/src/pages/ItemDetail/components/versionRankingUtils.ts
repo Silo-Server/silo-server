@@ -126,6 +126,16 @@ function bestAttributes(
   let bestAudioEvidence: string | undefined;
   let bestAudioScore = -1;
 
+  // On equal codec scores an Atmos track supplies the label. Equal scores are
+  // the same codec family, so the codec-only label used to pick a version
+  // does not change.
+  const replacesBestAudio = (score: number, codec: string, evidence?: string) =>
+    score > bestAudioScore ||
+    (score >= 0 &&
+      score === bestAudioScore &&
+      !mapAudioLabel(bestAudioCodec, bestAudioEvidence).includes("Atmos") &&
+      mapAudioLabel(codec, evidence).includes("Atmos"));
+
   for (const v of candidates) {
     const rs = resolutionScore(v.resolution);
     if (rs > bestResScore) {
@@ -135,10 +145,11 @@ function bestAttributes(
     if (v.hdr) hdr = true;
 
     const as_ = audioScore(v.codec_audio);
-    if (as_ > bestAudioScore) {
+    const versionEvidence = versionAudioAtmosEvidence(v);
+    if (replacesBestAudio(as_, v.codec_audio, versionEvidence)) {
       bestAudioScore = as_;
       bestAudioCodec = v.codec_audio;
-      bestAudioEvidence = versionAudioAtmosEvidence(v);
+      bestAudioEvidence = versionEvidence;
     }
 
     // Also check individual audio tracks for higher-quality codecs
@@ -146,10 +157,11 @@ function bestAttributes(
       for (const t of v.audio_tracks) {
         if (t.codec) {
           const ts = audioScore(t.codec);
-          if (ts > bestAudioScore) {
+          const trackEvidence = audioTrackAtmosEvidence(t);
+          if (replacesBestAudio(ts, t.codec, trackEvidence)) {
             bestAudioScore = ts;
             bestAudioCodec = t.codec;
-            bestAudioEvidence = audioTrackAtmosEvidence(t);
+            bestAudioEvidence = trackEvidence;
           }
         }
       }

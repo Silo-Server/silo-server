@@ -87,6 +87,13 @@ describe("playback info helpers", () => {
       sourceAudio({ codec: "eac3", title: longName, profile: "Dolby Digital Plus + Dolby Atmos" }),
     ).toBe("DD+ Atmos");
     expect(sourceAudio({ codec: "eac3", title: longName })).toBe(longName);
+    expect(
+      sourceAudio({
+        codec: "eac3",
+        title: "Atmospheric score",
+        profile: "Dolby Digital Plus + Dolby Atmos",
+      }),
+    ).toBe("DD+ Atmos");
   });
 
   it("formats a direct-play session with source metadata and live runtime stats", () => {

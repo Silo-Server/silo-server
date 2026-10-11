@@ -48,6 +48,19 @@ describe("pickBestAttributes", () => {
     expect(result!.audioLabel).toBe("TrueHD Atmos");
   });
 
+  it("labels Atmos from a later track of the same codec", () => {
+    const versions = [
+      makeVersion({
+        codec_audio: "eac3",
+        audio_tracks: [
+          { codec: "eac3", language: "en" },
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
+        ],
+      }),
+    ];
+    expect(pickBestAttributes(versions)?.audioLabel).toBe("DD+ Atmos");
+  });
+
   it("labels Atmos from the primary audio track's profile", () => {
     const versions = [
       makeVersion({

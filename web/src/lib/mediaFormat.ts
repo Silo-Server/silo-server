@@ -56,9 +56,14 @@ function codecCanCarryAtmos(lowerCodec: string): boolean {
   return !NON_ATMOS_CODECS.some((family) => lowerCodec.includes(family));
 }
 
+/** Whether text names Atmos as a word ("Atmospheric" does not). */
+export function mentionsAtmos(text?: string): boolean {
+  return Boolean(text && ATMOS_WORD.test(text));
+}
+
 function namesAtmos(lowerCodec: string, atmosEvidence?: string): boolean {
   if (lowerCodec.includes("atmos")) return true;
-  return Boolean(atmosEvidence && ATMOS_WORD.test(atmosEvidence)) && codecCanCarryAtmos(lowerCodec);
+  return mentionsAtmos(atmosEvidence) && codecCanCarryAtmos(lowerCodec);
 }
 
 /**
