@@ -29,6 +29,13 @@ func (b *imageWorkBudget) set(limit int) {
 	b.wakeLocked()
 }
 
+// size returns the current limit, zero when unbounded.
+func (b *imageWorkBudget) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.limit
+}
+
 // acquire waits for a slot and returns the function that frees it. A free
 // slot is taken even when ctx is already done.
 func (b *imageWorkBudget) acquire(ctx context.Context) (release func(), err error) {
