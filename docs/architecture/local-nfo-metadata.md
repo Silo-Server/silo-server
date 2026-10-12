@@ -385,8 +385,7 @@ Caching and refresh:
   a person photo carries the owning item's content ID as `series_id` for root
   confinement) to `ImageCacheProcessor.CopyLocalArtwork`, which queues the jobs
   behind a 10-minute discovery hold that other drains respect and copies them
-  on background workers (one per artwork-budget slot, at least two),
-  claiming each job by slot. That claim
+  on two background workers per process, claiming each job by slot. That claim
   ignores the hold but not the backoff of an attempt that failed. The copies
   share one per-process budget with the queue drain and manual refreshes,
   sized from `metadata.image_workers` and its memory cap; a claimed job that

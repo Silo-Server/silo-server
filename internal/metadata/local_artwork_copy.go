@@ -21,10 +21,10 @@ import (
 // each job for retries, which any server may claim.
 
 const (
-	// localArtworkCopyWorkers is the least number of copy workers a process
-	// starts; it starts one per slot of a larger artwork budget. Each copy
-	// takes a budget slot (SetWorkerBudget), so the budget, shared with the
-	// image-cache drain, bounds how many run; refreshes never wait for them.
+	// localArtworkCopyWorkers bounds the copies one process runs at once.
+	// Each decodes an image of up to MaxArtworkSourceBytes and encodes its
+	// variant ladder, and takes a slot of the same budget as the image-cache
+	// drain (SetWorkerBudget); refreshes never wait for it.
 	localArtworkCopyWorkers = 2
 
 	// localArtworkCopyBacklog bounds the discovered slots waiting for a copy
@@ -87,7 +87,7 @@ func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []Enq
 func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store localArtworkJobStore, queued []EnqueueImageCacheJobInput) {
 	p.localCopies.start.Do(func() {
 		p.localCopies.pending = make(chan EnqueueImageCacheJobInput, localArtworkCopyBacklog)
-		for range max(localArtworkCopyWorkers, p.workBudget.size()) {
+		for range localArtworkCopyWorkers {
 			go p.runLocalArtworkCopies(store)
 		}
 	})
