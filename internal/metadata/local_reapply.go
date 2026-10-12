@@ -132,7 +132,10 @@ func (s *MetadataService) localItemIdentityOutcome(ctx context.Context, folderID
 	live := maps.Clone(declared)
 	suppressProviderIDValues(live, stale)
 	added := newlyDeclaredIDs(canonicalIdentityProviderIDs(previousIDs), live)
-	if len(added) > 0 && (localIDsContradict(added, stored) || contentid.IsLocal(item.ContentID)) {
+	// A new ID corrects the identity when it contradicts a live stored one,
+	// or when the item has none to keep: matched only locally, or anchored
+	// only by IDs recorded as dead.
+	if len(added) > 0 && (localIDsContradict(added, stored) || !hasLiveIdentity(stored) || contentid.IsLocal(item.ContentID)) {
 		slog.InfoContext(ctx, "metadata: local files declare a new identity; refreshing to re-anchor the item", "component", "metadata",
 			"content_id", item.ContentID, "folder_id", folderID, "previous_ids", previousIDs, "declared_ids", live, "stored_ids", stored)
 		if err := s.RefreshTargetForLibrary(ctx, RefreshTargetItem, item.ContentID, folderID); err != nil {
@@ -149,6 +152,17 @@ func (s *MetadataService) localItemIdentityOutcome(ctx context.Context, folderID
 		return localReapplyNone, nil
 	}
 	return localReapplyMerged, nil
+}
+
+// hasLiveIdentity reports whether stored, with the IDs recorded as dead
+// removed, still holds an identity ID.
+func hasLiveIdentity(stored map[string]string) bool {
+	for _, key := range trustedSearchIDKeys {
+		if strings.TrimSpace(stored[key]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // newlyDeclaredIDs returns the IDs in declared that previous did not hold

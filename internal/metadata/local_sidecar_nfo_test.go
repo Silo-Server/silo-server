@@ -544,6 +544,20 @@ func TestLocalSidecarCheck_DeadNFOIDIsNoConflict(t *testing.T) {
 	}
 }
 
+func TestLocalSidecarCheck_NFOReplacingADeadStoredIDReAnchors(t *testing.T) {
+	f := newMovieFixture(t, "100")
+	f.scan(t)
+	// TMDB 100, the item's only ID, is recorded dead; the NFO then names a
+	// live replacement, which a refresh would anchor the item to.
+	f.x.RecordDeadProviderID(f.contentID, "tmdb", "100")
+	processed := f.x.RecordProcess()
+	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2", tmdbID("200")))
+	f.scan(t)
+	if requests := processed(); len(requests) != 1 || requests[0].Mode != metadata.ModeManualRefresh {
+		t.Fatalf("refreshes = %#v, want one manual refresh to re-anchor on TMDB 200", requests)
+	}
+}
+
 func TestLocalSidecarCheck_ConflictingUnchangedIDsAreNotApplied(t *testing.T) {
 	// The item was identified as TMDB 300 while its NFO names 100: a plot
 	// edit must not apply the other title's text, nor change the identity.
