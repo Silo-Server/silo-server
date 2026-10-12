@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -146,8 +147,14 @@ const maxAuthenticateByNameBody = 64 << 10
 
 // HandleAuthenticateByName serves POST /Users/AuthenticateByName.
 func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
+	// Read the whole body under the cap: Decode alone stops after the first
+	// JSON value and would never see an oversized tail.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAuthenticateByNameBody))
 	var req authenticateByNameRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthenticateByNameBody)).Decode(&req); err != nil {
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
 		return
 	}
