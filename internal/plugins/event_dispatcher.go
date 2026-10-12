@@ -55,7 +55,8 @@ const (
 	// eventOutcomeTimeout bounds recording a delivery's outcome, which
 	// outlives a server that starts shutting down after the plugin answered.
 	eventOutcomeTimeout = 10 * time.Second
-	// eventDrainTimeout bounds Stop writing the events still queued.
+	// eventDrainTimeout bounds writing one event, or all the events Stop
+	// finds still queued, once shutdown may have begun.
 	eventDrainTimeout = 5 * time.Second
 )
 
@@ -318,13 +319,18 @@ func (d *EventDispatcher) consumeHub(ctx context.Context, ch <-chan events.Envel
 	}
 }
 
+// storeEvents stores queued events until ctx ends. An event it has taken
+// from the intake is stored with a context of its own, so a shutdown that
+// begins meanwhile does not lose it; Stop waits for it before draining.
 func (d *EventDispatcher) storeEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case produced := <-d.intake:
-			d.store(ctx, produced)
+			storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), eventDrainTimeout)
+			d.store(storeCtx, produced)
+			cancel()
 		}
 	}
 }

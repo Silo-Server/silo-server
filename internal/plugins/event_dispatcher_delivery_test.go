@@ -298,6 +298,47 @@ func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
 	}
 }
 
+// cancelAwareStore is a memoryDeliveryStore whose Enqueue waits for the test
+// and then honors its context, as a database write would.
+type cancelAwareStore struct {
+	*memoryDeliveryStore
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *cancelAwareStore) Enqueue(ctx context.Context, deliveries []EventDelivery) error {
+	close(s.entered)
+	<-s.release
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.memoryDeliveryStore.Enqueue(ctx, deliveries)
+}
+
+// TestShutdownDuringStoreKeepsTheEvent: the server's context ends while an
+// event it already took from the intake is being written.
+func TestShutdownDuringStoreKeepsTheEvent(t *testing.T) {
+	deliveries := &cancelAwareStore{memoryDeliveryStore: newMemoryDeliveryStore(), entered: make(chan struct{}), release: make(chan struct{})}
+	store := &fakeInstallationStore{
+		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+	}
+	d := NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: &flakyClient{}}, deliveries, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := d.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete})
+	<-deliveries.entered
+	cancel()
+	close(deliveries.release)
+	d.Stop()
+	if pending := deliveries.pending(); len(pending) != 1 {
+		t.Fatalf("outbox after shutdown during the write = %+v, want the event", pending)
+	}
+}
+
 // TestDeliveryClaimedByDeadServerIsDeliveredByAnother: a server claims a
 // delivery and dies before it records the outcome. Once the lease runs out
 // another server delivers it, and the dead server's claim can no longer
