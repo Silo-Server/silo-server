@@ -57,3 +57,17 @@ func TestLocalIdentityConflict(t *testing.T) {
 		})
 	}
 }
+
+// An IMDb ID stored in another case agrees with the same ID chosen in
+// lowercase, so restating it is no correction of the stored match.
+func TestIdentityChoiceCorrectsComparesNormalizedIDs(t *testing.T) {
+	t.Parallel()
+
+	stored := map[string]string{"tmdb": "123", "imdb": "TT0111161"}
+	if identityChoiceCorrects(map[string]string{"imdb": "tt0111161"}, stored) {
+		t.Error("an IMDb ID differing only in case counted as a correction")
+	}
+	if !identityChoiceCorrects(map[string]string{"imdb": "tt0000002"}, stored) {
+		t.Error("a different IMDb ID did not count as a correction")
+	}
+}

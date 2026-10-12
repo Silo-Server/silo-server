@@ -9234,12 +9234,13 @@ func storedItemIdentity(item *models.MediaItem, durable map[string]string) map[s
 // ID differs from the stored value for its key, or the item stores identity
 // IDs and none of the chosen ones agrees with them. Restating a stored ID,
 // with or without adding one the item lacks, confirms or extends the match.
+// Values compare normalized, so an IMDb ID stored in another case agrees.
 func identityChoiceCorrects(chosen, stored map[string]string) bool {
 	agrees, hasStored := false, false
 	for _, key := range trustedSearchIDKeys {
-		old := strings.TrimSpace(stored[key])
+		old := normalizeProviderIDComparisonValue(key, stored[key])
 		hasStored = hasStored || old != ""
-		next := chosen[key]
+		next := normalizeProviderIDComparisonValue(key, chosen[key])
 		if old == "" || next == "" {
 			continue
 		}
