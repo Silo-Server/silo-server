@@ -47,7 +47,7 @@ func TestCopyRecoveryFFmpegProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := json.NewEncoder(conn).Encode(args); err != nil {
 		t.Fatal(err)
 	}

@@ -181,7 +181,7 @@ func TestChapterThumbnailRemoteWorkerFallback(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer stored.Close()
+				defer func() { _ = stored.Close() }()
 				if data, err := io.ReadAll(stored); err != nil || len(data) == 0 {
 					t.Fatalf("saved thumbnail is empty: %v", err)
 				}
