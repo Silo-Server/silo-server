@@ -97,6 +97,12 @@ func (c *syncByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req C
 	}, nil
 }
 
+func (c *syncByteImageCacher) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
 func newLocalArtworkDBProcessor(pool *pgxpool.Pool, roots []string) (*ImageCacheProcessor, *recordingArtworkTargets, *syncByteImageCacher) {
 	targets := newRecordingArtworkTargets()
 	cacher := &syncByteImageCacher{}
@@ -336,11 +342,21 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		if err := p.CopyLocalArtwork(ctx, inputs); err != nil {
 			t.Fatalf("CopyLocalArtwork: %v", err)
 		}
-		p.waitLocalArtworkCopies()
-
+		deadline := time.NewTimer(10 * time.Second)
+		defer deadline.Stop()
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
 		for _, in := range inputs {
 			got := readLocalArtworkJob(t, pool, in.TargetType, in.TargetContentID, in.ImageType)
-			if got.status != ImageCacheStatusSucceeded || got.attempts != 0 {
+			for got.status != ImageCacheStatusSucceeded {
+				select {
+				case <-deadline.C:
+					t.Fatalf("%s copy did not finish: %+v", in.TargetType, got)
+				case <-poll.C:
+				}
+				got = readLocalArtworkJob(t, pool, in.TargetType, in.TargetContentID, in.ImageType)
+			}
+			if got.attempts != 0 {
 				t.Errorf("%s job = %+v, want succeeded on the first attempt", in.TargetType, got)
 			}
 			key := in.TargetType + ":" + in.TargetContentID + ":" + in.ImageType
@@ -348,17 +364,21 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 				t.Errorf("%s slot cached path = %q, want a local/ copy", key, cached)
 			}
 		}
-		if cacher.calls != len(inputs) {
-			t.Errorf("copies = %d, want %d", cacher.calls, len(inputs))
+		if copies := cacher.callCount(); copies != len(inputs) {
+			t.Errorf("copies = %d, want %d", copies, len(inputs))
 		}
 
 		// Rediscovering the unchanged files queues nothing to copy again.
 		if err := p.CopyLocalArtwork(ctx, inputs); err != nil {
 			t.Fatalf("CopyLocalArtwork again: %v", err)
 		}
-		p.waitLocalArtworkCopies()
-		if cacher.calls != len(inputs) {
-			t.Errorf("copies after rediscovery = %d, want still %d", cacher.calls, len(inputs))
+		for _, in := range inputs {
+			if got := readLocalArtworkJob(t, pool, in.TargetType, in.TargetContentID, in.ImageType); got.status != ImageCacheStatusSucceeded {
+				t.Errorf("%s rediscovered job = %+v, want it left succeeded", in.TargetType, got)
+			}
+		}
+		if copies := cacher.callCount(); copies != len(inputs) {
+			t.Errorf("copies after rediscovery = %d, want still %d", copies, len(inputs))
 		}
 	})
 }

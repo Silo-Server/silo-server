@@ -100,6 +100,7 @@ type targetImageCacheJobStore interface {
 	retryTargetNow(ctx context.Context, targetContentID string, localOnly bool) error
 	claimDueForTarget(ctx context.Context, workerID, targetContentID string, localOnly bool, limit int) ([]*models.MetadataImageCacheJob, error)
 	targetHasRunningJobs(ctx context.Context, targetContentID string, localOnly bool) (bool, error)
+	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
 }
 
 // imageCacheTargetCachedPathReader is optionally implemented by the job store
@@ -461,8 +462,8 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	// Another worker may also have left a target job for a server with its
 	// storage mounted while this call waited on it.
 	pending = pending || deferred > 0
-	if reader, ok := p.jobs.(deferredLocalJobReader); ok && !pending {
-		waiting, err := reader.targetHasDeferredLocalJobs(ctx, targetContentID)
+	if !pending {
+		waiting, err := store.targetHasDeferredLocalJobs(ctx, targetContentID)
 		if err != nil {
 			return err
 		}

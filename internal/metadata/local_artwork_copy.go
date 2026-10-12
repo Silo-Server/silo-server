@@ -50,8 +50,6 @@ type LocalArtworkCopier interface {
 type localArtworkCopies struct {
 	start   sync.Once
 	pending chan EnqueueImageCacheJobInput
-	// inflight counts queued and running copies, so tests can wait for them.
-	inflight sync.WaitGroup
 	// lastFullLog rate-limits the full-backlog message (Unix nanoseconds).
 	lastFullLog atomic.Int64
 }
@@ -98,11 +96,9 @@ func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store
 	})
 	dropped := 0
 	for _, in := range queued {
-		p.localCopies.inflight.Add(1)
 		select {
 		case p.localCopies.pending <- in:
 		default:
-			p.localCopies.inflight.Done()
 			dropped++
 		}
 	}
@@ -121,7 +117,6 @@ func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store
 func (p *ImageCacheProcessor) runLocalArtworkCopies(store localArtworkJobStore) {
 	for in := range p.localCopies.pending {
 		p.copyDiscoveredLocalArtwork(store, in)
-		p.localCopies.inflight.Done()
 	}
 }
 
@@ -154,12 +149,6 @@ func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobSt
 	p.logger.DebugContext(ctx, "metadata image cache: copied discovered local artwork",
 		"job_id", job.ID, "target_type", job.TargetType, "target_id", job.TargetContentID,
 		"image_type", job.ImageType, "outcome", result.outcome)
-}
-
-// waitLocalArtworkCopies blocks until every discovered copy handed to the pool
-// has finished. Tests use it.
-func (p *ImageCacheProcessor) waitLocalArtworkCopies() {
-	p.localCopies.inflight.Wait()
 }
 
 // deferLocalJobWithoutStorage releases a local job this server cannot serve

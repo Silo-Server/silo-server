@@ -180,12 +180,6 @@ type imageCacheJobDeferrer interface {
 	DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error
 }
 
-// deferredLocalJobReader is implemented by job stores that can tell whether a
-// target's local artwork waits for another server.
-type deferredLocalJobReader interface {
-	targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error)
-}
-
 // localImageCacheJobClaimer is implemented by job stores that can claim only
 // local jobs, which draining uses while remote caching is off.
 type localImageCacheJobClaimer interface {
