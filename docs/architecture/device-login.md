@@ -130,7 +130,8 @@ the viewer gate resolves its limits and, for a PIN profile, checks the
 `profile_token`. A request naming another profile is refused with 403.
 `GET /profiles` lists only the bound profile. Tickets for the events and
 playback-control sockets carry the bound profile, and the socket refuses a
-ticket for any other.
+ticket for any other. The events socket delivers only the bound profile's
+events and account-wide ones, and offers no history-import channel.
 
 **No account powers.** The session acts with the account role `user` whatever
 the account's role is, and is not the account's own login session. `GET
@@ -157,6 +158,11 @@ The checks that do not run behind `RequireAuth` refuse a handoff too: Apple
 notification display tokens and direct-download links an older release minted
 for one, plugin access, and approvals (the approving session must be
 `purpose = 'account'` while the account is locked).
+
+Stream tokens already in media URLs are not tied to the login session, as for
+any sign-in: once a handoff ends it cannot start or replan playback, and the
+API's media routes refuse its bearer, but a proxy or transcode-node URL minted
+for a playback it already started stays usable until that token expires.
 
 **Sessions issued before this rule.** The migration binds each handoff whose
 device request is still stored and ends it 24 hours after it was created; one
