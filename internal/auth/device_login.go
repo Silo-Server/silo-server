@@ -1068,6 +1068,7 @@ func (s *DeviceLoginService) generateTokenPair(claims Claims) (*TokenPair, error
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		SessionID:    claims.SessionID,
 	}, nil
 }
 

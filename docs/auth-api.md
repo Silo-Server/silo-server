@@ -64,8 +64,13 @@ Already issued stream grants are not withdrawn by these operations.
 The Web Settings screen and admin user Sign-in tab use these operations. Native
 Apple and Android management screens are outside the 1.0 acceptance scope; their
 existing native authentication requests use the same session validity checks.
-Jellyfin-compatible sessions live in their own store and are not listed here; only
-account-wide revocation ends them.
+A Jellyfin-compatible sign-in, by password or Quick Connect, opens a login session that
+these lists show under the client's name (its User-Agent, or the device name a Quick Connect
+request sent). The Jellyfin-compatible session lives
+only as long as that login session: revoking it, from the account's own list or by an admin,
+or its expiry ends that one Jellyfin client on every node at its next request, including
+streams and the socket, and leaves the account's other Jellyfin clients signed in.
+Account-wide revocation ends them all.
 
 ## Account passwords
 
@@ -280,8 +285,8 @@ The login-session step of the `database_maintenance` scheduled task deletes expi
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
 expiry passes. The v1
 session-list response shape and query remain unchanged, but expired rows disappear from that
-listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
-session validity checks; cleanup removes only sessions that have already expired.
+listing once cleanup deletes them. Jellyfin-compatible clients check their login session on
+every request too; cleanup removes only sessions that have already expired.
 
 ### Access tokens after a role change
 

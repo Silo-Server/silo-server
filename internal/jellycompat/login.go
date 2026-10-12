@@ -159,7 +159,10 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
-	session := r.newSession(r.tokenGenerator(), combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	session, err := r.newSession(r.tokenGenerator(), combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	if err != nil {
+		return nil, err
+	}
 	if err := r.sessions.Put(session); err != nil {
 		return nil, err
 	}
@@ -181,9 +184,13 @@ func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) 
 	var session *Session
 	result, err := r.quickConnect.CollectQuickConnect(ctx, secret, func(ctx context.Context, tx pgx.Tx, result *auth.DeviceLoginPollResult) error {
 		// Collection loaded the approved profile under the request's lock.
-		stored, err := r.sessions.PutTx(ctx, tx, r.newSession(token,
+		newSession, err := r.newSession(token,
 			quickConnectUsername(result.User.Username, result.ProfileName),
-			result.User, result.TokenPair, result.ProfileID, result.ProfileName))
+			result.User, result.TokenPair, result.ProfileID, result.ProfileName)
+		if err != nil {
+			return err
+		}
+		stored, err := r.sessions.PutTx(ctx, tx, newSession)
 		if err != nil {
 			return err
 		}
@@ -234,8 +241,11 @@ func quickConnectUsername(account, profile string) string {
 }
 
 // newSession builds a compat session for the account's token pair, bound to
-// one profile.
-func (r *LoginResolver) newSession(token, username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) Session {
+// one profile. The session lives only as long as the pair's login session.
+func (r *LoginResolver) newSession(token, username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) (Session, error) {
+	if tokenPair.SessionID == "" {
+		return Session{}, errors.New("sign-in returned no login session")
+	}
 	now := r.now()
 	return Session{
 		Token:                 token,
@@ -248,8 +258,9 @@ func (r *LoginResolver) newSession(token, username string, user *models.User, to
 		StreamAppAccessToken:  tokenPair.AccessToken,
 		StreamAppRefreshToken: tokenPair.RefreshToken,
 		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
+		LoginSessionID:        tokenPair.SessionID,
 		CreatedAt:             now,
-	}
+	}, nil
 }
 
 // splitPasswordPIN splits "password#pin" at the last '#'.

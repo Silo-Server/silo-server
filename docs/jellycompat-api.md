@@ -462,6 +462,14 @@ sign in to Silo first: Jellyfin clients cannot run the password change it requir
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
 
+Each sign-in, by password or Quick Connect, opens its own Silo login session, and the
+compat session lives only as long as it (see
+[login sessions](auth-api.md#login-sessions)). Every authenticated request, stream
+grant, and socket re-check looks the login session up, one indexed read, on whichever
+node answers. A revoked or expired login session ends the compat session with `401`; a
+lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
+session and are checked as keys instead.
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in

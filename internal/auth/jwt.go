@@ -261,3 +261,20 @@ func (j *JWTService) ValidateToken(tokenStr string) (*Claims, error) {
 
 	return claims, nil
 }
+
+// StoredRefreshTokenSessionID returns the login session a refresh token that
+// Silo issued and stored itself belongs to, such as the one a
+// Jellyfin-compatible session keeps. It reads the claims without checking the
+// signature or expiry: the token comes from Silo's own encrypted storage, not
+// from a client, and an expired token still names its session. Never use it
+// on a token a request presented.
+func StoredRefreshTokenSessionID(tokenStr string) (string, error) {
+	claims := &Claims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(tokenStr, claims); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
+	if claims.TokenType != TokenTypeRefresh || claims.SessionID == "" {
+		return "", fmt.Errorf("%w: not a refresh token of a login session", ErrInvalidToken)
+	}
+	return claims.SessionID, nil
+}
