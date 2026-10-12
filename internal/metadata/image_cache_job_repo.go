@@ -539,8 +539,9 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 	// immediate retry, it does not reset the retry budget a background worker
 	// already spent on artwork that keeps failing. Failed rows are requeued
 	// regardless of their timer; queued rows are only pulled forward while
-	// they are still deferred, so the reset stays a small, one-off write.
-	// CacheTargetArtwork runs this once per refresh, not once per poll.
+	// they are still deferred, or carry a missing-storage deferral to start
+	// over, so the reset stays a small, one-off write. CacheTargetArtwork runs
+	// this once per refresh, not once per poll.
 	query := `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
@@ -555,7 +556,7 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 			updated_at = NOW()
 		WHERE ` + imageCacheTargetScope("$1") + `
 		  AND status IN ('queued', 'failed')
-		  AND (status = 'failed' OR next_attempt_at > NOW())
+		  AND (status = 'failed' OR next_attempt_at > NOW() OR starts_with(last_error, $2))
 		  AND NOT ` + heldLocalDiscoverySQL
 	if localOnly {
 		query += " AND " + localImageCacheSourceSQL

@@ -445,7 +445,17 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		}
 
 		// A manual refresh starts the deferral over, so refreshing on this
-		// server does not push the job to the long delay.
+		// server does not push the job to the long delay; also when the
+		// deferral had already run out.
+		if err := repo.retryTargetNow(ctx, contentID, false); err != nil {
+			t.Fatalf("retryTargetNow: %v", err)
+		}
+		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET next_attempt_at = NOW() - interval '1 second' WHERE target_content_id = $1
+		`, contentID); err != nil {
+			t.Fatalf("let the deferral run out: %v", err)
+		}
 		if err := repo.retryTargetNow(ctx, contentID, false); err != nil {
 			t.Fatalf("retryTargetNow: %v", err)
 		}
