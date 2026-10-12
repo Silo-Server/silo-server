@@ -419,7 +419,7 @@ func TestPushSenderRetriesAnAttemptWithTheTargetChoiceTheRelayRecorded(t *testin
 	// send keeps such an attempt retryable when only the identity lookup failed.
 	recorded["attempt-3"] = true
 	result := send("attempt-3", pushRelayTarget{})
-	if result.OK || result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != "idempotency_key_reuse" || len(requests) != 1 {
+	if result.OK || result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != relayCodeIdempotencyKeyReuse || len(requests) != 1 {
 		t.Fatalf("no target: result = %+v, requests = %+v", result, requests)
 	}
 }
@@ -980,7 +980,7 @@ func TestPushSenderRetriesLaterWhenAFailedIdentityLookupMismatchesTheRecordedAtt
 	}
 
 	sender.serverID = nil
-	if result := send(); result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != "idempotency_key_reuse" {
+	if result := send(); result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != relayCodeIdempotencyKeyReuse {
 		t.Fatalf("no identity configured: result = %+v, want the relay's 422", result)
 	}
 }

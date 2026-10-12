@@ -37,6 +37,10 @@ const (
 	relayFcmSendPath        = "/v1/fcm/send"
 	relayModePrivateAlert   = "private_alert"
 
+	// relayCodeIdempotencyKeyReuse is the relay's 422 code for a retry whose
+	// payload differs from the one recorded under its idempotency key.
+	relayCodeIdempotencyKeyReuse = "idempotency_key_reuse"
+
 	// relayTargetRecheck is how long sends to a relay that rejected the push
 	// target fields omit them before trying again.
 	relayTargetRecheck = time.Hour
@@ -572,7 +576,7 @@ func relayRejectedTarget(result pushSendResult) bool {
 // relayRecordedOtherTarget recognizes the relay refusing a retry whose payload
 // differs from the one it recorded under the attempt's idempotency key.
 func relayRecordedOtherTarget(result pushSendResult) bool {
-	return result.HTTPStatus == http.StatusUnprocessableEntity && result.UpstreamReason == "idempotency_key_reuse"
+	return result.HTTPStatus == http.StatusUnprocessableEntity && result.UpstreamReason == relayCodeIdempotencyKeyReuse
 }
 
 func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string, target pushRelayTarget, relayURL, apiKey string) pushSendResult {
