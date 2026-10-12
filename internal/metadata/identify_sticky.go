@@ -178,6 +178,13 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 	if len(declaredLocalIDs(hints)) == 0 {
 		return false, nil
 	}
+	return s.seriesIdentityConflict(ctx, series, hints)
+}
+
+// seriesIdentityConflict reports whether the IDs a series' local files
+// declare (hints) name a different show than the identity a refresh of one
+// of its seasons or episodes keeps.
+func (s *MetadataService) seriesIdentityConflict(ctx context.Context, series *models.MediaItem, hints []localIdentityHint) (bool, error) {
 	durable, err := s.loadDurableProviderIDs(ctx, series.ContentID)
 	if err != nil {
 		return false, err

@@ -199,15 +199,16 @@ func sameItemBackdrops(stored, planned []models.ItemBackdrop) bool {
 // syncItemExtraBackdrops stores the item's backdrops after the primary and
 // queues a cache job for each, as enqueueItemImages does for the slots on the
 // item row. It runs after the item is persisted, because the rows reference it.
-func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention *localArtworkRetention, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
+// A failure is logged and returned.
+func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention *localArtworkRetention, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) error {
 	if s == nil || s.itemBackdropRepo == nil || item == nil || item.ContentID == "" {
-		return
+		return nil
 	}
 	stored, err := s.itemBackdropRepo.ListByContentIDs(ctx, []string{item.ContentID})
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: loading item backdrops failed", "component", "metadata",
 			"content_id", item.ContentID, "error", err)
-		return
+		return err
 	}
 	rows := stored[item.ContentID]
 	if planned := planExtraBackdrops(retention, item, rows, images); !sameItemBackdrops(rows, planned) {
@@ -215,7 +216,7 @@ func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention 
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: storing item backdrops failed", "component", "metadata",
 				"content_id", item.ContentID, "error", err)
-			return
+			return err
 		}
 	}
 	inputs := make([]EnqueueImageCacheJobInput, 0, len(rows))
@@ -237,5 +238,5 @@ func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention 
 			RequeueSucceeded:  !isCachedImagePath(b.Path),
 		})
 	}
-	s.enqueueImageCacheJobs(ctx, "item backdrop", item.ContentID, inputs)
+	return s.enqueueImageCacheJobs(ctx, "item backdrop", item.ContentID, inputs)
 }

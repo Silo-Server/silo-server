@@ -98,6 +98,9 @@
 ./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
 ./internal/metadata TestReplacedLocalSidecarRequeuesSucceededJobDB
 
+# Local sidecar change detection lists scanned items and stores fingerprints.
+./internal/metadata TestLocalSidecarRepositoryDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking

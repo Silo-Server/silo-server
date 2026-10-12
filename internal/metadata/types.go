@@ -82,6 +82,17 @@ type ProcessRequest struct {
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
 	enrichmentOnly bool
+	// localReapply marks a write of an item's changed local sidecar metadata
+	// (local_reapply.go): the local provider's fields replace unlocked stored
+	// ones, and like an enrichment write it leaves identity, refresh
+	// bookkeeping, videos, seasons and episodes alone.
+	localReapply bool
+}
+
+// writesFieldsOnly reports whether the request merges provider fields into an
+// existing item without the rest of a refresh.
+func (r ProcessRequest) writesFieldsOnly() bool {
+	return r.enrichmentOnly || r.localReapply
 }
 
 // ProcessResult is the output of MetadataService.Process().

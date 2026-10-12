@@ -454,6 +454,7 @@ type MetadataService struct {
 	scannedGroupRepo        metadataScannedGroupRepo
 	groupOverrideRepo       metadataGroupOverrideRepo
 	observedLocationRepo    metadataObservedLocationRepo
+	localSidecars           localSidecarStore
 	dbPool                  *pgxpool.Pool
 
 	dedupLocks      keyedDedupLocks
@@ -1042,16 +1043,34 @@ func compactMetadataLanguages(values []string) []string {
 }
 
 func (s *MetadataService) localProviderContextForContent(ctx context.Context, contentID string, folderID int) localProviderContext {
+	localCtx, _ := s.buildLocalProviderContext(ctx, contentID, folderID, false)
+	return localCtx
+}
+
+// loadLocalProviderContext is localProviderContextForContent that also
+// reports a failure to read the item's files or their observed roots, which
+// would otherwise look like an item without local sidecars.
+func (s *MetadataService) loadLocalProviderContext(ctx context.Context, contentID string, folderID int) (localProviderContext, error) {
+	return s.buildLocalProviderContext(ctx, contentID, folderID, true)
+}
+
+// buildLocalProviderContext loads the local-provider context of an item's
+// files in a library. Strict, it fails when an observed root cannot be looked
+// up; otherwise such a root is only left out, as before.
+func (s *MetadataService) buildLocalProviderContext(ctx context.Context, contentID string, folderID int, strict bool) (localProviderContext, error) {
 	if s == nil || s.fileRepo == nil || contentID == "" {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
 	lister, ok := s.fileRepo.(metadataContentFileLister)
 	if !ok {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
 	files, err := lister.GetByContentID(ctx, contentID)
-	if err != nil || len(files) == 0 {
-		return localProviderContext{}
+	if err != nil {
+		return localProviderContext{}, fmt.Errorf("loading files of %s: %w", contentID, err)
+	}
+	if len(files) == 0 {
+		return localProviderContext{}, nil
 	}
 	if folderID > 0 {
 		filtered := files[:0]
@@ -1062,7 +1081,7 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		}
 		files = filtered
 		if len(files) == 0 {
-			return localProviderContext{}
+			return localProviderContext{}, nil
 		}
 	}
 
@@ -1081,17 +1100,26 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		groupFilePaths = append(groupFilePaths, file.FilePath)
 	}
 	if representativeFilePath == "" {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
-	if representativeFile != nil && representativeFile.ObservedRootPath != "" &&
-		s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			representativeFile.MediaFolderID,
-			representativeFile.ObservedRootPath,
-			representativeFile.GroupKeyVersion,
-			representativeFile.ContentGroupKey,
-		) {
-		observedRootPath = representativeFile.ObservedRootPath
+	usableRoot := func(file *models.MediaFile) (bool, error) {
+		if strict {
+			return s.observedRootUsableForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey)
+		}
+		return s.canUseObservedRootForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey), nil
+	}
+	if representativeFile != nil && representativeFile.ObservedRootPath != "" {
+		usable, err := usableRoot(representativeFile)
+		if err != nil {
+			return localProviderContext{}, fmt.Errorf("loading observed root of %s: %w", contentID, err)
+		}
+		if usable {
+			observedRootPath = representativeFile.ObservedRootPath
+		}
+	}
+	searchPaths, err := s.collectDirectorySidecarSearchPaths(files, usableRoot)
+	if err != nil {
+		return localProviderContext{}, fmt.Errorf("loading observed roots of %s: %w", contentID, err)
 	}
 
 	return localProviderContext{
@@ -1099,8 +1127,8 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		representativeFilePath:    representativeFilePath,
 		observedRootPath:          observedRootPath,
 		allGroupFilePaths:         compactUniqueFilePaths(groupFilePaths),
-		primarySidecarSearchPaths: s.directorySidecarSearchPathsForFiles(ctx, files),
-	}
+		primarySidecarSearchPaths: searchPaths,
+	}, nil
 }
 
 // seriesChildLocalContext carries the local-sidecar context for season- and
@@ -1153,26 +1181,30 @@ func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context,
 }
 
 func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Context, files []*models.MediaFile) []string {
+	paths, _ := s.collectDirectorySidecarSearchPaths(files, func(file *models.MediaFile) (bool, error) {
+		return s.canUseObservedRootForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey), nil
+	})
+	return paths
+}
+
+func (s *MetadataService) collectDirectorySidecarSearchPaths(files []*models.MediaFile, usable func(*models.MediaFile) (bool, error)) ([]string, error) {
 	if len(files) == 0 {
-		return nil
+		return nil, nil
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file == nil || file.ObservedRootPath == "" {
 			continue
 		}
-		if !s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			file.MediaFolderID,
-			file.ObservedRootPath,
-			file.GroupKeyVersion,
-			file.ContentGroupKey,
-		) {
-			continue
+		ok, err := usable(file)
+		if err != nil {
+			return nil, err
 		}
-		paths = append(paths, file.ObservedRootPath)
+		if ok {
+			paths = append(paths, file.ObservedRootPath)
+		}
 	}
-	return compactUniqueFilePaths(paths)
+	return compactUniqueFilePaths(paths), nil
 }
 
 func (s *MetadataService) canUseObservedRootForDirectorySidecars(
@@ -1182,32 +1214,48 @@ func (s *MetadataService) canUseObservedRootForDirectorySidecars(
 	groupKeyVersion int,
 	contentGroupKey string,
 ) bool {
-	cleanRoot := filepath.Clean(strings.TrimSpace(observedRootPath))
-	if cleanRoot == "" || cleanRoot == "." {
-		return false
-	}
-	if s == nil || s.observedLocationRepo == nil || folderID <= 0 {
-		return true
-	}
-	location, err := s.observedLocationRepo.Get(ctx, folderID, cleanRoot)
+	usable, err := s.observedRootUsableForDirectorySidecars(ctx, folderID, observedRootPath, groupKeyVersion, contentGroupKey)
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: observed location lookup failed", "component", "metadata",
 			"folder_id", folderID,
-			"observed_root_path", cleanRoot,
+			"observed_root_path", filepath.Clean(strings.TrimSpace(observedRootPath)),
 			"error", err,
 		)
 		return false
 	}
+	return usable
+}
+
+// observedRootUsableForDirectorySidecars is canUseObservedRootForDirectorySidecars
+// that returns a failed lookup instead of reading it as an unusable root.
+func (s *MetadataService) observedRootUsableForDirectorySidecars(
+	ctx context.Context,
+	folderID int,
+	observedRootPath string,
+	groupKeyVersion int,
+	contentGroupKey string,
+) (bool, error) {
+	cleanRoot := filepath.Clean(strings.TrimSpace(observedRootPath))
+	if cleanRoot == "" || cleanRoot == "." {
+		return false, nil
+	}
+	if s == nil || s.observedLocationRepo == nil || folderID <= 0 {
+		return true, nil
+	}
+	location, err := s.observedLocationRepo.Get(ctx, folderID, cleanRoot)
+	if err != nil {
+		return false, err
+	}
 	if location == nil || location.ContentGroupCount > 1 {
-		return false
+		return false, nil
 	}
 	if groupKeyVersion != 0 && location.PrimaryGroupKeyVersion != 0 && location.PrimaryGroupKeyVersion != groupKeyVersion {
-		return false
+		return false, nil
 	}
 	if contentGroupKey != "" && location.PrimaryContentGroupKey != "" && location.PrimaryContentGroupKey != contentGroupKey {
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 func compactUniqueFilePaths(paths []string) []string {
@@ -2578,6 +2626,9 @@ func (s *MetadataService) mergeAndPersist(
 	case ModeManualRefresh, ModeIdentify:
 		mergeMode = MergeReplaceUnlocked
 	}
+	if req.localReapply {
+		mergeMode = MergeReplaceUnlocked
+	}
 
 	isNew := req.ContentID == "" && req.Mode == ModeInitialMatch
 	contentID := req.ContentID
@@ -2623,10 +2674,10 @@ func (s *MetadataService) mergeAndPersist(
 			return nil, err
 		}
 	}
-	// An enrichment write only merges into an item that exists. It must not
-	// recreate one deleted since the pass selected it.
-	if req.enrichmentOnly && existingItem == nil {
-		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
+	// An enrichment or local re-apply write only merges into an item that
+	// exists. It must not recreate one deleted since the pass selected it.
+	if req.writesFieldsOnly() && existingItem == nil {
+		return nil, fmt.Errorf("metadata target %q no longer exists", contentID)
 	}
 	// Nor may an Identify: a concurrent Identify can move the item to its
 	// corrected id after this one loaded it, and writing on without the stored
@@ -2636,7 +2687,7 @@ func (s *MetadataService) mergeAndPersist(
 	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
-	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
+	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
 		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, err
@@ -2661,7 +2712,7 @@ func (s *MetadataService) mergeAndPersist(
 	// be claimed underneath us; movies and first-match series move a handful of
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
-	if !req.enrichmentOnly && !isNew && contentid.IsLocal(contentID) {
+	if !req.writesFieldsOnly() && !isNew && contentid.IsLocal(contentID) {
 		canonical, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
@@ -2747,6 +2798,9 @@ func (s *MetadataService) mergeAndPersist(
 		canonicalLanguage = "en"
 	}
 	isCanonicalWrite := existingItem == nil || strings.EqualFold(req.Language, canonicalLanguage)
+	// Whether the providers listed any people, before the merge below folds
+	// the stored item into the accumulator.
+	providersListPeople := len(accumulator.People) > 0
 
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
@@ -2802,7 +2856,7 @@ func (s *MetadataService) mergeAndPersist(
 	item.LastRefreshed = &now
 	item.RefreshFailures = 0
 	item.Status = "matched"
-	if req.enrichmentOnly {
+	if req.writesFieldsOnly() {
 		// An enrichment write is not a refresh: the refresh bookkeeping stays as
 		// the last match or refresh left it. So does what no metadata result
 		// carries: the series episode state, which only a refresh that
@@ -2835,7 +2889,13 @@ func (s *MetadataService) mergeAndPersist(
 	var localArt *localArtworkRetention
 	if handleArtwork {
 		localArt = newLocalArtworkRetention(ctx, contentID, localArtworkItem)
-		applyBestImages(item, images, mergeMode, req.Language)
+		imageMode := mergeMode
+		if req.localReapply {
+			// Local images always apply; fill-empty keeps the rest of the
+			// stored artwork, which no remote provider was asked about.
+			imageMode = MergeFillEmpty
+		}
+		applyBestImages(item, images, imageMode, req.Language)
 		keepUnconfirmedLocalItemArtwork(localArt, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
@@ -2889,8 +2949,14 @@ func (s *MetadataService) mergeAndPersist(
 	unlockProviderDedup()
 	providerDedupReleased = true
 	if handleArtwork {
-		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
-		s.syncItemExtraBackdrops(ctx, localArt, item, accumulator.ProviderIDs, images)
+		// The failure is logged; a local re-apply also fails on it, so its
+		// fingerprint does not advance past artwork that was never queued.
+		if err := s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images); err != nil && req.localReapply {
+			return nil, fmt.Errorf("queueing artwork: %w", err)
+		}
+		if err := s.syncItemExtraBackdrops(ctx, localArt, item, accumulator.ProviderIDs, images); err != nil && req.localReapply {
+			return nil, fmt.Errorf("storing backdrops: %w", err)
+		}
 	}
 
 	if !isCanonicalWrite && s.itemLocalizationRepo != nil {
@@ -2911,13 +2977,19 @@ func (s *MetadataService) mergeAndPersist(
 	// Persist people to the unified people table. The set is replaced
 	// wholesale from providers' people, and the stored cast is not merged in,
 	// so an enrichment write, which hears from one provider, leaves it alone.
-	if !req.enrichmentOnly && len(item.People) > 0 && s.personRepo != nil {
+	// A local re-apply whose files list no people (artwork only, or an NFO
+	// without credits) leaves the stored cast as it is.
+	if !req.enrichmentOnly && (!req.localReapply || providersListPeople) && len(item.People) > 0 && s.personRepo != nil {
 		persons := make([]models.Person, len(item.People))
 		for i := range item.People {
 			persons[i] = item.People[i].Person
 		}
 		personIDs, err := s.personRepo.BatchFindOrCreate(ctx, persons)
 		if err != nil {
+			if req.localReapply {
+				// A failed local re-apply is retried by the next check.
+				return nil, fmt.Errorf("finding people: %w", err)
+			}
 			slog.WarnContext(ctx, "metadata: batch find/create people failed", "component", "metadata", "error", err)
 		} else {
 			for i := range item.People {
@@ -2931,7 +3003,14 @@ func (s *MetadataService) mergeAndPersist(
 				valid = append(valid, p)
 			}
 		}
+		if req.localReapply && len(valid) != len(item.People) {
+			// A partial cast would replace the stored one.
+			return nil, fmt.Errorf("resolving people: %d of %d unresolved", len(item.People)-len(valid), len(item.People))
+		}
 		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
+			if req.localReapply {
+				return nil, fmt.Errorf("replacing people: %w", err)
+			}
 			slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
 		}
 		s.applyLocalPersonPhotos(ctx, contentID, valid)
@@ -2943,7 +3022,7 @@ func (s *MetadataService) mergeAndPersist(
 	// the next refresh; fill-empty refreshes only write when providers
 	// returned something, so a transient provider failure cannot wipe data.
 	// An enrichment write skips them for the same reason as people.
-	if !req.enrichmentOnly && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
+	if !req.writesFieldsOnly() && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
 		allowed := s.resolveAllowedVideoKinds(ctx, contentID, parseProcessFolderID(req.FolderID))
 		filtered := filterVideosByKinds(accumulator.Videos, allowed)
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
@@ -3003,7 +3082,7 @@ func (s *MetadataService) mergeAndPersist(
 	// covers any files the providers left unlinked (episodes with no NFO
 	// and no remote row); it is a no-op when every file is linked. An
 	// enrichment write carries no seasons or episodes and leaves them alone.
-	if contentType == "series" && !req.enrichmentOnly {
+	if contentType == "series" && !req.writesFieldsOnly() {
 		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		}
@@ -4512,19 +4591,21 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 }
 
 func (s *MetadataService) enqueueSeriesChildImages(ctx context.Context, seriesID string, inputs []EnqueueImageCacheJobInput) {
-	s.enqueueImageCacheJobs(ctx, "series child", seriesID, inputs)
+	_ = s.enqueueImageCacheJobs(ctx, "series child", seriesID, inputs)
 }
 
-func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) {
+func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) error {
 	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || len(inputs) == 0 {
-		return
+		return nil
 	}
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if _, err := s.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to enqueue image cache jobs", "component", "metadata",
 			"target_kind", targetKind, "target_id", targetID, "count", len(inputs), "error", err)
+		return err
 	}
+	return nil
 }
 
 // providerIDFromPluginURL extracts the plugin slug from a plugin-scheme URL
@@ -5590,10 +5671,14 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				seasonModel.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				if isCanonicalWrite {
 					mergedSeason := seasonResultFromModel(existingSeason)
-					MergeSeasonResult(&SeasonResult{
-						SeasonNumber: ep.SeasonNumber,
-						Title:        title,
-					}, &mergedSeason, mergeMode)
+					// The fallback title only names a season that has none:
+					// a season referenced only by its episodes keeps its
+					// stored title, even in a replacing merge.
+					implicit := SeasonResult{SeasonNumber: ep.SeasonNumber}
+					if strings.TrimSpace(existingSeason.Title) == "" {
+						implicit.Title = title
+					}
+					MergeSeasonResult(&implicit, &mergedSeason, mergeMode)
 					mergedSeason.PosterThumbhash = mergedImageThumbhash(
 						existingSeason.PosterPath,
 						existingSeason.PosterThumbhash,
@@ -8685,9 +8770,9 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	}
 }
 
-func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
+func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) error {
 	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || item == nil || item.ContentID == "" {
-		return
+		return nil
 	}
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
 	for _, field := range itemArtworkFields(item) {
@@ -8713,7 +8798,7 @@ func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.Me
 			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
-	s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
+	return s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
 }
 
 func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, item *models.MediaItem, loc *models.MediaItemLocalization, providerIDs map[string]string, images []RemoteImage) {
@@ -8752,7 +8837,7 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
-	s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)
+	_ = s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)
 }
 
 func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]string, images []RemoteImage, sourcePath string) (string, string) {

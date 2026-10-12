@@ -297,8 +297,9 @@ inject provider-id keys. A title-only NFO yields a `matched` item under a
 path-deterministic `local-` content id; adding a `<uniqueid>` later promotes it
 to that provider anchor on the next refresh (this promotion from an unanchored
 id runs on scheduled refresh too — only an *already-anchored* identity is held
-stable in the background). NFO field edits propagate on **manual refresh only**
-(scheduled refresh is fill-empty by design).
+stable in the background). The scheduled refresh stays fill-empty; NFO field
+edits reach a matched item through [change detection](#change-detection) or a
+manual refresh.
 
 ## Sidecar artwork: copy into the S3 image cache
 
@@ -506,6 +507,115 @@ type guard means a `tvshow.nfo` next to a movie-classified file is ignored,
 never applied; the per-root Type override is the correction path. This is the
 contract for sports/mixed libraries (events as movies, weekly shows as series).
 
+## Change detection
+
+A matched item picks up an edited NFO or sidecar image without a manual
+refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
+
+- **Fingerprints.** `local_sidecar_fingerprints` stores, per library and per
+  item, season and episode, a SHA-256 of the path, size and modification time
+  of the sidecar files the local provider applied. The provider reports those
+  files itself (`LocalSidecarProvider`, `internal/metadata/nfo/sidecars.go`)
+  with the same lookups as `GetMetadata`/`GetImages`/`GetSeasons`/`GetEpisodes`,
+  so lookup rules live in one place. Item rows also store a digest of every
+  sidecar-type file in the item's folders (its files' directories and observed
+  root) and the provider IDs the NFO declared. Rows follow a content ID rename
+  and go with their library.
+- **Equality, not timestamps.** A change is any difference in the applied
+  set, a size, or a modification time: an edit, a new higher-precedence file,
+  or a removed one. Silo never compares a file's time with when it last saved
+  the item.
+- **Scans** (library, subtree and file). The video walk keeps the names of the
+  sidecar files in every directory it reads (`scanner.SidecarListing`) at no
+  extra filesystem cost. After matching, `libraryingest` calls
+  `CheckLocalSidecars` for the scanned scope. In libraries that take local
+  metadata, each listed directory's sidecars are stat'ed once; an item whose
+  folder digest is unchanged costs nothing more. Otherwise the provider
+  lookups run, and only a changed fingerprint re-applies. A scan narrower than
+  the item (one season's folder) checks only the seasons and episodes it read
+  and keeps the stored folder digest, so the next full scan still sees changes
+  in the folders it skipped. A changed item gets a `catalog.item.changed`
+  event (at most 100 per scan).
+- **Events.** For file changes from the library monitor and autoscan,
+  `scantrigger` resolves an `.nfo` or sidecar image in a video library to a
+  subtree scan of its folder (`Request.SidecarFolder`; the scan API still
+  rejects non-media paths). The Jellyfin-compatible autoscan endpoint already
+  scans a rejected file's parent folder. The monitor's quiet window and the
+  scan queue's coalescing debounce bursts.
+- **Scheduled refresh.** `refresh_metadata` checks each item target it visits
+  with `CheckLocalSidecarTarget`, from the item's applied files alone, before
+  its own refresh, which can move a local item to a new content ID. When the
+  check re-anchored the item (a changed identity), the scheduled refresh runs
+  under the item's new content ID. A re-anchored item's record is stored, and
+  its change published, under the content ID its media file names after the
+  refresh.
+- **Re-apply.** Local files only, no remote provider call. The item's NFO
+  values merge with `ReplaceUnlocked` through `mergeAndPersist`
+  (`localReapply`), so field locks win and lists the NFO supplies replace the
+  stored ones; credits keep the provider IDs and photos the stored cast
+  already has. Local artwork applies as on any refresh, so an image replaced
+  under the same name gets a new `?v=` source and is cached again; identity,
+  videos and refresh bookkeeping are left alone. Seasons and episodes merge their local
+  results with `ReplaceUnlocked` through `persistSeasonAndEpisodeRows`.
+- **Chain order.** A level's local provider always runs ahead of its remote
+  ones (see Precedence), so wherever a level has one, its NFO text, artwork
+  and identity are tracked and re-applied. A level without one records no
+  fingerprint; adding the local provider there starts the next check that
+  looks the item up from first sight.
+- **Symbolic links.** The folder digest records whether each sidecar name is a
+  link, and the size and time of what it names: an edit to a linked NFO is
+  seen, and so is replacing a linked image (which discovery skips) with a copy.
+- **Identity.** The NFO's IDs are compared with the item's identity as a
+  refresh compares them (see Identity): IDs recorded as dead count on neither
+  side. When the NFO now declares an ID it did not declare last time
+  (removing one never counts), and that ID contradicts the item's or gives a
+  locally matched item its first provider ID, the change runs a manual
+  refresh, which re-anchors the item as described under Identity. An admin's
+  Identify choice (`media_items.identity_chosen_at`) outranks any declared IDs
+  that don't confirm it: the item keeps its identity, nothing local is
+  applied, and the conflict is logged. The same holds when the NFO's IDs did
+  not change but contradict the item's. A series whose NFO names another
+  title by these rules applies none of its season or episode files either.
+- **First sight records.** An item with no stored row, or with one made while
+  its level had no local provider, is recorded without re-applying, so
+  enabling local metadata or upgrading never rewrites a library; edits made
+  after that are detected. The first record covers all of the item's seasons
+  and episodes, even when a scan of one season folder makes it. A season or
+  episode that appears in an item already recorded is new, so its sidecars
+  apply. An item whose media file cannot be read (an offline mount) is
+  skipped, so its sidecars never read as removed, and an item whose files
+  cannot be loaded from the database records nothing. Nor does one whose NFO
+  lookup fails (no NFO applies and one cannot be read, or its share is not
+  there), as `GetMetadata` would fail; or a series seen for the first
+  time whose seasons and episodes could not be checked: it stays in
+  first-sight mode until they are. A re-applied series stores its folder
+  digest only after its seasons and episodes were checked, so a scan stopped
+  in between leaves them to the next one. A first-sight record never replaces
+  one another check stored meanwhile. A fingerprint advances only after its
+  re-apply succeeds, including its credits and queueing its artwork, and only
+  when every lookup it needs (provider chain, observed roots, library
+  language, Identify choice) succeeded, so a failure is retried by the next
+  check. Season and episode rows are the exception listed under Known
+  limitations: a failed row write still advances its fingerprint.
+- Everything runs inside existing queued work (`scan_runs`, the
+  `refresh_metadata` task) on API/integrated nodes. A re-apply and its stored
+  fingerprints happen under a Postgres advisory lock per item and library,
+  after the record and files are read again, so two checks on any nodes apply
+  one change once and never store a fingerprint newer than the item shows.
+  The rest of a scan's records are written in batches outside the lock: a
+  first record only where none exists, any other only while the stored
+  record still holds the fingerprint the scan read, so a batch never
+  overwrites what another check stored meanwhile. A
+  check that finds the lock held waits up to 30 seconds, so an edit saved
+  during another check's re-apply is applied right after it; past that it
+  stores nothing and the next check looks again. PostgreSQL enforces the wait
+  (`pglock.Acquire`), so a check that gives up leaves no session queued on the
+  lock. A process holds or waits for at most a quarter of its pool's
+  connections' worth of these locks, and never more than four, since each pins
+  a pooled connection while its re-apply runs. The wait covers getting that
+  connection too. With a pool of two connections or fewer the lock takes a
+  connection of its own, one per process, so the re-apply keeps the pool's.
+
 ## Known limitations
 
 - The admin image picker does not surface local art (automatic chain path
@@ -519,6 +629,31 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
   `ImageClearArt` or `ImageDisc` (plugin image kinds `banner`, `thumb`,
   `clearart`, `disc`), and `applyBestImages` fills the slot when no sidecar
   does.
+- A value removed from an NFO keeps its stored value: Silo records no
+  per-field provenance, so re-applying cannot tell an NFO-supplied value from
+  a remote one. Removing a sidecar image likewise keeps the cached copy until
+  a manual refresh.
+- A sidecar directly under a library root (a flat movie folder) is not routed
+  by file events; the next library scan picks it up. In a flat folder every
+  item shares the folder digest, so one change there runs the provider lookups
+  for each item in it.
+- Changed season and episode rows are written by the shared
+  `persistSeasonAndEpisodeRows`, which logs a failed row, or a failure to
+  queue their artwork for caching, instead of returning the error. Their
+  fingerprints still advance, so such a row keeps its old values or artwork
+  until its sidecar changes again or the series is refreshed.
+- An item whose files span several roots is checked only while every root is
+  reachable, since a sidecar on an offline root reads as removed.
+- Two checks recording an item for the first time at once may take an edit
+  saved between their reads as the baseline, when the later read is stored
+  first.
+- Images in an item's `extrafanart/` folder are part of its fingerprint and
+  apply with every re-apply, but scans and file events watch only the item's
+  own folders, so a change in `extrafanart/` alone waits for the scheduled
+  refresh's check or the next sidecar change beside the item.
+- An actor photo an NFO names (an `.actors` image) is not fingerprinted:
+  replacing it under the same name takes effect at the item's next re-apply
+  or refresh.
 - Multi-part movies: in a folder holding multiple content groups, only
   `<basename>.nfo` and the stack base name are read; a differently named NFO
   there is not found.

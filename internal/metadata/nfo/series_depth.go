@@ -53,7 +53,7 @@ func (p *Provider) GetSeasons(ctx context.Context, req metadata.SeasonsRequest) 
 	var seasons []metadata.SeasonResult
 	for _, number := range seasonNumbers {
 		dirs := compactNFOPaths(req.SeasonDirectoryPaths[number])
-		parsed, err := parseSeasonSidecar(ctx, lookup, dirs, req.ShowFilePaths, number)
+		_, parsed, err := parseSeasonSidecar(ctx, lookup, dirs, req.ShowFilePaths, number)
 		readErr = keepReadErr(readErr, err)
 		season := metadata.SeasonResult{SeasonNumber: number}
 		if parsed != nil {
@@ -80,10 +80,11 @@ func (p *Provider) GetSeasons(ctx context.Context, req metadata.SeasonsRequest) 
 }
 
 // parseSeasonSidecar loads the first parseable season.nfo (any case) across
-// the season's candidate directories. A declared <seasonnumber> that
-// disagrees with the directory-derived number is advisory: naming owns
-// structure, so the directory number wins with a warning.
-func parseSeasonSidecar(ctx context.Context, lookup *sidecarLookup, seasonDirs, showFiles []string, seasonNumber int) (*parsedNFO, error) {
+// the season's candidate directories and returns its path and contents. A
+// declared <seasonnumber> that disagrees with the directory-derived number is
+// advisory: naming owns structure, so the directory number wins with a
+// warning.
+func parseSeasonSidecar(ctx context.Context, lookup *sidecarLookup, seasonDirs, showFiles []string, seasonNumber int) (string, *parsedNFO, error) {
 	var readErr error
 	for _, dir := range seasonDirs {
 		// Media the server may not reach for permission is still there, so
@@ -108,9 +109,9 @@ func parseSeasonSidecar(ctx context.Context, lookup *sidecarLookup, seasonDirs, 
 				"component", "metadata", "path", path,
 				"nfo_season", parsed.Season, "directory_season", seasonNumber)
 		}
-		return parsed, nil
+		return path, parsed, nil
 	}
-	return nil, readErr
+	return "", nil, readErr
 }
 
 // findSeasonPoster returns the source of a season's artwork: poster, folder,
@@ -161,14 +162,7 @@ func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest
 
 	finder := newSidecarFinder(ctx)
 	lookup := p.newLookup(ctx)
-	// Every cataloged file of the show, to tell a deleted episode from a
-	// missing share even when the request names only one episode and its
-	// folder holds other seasons too.
-	showFiles := slices.Clone(req.ShowFilePaths)
-	for _, paths := range req.EpisodeFilePaths {
-		showFiles = append(showFiles, paths...)
-	}
-	showFiles = compactNFOPaths(showFiles)
+	showFiles := episodeShowFiles(req)
 	seriesRoots := compactNFOPaths(req.SeriesRootPaths)
 	var episodes []metadata.EpisodeResult
 	// nfoEpisodes counts the episodes each NFO file describes: one file
@@ -219,6 +213,17 @@ func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest
 		}
 	}
 	return episodes, readErr
+}
+
+// episodeShowFiles returns every cataloged file of the show, to tell a
+// deleted episode from a missing share even when the request names only one
+// episode and its folder holds other seasons too.
+func episodeShowFiles(req metadata.EpisodesRequest) []string {
+	showFiles := slices.Clone(req.ShowFilePaths)
+	for _, paths := range req.EpisodeFilePaths {
+		showFiles = append(showFiles, paths...)
+	}
+	return compactNFOPaths(showFiles)
 }
 
 // findEpisodeSidecars locates the episode's <basename>.nfo (any case) and its
