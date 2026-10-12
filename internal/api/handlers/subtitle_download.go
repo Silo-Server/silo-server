@@ -31,7 +31,7 @@ func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, 
 			return nil, &APIError{Status: http.StatusNotFound, Code: "provider_not_found", Message: "Subtitle provider not found", cause: err}
 		}
 		if errors.Is(err, subtitles.ErrInvalidSubtitleID) {
-			slog.WarnContext(ctx, "subtitle download refused malformed result id", "component", "api", "provider", req.ProviderName, "subtitle_id", req.SubtitleID)
+			slog.WarnContext(ctx, "subtitle download refused malformed result id", "component", "api", "provider", req.ProviderName)
 			return nil, fieldError("subtitle_id", "subtitle_id is not a result ID this provider returns").WithCause(err)
 		}
 		slog.ErrorContext(ctx, "subtitle download failed", "component", "api", "provider", req.ProviderName, "subtitle_id", req.SubtitleID, "error", err)
