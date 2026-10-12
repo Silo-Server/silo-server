@@ -68,3 +68,42 @@ func TestNFONamedURLNeedsImageCaching(t *testing.T) {
 		}
 	}
 }
+
+// A local re-apply that picks up a replaced poster hands it to the
+// discovering server's copier, as a refresh does, rather than only queueing it
+// for whichever drain runs first.
+func TestLocalReapplyCopiesReplacedPosterOnDiscovery(t *testing.T) {
+	f := newMovieFixture(t, "100")
+	f.x.RecordLocalArtworkCopies()
+	f.scan(t)
+	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2", tmdbID("100")))
+	f.scan(t)
+
+	writeNewerFile(t, filepath.Join(f.dir, "poster.jpg"), "poster-v2, a different size")
+	if n := f.scan(t); n != 1 {
+		t.Fatalf("check after replacing poster.jpg re-applied %d items, want 1", n)
+	}
+	source := f.item(t).PosterSourcePath
+	for _, in := range f.x.LocalArtworkCopies() {
+		if in.SourcePath == source {
+			return
+		}
+	}
+	t.Fatalf("copier got %+v, want the replaced poster %q", f.x.LocalArtworkCopies(), source)
+}
+
+// A local re-apply with caching off leaves out an image URL the edited NFO
+// names, as a refresh does, since only the image cache could fetch it.
+func TestLocalReapplySkipsNFONamedURLWithCachingOff(t *testing.T) {
+	f := newMovieFixture(t, "100")
+	f.x.Service().SetAutoCacheImages(false)
+	f.scan(t)
+	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2",
+		tmdbID("100")+`<thumb aspect="clearlogo">https://img.example.org/nfo-logo.png</thumb>`))
+	if n := f.scan(t); n != 1 {
+		t.Fatalf("check after editing movie.nfo re-applied %d items, want 1", n)
+	}
+	if got := f.item(t).LogoSourcePath; got != "" {
+		t.Fatalf("logo source = %q, want no NFO-named URL with caching off", got)
+	}
+}

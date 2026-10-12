@@ -288,10 +288,12 @@ func TestLocalArtworkFallsBackToQueueWhenCopierFails(t *testing.T) {
 	jobs := &capturingImageJobEnqueuer{}
 	s := &MetadataService{imageCacheJobs: jobs}
 	s.SetLocalArtworkCopier(failingLocalArtworkCopier{})
-	s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
+	if err := s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: "file:///media/Film/poster.jpg"},
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImageBackdrop, SourcePath: "https://img.example/b.jpg"},
-	})
+	}); err != nil {
+		t.Fatalf("enqueueImageCacheJobs: %v", err)
+	}
 	if len(jobs.inputs) != 1 || jobs.inputs[0].ImageType != ImageCacheImagePoster {
 		t.Fatalf("queued = %#v, want only the local poster", jobs.inputs)
 	}
@@ -310,10 +312,12 @@ func TestOnlyVisibleLocalArtworkGoesToTheCopier(t *testing.T) {
 	copier := &recordingLocalArtworkCopier{}
 	s := &MetadataService{imageCacheJobs: jobs}
 	s.SetLocalArtworkCopier(copier)
-	s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
+	if err := s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: seen},
 		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImageBackdrop, SourcePath: unseen},
-	})
+	}); err != nil {
+		t.Fatalf("enqueueImageCacheJobs: %v", err)
+	}
 	if len(copier.inputs) != 1 || copier.inputs[0].SourcePath != seen {
 		t.Fatalf("copier got %#v, want only the poster this server can see", copier.inputs)
 	}

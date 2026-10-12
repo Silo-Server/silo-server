@@ -74,7 +74,7 @@ func (s *MetadataService) reapplyLocalItem(
 				return localReapplyNone, nil, fmt.Errorf("%s images: %w", provider.Slug(), err)
 			}
 			for _, image := range found {
-				if isLocalImageSourcePath(image.URL) {
+				if isLocalImageSourcePath(image.URL) && s.localSourceUsable(image.URL) {
 					images = append(images, image)
 				}
 			}
