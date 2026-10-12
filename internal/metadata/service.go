@@ -8562,6 +8562,11 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
 	}
 	for _, field := range itemOnlyArtworkFields(item) {
+		// These slots arrive carried over from the stored item, so under the
+		// lock a source still waiting for its cache job holds the slot too.
+		if imagesLocked && *field.source != "" {
+			continue
+		}
 		applyIfBetter(field.path, bestByType[field.imageType])
 	}
 }
@@ -8633,6 +8638,11 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
+		// A slot still waiting for its cache job, which this write left as
+		// stored, keeps its source so the queued job still matches it.
+		if *field.path == "" && existingPath == "" && *field.source != "" && *field.source == existingSource {
+			continue
+		}
 		currentThumbhash := ""
 		if field.thumbhash != nil {
 			currentThumbhash = *field.thumbhash

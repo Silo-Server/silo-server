@@ -1532,6 +1532,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err != nil {
 			return nil, err
 		}
+		s.presignExtraArtwork(ctx, detail, string(filter.ImageSize))
 		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, string(filter.ImageSize), true)
 		return detail, nil
 	case target.season != nil:
@@ -2259,7 +2260,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
-	s.presignExtraArtwork(ctx, detail, item, string(filter.ImageSize))
+	copyExtraArtwork(detail, item)
 
 	// File versions and subtitle aggregation only apply to movies.
 	// For series, each episode file shares the series content_id, so

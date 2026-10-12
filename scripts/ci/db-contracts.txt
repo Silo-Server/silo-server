@@ -217,6 +217,7 @@
 ./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
 ./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
 ./internal/catalog TestItemBackdropRepositoryDB
+./internal/catalog TestItemBackdropReplaceWaitsForCacheWriteDB
 ./internal/catalog TestFilterUnreferencedImageDirsPostgres
 ./internal/metadata TestItemOnlyArtworkBackfillAndRepairDB
 ./internal/jellycompat TestRecommendationsListEveryBackdropDB

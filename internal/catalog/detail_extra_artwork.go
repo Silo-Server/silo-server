@@ -12,20 +12,29 @@ type itemBackdropLister interface {
 	ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]models.ItemBackdrop, error)
 }
 
-// presignExtraArtwork fills a movie or series detail's banner, thumb, clear
-// art and disc art.
-func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDetail, item *models.MediaItem, size string) {
+// copyExtraArtwork copies a movie's or series' banner, thumb, clear art and
+// disc art paths and thumbhashes onto its detail. Jellyfin batch detail reads
+// only the paths; presignExtraArtwork resolves the URLs for single-item detail.
+func copyExtraArtwork(detail *ItemDetail, item *models.MediaItem) {
 	detail.BannerPath, detail.ThumbPath = item.BannerPath, item.ThumbPath
 	detail.ClearArtPath, detail.DiscPath = item.ClearArtPath, item.DiscPath
-	detail.BannerURL = s.PresignImageURL(ctx, item.BannerPath, artworkkey.ImageBanner, size)
-	detail.ThumbURL = s.PresignImageURL(ctx, item.ThumbPath, artworkkey.ImageThumb, size)
-	detail.ClearArtURL = s.PresignImageURL(ctx, item.ClearArtPath, artworkkey.ImageClearArt, size)
-	detail.DiscURL = s.PresignImageURL(ctx, item.DiscPath, artworkkey.ImageDisc, size)
-	if detail.BannerURL != "" {
-		detail.BannerThumbhash = item.BannerThumbhash
+	detail.BannerThumbhash, detail.ThumbThumbhash = item.BannerThumbhash, item.ThumbThumbhash
+}
+
+// presignExtraArtwork resolves the banner, thumb, clear art and disc art URLs
+// of a detail filled by copyExtraArtwork, keeping a thumbhash only beside its
+// URL. Only single-item detail returns these URLs, so batch reads skip the
+// four lookups per item.
+func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDetail, size string) {
+	detail.BannerURL = s.PresignImageURL(ctx, detail.BannerPath, artworkkey.ImageBanner, size)
+	detail.ThumbURL = s.PresignImageURL(ctx, detail.ThumbPath, artworkkey.ImageThumb, size)
+	detail.ClearArtURL = s.PresignImageURL(ctx, detail.ClearArtPath, artworkkey.ImageClearArt, size)
+	detail.DiscURL = s.PresignImageURL(ctx, detail.DiscPath, artworkkey.ImageDisc, size)
+	if detail.BannerURL == "" {
+		detail.BannerThumbhash = ""
 	}
-	if detail.ThumbURL != "" {
-		detail.ThumbThumbhash = item.ThumbThumbhash
+	if detail.ThumbURL == "" {
+		detail.ThumbThumbhash = ""
 	}
 }
 

@@ -37,7 +37,8 @@ func TestPresignExtraArtworkUsesEachTypesLadder(t *testing.T) {
 		DiscPath:     "local/movies/m/dd/disc/original.r4.webp",
 	}
 	detail := &ItemDetail{}
-	s.presignExtraArtwork(context.Background(), detail, item, "large")
+	copyExtraArtwork(detail, item)
+	s.presignExtraArtwork(context.Background(), detail, "large")
 	for name, pair := range map[string][2]string{
 		"banner":   {detail.BannerURL, "https://cdn.example/local/movies/m/aa/banner/w1000.r1.webp"},
 		"thumb":    {detail.ThumbURL, "https://cdn.example/local/movies/m/bb/thumb/w1280.r2.webp"},
@@ -53,7 +54,8 @@ func TestPresignExtraArtworkUsesEachTypesLadder(t *testing.T) {
 	}
 
 	empty := &ItemDetail{}
-	s.presignExtraArtwork(context.Background(), empty, &models.MediaItem{BannerThumbhash: "orphan"}, "")
+	copyExtraArtwork(empty, &models.MediaItem{BannerThumbhash: "orphan"})
+	s.presignExtraArtwork(context.Background(), empty, "")
 	if empty.BannerURL != "" || empty.BannerThumbhash != "" {
 		t.Fatalf("an item without a banner got %q/%q", empty.BannerURL, empty.BannerThumbhash)
 	}

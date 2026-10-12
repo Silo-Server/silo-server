@@ -74,6 +74,16 @@ func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, 
 
 	var stored []models.ItemBackdrop
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// Lock the item's rows first: a cache job writing one of them
+		// commits before the upsert reads the stored cached copies, and none
+		// can write until this commits.
+		if _, err := tx.Exec(ctx, `
+			SELECT 1 FROM media_item_backdrops
+			WHERE content_id = $1
+			ORDER BY id
+			FOR UPDATE`, contentID); err != nil {
+			return fmt.Errorf("locking item backdrops: %w", err)
+		}
 		// Upsert before trimming, so a source moving down from a trimmed
 		// ordinal still finds its stored row.
 		if len(backdrops) > 0 {

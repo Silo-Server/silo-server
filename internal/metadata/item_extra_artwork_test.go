@@ -133,6 +133,30 @@ func TestApplyBestImagesFillsExtraSlots(t *testing.T) {
 	}
 }
 
+// A banner, thumb, clear art or disc slot whose cache job has not finished
+// holds a source but no served path yet; the job only writes while the slot
+// still holds that source.
+func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
+	const pending = "file:///m/Film/banner.jpg?v=1-1"
+	t.Run("a write that offers nothing for the slot", func(t *testing.T) {
+		existing := &models.MediaItem{BannerSourcePath: pending}
+		item := &models.MediaItem{}
+		carryItemOnlyArtwork(item, existing)
+		applyBestImages(item, nil, MergeFillEmpty, "en")
+		prepareItemImagesForQueue(item, existing)
+		if item.BannerSourcePath != pending || item.BannerPath != "" {
+			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
+		}
+	})
+	t.Run("locked artwork", func(t *testing.T) {
+		item := &models.MediaItem{BannerSourcePath: pending, LockedFields: []int{int(FieldImages)}}
+		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en")
+		if item.BannerPath != "" {
+			t.Fatalf("a locked pending banner was replaced by %q", item.BannerPath)
+		}
+	})
+}
+
 func TestImageTypeFromKindMapsExtraKinds(t *testing.T) {
 	for kind, want := range map[string]ImageType{
 		"banner": ImageBanner, "thumb": ImageThumb, "clearart": ImageClearArt, "disc": ImageDisc,
