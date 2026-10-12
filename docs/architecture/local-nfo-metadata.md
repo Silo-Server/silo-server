@@ -376,9 +376,13 @@ sits in the chain.
   missing or no longer qualifies) and kept while it does not. A refresh that
   did not search the item level leaves the slots alone. Their cache jobs and
   storage follow the poster's; an extra backdrop's job targets its
-  `media_item_backdrops` row (`item_backdrop`), and its local key carries the
-  row ID beside the content hash, so re-caching one backdrop never deletes
-  another's prefix.
+  `media_item_backdrops` row (`item_backdrop`), and its local key carries a
+  hash of the sidecar's path beside the content hash. Two sidecars with the
+  same bytes get different keys, so re-caching one backdrop never deletes
+  another's prefix, and a backdrop that moves to another row keeps its key. A
+  stored backdrop the refresh did not find again stays unless its sidecar is
+  gone; a removed `extrafanart` folder counts as gone once the folder holding
+  it answers.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in

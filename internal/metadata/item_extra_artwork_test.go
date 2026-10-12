@@ -453,45 +453,68 @@ func (f *fakeItemBackdropUpdater) UpdateArtworkIfSourceMatches(_ context.Context
 	return true, nil
 }
 
-// An item's backdrops share a key folder per file, so each row's key carries
-// its row ID: re-caching one row deletes only its own stale prefix, never the
-// primary's or another row's.
-func TestProcessLocalItemBackdropKeysByRow(t *testing.T) {
+// An item's backdrops share its key folder, and two sidecars can hold the same
+// bytes, so each backdrop's key carries a hash of its sidecar's path. Two rows
+// with identical images get different keys, re-caching one deletes only its
+// own stale prefix, and a backdrop that moves to another row keeps its key.
+func TestProcessLocalItemBackdropKeysBySidecarPath(t *testing.T) {
 	root := t.TempDir()
-	path := writeLocalPoster(t, root)
-	job := localArtworkJob("file://" + path)
-	job.TargetType = ImageCacheTargetItemBackdrop
-	job.TargetContentID = "42"
-	job.ImageType = ImageCacheImageBackdrop
-	const previous = "local/movies/movie-1/0badf00d-42/backdrop/original.old.webp"
-	jobs := &fakeLocalImageCacheJobs{
-		fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
-		currentCached:      previous,
-	}
-	cacher := &fakeByteImageCacher{thumbhash: "th"}
-	backdrops := &fakeItemBackdropUpdater{}
-	deleter := &fakePrefixDeleter{bucket: "images"}
-	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{ItemBackdrops: backdrops})
-	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
-	p.SetImagePrefixDeleter(deleter)
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
+	first := writeLocalPoster(t, root)
+	second := filepath.Join(root, "fanart-2.jpg")
+	if err := os.WriteFile(second, []byte("poster-bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if stats.Succeeded != 1 {
-		t.Fatalf("stats = %+v, failed text %q", stats, jobs.failedText)
+	run := func(path, rowID, previous string) (*fakeByteImageCacher, *fakeItemBackdropUpdater, *fakePrefixDeleter) {
+		t.Helper()
+		job := localArtworkJob("file://" + path)
+		job.TargetType = ImageCacheTargetItemBackdrop
+		job.TargetContentID = rowID
+		job.ImageType = ImageCacheImageBackdrop
+		jobs := &fakeLocalImageCacheJobs{
+			fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
+			currentCached:      previous,
+		}
+		cacher := &fakeByteImageCacher{thumbhash: "th"}
+		backdrops := &fakeItemBackdropUpdater{}
+		deleter := &fakePrefixDeleter{bucket: "images"}
+		p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{ItemBackdrops: backdrops})
+		p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
+		p.SetImagePrefixDeleter(deleter)
+		stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Succeeded != 1 {
+			t.Fatalf("stats = %+v, failed text %q", stats, jobs.failedText)
+		}
+		return cacher, backdrops, deleter
 	}
-	discriminator := cacher.bytesReq[0].KeyDiscriminator
-	if len(discriminator) != len("00000000-42") || discriminator[8:] != "-42" {
-		t.Fatalf("KeyDiscriminator = %q, want <content hash>-42", discriminator)
+
+	const previous = "local/movies/movie-1/0badf00d-0badf00d/backdrop/original.old.webp"
+	cacher, backdrops, deleter := run(first, "42", previous)
+	key := cacher.bytesReq[0].KeyDiscriminator
+	if len(key) != len("00000000-00000000") || key[8] != '-' {
+		t.Fatalf("KeyDiscriminator = %q, want <content hash>-<path hash>", key)
 	}
-	want := "local/movies/movie-1/" + discriminator + "/backdrop/original.webp"
-	if backdrops.id != 42 || backdrops.cached != want || backdrops.hash != "th" || backdrops.source != job.SourcePath {
+	want := "local/movies/movie-1/" + key + "/backdrop/original.webp"
+	if backdrops.id != 42 || backdrops.cached != want || backdrops.hash != "th" {
 		t.Fatalf("backdrop update = %+v, want row 42 at %q", backdrops, want)
 	}
-	if !slices.Equal(deleter.prefixes, []string{"local/movies/movie-1/0badf00d-42/backdrop/"}) {
+	if !slices.Equal(deleter.prefixes, []string{"local/movies/movie-1/0badf00d-0badf00d/backdrop/"}) {
 		t.Fatalf("deleted prefixes = %q", deleter.prefixes)
+	}
+
+	// Same bytes in another sidecar: another key, so neither re-cache can
+	// delete the other's files.
+	other, _, _ := run(second, "43", "")
+	if other.bytesReq[0].KeyDiscriminator == key || other.bytesReq[0].KeyDiscriminator[:8] != key[:8] {
+		t.Fatalf("keys %q and %q, want the same content hash and different path hashes", key, other.bytesReq[0].KeyDiscriminator)
+	}
+	// The same sidecar on another row keeps its key, and its current copy is
+	// not deleted.
+	moved, _, movedDeleter := run(first, "44", want)
+	if moved.bytesReq[0].KeyDiscriminator != key || len(movedDeleter.prefixes) != 0 {
+		t.Fatalf("moved backdrop key %q (want %q), deleted %q", moved.bytesReq[0].KeyDiscriminator, key, movedDeleter.prefixes)
 	}
 }
 
