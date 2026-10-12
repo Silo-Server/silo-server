@@ -658,3 +658,57 @@ func TestRememberCompatTracksReadsTheStoredClaimBack(t *testing.T) {
 		t.Fatalf("last subtitle write = %+v, want the newer off choice read from the stored play", last)
 	}
 }
+
+// replayingStore runs each Update callback the way the durable store does, on
+// a cached copy and then on the stored row, and keeps it so a test can replay
+// it as a pending update once the row already holds its change.
+type replayingStore struct {
+	CompatPlaybackStore
+	callbacks []func(*PlaybackSession) error
+}
+
+func (s *replayingStore) Update(id string, fn func(*PlaybackSession) error) error {
+	s.callbacks = append(s.callbacks, fn)
+	if cached, ok := s.Get(id); ok {
+		cached.MediaSources = slices.Clone(cached.MediaSources)
+		if err := fn(cached); err != nil {
+			return err
+		}
+	}
+	return s.CompatPlaybackStore.Update(id, fn)
+}
+
+// TestRememberCompatTracksCallbacksNeverFail covers the durable store's
+// replay of a pending update: a callback that failed on a row already holding
+// its claim would fail every later durable update of the play, so neither the
+// claim nor the read-back callback returns an error.
+func TestRememberCompatTracksCallbacksNeverFail(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	store := &replayingStore{CompatPlaybackStore: handler.playbackStore}
+	handler.playbackStore = store
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemorySDHSubtitle)
+	if len(prefs.subtitles) != 1 {
+		t.Fatalf("subtitle saves = %+v, want one", prefs.subtitles)
+	}
+
+	current, ok := store.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	for i, fn := range store.callbacks {
+		replayed := *current
+		replayed.MediaSources = slices.Clone(current.MediaSources)
+		if err := fn(&replayed); err != nil {
+			t.Fatalf("replayed update callback %d returned %v, want nil", i, err)
+		}
+	}
+	terminal := *current
+	terminal.MediaSources = slices.Clone(current.MediaSources)
+	terminal.Terminal = true
+	for i, fn := range store.callbacks {
+		if err := fn(&terminal); err != nil {
+			t.Fatalf("update callback %d on a terminal row returned %v, want nil", i, err)
+		}
+	}
+}

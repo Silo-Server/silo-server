@@ -116,9 +116,9 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	}
 	// Claim the change on the play before writing it, so overlapping reports
 	// (a retry, a Stopped beside a Progress, another replica) write it once.
-	audio, subtitle, err = h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle, stop)
+	audio, subtitle, err = h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle)
 	// A play that ended meanwhile is not a failure either.
-	if err != nil && !errors.Is(err, errCompatTracksUnchanged) && !errors.Is(err, ErrSessionNotFound) {
+	if err != nil && !errors.Is(err, ErrSessionNotFound) {
 		slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
 			"play_session_id", playSession.ID, "error", err)
 	}
@@ -173,28 +173,27 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 func (h *PlaybackHandler) latestCompatTrackClaim(playSessionID, sourceID string) (*PlaybackMediaSource, bool) {
 	var latest *PlaybackMediaSource
 	err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
-		source, err := compatPlaybackSource(current, sourceID)
-		latest = source
-		return err
+		// Never fail, for the reason claimCompatTrackChange gives.
+		latest, _ = compatPlaybackSource(current, sourceID)
+		return nil
 	})
 	return latest, err == nil && latest != nil
 }
 
-// errCompatTracksUnchanged ends a claim another report already made.
-var errCompatTracksUnchanged = errors.New("remembered tracks unchanged")
-
 // claimCompatTrackChange records the reported tracks on the play's source
 // under the store's lock, rechecking each against the current row, and
 // returns the ones this report changed. The durable store runs the callback on
-// its cached copy before the stored row and stops at the first error, so an
-// authoritative claim reports "unchanged" as no claim rather than as an error,
-// letting the stored row decide.
-func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int, authoritative bool) (claimedAudio, claimedSubtitle *int, err error) {
+// its cached copy and then on the stored row, and replays it after a failed
+// database write, so the callback never fails: it only records what it found,
+// and the stored row's run decides.
+func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int) (claimedAudio, claimedSubtitle *int, err error) {
+	ended := false
 	err = h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		claimedAudio, claimedSubtitle = nil, nil
 		// The stored row can be terminal while a replica's copy is not.
-		if current.Terminal {
-			return ErrSessionNotFound
+		ended = current.Terminal
+		if ended {
+			return nil
 		}
 		for i := range current.MediaSources {
 			source := &current.MediaSources[i]
@@ -210,11 +209,11 @@ func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string,
 				claimedSubtitle = subtitle
 			}
 		}
-		if claimedAudio == nil && claimedSubtitle == nil && !authoritative {
-			return errCompatTracksUnchanged
-		}
 		return nil
 	})
+	if err == nil && ended {
+		err = ErrSessionNotFound
+	}
 	return claimedAudio, claimedSubtitle, err
 }
 
