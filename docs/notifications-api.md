@@ -172,8 +172,11 @@ sent together or not at all; without a readable server identity the push goes
 out without them. A relay that predates the fields answers 400
 `unexpected_field`. The sender then resends the attempt once without them under
 the same idempotency key, and leaves them out of later sends to that relay for an
-hour. Nothing else drops them, because they are part of the relay's
-idempotency hash.
+hour. The fields are part of the relay's idempotency hash, and a retry can
+differ from the attempt's first send (an earlier server version, another
+replica, or the hour ending). The relay answers such a retry with 422
+`idempotency_key_reuse`, and the sender resends it once with the other choice,
+which the relay replays or resumes.
 Only an administrator's clear or a relay `deployment_disabled` response parks
 delivery behind the re-registration marker; either one stores an empty
 credential. An older server stored the rejected key along with the marker. That

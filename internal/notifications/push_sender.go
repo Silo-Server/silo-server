@@ -507,22 +507,38 @@ func relayCredentialRejection(err error) (string, bool) {
 // so the attempt is resent once without them under the same key, and later
 // sends to that relay omit them for relayTargetRecheck.
 //
-// Only that rejection (400 unexpected_field naming a target field) may drop
-// the fields or mark a relay as lacking them. The fields are part of the
-// relay's idempotency hash, so a retry of an attempt the relay recorded with
-// them must keep them; a relay that recorded them accepts them and never
-// answers this way, so the mark cannot strip them from such a retry.
+// Only that rejection (400 unexpected_field naming a target field) may mark a
+// relay as lacking them.
+//
+// The fields are part of the relay's idempotency hash, and nothing records
+// which choice an attempt was first sent with: an earlier server version,
+// another replica, or a send inside relayTargetRecheck may have made the
+// other one. The relay answers a retry that differs with 422
+// idempotency_key_reuse, so the attempt is resent once with the other choice,
+// which the relay replays or resumes instead of delivering again.
 func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string, target pushRelayTarget, relayURL, apiKey string) pushSendResult {
-	if target != (pushRelayTarget{}) && s.relayLacksTarget(relayURL) {
-		target = pushRelayTarget{}
+	sent := target
+	if sent != (pushRelayTarget{}) && s.relayLacksTarget(relayURL) {
+		sent = pushRelayTarget{}
 	}
-	result := s.postRelay(ctx, attempt, device, token, target, relayURL, apiKey)
-	if target == (pushRelayTarget{}) || !relayRejectedTarget(result) {
-		return result
+	result := s.postRelay(ctx, attempt, device, token, sent, relayURL, apiKey)
+	switch {
+	case sent != (pushRelayTarget{}) && relayRejectedTarget(result):
+		s.markRelayLacksTarget(relayURL)
+		s.logger.InfoContext(ctx, "push relay does not accept server_id and profile_id yet; sending without them")
+		return s.postRelay(ctx, attempt, device, token, pushRelayTarget{}, relayURL, apiKey)
+	case target != (pushRelayTarget{}) && relayRecordedOtherTarget(result):
+		other := pushRelayTarget{}
+		if sent == (pushRelayTarget{}) {
+			other = target
+		}
+		// A relay that refuses the fields never recorded them, so its answer
+		// says nothing about the payload the 422 was about.
+		if retry := s.postRelay(ctx, attempt, device, token, other, relayURL, apiKey); !relayRejectedTarget(retry) {
+			return retry
+		}
 	}
-	s.markRelayLacksTarget(relayURL)
-	s.logger.InfoContext(ctx, "push relay does not accept server_id and profile_id yet; sending without them")
-	return s.postRelay(ctx, attempt, device, token, pushRelayTarget{}, relayURL, apiKey)
+	return result
 }
 
 func (s *pushSender) markRelayLacksTarget(relayURL string) {
@@ -545,6 +561,12 @@ func relayRejectedTarget(result pushSendResult) bool {
 	}
 	field := strings.TrimSpace(strings.TrimPrefix(result.Message, "unexpected field:"))
 	return field == "server_id" || field == "profile_id"
+}
+
+// relayRecordedOtherTarget recognizes the relay refusing a retry whose payload
+// differs from the one it recorded under the attempt's idempotency key.
+func relayRecordedOtherTarget(result pushSendResult) bool {
+	return result.HTTPStatus == http.StatusUnprocessableEntity && result.UpstreamReason == "idempotency_key_reuse"
 }
 
 func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string, target pushRelayTarget, relayURL, apiKey string) pushSendResult {

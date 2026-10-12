@@ -369,6 +369,60 @@ func TestPushSenderResendsWithoutTargetToARelayThatPredatesIt(t *testing.T) {
 	}
 }
 
+func TestPushSenderRetriesAnAttemptWithTheTargetChoiceTheRelayRecorded(t *testing.T) {
+	type sent struct {
+		key      string
+		targeted bool
+	}
+	var requests []sent
+	recorded := map[string]bool{}
+	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingStore{}))
+	sender.now = func() time.Time { return now }
+	sender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		key := req.Header.Get("Idempotency-Key")
+		_, targeted := body["server_id"]
+		requests = append(requests, sent{key: key, targeted: targeted})
+		if first, ok := recorded[key]; ok && first != targeted {
+			return relayResponse(http.StatusUnprocessableEntity, `{"error":{"code":"idempotency_key_reuse","message":"Idempotency-Key was reused with a different payload"}}`), nil
+		}
+		recorded[key] = targeted
+		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
+	})}
+	device := &PushDevice{Platform: PushPlatformApple, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
+	target := pushRelayTarget{ServerID: "server-1", ProfileID: "profile-1"}
+	send := func(attemptID string, target pushRelayTarget) pushSendResult {
+		requests = nil
+		return sender.sendWithCapability(context.Background(), PushDeliveryAttempt{ID: attemptID}, device, strings.Repeat("a", 64), target, DefaultPushRelayURL, "capability")
+	}
+
+	// First sent without the fields, by an earlier server version or while the
+	// relay was remembered as lacking them; retried with them.
+	recorded["attempt-1"] = false
+	if result := send("attempt-1", target); !result.OK || !slices.Equal(requests, []sent{{"attempt-1", true}, {"attempt-1", false}}) {
+		t.Fatalf("recorded without target: result = %+v, requests = %+v", result, requests)
+	}
+
+	// First sent with them; retried while this process remembers the relay as
+	// lacking them.
+	recorded["attempt-2"] = true
+	sender.markRelayLacksTarget(DefaultPushRelayURL)
+	if result := send("attempt-2", target); !result.OK || !slices.Equal(requests, []sent{{"attempt-2", false}, {"attempt-2", true}}) {
+		t.Fatalf("recorded with target: result = %+v, requests = %+v", result, requests)
+	}
+
+	// Without a target of its own the server has no other choice to offer.
+	recorded["attempt-3"] = true
+	result := send("attempt-3", pushRelayTarget{})
+	if result.OK || result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != "idempotency_key_reuse" || len(requests) != 1 {
+		t.Fatalf("no target: result = %+v, requests = %+v", result, requests)
+	}
+}
+
 func TestTerminalFCMDeviceRejectionReasons(t *testing.T) {
 	if !terminalFCMDeviceRejection(http.StatusUnprocessableEntity, "fcm_rejected",
 		"FCM rejected the notification: UNREGISTERED") {
