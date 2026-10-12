@@ -40,11 +40,13 @@ type healthStatus struct {
 	ServerID   string `json:"server_id,omitempty"`
 }
 
-// Readiness status values. The v1 shape is frozen; "degraded" is additive.
+// Readiness status values. The v1 shape is frozen; "degraded" and
+// "shutting_down" are additive.
 const (
-	readyStatusOK       = "ok"
-	readyStatusError    = "error"
-	readyStatusDegraded = "degraded"
+	readyStatusOK           = "ok"
+	readyStatusError        = "error"
+	readyStatusDegraded     = "degraded"
+	readyStatusShuttingDown = "shutting_down"
 )
 
 // readyStatus represents the JSON response for the readiness endpoint.
@@ -95,6 +97,9 @@ type ReadyHandler struct {
 	artworkMu      sync.Mutex
 	artworkChecked time.Time
 	artworkOK      bool
+	// shuttingDown reports whether the process has begun shutting down; nil
+	// means it never does as far as readiness is concerned.
+	shuttingDown func() bool
 }
 
 // NewReadyHandler creates a ReadyHandler with the given PG and S3 dependencies.
@@ -108,9 +113,18 @@ func NewReadyHandler(pg PGPinger, s3 S3HealthChecker, artwork ...ArtworkHealthCh
 	return &ReadyHandler{pg: pg, s3: s3, artwork: checker}
 }
 
+// SetShuttingDown makes readiness fail once fn reports true, so a load
+// balancer or Kubernetes routes new requests away while this process is still
+// serving the ones it has. Call it while building the router, before the
+// handler serves; fn itself may be read concurrently.
+func (h *ReadyHandler) SetShuttingDown(fn func() bool) {
+	h.shuttingDown = fn
+}
+
 // ServeHTTP checks PostgreSQL and storage health. It returns 503 when
-// PostgreSQL is unreachable and 200 otherwise, with "degraded" in the body when
-// a configured storage backend failed its probe.
+// PostgreSQL is unreachable or the process is shutting down, and 200 otherwise,
+// with "degraded" in the body when a configured storage backend failed its
+// probe.
 func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -127,14 +141,21 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The v1 body shape is frozen: a healthy answer carries only status, and
 	// any other answer carries every dependency boolean, with an unconfigured
 	// dependency reporting true. "degraded" is additive to that contract.
+	shuttingDown := h.shuttingDown != nil && h.shuttingDown()
 	status := readyStatus{Status: readyStatusOK}
-	if !pgOK || !s3OK || !artworkOK {
+	if !pgOK || !s3OK || !artworkOK || shuttingDown {
 		status.Postgres = new(pgOK)
 		status.S3 = new(s3OK)
 		status.Artwork = new(artworkOK)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case shuttingDown:
+		// The process is about to stop serving. Saying so before it does is
+		// what lets a load balancer take it out of rotation without cutting
+		// requests; see docs/architecture/api-contract.md.
+		status.Status = readyStatusShuttingDown
+		w.WriteHeader(http.StatusServiceUnavailable)
 	case !pgOK:
 		status.Status = readyStatusError
 		w.WriteHeader(http.StatusServiceUnavailable)

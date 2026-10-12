@@ -1283,7 +1283,10 @@ func main() {
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
+	// Set when shutdown begins; /api/v1/ready fails from then on.
+	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -3731,8 +3734,12 @@ func main() {
 
 	errCh := make(chan error, 3)
 	// Closed when the LAN advertiser has sent its goodbye packets; nil when
-	// discovery is off.
+	// discovery is off. Shutdown ends the advertisement through lanCtx before
+	// the rest of appCtx, so LAN clients stop finding a server that is about
+	// to close.
 	var lanDiscoveryDone chan struct{}
+	lanCtx, stopLANDiscovery := context.WithCancel(appCtx)
+	defer stopLANDiscovery()
 	// Bind before serving so resident plugins, which reverse-proxy to this
 	// listener, are only started once it exists.
 	apiListener, apiListenErr := net.Listen("tcp", cfg.Server.Listen)
@@ -3754,7 +3761,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginService != nil {
@@ -3785,10 +3792,19 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sigCh)
 
+	// A signal fails readiness first and keeps serving for
+	// SILO_SHUTDOWN_DELAY, so a load balancer routes traffic away before the
+	// listeners close. A restart request stops at once, as before: storage
+	// admission loss sends one after it has already stopped storage writers,
+	// and an administrator's restart has told players it is restarting now. A
+	// listener failure stops at once too.
+	shutdownDelay := apiShutdownDelay(os.Getenv(apiShutdownDelayEnv))
 	select {
 	case sig := <-sigCh:
-		appCancel()
 		slog.Info("received signal, shutting down", "signal", sig)
+		stopLANDiscovery()
+		routeAwayBeforeShutdown(&shuttingDown, shutdownDelay, sigCh)
+		appCancel()
 	case <-restartReqCh:
 		appCancel()
 		slog.Info("server restart requested, shutting down")

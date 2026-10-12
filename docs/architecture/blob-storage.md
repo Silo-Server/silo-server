@@ -388,7 +388,8 @@ required on the job, and the admin UI surfaces that instruction.
 
 ## Readiness
 
-`/ready` fails only when PostgreSQL is unreachable. A failed artwork or S3
+`/ready` fails only when PostgreSQL is unreachable or the process is shutting
+down (see [api-shutdown.md](api-shutdown.md)). A failed artwork or S3
 probe answers 200 with `"status":"degraded"` and the same per-dependency
 booleans the error shape carries, so a storage outage is visible without
 removing the node from service: the API keeps answering,

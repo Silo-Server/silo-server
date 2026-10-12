@@ -123,6 +123,10 @@ type Dependencies struct {
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
+	// ShuttingDown reports whether this process has begun shutting down.
+	// /api/v1/ready fails once it does, while the server still answers
+	// requests. May be nil.
+	ShuttingDown func() bool
 	// OnConfigChange registers a callback fired after a live config reload
 	// actually changes the config. May be nil when hot reload is not wired.
 	OnConfigChange               func(fn func(old, updated *config.Config))
@@ -421,6 +425,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Blobs.Assets)
+	readyHandler.SetShuttingDown(deps.ShuttingDown)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the

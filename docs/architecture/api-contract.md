@@ -1221,6 +1221,11 @@ tombstone. The retained contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
+  answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
+  while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
+  listeners close; `shutting_down` is additive to the frozen shape. See
+  [api-shutdown.md](api-shutdown.md).
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also
   `egress_kbps`); read from already-published snapshots, never a probe, path-redacted because the
