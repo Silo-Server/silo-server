@@ -250,15 +250,31 @@ type HealthChecker struct {
 	// a fetch that outlives the sweep that started it is not started again by
 	// the next sweep. Node ids are unique across both pools (one table).
 	capabilityRefreshInFlight sync.Map
+
+	// ctx is the context Start ran with; the rechecks started between sweeps
+	// end with it. Guarded by mu.
+	ctx context.Context
+	// broadcastUnreachable tells other API servers about a transcode node this
+	// one could not connect to. Guarded by mu.
+	broadcastUnreachable func(nodeURL string)
+	// recheckInterval separates the rechecks of a node marked unreachable;
+	// tests shorten it.
+	recheckInterval time.Duration
+	// rechecks tracks the recheck goroutines so tests can wait for them, and
+	// recheckInFlight holds the URLs being rechecked so repeated reports about
+	// one node share a single recheck.
+	rechecks        sync.WaitGroup
+	recheckInFlight sync.Map
 }
 
 // NewHealthChecker creates a health checker for the given pools.
 func NewHealthChecker(proxyPool *ProxyPool, transcodePool *TranscodePool, repo *Repository) *HealthChecker {
 	return &HealthChecker{
-		proxyPool:     proxyPool,
-		transcodePool: transcodePool,
-		repo:          repo,
-		interval:      30 * time.Second,
+		proxyPool:       proxyPool,
+		transcodePool:   transcodePool,
+		repo:            repo,
+		interval:        30 * time.Second,
+		recheckInterval: unreachableRecheckInterval,
 	}
 }
 
@@ -321,6 +337,9 @@ func (hc *HealthChecker) hooks() (CapabilityFetcher, func(nodeURL string)) {
 
 // Start runs health checks in a background goroutine. Stops when ctx is cancelled.
 func (hc *HealthChecker) Start(ctx context.Context) {
+	hc.mu.Lock()
+	hc.ctx = ctx
+	hc.mu.Unlock()
 	go func() {
 		hc.checkAll(ctx)
 		ticker := time.NewTicker(hc.interval)

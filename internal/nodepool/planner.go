@@ -3,6 +3,7 @@ package nodepool
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,6 +117,10 @@ type Planner struct {
 	// because a cluster reaches "no headroom anywhere" on its own schedule.
 	// Guarded by mu.
 	scratchGuardDropped bool
+	// unreachable, when set, takes MarkTranscodeNodeUnreachable reports so the
+	// health checker can recheck the node and tell other API servers. Without
+	// it a report only marks the pool.
+	unreachable atomic.Pointer[func(nodeURL string) bool]
 }
 
 // NewPlanner creates a planner over the given pools.

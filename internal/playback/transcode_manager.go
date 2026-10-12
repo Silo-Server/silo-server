@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1128,6 +1129,16 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
+// remoteTranscodeControlClient sends stop requests to transcode nodes. Its
+// connect bound matches transcodeproxy.NodeDialTimeout, which this package
+// cannot import: playback paths call the stop synchronously, so a stop aimed
+// at a dead host must give up as quickly as the start that found it dead.
+var remoteTranscodeControlClient = func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	return &http.Client{Transport: transport}
+}()
+
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
@@ -1148,7 +1159,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	}
 	req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := remoteTranscodeControlClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}

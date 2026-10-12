@@ -1,9 +1,22 @@
 package transcodeproxy
 
-import "net/http"
+import (
+	"net"
+	"net/http"
+	"time"
+)
 
-// nodeClient is shared by every hop that relays transcode output from a node:
-// the API's native and Jellyfin-compatible relays and the dedicated proxy.
+// NodeDialTimeout bounds opening a TCP connection to a transcode node. Nodes
+// sit on the same network as the API or on a private overlay, where a connect
+// takes milliseconds, so a few seconds only ever expires on a node that is
+// gone. Go's default of 30 seconds would hold every playback start and relay
+// aimed at a dead host for that long before a caller could try another node.
+const NodeDialTimeout = 3 * time.Second
+
+// nodeClient is shared by every hop that relays transcode output from a node
+// (the API's native and Jellyfin-compatible relays and the dedicated proxy) and
+// by the API's control calls to nodes: transcode start, capability reads, and
+// stop.
 //
 // It sets no overall timeout, because segment bodies stream at the viewer's
 // download speed, and no response-header timeout, because no fixed limit
@@ -23,11 +36,11 @@ var nodeClient = &http.Client{
 	},
 }
 
-// NodeClient returns a client for relaying manifests, segments and their
-// completion acknowledgements to a transcode node. Every returned client
-// shares one process-wide transport and connection pool; each call returns a
-// fresh copy of the client so a caller that changes its settings cannot change
-// them for every other relay. Pass it to telemetry.DoTrustedNode so the calls
+// NodeClient returns a client for calls to a transcode node: relayed manifests,
+// segments and their completion acknowledgements, and control requests such as
+// transcode start. Every returned client shares one process-wide transport and
+// connection pool; each call returns a fresh copy of the client so a caller
+// that changes its settings cannot change them for every other caller. Pass it to telemetry.DoTrustedNode so the calls
 // land in the node dependency metrics, and give every request a context that
 // ends when its caller stops waiting.
 func NodeClient() *http.Client {
@@ -45,6 +58,9 @@ func newStreamTransport() *http.Transport {
 		base = &http.Transport{}
 	}
 	t := base.Clone()
+	// Only the connect is bounded. Once a connection is open, the request
+	// context bounds the call, as below.
+	t.DialContext = (&net.Dialer{Timeout: NodeDialTimeout, KeepAlive: 30 * time.Second}).DialContext
 	t.MaxIdleConns = 128
 	t.MaxIdleConnsPerHost = 32
 	// See nodeClient: the request context, not a header deadline, bounds a
