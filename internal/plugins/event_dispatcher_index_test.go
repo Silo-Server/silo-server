@@ -529,3 +529,28 @@ func sortedInts(values []int) []int {
 	slices.Sort(out)
 	return out
 }
+
+// TestLifecycleChangeIsAnnouncedBeforeSlowHooks: another API server stores
+// the events it produces by its own subscriber index until plugins_changed
+// reaches it, so the announcement goes out before slow hooks such as the
+// resident reconcile.
+func TestLifecycleChangeIsAnnouncedBeforeSlowHooks(t *testing.T) {
+	ctx := t.Context()
+	svc := &Service{}
+	var order []string
+	svc.AddLifecycleHook(func(context.Context) { order = append(order, "reconcile") })
+	bus := newFakeBus()
+	if err := bus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type == cache.EventPluginsChanged {
+			order = append(order, "announce")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.PublishLifecycleChanges(bus)
+
+	svc.OnLifecycleChange(ctx)
+	if want := []string{"announce", "reconcile"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}

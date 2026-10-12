@@ -88,6 +88,11 @@ published while the server drains its requests after its context ended.
 - Each server delivers four events at a time across all plugins. A plugin
   that hangs holds a slot for 10 seconds per attempt, or a minute when it
   will not start, so its backlog delays other plugins' events.
+- A server stores the events it produces by its own subscriber index. After
+  a plugin is installed or enabled on another server, it learns of the change
+  from `plugins_changed`, which that server publishes before its slower
+  lifecycle hooks. Events it produces in the meantime, a Redis round trip or
+  up to a minute when the message is lost, miss the new subscriber.
 - One process sees each event, so a plugin that keeps per-process state
   cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver from their
