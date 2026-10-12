@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
+	maxDownloadBytes = metadata.MaxArtworkSourceBytes // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 

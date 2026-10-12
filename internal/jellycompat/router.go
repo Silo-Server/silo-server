@@ -126,11 +126,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	autoscanHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
+	// Rate limiting mirrors the native API: credential endpoints spend their
+	// per-endpoint budget, and authenticated routes, media included, run the
+	// generic limiter after auth, as the native authenticated group does.
+	// Anonymous artwork, avatars, web assets, and public server info stay
+	// unlimited like native public artwork and server reads.
+	rateLimit := compatRateLimit(deps.RateLimit)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
-		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth)).
+		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth), rateLimit).
 			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
-		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey, rateLimit).
 			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
 		autoscanVirtualFoldersRegistered = true
 	}
@@ -207,11 +213,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
 	r.Get("/System/Ping", systemHandler.HandlePing)
+	r.Post("/System/Ping", systemHandler.HandlePing)
 	r.Get("/System/Endpoint", systemHandler.HandleEndpoint)
 	r.Get("/Branding/Configuration", systemHandler.HandleBrandingConfiguration)
+	r.Get("/Branding/Css", systemHandler.HandleBrandingCSS)
+	r.Get("/Branding/Css.css", systemHandler.HandleBrandingCSS)
 	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
-	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
+	r.With(compatAuthEndpointRateLimit(deps.RateLimit, compatLoginRateLimitBucket)).
+		Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
@@ -235,6 +245,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(RequireSessionOrAPIKeySession(deps.Authenticator, adminAPIKeyAuth))
+			r.Use(rateLimit)
 			r.Get("/Users/Me", authHandler.HandleCurrentUser)
 			r.Get("/Users", authHandler.HandleUsers)
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
@@ -338,6 +349,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Use(rateLimit)
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Method(http.MethodHead, "/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))

@@ -22,10 +22,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// maxLocalImageSourceBytes caps local sidecar artwork reads at 8 MiB,
-// matching the NFO provider's discovery guard.
-const maxLocalImageSourceBytes = 8 << 20
-
 const (
 	immediateImageCacheClaimLimit  = 16
 	immediateImageCacheConcurrency = 3
@@ -938,7 +934,10 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	localPath := filepath.Clean(strings.TrimSpace(job.SourcePath)[len("file://"):])
+	// The source carries a size+mtime fingerprint that only exists to change
+	// the source path when the file is replaced; confinement and the read use
+	// the bare path.
+	localPath, _ := localImageSourceFilePath(job.SourcePath)
 	rootsContentID := firstNonEmpty(job.SeriesID, job.TargetContentID)
 	roots, err := p.libraryRoots.LibraryRootsForContent(ctx, rootsContentID)
 	if err != nil {
@@ -1094,7 +1093,7 @@ func localImagePathWithinRoots(path string, roots []string) bool {
 
 // readLocalImageFile reads a sidecar image with the same guards as discovery:
 // Lstat rejects symlinked leaves and non-regular files, the opened handle is
-// fstat-re-checked, and reads cap at maxLocalImageSourceBytes. ENOENT/EPERM
+// fstat-re-checked, and reads cap at MaxArtworkSourceBytes. ENOENT/EPERM
 // map to the stable-failure texts matched by isStableProviderImageFailure.
 func readLocalImageFile(path string) ([]byte, error) {
 	classify := func(err error) error {
@@ -1114,8 +1113,8 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if info.Size() > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if info.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -1136,15 +1135,15 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}
-	if stat.Size() > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if stat.Size() > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxLocalImageSourceBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, MaxArtworkSourceBytes+1))
 	if err != nil {
 		return nil, classify(err)
 	}
-	if len(data) > maxLocalImageSourceBytes {
-		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", maxLocalImageSourceBytes, path)
+	if len(data) > MaxArtworkSourceBytes {
+		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("local image read failed: empty file %s", path)
