@@ -87,6 +87,15 @@ func TestSetupAccessFor(t *testing.T) {
 			t.Errorf("host %s (browser %v): local = %v, want %v", tc.host, tc.browser, got, tc.local)
 		}
 	}
+	// Over plain HTTP the web app's status read carries neither Origin nor
+	// Sec-Fetch-Site; its own client headers still mark it as a browser.
+	for _, header := range [][2]string{{"X-Silo-Client", "Silo Web"}, {"X-Silo-Client-Family", "web"}} {
+		r := httptest.NewRequest(http.MethodGet, "http://silo.example.com/api/v2/system/setup", nil)
+		r.Header.Set(header[0], header[1])
+		if SetupAccessFor(lan, r, "").Local {
+			t.Errorf("%s: web app read by a public-looking name counted as local", header[0])
+		}
+	}
 	if SetupAccessFor(lan, nil, "").Local {
 		t.Error("a missing request counted as local")
 	}

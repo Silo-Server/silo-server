@@ -46,8 +46,7 @@ var setupCrossOrigin = http.NewCrossOriginProtection()
 // SetupAccessFor decides how the setup request r qualifies. ctx carries the
 // resolved client address; when forwarding headers came from a peer the
 // resolver does not trust, that address is the proxy's and the request is not
-// local. A browser request (one with Origin or
-// Sec-Fetch-Site) counts as local only when another site did not start it
+// local. A browser request (see browserRequest) counts as local only when another site did not start it
 // and the browser addressed a host only the local network can reach (see
 // localSetupHost), so a page can use a browser on the local network neither
 // across sites nor by rebinding its own domain to the server's address. A
@@ -56,7 +55,7 @@ func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAcc
 	if r == nil || SetupTokenRequired(ctx) || forwardedByUntrustedPeer(ctx, r) {
 		return SetupAccess{Token: token}
 	}
-	if r.Header.Get("Origin") == "" && r.Header.Get("Sec-Fetch-Site") == "" {
+	if !browserRequest(r) {
 		return SetupAccess{Local: true, Token: token}
 	}
 	// Behind a trusted proxy that rewrites Host, the client's host is in
@@ -71,6 +70,17 @@ func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAcc
 		checked.Host = host
 	}
 	return SetupAccess{Local: setupCrossOrigin.Check(checked) == nil, Token: token}
+}
+
+// browserRequest reports whether r came from a browser: it carries Origin or
+// Sec-Fetch-Site, or names the web app. Browsers send Sec-Fetch-Site only to
+// secure origins and no Origin on a same-origin GET, so the web app's own
+// headers keep its setup status read over plain HTTP classified the same way
+// as its setup request. Claiming to be the web app only makes the check
+// stricter.
+func browserRequest(r *http.Request) bool {
+	return r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" ||
+		r.Header.Get("X-Silo-Client") == "Silo Web" || r.Header.Get("X-Silo-Client-Family") == "web"
 }
 
 // forwardedByUntrustedPeer reports whether r carries forwarding headers that

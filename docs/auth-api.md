@@ -81,7 +81,9 @@ creates it as the administrator. Only these callers may do it:
   or an `Origin` that does not match the host the client addressed, which a trusted proxy
   may send as `X-Forwarded-Host`; checked with `http.CrossOriginProtection`)
   never counts as local, so a web page cannot use a browser on the local network to set the
-  server up (`auth.SetupAccessFor`). A browser request also needs the host it addressed to be
+  server up (`auth.SetupAccessFor`). A browser request (one with `Origin` or
+  `Sec-Fetch-Site`, or the web app's `X-Silo-Client: Silo Web` or
+  `X-Silo-Client-Family: web`) also needs the host it addressed to be
   one only the local network can reach: an IP address, `localhost`, a single-label name, or a
   name under `.local`, `.localhost`, `.localdomain`, `.home.arpa`, `.internal`, or `.lan`.
   Any other name could be a public domain rebound to the server's address (DNS rebinding),
