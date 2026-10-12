@@ -408,7 +408,8 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 
 	t.Run("root absent on this server", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "unmounted")
-		contentID := enqueue(t, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000")
+		source := "file://" + filepath.Join(root, "Film", "poster.jpg") + "?v=12-1700000000"
+		contentID := enqueue(t, source)
 		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
 		if waiting, err := repo.targetHasDeferredLocalJobs(ctx, contentID); err != nil || !waiting {
 			t.Fatalf("targetHasDeferredLocalJobs = %v, %v; want the deferred job reported", waiting, err)
@@ -420,6 +421,27 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		if got.status != ImageCacheStatusQueued || got.attempts != 0 ||
 			got.nextAttemptIn < imageCacheRootUnavailableRepeatRetry-time.Minute {
 			t.Fatalf("repeat deferral = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRepeatRetry)
+		}
+
+		// This server's discovery copy, which ignores the deferral, cannot
+		// push the job further out either.
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET next_attempt_at = NOW() + interval '20 minutes' WHERE target_content_id = $1
+		`, contentID); err != nil {
+			t.Fatalf("shorten the wait: %v", err)
+		}
+		before := 20 * time.Minute
+		job, err := repo.claimQueuedLocalJob(ctx, EnqueueImageCacheJobInput{
+			TargetType: ImageCacheTargetItem, TargetContentID: contentID, ImageType: ImageCacheImagePoster, SourcePath: source,
+		}, "mountless-copy")
+		if err != nil || job == nil {
+			t.Fatalf("discovery claim of the deferred job = %+v, %v", job, err)
+		}
+		p, _, _ := newLocalArtworkDBProcessor(pool, []string{root})
+		p.processClaimedJobs(ctx, "mountless-copy", []*models.MetadataImageCacheJob{job}, 1)
+		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster); got.status != ImageCacheStatusQueued ||
+			got.attempts != 0 || got.nextAttemptIn > before+time.Minute {
+			t.Fatalf("after a discovery copy = %+v, want queued with its wait (%s) kept", got, before)
 		}
 
 		// A manual refresh starts the deferral over, so refreshing on this

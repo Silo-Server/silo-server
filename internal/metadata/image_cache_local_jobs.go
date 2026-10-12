@@ -110,8 +110,11 @@ func (r *ImageCacheJobRepository) claimQueuedLocalJob(ctx context.Context, in En
 }
 
 // DeferClaimed returns a claimed job to the queue without counting an attempt,
-// recording why. It waits delay, or repeatDelay when the job was last deferred
-// for the same reason. The lease guard matches MarkFailed.
+// recording why. It waits delay, or repeatDelay when the job was due and last
+// deferred for the same reason. A job claimed before it was due (a discovery
+// copy ignores a deferral) keeps its wait, extended to delay at most, so a
+// server without the mount that keeps re-finding the job cannot push it
+// further from servers that have it. The lease guard matches MarkFailed.
 func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lockedBy string, errText string, delay, repeatDelay time.Duration) error {
 	if r == nil || r.pool == nil {
 		return nil
@@ -119,10 +122,10 @@ func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lo
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
-			next_attempt_at = NOW() + CASE
-				WHEN last_error = left($4, 2000) THEN $5::interval
+			next_attempt_at = GREATEST(next_attempt_at, NOW() + CASE
+				WHEN last_error = left($4, 2000) AND next_attempt_at <= NOW() THEN $5::interval
 				ELSE $3::interval
-			END,
+			END),
 			locked_at = NULL,
 			locked_by = '',
 			last_error = left($4, 2000),
