@@ -53,7 +53,9 @@ func (r *ItemBackdropRepository) ListByContentIDs(ctx context.Context, contentID
 // Replace makes backdrops the item's extra backdrops, numbered from ordinal 1
 // in slice order, and returns the stored rows. A row keeps its ID while its
 // ordinal survives, so a cache job that targets it stays valid across
-// refreshes; rows past the new count are deleted.
+// refreshes; rows past the new count are deleted. A row whose source is
+// unchanged keeps its cached path and thumbhash: only its cache job and
+// reconcile write those, and the caller's copy may predate the job's write.
 func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, backdrops []models.ItemBackdrop) ([]models.ItemBackdrop, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil
@@ -85,8 +87,7 @@ func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, 
 					path = EXCLUDED.path,
 					source_path = EXCLUDED.source_path,
 					thumbhash = EXCLUDED.thumbhash
-				WHERE (media_item_backdrops.path, media_item_backdrops.source_path, media_item_backdrops.thumbhash)
-					IS DISTINCT FROM (EXCLUDED.path, EXCLUDED.source_path, EXCLUDED.thumbhash)`,
+				WHERE media_item_backdrops.source_path IS DISTINCT FROM EXCLUDED.source_path`,
 				contentID, ordinals, paths, sources, thumbhashes); err != nil {
 				return fmt.Errorf("writing item backdrops: %w", err)
 			}

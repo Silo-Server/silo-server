@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -168,11 +169,15 @@ func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, exi
 // artwork is off). An unmounted share leaves the folder missing or its mount
 // point empty, and an unreadable or unresponsive folder proves nothing, so in
 // those cases the local copy stays. The folder is probed through rootcheck,
-// with its timeout, before the file itself is looked up.
+// with its timeout, before the file itself is looked up. A sidecar in an
+// extrafanart folder is judged by extraFanartSidecarGone instead.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true
+	}
+	if strings.EqualFold(filepath.Base(filepath.Dir(path)), ExtraFanartFolder) {
+		return r.extraFanartSidecarGone(path)
 	}
 	if !r.folderAnswers(filepath.Dir(path)) {
 		return false

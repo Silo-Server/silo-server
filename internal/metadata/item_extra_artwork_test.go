@@ -402,6 +402,24 @@ func TestPlanExtraBackdrops(t *testing.T) {
 	})
 }
 
+// A primary backdrop can come from extrafanart when the item has no named or
+// numbered one. Once that folder is removed and the item folder answers, a
+// searched refresh lets the provider backdrop replace it; while the item
+// folder itself is missing, as on an unmounted share, the cached copy stays.
+func TestPrimaryBackdropFromRemovedExtraFanartIsNotKept(t *testing.T) {
+	searched := withLocalArtworkSearched(context.Background(), localArtworkItem)
+	root := writeSidecars(t, t.TempDir(), "movie.mkv")
+	const remote = "https://image.tmdb.org/t/p/original/b.jpg"
+	const cached = "local/movies/movie-1/aa/backdrop/original.r.webp"
+	if itemRetention(searched).keep(remote, cached, localSource(filepath.Join(root, "extrafanart", "x.jpg"))) {
+		t.Fatal("kept a primary backdrop whose extrafanart folder is gone")
+	}
+	unmounted := localSource(filepath.Join(root, "missing-share", "extrafanart", "x.jpg"))
+	if !itemRetention(searched).keep(remote, cached, unmounted) {
+		t.Fatal("dropped a primary backdrop while its item folder is unreachable")
+	}
+}
+
 func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeItemBackdropRepo()

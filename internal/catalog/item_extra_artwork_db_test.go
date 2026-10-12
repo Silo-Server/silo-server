@@ -129,6 +129,19 @@ func TestItemBackdropRepositoryDB(t *testing.T) {
 		t.Fatalf("listed = %+v", listed)
 	}
 
+	// A refresh that read the rows before the cache job wrote keeps the job's
+	// cached copy for a row whose source it did not change.
+	stale, err := repo.Replace(ctx, contentID, []models.ItemBackdrop{
+		{SourcePath: "file:///m/fanart-1.jpg", Path: cached("a"), Thumbhash: "ta"},
+		{SourcePath: "file:///m/fanart-3.jpg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 2 || stale[1].Path != cached("b") || stale[1].Thumbhash != "tb" {
+		t.Fatalf("rows after a stale refresh = %+v, want the cached copy kept", stale)
+	}
+
 	// Deleting the item deletes its backdrops and queues their cached copies.
 	if _, err := items.Delete(ctx, contentID); err != nil {
 		t.Fatal(err)

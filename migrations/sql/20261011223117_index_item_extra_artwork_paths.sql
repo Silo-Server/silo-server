@@ -20,6 +20,12 @@ CREATE INDEX CONCURRENTLY idx_media_items_clearart_path_gc ON public.media_items
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_media_items_disc_path_gc;
 CREATE INDEX CONCURRENTLY idx_media_items_disc_path_gc ON public.media_items (disc_path) WHERE disc_path <> '';
 
+-- 20261011223116 added the widened cache-job checks NOT VALID. Validating
+-- outside its transaction scans the queue without blocking its writers.
+ALTER TABLE public.metadata_image_cache_jobs VALIDATE CONSTRAINT metadata_image_cache_jobs_target_check;
+ALTER TABLE public.metadata_image_cache_jobs VALIDATE CONSTRAINT metadata_image_cache_jobs_image_type_check;
+ALTER TABLE public.metadata_image_cache_jobs VALIDATE CONSTRAINT metadata_image_cache_jobs_shape_check;
+
 -- +goose Down
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_media_items_banner_path_gc;
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_media_items_thumb_path_gc;

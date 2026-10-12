@@ -73,16 +73,19 @@ func (f *sidecarFinder) findBackdrops(contentType string, searchDirs, mediaFiles
 				}
 			}
 		}
-		for _, source := range f.extraFanart(dir) {
-			add(source)
+		if room := metadata.MaxItemBackdrops - len(sources); room > 0 {
+			for _, source := range f.extraFanart(dir, room) {
+				add(source)
+			}
 		}
 	}
 	return sources
 }
 
-// extraFanart returns the usable images in dir's extrafanart folder, sorted by
-// name ignoring case.
-func (f *sidecarFinder) extraFanart(dir string) []string {
+// extraFanart returns up to limit usable images in dir's extrafanart folder,
+// sorted by name ignoring case. It stops checking files once it has limit, so a
+// large folder on a network share is not checked file by file.
+func (f *sidecarFinder) extraFanart(dir string, limit int) []string {
 	folders := []string{metadata.ExtraFanartFolder}
 	if listing := f.listing(dir); listing != nil {
 		folders = listing[metadata.ExtraFanartFolder]
@@ -101,6 +104,9 @@ func (f *sidecarFinder) extraFanart(dir string) []string {
 			for _, entry := range entries[lower] {
 				if source := f.usableSource(filepath.Join(dir, folder, entry)); source != "" {
 					sources = append(sources, source)
+					if len(sources) == limit {
+						return sources
+					}
 				}
 			}
 		}

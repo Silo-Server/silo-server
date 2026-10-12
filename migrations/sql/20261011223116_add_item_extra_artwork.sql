@@ -72,7 +72,10 @@ FOR EACH ROW EXECUTE FUNCTION public.queue_displaced_artwork_revision('path', 'b
 
 -- Item jobs may cache the new slots. An item_backdrop job targets one
 -- media_item_backdrops row by id and carries the item's content ID in
--- series_id, as a person job targets people.id.
+-- series_id, as a person job targets people.id. The checks only widen, so
+-- every existing row passes them: they are added NOT VALID to skip the scan
+-- while this transaction holds media_items, and the next migration validates
+-- them without blocking writers.
 ALTER TABLE public.metadata_image_cache_jobs
     DROP CONSTRAINT IF EXISTS metadata_image_cache_jobs_target_check,
     DROP CONSTRAINT IF EXISTS metadata_image_cache_jobs_image_type_check,
@@ -80,9 +83,9 @@ ALTER TABLE public.metadata_image_cache_jobs
 
 ALTER TABLE public.metadata_image_cache_jobs
     ADD CONSTRAINT metadata_image_cache_jobs_target_check
-        CHECK (target_type IN ('item', 'item_localization', 'item_backdrop', 'season', 'season_localization', 'episode', 'person')),
+        CHECK (target_type IN ('item', 'item_localization', 'item_backdrop', 'season', 'season_localization', 'episode', 'person')) NOT VALID,
     ADD CONSTRAINT metadata_image_cache_jobs_image_type_check
-        CHECK (image_type IN ('poster', 'backdrop', 'logo', 'banner', 'thumb', 'clearart', 'disc', 'still', 'profile')),
+        CHECK (image_type IN ('poster', 'backdrop', 'logo', 'banner', 'thumb', 'clearart', 'disc', 'still', 'profile')) NOT VALID,
     ADD CONSTRAINT metadata_image_cache_jobs_shape_check CHECK (
         (
             target_type = 'item'
@@ -133,7 +136,7 @@ ALTER TABLE public.metadata_image_cache_jobs
             AND season_number IS NULL
             AND episode_number IS NULL
         )
-    );
+    ) NOT VALID;
 
 -- +goose Down
 DELETE FROM public.metadata_image_cache_jobs

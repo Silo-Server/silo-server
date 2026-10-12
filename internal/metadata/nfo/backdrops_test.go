@@ -165,6 +165,22 @@ func TestGetImagesBackdropsAreCapped(t *testing.T) {
 	}
 }
 
+// extraFanart stops once it has as many usable images as the backdrops still
+// have room for, so a large folder is not checked file by file.
+func TestExtraFanartStopsAtLimit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "extrafanart"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"c.jpg", "a.jpg", "b.jpg"} {
+		writeImageFile(t, filepath.Join(dir, "extrafanart", name))
+	}
+	got := newSidecarFinder(context.Background()).extraFanart(dir, 2)
+	if len(got) != 2 || !strings.Contains(got[0], "/extrafanart/a.jpg") || !strings.Contains(got[1], "/extrafanart/b.jpg") {
+		t.Fatalf("extraFanart = %q, want a.jpg and b.jpg", got)
+	}
+}
+
 // A flat folder of several movies offers no directory-level search path, so
 // only the movie's own "-fanart" sidecar is a backdrop; the folder's numbered
 // and extrafanart images belong to no single movie.

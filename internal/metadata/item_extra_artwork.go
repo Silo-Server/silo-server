@@ -135,7 +135,7 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 		}
 		stored[f] = b
 		storedOrder = append(storedOrder, f)
-		if discovered[f] == "" && (!retention.searched || !retention.extraBackdropGone(b.SourcePath)) {
+		if discovered[f] == "" && (!retention.searched || !retention.sidecarGone(b.SourcePath)) {
 			keep[f] = true
 		}
 	}
@@ -175,21 +175,14 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 	return planned
 }
 
-// extraBackdropGone is sidecarGone for an extra backdrop. A backdrop in an
-// extrafanart folder is judged from the folder holding that folder: once it
-// answers, a missing or emptied extrafanart folder, or a missing file in it,
-// means the backdrop is gone, which sidecarGone alone reads as an unmounted
-// share and keeps forever. An extrafanart folder that cannot be listed keeps
-// its backdrops.
-func (r *localArtworkRetention) extraBackdropGone(source string) bool {
-	path, ok := localImageSourceFilePath(source)
-	if !ok || !filepath.IsAbs(path) {
-		return r.sidecarGone(source)
-	}
+// extraFanartSidecarGone is sidecarGone for an image in an extrafanart folder,
+// which can supply the primary backdrop as well as extra ones. It is judged
+// from the folder holding the extrafanart folder: once that answers, a missing
+// or emptied extrafanart folder, or a missing file in it, means the image is
+// gone, which the plain rule reads as an unmounted share and keeps forever. An
+// extrafanart folder that cannot be listed keeps its images.
+func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
 	dir := filepath.Dir(path)
-	if !strings.EqualFold(filepath.Base(dir), ExtraFanartFolder) {
-		return r.sidecarGone(source)
-	}
 	if !r.folderAnswers(filepath.Dir(dir)) {
 		return false
 	}
