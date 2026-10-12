@@ -330,3 +330,102 @@ func TestCompatPreferenceLanguageDropsUndefinedTags(t *testing.T) {
 		}
 	}
 }
+
+// TestPlaybackReportOnTheDeviceFallbackRemembersNothing covers a client whose
+// profile cannot play the track the viewer's preferences select, so
+// PlaybackInfo offered a fallback in its place: playing either default is no
+// choice.
+func TestPlaybackReportOnTheDeviceFallbackRemembersNothing(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+		s.MediaSources[0].DefaultAudioStreamIndex = intPtr(trackMemoryEnglishAudio)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemoryForcedSubtitle)
+	if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+		s.MediaSources[0].SelectedAudioStreamIndex = intPtr(trackMemoryEnglishAudio)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemoryForcedSubtitle)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("write attempts = %d for the preferred track and its fallback, want 0: %+v", prefs.attempts, prefs.audio)
+	}
+}
+
+// TestPlaybackReportSkipsARefusedAudioSwitch covers an audio switch the
+// server refused: the play keeps the old track, so the viewer never heard the
+// requested one and it is not remembered.
+func TestPlaybackReportSkipsARefusedAudioSwitch(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+		s.MediaSources[0].HLSRemux = true
+		s.MediaSources[0].HLSRemuxAudioStreamIndexes = []int{trackMemoryJapaneseAudio}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemoryForcedSubtitle)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("saved audio %+v for a refused switch", prefs.audio)
+	}
+}
+
+// TestPlaybackReportDoesNotAdoptAnUnknownSubtitleIndex covers an index that
+// names no track: it saves nothing and does not become the play's baseline,
+// so reporting the default afterwards still saves nothing.
+func TestPlaybackReportDoesNotAdoptAnUnknownSubtitleIndex(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, 99)
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemoryForcedSubtitle)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("subtitle saves = %+v, want none", prefs.subtitles)
+	}
+}
+
+// TestRememberCompatTracksClaimsAgainstTheCurrentPlay covers a report judged
+// from a stale copy of the play, as a second replica or an overlapping retry
+// sees it: the change another report already claimed is not written again.
+func TestRememberCompatTracksClaimsAgainstTheCurrentPlay(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	stale, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	off := compatIntValue(-1)
+	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &off}
+
+	handler.rememberCompatTracks(t.Context(), session, stale, req)
+	handler.rememberCompatTracks(t.Context(), session, stale, req)
+
+	if prefs.attempts != 1 {
+		t.Fatalf("write attempts = %d for one change seen twice, want 1", prefs.attempts)
+	}
+}
+
+// TestCompatReportedSourceFollowsTheStreamedVersion covers a multi-version
+// play whose reports omit MediaSourceId: the tracks belong to the version the
+// play streams, and without one known nothing is matched.
+func TestCompatReportedSourceFollowsTheStreamedVersion(t *testing.T) {
+	play := &PlaybackSession{MediaSources: []PlaybackMediaSource{{ID: "a", FileID: 1}, {ID: "b", FileID: 2}}}
+	if source := compatReportedSource(play, ""); source != nil {
+		t.Fatalf("source = %q before the play streams a version, want none", source.ID)
+	}
+	play.UpstreamMediaFileID = 2
+	if source := compatReportedSource(play, ""); source == nil || source.ID != "b" {
+		t.Fatalf("source = %+v, want the streamed version b", source)
+	}
+	if source := compatReportedSource(play, "a"); source == nil || source.ID != "a" {
+		t.Fatalf("source = %+v, want the named version a", source)
+	}
+}

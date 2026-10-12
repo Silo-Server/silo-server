@@ -2,8 +2,10 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -22,6 +24,10 @@ type AudioPreferenceWriter interface {
 type SubtitlePreferenceWriter interface {
 	SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
 }
+
+// compatTrackMemoryTimeout bounds the reads and writes one report makes to
+// remember its tracks, which outlive a client that drops the connection.
+const compatTrackMemoryTimeout = 10 * time.Second
 
 // compatSubtitleOff is the SubtitleStreamIndex Jellyfin reports for
 // subtitles off, and the track index Silo stores for it.
@@ -56,62 +62,129 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	if playSession.PreferenceKey == "" || playSession.Terminal || session.ProfileID == "" {
 		return
 	}
-	source, err := compatPlaybackSource(playSession, req.MediaSourceID)
-	if err != nil {
+	source := compatReportedSource(playSession, req.MediaSourceID)
+	if source == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compatTrackMemoryTimeout)
+	defer cancel()
 	var audio, subtitle *int
 	if req.AudioStreamIndex != nil && h.AudioPreferences != nil {
-		index := int(*req.AudioStreamIndex)
-		if current := compatRememberedAudioStreamIndex(*source); (current == nil || *current != index) &&
-			isValidCompatAudioStreamIndex(source.Version, index) {
+		if index := int(*req.AudioStreamIndex); compatAudioStreamChanged(*source, index) && isValidCompatAudioStreamIndex(source.Version, index) {
 			audio = &index
 		}
 	}
+	var subtitlePref userstore.SubtitlePreference
 	if req.SubtitleStreamIndex != nil && h.SubtitlePreferences != nil {
-		if index := int(*req.SubtitleStreamIndex); index >= compatSubtitleOff && index != compatRememberedSubtitleStreamIndex(*source) {
-			subtitle = &index
+		index := int(*req.SubtitleStreamIndex)
+		if index >= compatSubtitleOff && index != compatRememberedSubtitleStreamIndex(*source) {
+			// An index that names no track is not recorded either, so it
+			// cannot become the play's baseline.
+			var ok bool
+			if subtitlePref, ok = h.compatSubtitlePreference(ctx, session, playSession.PreferenceKey, *source, index); ok {
+				subtitle = &index
+			}
 		}
 	}
 	if audio == nil && subtitle == nil {
 		return
 	}
 
-	ctx = context.WithoutCancel(ctx)
+	// Claim the change on the play before writing it, so overlapping reports
+	// (a retry, a Stopped beside a Progress, another replica) write it once.
+	audio, subtitle, err := h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle)
+	if err != nil {
+		// A play that ended meanwhile is not a failure either.
+		if !errors.Is(err, errCompatTracksUnchanged) && !errors.Is(err, ErrSessionNotFound) {
+			slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
+				"play_session_id", playSession.ID, "error", err)
+		}
+		return
+	}
 	saved := compatSavedConfiguration(ctx, h.storeProvider, session)
 	if audio != nil && saved.remembersAudio() {
-		h.saveCompatAudioTrack(ctx, session, playSession.PreferenceKey, *source, *audio)
+		audioPref := compatAudioPreference(session, playSession.PreferenceKey, *source, *audio)
+		if err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, audioPref); err != nil {
+			slog.WarnContext(ctx, "jellycompat could not remember the audio track", "component", "jellycompat",
+				"series_id", playSession.PreferenceKey, "audio_track_index", audioPref.AudioTrackIndex, "error", err)
+		}
 	}
 	if subtitle != nil && saved.remembersSubtitles() {
-		h.saveCompatSubtitleTrack(ctx, session, playSession.PreferenceKey, *source, *subtitle)
-	}
-	err = h.playbackStore.Update(playSession.ID, func(current *PlaybackSession) error {
-		for i := range current.MediaSources {
-			if !mediaSourceIDsEqual(current.MediaSources[i].ID, source.ID) {
-				continue
-			}
-			if audio != nil {
-				current.MediaSources[i].RememberedAudioStreamIndex = intPtr(*audio)
-			}
-			if subtitle != nil {
-				current.MediaSources[i].RememberedSubtitleStreamIndex = intPtr(*subtitle)
-			}
+		if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, subtitlePref); err != nil {
+			slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
+				"series_id", playSession.PreferenceKey, "subtitle_track_index", subtitlePref.SubtitleTrackIndex, "error", err)
 		}
-		return nil
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
-			"play_session_id", playSession.ID, "error", err)
 	}
 }
 
-// compatRememberedAudioStreamIndex is the audio stream the series preference
-// names for this play: the last one handled, else the default it started with.
-func compatRememberedAudioStreamIndex(source PlaybackMediaSource) *int {
-	if source.RememberedAudioStreamIndex != nil {
-		return source.RememberedAudioStreamIndex
+// errCompatTracksUnchanged ends a claim another report already made.
+var errCompatTracksUnchanged = errors.New("remembered tracks unchanged")
+
+// claimCompatTrackChange records the reported tracks on the play's source
+// under the store's lock, rechecking each against the current row, and
+// returns the ones this report changed.
+func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int) (claimedAudio, claimedSubtitle *int, err error) {
+	err = h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+		claimedAudio, claimedSubtitle = nil, nil
+		for i := range current.MediaSources {
+			source := &current.MediaSources[i]
+			if !mediaSourceIDsEqual(source.ID, sourceID) {
+				continue
+			}
+			if audio != nil && compatAudioStreamChanged(*source, *audio) {
+				source.RememberedAudioStreamIndex = intPtr(*audio)
+				claimedAudio = audio
+			}
+			if subtitle != nil && *subtitle != compatRememberedSubtitleStreamIndex(*source) {
+				source.RememberedSubtitleStreamIndex = intPtr(*subtitle)
+				claimedSubtitle = subtitle
+			}
+		}
+		if claimedAudio == nil && claimedSubtitle == nil {
+			return errCompatTracksUnchanged
+		}
+		return nil
+	})
+	return claimedAudio, claimedSubtitle, err
+}
+
+// compatReportedSource is the source a report names. A report without
+// MediaSourceId is matched to the version the play streams, not the first
+// offered, so a multi-version item never saves another version's track.
+func compatReportedSource(playSession *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {
+	if mediaSourceID == "" && len(playSession.MediaSources) > 1 {
+		if playSession.UpstreamMediaFileID == 0 {
+			return nil
+		}
+		for _, source := range playSession.MediaSources {
+			if source.FileID == playSession.UpstreamMediaFileID {
+				return &source
+			}
+		}
+		return nil
 	}
-	return source.DefaultAudioStreamIndex
+	source, err := compatPlaybackSource(playSession, mediaSourceID)
+	if err != nil {
+		return nil
+	}
+	return source
+}
+
+// compatAudioStreamChanged reports whether a reported audio stream differs
+// from the last one handled for this play or, before any, from the defaults
+// it started with: the track the viewer's preferences select, and the device
+// fallback PlaybackInfo offered in its place (AC3 for TrueHD). A client
+// playing either made no choice.
+func compatAudioStreamChanged(source PlaybackMediaSource, index int) bool {
+	if source.RememberedAudioStreamIndex != nil {
+		return index != *source.RememberedAudioStreamIndex
+	}
+	for _, unchosen := range []*int{source.DefaultAudioStreamIndex, defaultAudioStreamIndex(source.Version)} {
+		if unchosen != nil && *unchosen == index {
+			return false
+		}
+	}
+	return true
 }
 
 // compatRememberedSubtitleStreamIndex is the subtitle stream the series
@@ -127,72 +200,68 @@ func compatRememberedSubtitleStreamIndex(source PlaybackMediaSource) int {
 	}
 }
 
-// saveCompatAudioTrack stores the audio stream as the remembered track, with
-// the fields native playback records for it.
-func (h *PlaybackHandler) saveCompatAudioTrack(ctx context.Context, session *Session, key string, source PlaybackMediaSource, streamIndex int) {
+// compatAudioPreference is the remembered track a valid audio stream stands
+// for, with the fields native playback records for it.
+func compatAudioPreference(session *Session, key string, source PlaybackMediaSource, streamIndex int) userstore.AudioPreference {
 	trackIndex := streamIndex - len(source.Version.VideoTracks)
 	track := source.Version.AudioTracks[trackIndex]
-	err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, userstore.AudioPreference{
+	return userstore.AudioPreference{
 		ProfileID:       session.ProfileID,
 		SeriesID:        key,
 		AudioTrackIndex: trackIndex,
 		AudioLanguage:   compatPreferenceLanguage(track.Language),
 		TrackSignature:  playback.AudioTrackSignatureFromTrack(track),
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "jellycompat could not remember the audio track", "component", "jellycompat",
-			"series_id", key, "audio_track_index", trackIndex, "error", err)
 	}
 }
 
-// saveCompatSubtitleTrack stores the subtitle stream, or subtitles off, as
-// the remembered choice, as a Silo player does on a pick: mode always with
-// the track's language, signature and v3 combined index, or mode off with no
-// track. An index that names no track saves nothing.
-func (h *PlaybackHandler) saveCompatSubtitleTrack(ctx context.Context, session *Session, key string, source PlaybackMediaSource, streamIndex int) {
-	pref := userstore.SubtitlePreference{
+// compatSubtitlePreference is the remembered choice a subtitle stream, or
+// subtitles off, stands for, as a Silo player saves it on a pick: mode always
+// with the track's language, signature and v3 combined index, or mode off
+// with no track. ok is false when the index names no track.
+func (h *PlaybackHandler) compatSubtitlePreference(ctx context.Context, session *Session, key string, source PlaybackMediaSource, streamIndex int) (pref userstore.SubtitlePreference, ok bool) {
+	pref = userstore.SubtitlePreference{
 		ProfileID:          session.ProfileID,
 		SeriesID:           key,
 		SubtitleTrackIndex: compatSubtitleOff,
 		SubtitleMode:       profileSubtitleOff,
 	}
-	if streamIndex != compatSubtitleOff {
-		var downloaded []subtitles.DownloadedSubtitle
-		if streamIndex >= nextDownloadedSubtitleIndex(source.Version) && h.SubtitleRepo != nil {
-			var err error
-			if downloaded, err = h.SubtitleRepo.ListDownloadedSubtitles(ctx, source.Version.FileID); err != nil {
-				slog.WarnContext(ctx, "jellycompat could not look up the reported downloaded subtitle", "component", "jellycompat",
-					"file_id", source.Version.FileID, "error", err)
-				return
-			}
-		}
-		candidates := compatSubtitleCandidates(source.Version, downloaded)
-		position := slices.IndexFunc(candidates, func(c compatSubtitleCandidate) bool { return c.Index == streamIndex })
-		if position < 0 {
-			return
-		}
-		track := candidates[position]
-		pref.SubtitleTrackIndex = compatCombinedSubtitleIndex(candidates, position)
-		pref.SubtitleLanguage = compatPreferenceLanguage(track.Language)
-		pref.SubtitleMode = profileSubtitleAlways
-		pref.TrackSignature = &userstore.SubtitleTrackSignature{
-			Source:          track.Source,
-			Language:        track.Language,
-			Codec:           track.Codec,
-			Label:           track.Label,
-			Forced:          track.Forced,
-			HearingImpaired: track.HearingImpaired,
+	if streamIndex == compatSubtitleOff {
+		return pref, true
+	}
+	var downloaded []subtitles.DownloadedSubtitle
+	if streamIndex >= nextDownloadedSubtitleIndex(source.Version) && h.SubtitleRepo != nil {
+		var err error
+		if downloaded, err = h.SubtitleRepo.ListDownloadedSubtitles(ctx, source.Version.FileID); err != nil {
+			slog.WarnContext(ctx, "jellycompat could not look up the reported downloaded subtitle", "component", "jellycompat",
+				"file_id", source.Version.FileID, "error", err)
+			return pref, false
 		}
 	}
-	if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, pref); err != nil {
-		slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
-			"series_id", key, "subtitle_track_index", pref.SubtitleTrackIndex, "error", err)
+	candidates := compatSubtitleCandidates(source.Version, downloaded)
+	position := slices.IndexFunc(candidates, func(c compatSubtitleCandidate) bool { return c.Index == streamIndex })
+	if position < 0 {
+		return pref, false
 	}
+	track := candidates[position]
+	pref.SubtitleTrackIndex = compatCombinedSubtitleIndex(candidates, position)
+	pref.SubtitleLanguage = compatPreferenceLanguage(track.Language)
+	pref.SubtitleMode = profileSubtitleAlways
+	pref.TrackSignature = &userstore.SubtitleTrackSignature{
+		Source:          track.Source,
+		Language:        track.Language,
+		Codec:           track.Codec,
+		Label:           track.Label,
+		Forced:          track.Forced,
+		HearingImpaired: track.HearingImpaired,
+	}
+	return pref, true
 }
 
 // compatCombinedSubtitleIndex is the candidate's index in the playback v3
 // combined subtitle space Silo clients store: external files, then embedded
-// tracks, then downloaded subtitles, each in catalog order.
+// tracks, then downloaded subtitles, each in catalog order, as
+// playback.BuildSubtitleInventoryV3 assigns them. Playback matches the stored
+// signature first; this index is only its fallback.
 func compatCombinedSubtitleIndex(candidates []compatSubtitleCandidate, position int) int {
 	rank := func(source string) int {
 		switch source {
