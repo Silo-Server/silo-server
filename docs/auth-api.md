@@ -64,8 +64,13 @@ Already issued stream grants are not withdrawn by these operations.
 The Web Settings screen and admin user Sign-in tab use these operations. Native
 Apple and Android management screens are outside the 1.0 acceptance scope; their
 existing native authentication requests use the same session validity checks.
-Jellyfin-compatible sessions live in their own store and are not listed here; only
-account-wide revocation ends them.
+A Jellyfin-compatible sign-in, by password or Quick Connect, opens a login session that
+these lists show under the client's name (its User-Agent, or the device name a Quick Connect
+request sent). The Jellyfin-compatible session lives
+only as long as that login session: revoking it, from the account's own list or by an admin,
+or its expiry ends that one Jellyfin client on every node at its next request, including
+streams and the socket, and leaves the account's other Jellyfin clients signed in.
+Account-wide revocation ends them all.
 
 ## Account passwords
 
@@ -280,8 +285,8 @@ The login-session step of the `database_maintenance` scheduled task deletes expi
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
 expiry passes. The v1
 session-list response shape and query remain unchanged, but expired rows disappear from that
-listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
-session validity checks; cleanup removes only sessions that have already expired.
+listing once cleanup deletes them. Jellyfin-compatible clients check their login session on
+every request too; cleanup removes only sessions that have already expired.
 
 ### Access tokens after a role change
 
@@ -314,16 +319,35 @@ to resolve viewer access is still `500`. The proxy's header-authenticated `/stre
 too. The Jellyfin surface keeps its session and answers `503` when its session check or
 its stream and HLS authorization cannot read the session from the database, when a due
 token refresh cannot reach the database, and when that refresh meets an unreachable
-sign-in provider under the `fail_closed` outage policy.
+sign-in provider under the `fail_closed` outage policy. Its `/socket` answers a new
+connection `503` the same way, and keeps an open socket open when a periodic re-check
+cannot run.
 
 Routes that check credentials outside the shared auth gate, refresh, the proxy media grant
-and the Jellyfin session and stream checks may still treat a failed lookup as no session and
+and the Jellyfin session, stream and socket checks may still treat a failed lookup as no session and
 answer 401 or refuse the request. Examples are plugin content routes, theme-song grants,
-Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), the
-Jellyfin websocket, and the v2 socket-ticket check used by the events, playback-control,
+Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), and
+the v2 socket-ticket check used by the events, playback-control,
 watch-together and admin-logs sockets (a watch-together re-check that fails closes the
 room). None of them is a token refresh, so a client that signs out only on a refresh 401
 stays signed in and retries.
+
+## Sign-in rate limits
+
+Operations that name a rate-limit budget (`login`, `setup`, `signup`, `invitation`,
+`password_reset`, the `device_*` budgets and the others above) spend one counter per
+budget wherever they run: v1 and v2, and for `login` and the device budgets the
+Jellyfin-compatible listener too. A budget counts per client IP. That is the address taken
+from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
+(`clientip.trusted_proxies`, every private range and loopback by default), otherwise the
+connection's own address.
+
+When the client IP came from those headers, the request also spends a budget keyed on the
+connection's own address: ten times the per-client one, shared by every client behind that
+proxy. Naming a new client in the headers on each request therefore stops at that budget.
+Direct connections and requests through a network access provider, whose plugin writes the
+header itself, spend only the per-client budget. An exhausted budget answers 429 with
+`Retry-After`.
 
 ## Profile PINs
 
@@ -357,6 +381,19 @@ Jellyfin sign-ins that use the `password#PIN` convention count against the same
 per-profile budget. A locked profile fails there the way a wrong PIN does (401
 `InvalidUsernameOrPassword`), and only the message names the lockout. PIN guesses
 are counted only after the account password matched.
+
+Audiobookshelf-compatible sign-ins (beta) use the same conventions:
+`username#profile` names the profile and `password#PIN` carries its PIN. A bare
+username names the profile called like the account when there is one, and otherwise
+signs in to the primary profile only when that profile has no PIN. PIN
+guesses count against the same per-profile budget, again only after the account
+password matched, and a locked profile answers 401 like a wrong PIN, with a message
+naming the lockout. Audiobookshelf access and refresh tokens carry the profile's PIN
+revision. Once the profile has a PIN at another revision, because one was set or
+changed, or once the profile is deleted, its tokens answer 401 and refresh is refused,
+so the app signs in again. A token that names no profile works only while the account
+has no profiles. The Socket.io connection checks the token the same way when it
+authenticates.
 
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting

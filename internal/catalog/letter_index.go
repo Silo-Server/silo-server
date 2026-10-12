@@ -74,6 +74,15 @@ func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, ac
 		return LetterIndex{}, err
 	}
 	sql, args := plan.letterIndexSQL()
+	load := func(ctx context.Context) (LetterIndex, error) { return e.queryLetterIndex(ctx, sql, args) }
+	key, ok := queryCacheKey(sql, args)
+	if !ok {
+		return load(ctx)
+	}
+	return e.LetterIndexes.get(ctx, key, load)
+}
+
+func (e *QueryExecutor) queryLetterIndex(ctx context.Context, sql string, args []any) (LetterIndex, error) {
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return LetterIndex{}, fmt.Errorf("querying letter index: %w", err)
@@ -99,6 +108,27 @@ func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, ac
 		return LetterIndex{}, fmt.Errorf("reading letter index: %w", err)
 	}
 	return index, nil
+}
+
+const (
+	// letterIndexCacheTTL bounds how stale a cached index can be: a title
+	// added, removed or retitled moves later positions within this window.
+	// Clients keep an index longer than this anyway.
+	letterIndexCacheTTL = 2 * time.Minute
+	// letterIndexCacheBudget caps the runs one node holds. An index has a
+	// few hundred at most.
+	letterIndexCacheBudget = 200_000
+	letterIndexFillLimit   = 4
+	letterIndexLoadTimeout = 30 * time.Second
+)
+
+// letterIndexCache holds the letter index of each title-ordered query; it
+// numbers every match, so building one is a full scan and sort.
+type letterIndexCache = queryCache[LetterIndex]
+
+func newLetterIndexCache() *letterIndexCache {
+	return newQueryCache(letterIndexCacheTTL, letterIndexCacheBudget, letterIndexFillLimit, letterIndexLoadTimeout,
+		func(index LetterIndex) int { return len(index.Runs) })
 }
 
 // letterIndexSQL numbers the plan's rows in its own order, files each under
@@ -145,6 +175,9 @@ func (r *CatalogResolver) LetterIndex(ctx context.Context, req CatalogRequest, a
 	if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
 		return LetterIndex{}, err
 	}
-	now := time.Now()
-	return r.queryExecutorForScope(req.Query.MediaScope, &now).LetterIndex(ctx, req.Query, access)
+	// No snapshot: the index covers the live list, and a stable query is what
+	// lets it be cached.
+	executor := r.queryExecutorForScope(req.Query.MediaScope, nil)
+	executor.LetterIndexes = r.letterIndexes
+	return executor.LetterIndex(ctx, req.Query, access)
 }
