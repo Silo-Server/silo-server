@@ -89,6 +89,10 @@ type Dependencies struct {
 	ContentService  ContentService
 	UserDataService UserDataService
 	AuthService     *auth.Service
+	// DeviceLogin serves Jellyfin Quick Connect on Silo's device sign-in
+	// (auth.DeviceLoginService). Nil turns Quick Connect off:
+	// /QuickConnect/Enabled answers false.
+	DeviceLogin QuickConnectService
 
 	// WatchCompletionObserver is notified when a Jellyfin-compat mark-played
 	// completes a watch, so fully-watched items leave the watchlist. Optional.

@@ -1039,7 +1039,9 @@ func main() {
 		}()
 	}
 
-	eventBus := cache.NewEventBus(cfg.Redis)
+	// The plugin event dispatcher observes what this process publishes, so
+	// each event reaches plugins once however many nodes receive it.
+	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		if event.Type == cache.EventScanComplete {
 			sections.InvalidateResolvedListCache()
@@ -1197,6 +1199,10 @@ func main() {
 			// Reclaim orphaned transcode dirs at boot and hourly thereafter, bound
 			// to appCtx so it stops on shutdown.
 			srv.StartOrphanSweeper(appCtx)
+			// SIGTERM drains the node before it shuts down, and every drain
+			// change is announced so placement reacts before the next sweep.
+			srv.SetDrainAnnouncer(nodeDrainAnnouncer(appCtx, eventBus, watcher))
+			standaloneHooks.drain = newTranscodeNodeDrain(srv)
 			handler = srv.Handler()
 			shutdownStandalone = srv.Shutdown
 		}
@@ -1283,7 +1289,10 @@ func main() {
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
+	// Set when shutdown begins; /api/v1/ready fails from then on.
+	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -1418,9 +1427,22 @@ func main() {
 
 		deps.ProxyPool = proxyPool
 		deps.TranscodePool = transcodePool
-		deps.NodePlanner = nodepool.NewPlanner(proxyPool, transcodePool)
+		planner := nodepool.NewPlanner(proxyPool, transcodePool)
+		deps.NodePlanner = planner
 
 		healthChecker := nodepool.NewHealthChecker(proxyPool, transcodePool, nodeRepo)
+		planner.SetUnreachableHandler(healthChecker.ReportUnreachable)
+		healthChecker.SetUnreachableBroadcast(func(payload string) {
+			// Off the request path: the caller is a playback request that has
+			// already lost time to the dead node.
+			go func() {
+				publishCtx, cancel := context.WithTimeout(appCtx, 5*time.Second)
+				defer cancel()
+				if err := eventBus.Publish(publishCtx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodeUnreachable, Payload: payload}); err != nil {
+					slog.Warn("publish unreachable stream node", "error", err)
+				}
+			}()
+		})
 		capabilityBudget := nodeCapabilityProbeBudget(configWatcher.Config)
 		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(cfg.Auth.JWTSecret, capabilityBudget))
 		// The sweep's backstop is derived from the same budget, so it can never
@@ -1428,6 +1450,7 @@ func main() {
 		healthChecker.SetCapabilityFetchBudget(capabilityBudget)
 		deps.NodeHealthChecker = healthChecker
 		healthChecker.Start(appCtx)
+		subscribeNodeDrainChanges(appCtx, eventBus, healthChecker)
 		slog.Info("node pools initialized", "proxy_nodes", len(proxyNodes), "transcode_nodes", len(transcodeNodes))
 
 		// The API host runs the same sampler the nodes do. It is not a
@@ -1456,6 +1479,10 @@ func main() {
 
 		// Subscribe to node pool change events for multi-instance reload.
 		_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type == cache.EventNodeUnreachable {
+				healthChecker.ApplyUnreachableAnnouncement(event.Payload)
+				return
+			}
 			if event.Type == cache.EventNodePoolChanged {
 				pNodes, pErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
 				tNodes, tErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
@@ -1875,11 +1902,12 @@ func main() {
 		close(pluginAutoUpdateDone)
 	}
 	if pluginService != nil && pluginInstallationStore != nil {
-		dispatcher := plugins.NewEventDispatcherWithTypedResolver(deps.EventBus, deps.EventsHub, pluginInstallationStore, pluginService, 4)
+		dispatcher := plugins.NewEventDispatcherWithTypedResolver(deps.EventBus, deps.EventsHub, pluginInstallationStore, pluginService, plugins.NewEventDeliveryStore(deps.DB), 4)
 		pluginService.SetEventDispatcher(dispatcher)
 		if err := dispatcher.Start(appCtx); err != nil {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
+		eventBus.ObservePublishes(dispatcher.ObservePublish)
 		defer dispatcher.Stop()
 		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
 		// before PublishLifecycleChanges was registered, so this call is the
@@ -1921,9 +1949,10 @@ func main() {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		// Make every existing library chain aware of the built-in providers
 		// before serving: materialize legacy content_level='' chains per level,
-		// then append registered builtins disabled (idempotent; also the repair
-		// path after a stale chain-editor save drops a builtin row). Runs before
-		// the metadata service exists, so no chain cache to invalidate here.
+		// then append registered builtins and move them to the front of each
+		// chain (idempotent; also the repair path after a stale chain-editor
+		// save drops a builtin row). Runs before the metadata service exists,
+		// so no chain cache to invalidate here.
 		syncCtx, syncCancel := context.WithTimeout(appCtx, 30*time.Second)
 		syncErr := metadata.SyncBuiltinProviderChains(syncCtx, chainRepo)
 		syncCancel()
@@ -2066,6 +2095,9 @@ func main() {
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
 		metadataService.SetImageResolver(imageResolver)
+		// Scans and the scheduled refresh re-apply local NFO and artwork
+		// metadata whose sidecar files changed.
+		metadataService.SetLocalSidecarStore(metadata.NewLocalSidecarRepository(deps.DB))
 
 		// Wire the image cacher whenever object storage is available so explicit
 		// admin image applies can succeed even if automatic metadata caching is off.
@@ -2082,6 +2114,7 @@ func main() {
 				imageResolver,
 				metadata.ImageCacheProcessorTargets{
 					Items:               itemRepo,
+					ItemBackdrops:       catalog.NewItemBackdropRepository(deps.DB),
 					Seasons:             seasonRepo,
 					Episodes:            episodeRepo,
 					ItemLocalizations:   catalog.NewMediaItemLocalizationRepository(deps.DB),
@@ -2091,9 +2124,11 @@ func main() {
 			)
 			// Local file:// artwork (NFO sidecars): confine reads to the owning
 			// library's roots and sweep stale hashed local/ prefixes on re-cache.
-			// The processor host must mount the libraries, like the metadata worker.
+			// The process whose refresh discovers a sidecar copies it, so a
+			// server without the library mount never has to.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
 			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
+			metadataService.SetLocalArtworkCopier(metadataImageCacheProcessor)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
 			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {
@@ -2222,6 +2257,9 @@ func main() {
 			deps.RealtimeHub,
 		)
 		deps.LibraryIngester = libraryIngestExecutor
+		if metadataService != nil {
+			libraryIngestExecutor.SetLocalSidecarChecker(metadataService)
+		}
 		if deps.DB != nil {
 			libraryScanQueue = scanqueue.NewService(
 				scanqueue.NewRepository(deps.DB),
@@ -2752,6 +2790,9 @@ func main() {
 	// shares one budget per profile even with ratelimit.backend at its memory
 	// default, and is process-local only on a Redis-less deployment.
 	deps.ProfilePINAttempts = ratelimit.NewProfilePINAttemptLimiter(apiRedisClient)
+	// The Quick Connect code budget per account follows the same rule, and
+	// the native approval routes and Jellyfin's Authorize share it.
+	deps.QuickConnectCodeAttempts = ratelimit.NewQuickConnectCodeAttemptLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -3110,8 +3151,10 @@ func main() {
 		}
 		if metadataImageCacheProcessor != nil {
 			tasks.SetImageWorkers(cfg.Metadata.ImageWorkers)
+			metadataImageCacheProcessor.SetWorkerBudget(tasks.ImageWorkerBudget())
 			configWatcher.OnChange(func(_, updated *config.Config) {
 				tasks.SetImageWorkers(updated.Metadata.ImageWorkers)
+				metadataImageCacheProcessor.SetWorkerBudget(tasks.ImageWorkerBudget())
 			})
 			cacheImagesTask := tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor)
 			// Artwork cached under an older variant ladder is missing the rungs
@@ -3651,6 +3694,11 @@ func main() {
 			})
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
+			// Jellyfin Quick Connect runs on the device sign-in requests the
+			// native API approves; profile tokens are only for remote playback.
+			if devices := auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo, compatDeps.UserStoreProvider, nil); devices != nil {
+				compatDeps.DeviceLogin = devices.WithQuickConnectAttempts(deps.QuickConnectCodeAttempts)
+			}
 			if authProviderRegistry != nil {
 				// Directory (LDAP) users sign in with their directory password.
 				compatDeps.AuthService.SetPluginProviderSource(authProviderRegistry)
@@ -3731,8 +3779,12 @@ func main() {
 
 	errCh := make(chan error, 3)
 	// Closed when the LAN advertiser has sent its goodbye packets; nil when
-	// discovery is off.
+	// discovery is off. Shutdown ends the advertisement through lanCtx before
+	// the rest of appCtx, so LAN clients stop finding a server that is about
+	// to close.
 	var lanDiscoveryDone chan struct{}
+	lanCtx, stopLANDiscovery := context.WithCancel(appCtx)
+	defer stopLANDiscovery()
 	// Bind before serving so resident plugins, which reverse-proxy to this
 	// listener, are only started once it exists.
 	apiListener, apiListenErr := net.Listen("tcp", cfg.Server.Listen)
@@ -3754,7 +3806,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginService != nil {
@@ -3785,17 +3837,17 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sigCh)
 
-	select {
-	case sig := <-sigCh:
-		appCancel()
-		slog.Info("received signal, shutting down", "signal", sig)
-	case <-restartReqCh:
-		appCancel()
-		slog.Info("server restart requested, shutting down")
-	case serverErr := <-errCh:
-		appCancel()
-		slog.Error("server error, shutting down", "error", serverErr)
-	}
+	// A signal fails readiness first and keeps serving for
+	// SILO_SHUTDOWN_DELAY, so a load balancer routes traffic away before the
+	// listeners close. A restart request stops at once, even during that wait:
+	// storage admission loss sends one after it has already stopped storage
+	// writers, and an administrator's restart has told players it is
+	// restarting now. A listener failure stops at once too.
+	waitForAPIStop(sigCh, restartReqCh, errCh, apiShutdownDelay(os.Getenv(apiShutdownDelayEnv)), func() {
+		shuttingDown.Store(true)
+		stopLANDiscovery()
+	})
+	appCancel()
 
 	// Step 12: Graceful shutdown sequence.
 	slog.Info("beginning graceful shutdown")
@@ -3911,9 +3963,12 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 // listener's lifetime: afterListen runs once the address is bound (resident
 // plugins reverse-proxy to it, so they start only then), beforeDrain runs
 // before the HTTP server drains (their overlay ingress goes away first).
+// drain, when set, runs first on SIGTERM: the node stops taking new work and
+// finishes what it has while everything keeps running.
 type standaloneServerHooks struct {
 	afterListen func()
 	beforeDrain func(context.Context)
+	drain       *nodeDrain
 }
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
@@ -3952,6 +4007,9 @@ func startStandaloneServer(addr string, handler http.Handler, appCancel context.
 	select {
 	case sig := <-sigCh:
 		slog.Info("received signal, shutting down", "signal", sig)
+		if hooks.drain != nil {
+			hooks.drain.run(sigCh)
+		}
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
 	}

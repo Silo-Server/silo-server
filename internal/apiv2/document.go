@@ -628,6 +628,7 @@ func registerAll(reg *Registry) {
 	registerAdminDashboardStats(reg)
 	registerAdminNodesRead(reg)
 	registerAdminNodeCommands(reg)
+	registerAdminNodeDrain(reg)
 	registerAdminNodeReload(reg)
 	registerAdminNodeConfiguration(reg)
 	registerAdminServerStatus(reg)

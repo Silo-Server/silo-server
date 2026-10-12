@@ -43,6 +43,8 @@ type AdminNode struct {
 	CapabilityDriftBaseline          json.RawMessage `json:"capability_drift_baseline,omitempty"`
 	AdvertisedCapabilitiesHash       *string         `json:"advertised_capabilities_hash,omitempty" doc:"Absent when not checked in this process; empty when checked but no hash was advertised."`
 	PhysicalGPUKeys                  []string        `json:"physical_gpu_keys,omitempty"`
+	DrainRequested                   bool            `json:"drain_requested" doc:"An administrator asked this transcode node to drain: new work is not placed on it while its sessions finish."`
+	DrainState                       string          `json:"drain_state" enum:"none,draining,drained" doc:"What the node reported on its last health check: draining while it refuses new work (after a drain request or SIGTERM), drained once it has none left and can be stopped without cutting a stream."`
 	// NetworkAccess is keyed by provider slug ("tailscale"). Only proxy nodes
 	// report it; a transcode node never does because clients never reach one.
 	NetworkAccess map[string]AdminNodeNetworkAccess `json:"network_access,omitempty" doc:"Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers."`
@@ -75,7 +77,7 @@ func compareNodePosition(a, b adminNodePosition) int {
 	return cmp.Or(cmp.Compare(a.Type, b.Type), cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
 }
 func adminNodeOf(n *nodepool.Node) AdminNode {
-	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys}
+	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys, DrainRequested: n.DrainRequested, DrainState: adminNodeDrainState(n)}
 	if n.LastHealthCheck != nil {
 		out.LastHealthCheck = NullableInstant{Valid: true, Time: NewInstant(*n.LastHealthCheck)}
 	}

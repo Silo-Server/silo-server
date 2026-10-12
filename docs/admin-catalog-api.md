@@ -464,7 +464,9 @@ returned `content_id` differs from the path ID when the item moved: a `local-`
 item takes its provider-anchored ID, and an item whose match the choice
 corrects moves to the ID its new identity derives (see
 [deterministic content IDs](architecture/deterministic-content-id.md#re-anchor-on-a-corrected-match)).
-Callers holding the old ID should switch to the returned one. Neither web mutation automatically retries or refreshes
+Callers holding the old ID should switch to the returned one. Apply records the
+choice on the item: later refreshes keep it when a local `.nfo` names another
+title, instead of re-matching to the file's `<uniqueid>`. Neither web mutation automatically retries or refreshes
 and replays authentication. Frozen v1 responses and parsing order remain
 unchanged. These administration flows have web consumers; Apple, Android and
 Jellyfin have no corresponding caller in the migration inventory.

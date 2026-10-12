@@ -70,11 +70,6 @@ func (h *SystemHandler) HandleBrandingConfiguration(w http.ResponseWriter, r *ht
 	})
 }
 
-// HandleQuickConnectEnabled serves GET /QuickConnect/Enabled.
-func (h *SystemHandler) HandleQuickConnectEnabled(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, false)
-}
-
 // HandleEndpoint serves GET /System/Endpoint.
 func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, endpointInfoResponse{

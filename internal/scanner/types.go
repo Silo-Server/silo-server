@@ -40,6 +40,9 @@ type ScanResult struct {
 	// the operator confirms cleanup or the files return.
 	SuspectEmptyRoots []string
 	RootObservations  []RootObservation
+	// Sidecars lists the local metadata sidecars (.nfo, artwork) in every
+	// directory a video scan read. It is nil for other library types.
+	Sidecars SidecarListing
 }
 
 // FileHints contains the OSHash gathered during scanning.

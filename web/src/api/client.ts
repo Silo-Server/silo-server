@@ -251,6 +251,25 @@ export function captureProfileRequestContext(): ProfileRequestContextSnapshot | 
 }
 
 /**
+ * Capture the session with an explicit profile authority, for one request
+ * made as a profile other than the active one: approving a Jellyfin Quick
+ * Connect request for the profile the person chose. Null while signed out.
+ */
+export function captureProfileRequestContextAs(
+  profileId: string,
+  profileToken: string | null,
+): ProfileRequestContextSnapshot | null {
+  if (!accessToken) return null;
+  return {
+    accessToken,
+    authContextVersion,
+    serverOrigin: currentServerOrigin(),
+    profileId,
+    profileToken,
+  };
+}
+
+/**
  * A session-authority change advances authContextVersion even if an account
  * later happens to return to the same token. Queued work can therefore never
  * cross a logout, impersonation, account switch, or server-origin switch

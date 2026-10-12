@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -88,6 +89,19 @@ func (r *SessionRepository) encryptTokens(session Session) (accessToken, refresh
 
 // Upsert inserts or updates a compat session.
 func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
+	return r.upsert(ctx, r.pool, session)
+}
+
+// UpsertTx is Upsert inside tx.
+func (r *SessionRepository) UpsertTx(ctx context.Context, tx pgx.Tx, session Session) error {
+	return r.upsert(ctx, tx, session)
+}
+
+type sessionExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func (r *SessionRepository) upsert(ctx context.Context, db sessionExecer, session Session) error {
 	if session.Token == "" {
 		session.Token = uuid.NewString()
 	}
@@ -97,7 +111,7 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		return err
 	}
 
-	_, err = r.pool.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO jellycompat_sessions (
 			token, username, account_username, profile_id, profile_name, pseudo_user_id,
 			streamapp_user_id, streamapp_access_token, streamapp_refresh_token,

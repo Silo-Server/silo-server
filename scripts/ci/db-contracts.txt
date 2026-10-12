@@ -51,6 +51,14 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 
+# Scoped administrator keys cannot redirect recovery through either API version.
+./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
+
+# Recovery identity changes retire links and prevent delivery to a stale address.
+./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
+./internal/passwordreset TestResetIssuanceRejectsChangedRecoveryEmailDB
+./internal/passwordreset TestResetIssuanceSerializesEmailChangeDB
+
 # Task locks and bounded history cleanup.
 ./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
@@ -74,6 +82,10 @@
 # The person name fallback never merges namesakes with different provider IDs.
 ./internal/catalog TestPersonNameFallbackKeepsNamesakesApartPostgres
 
+# An NFO actor photo takes a person's photo source only while the stored source
+# is the one the caller read.
+./internal/catalog TestPersonClaimPhotoSourcesPostgres
+
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
@@ -81,8 +93,19 @@
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
-# Image cache jobs run again for artwork the target no longer holds.
+# Image cache jobs run again for artwork the target no longer holds, and for a
+# local sidecar replaced under the same name.
 ./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
+./internal/metadata TestReplacedLocalSidecarRequeuesSucceededJobDB
+
+# Local sidecar change detection lists scanned items and stores fingerprints.
+./internal/metadata TestLocalSidecarRepositoryDB
+
+# The process that discovers local artwork copies it, other drains wait out the
+# discovery hold, and a server without the library mount leaves local jobs to
+# one that has it without counting attempts.
+./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
+./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
@@ -180,6 +203,10 @@
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
+# Plugin event deliveries: a claim takes at most its limit, never shares a row,
+# and only the latest claim records the outcome.
+./internal/plugins TestEventDeliveryOutboxPostgres
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
@@ -195,3 +222,15 @@
 ./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
 ./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
+
+# Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
+# and Down, slot write-back, backdrop row identity and GC queueing, and the
+# folder-delete reference check over the new columns, provider backfill and
+# repair of the new slots, and Jellyfin recommendations listing every backdrop.
+./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
+./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
+./internal/catalog TestItemBackdropRepositoryDB
+./internal/catalog TestItemBackdropReplaceWaitsForCacheWriteDB
+./internal/catalog TestFilterUnreferencedImageDirsPostgres
+./internal/metadata TestItemOnlyArtworkBackfillAndRepairDB
+./internal/jellycompat TestRecommendationsListEveryBackdropDB
