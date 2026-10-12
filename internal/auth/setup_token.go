@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -43,22 +44,58 @@ func SetupTokenRequired(ctx context.Context) bool {
 var setupCrossOrigin = http.NewCrossOriginProtection()
 
 // SetupAccessFor decides how the setup request r qualifies. ctx carries the
-// resolved client address. A browser request that another site started
-// (Sec-Fetch-Site, or an Origin that does not match the host the client
-// addressed) never counts as local, so a page cannot use a browser on the
-// local network to set the server up; neither does a missing request.
+// resolved client address. A browser request (one with Origin or
+// Sec-Fetch-Site) counts as local only when another site did not start it
+// and the browser addressed a host only the local network can reach (see
+// localSetupHost), so a page can use a browser on the local network neither
+// across sites nor by rebinding its own domain to the server's address. A
+// missing request never counts as local.
 func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAccess {
 	if r == nil || SetupTokenRequired(ctx) {
 		return SetupAccess{Token: token}
 	}
+	if r.Header.Get("Origin") == "" && r.Header.Get("Sec-Fetch-Site") == "" {
+		return SetupAccess{Local: true, Token: token}
+	}
 	// Behind a trusted proxy that rewrites Host, the client's host is in
-	// X-Forwarded-Host; compare Origin with that one.
+	// X-Forwarded-Host.
+	host := clientip.RequestHost(r)
+	if !localSetupHost(host) {
+		return SetupAccess{Token: token}
+	}
 	checked := r
-	if host := clientip.RequestHost(r); host != r.Host {
+	if host != r.Host {
 		checked = r.WithContext(r.Context())
 		checked.Host = host
 	}
 	return SetupAccess{Local: setupCrossOrigin.Check(checked) == nil, Token: token}
+}
+
+// localSetupDomains are special-use or conventional local suffixes that no
+// public DNS delegates, so no outside site can rebind a name under them.
+var localSetupDomains = []string{".local", ".localhost", ".localdomain", ".home.arpa", ".internal", ".lan"}
+
+// localSetupHost reports whether host[:port] names the server the way only a
+// client on the local network can: an IP address, localhost, a single-label
+// name, or a name under localSetupDomains. Any other name could be a public
+// domain whose owner points it at the server's address (DNS rebinding).
+func localSetupHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if host == "" {
+		return false
+	}
+	if net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		return true
+	}
+	for _, suffix := range localSetupDomains {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupAccess is how a caller qualifies for first-run setup.

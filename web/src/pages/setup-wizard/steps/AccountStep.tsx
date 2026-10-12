@@ -142,7 +142,7 @@ export function AccountStep() {
                 >
                   {tokenRefused === "invalid"
                     ? "That token doesn't match. Copy it again from the server's console log; it changes every time the server starts."
-                    : "This browser isn't on the server's local network. Copy the setup token from the server's console log, where it is printed at startup."}
+                    : "Silo asks for this when the browser isn't on its local network or opened it by a domain name. Copy the setup token from the server's console log, where it is printed at startup."}
                 </p>
               </Field>
             </div>

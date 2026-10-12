@@ -79,7 +79,12 @@ creates it as the administrator. Only these callers may do it:
   or an `Origin` that does not match the host the client addressed, which a trusted proxy
   may send as `X-Forwarded-Host`; checked with `http.CrossOriginProtection`)
   never counts as local, so a web page cannot use a browser on the local network to set the
-  server up (`auth.SetupAccessFor`).
+  server up (`auth.SetupAccessFor`). A browser request also needs the host it addressed to be
+  one only the local network can reach: an IP address, `localhost`, a single-label name, or a
+  name under `.local`, `.localhost`, `.localdomain`, `.home.arpa`, `.internal`, or `.lan`.
+  Any other name could be a public domain rebound to the server's address (DNS rebinding),
+  so a browser that opens the server by such a name needs the token. Requests without
+  browser headers, such as the apps', skip this host check.
 - Any other client that presents a setup token as the body member `setup_token`.
 
 Every API process that starts while no account exists prints a fresh setup token on its

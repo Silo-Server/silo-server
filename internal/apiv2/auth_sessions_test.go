@@ -193,7 +193,7 @@ func TestSetupServerSetupToken(t *testing.T) {
 		fetchSite string
 		local     bool
 	}{{"same-origin", true}, {"cross-site", false}} {
-		r := httptest.NewRequest(http.MethodPost, "/api/v2/auth/setup", strings.NewReader(`{"username":"admin","email":"admin@example.test","password":"password"}`))
+		r := httptest.NewRequest(http.MethodPost, "http://192.168.1.10:8090/api/v2/auth/setup", strings.NewReader(`{"username":"admin","email":"admin@example.test","password":"password"}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Sec-Fetch-Site", tc.fetchSite)
 		rec := httptest.NewRecorder()

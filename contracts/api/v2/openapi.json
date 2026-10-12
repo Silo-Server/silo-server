@@ -44135,7 +44135,7 @@
             "type": "string"
           },
           "setup_token": {
-            "description": "The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required, that is when the client is not on the server's local network",
+            "description": "The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required",
             "examples": [
               "QK3V7XN2M4PLR6TYW5HBJ8CDFA"
             ],
@@ -44170,7 +44170,7 @@
             "type": "boolean"
           },
           "setup_token_required": {
-            "description": "True while needs_setup is true and this client is not on the server's local network: setupServer then needs the setup token the server printed to its log",
+            "description": "True while needs_setup is true and this client must present the setup token the server printed to its log to call setupServer: it is not on the server's local network, or it is a browser that opened the server by a domain name that could point anywhere",
             "examples": [
               false
             ],

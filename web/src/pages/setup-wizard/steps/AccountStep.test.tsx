@@ -107,7 +107,7 @@ describe("AccountStep setup token", () => {
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByLabelText("Setup token")).toBeInTheDocument();
-    expect(screen.getByText(/isn't on the server's local network/)).toBeInTheDocument();
+    expect(screen.getByText(/isn't on its local network/)).toBeInTheDocument();
   });
 
   it("marks a wrong token invalid", async () => {

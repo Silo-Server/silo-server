@@ -200,7 +200,7 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 		case errors.Is(err, auth.ErrSetupAlreadyComplete):
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
 		case errors.Is(err, auth.ErrSetupTokenRequired):
-			return TokenPairView{}, apiError(http.StatusForbidden, "setup_token_required", "Setting up this server from outside its local network needs the setup token from the server log")
+			return TokenPairView{}, apiError(http.StatusForbidden, "setup_token_required", "Setting up this server from here needs the setup token from the server log")
 		case errors.Is(err, auth.ErrSetupTokenInvalid):
 			return TokenPairView{}, apiError(http.StatusForbidden, "setup_token_invalid", "The setup token does not match the one in the server log")
 		}

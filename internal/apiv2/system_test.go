@@ -72,6 +72,33 @@ func TestGetSetupStatusSetupTokenRequired(t *testing.T) {
 	}
 }
 
+// A browser on the local network that opened the server by a public-looking
+// domain name is asked for the token: the name could be a rebound domain.
+func TestGetSetupStatusSetupTokenRequiredByHost(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.Accounts = fakeAccounts{needsSetup: true}
+	h := newTestHandler(t, deps)
+	for _, tc := range []struct {
+		host string
+		want bool
+	}{
+		{"192.168.1.10:8090", false},
+		{"silo.example.com", true},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "http://"+tc.host+"/api/v2/system/setup", nil)
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r.WithContext(clientip.SetContext(r.Context(), "192.168.1.20")))
+		var body SetupStatus
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); rec.Code != 200 || err != nil {
+			t.Fatalf("%s: %d %s", tc.host, rec.Code, rec.Body.String())
+		}
+		if body.SetupTokenRequired != tc.want {
+			t.Fatalf("%s: setup_token_required = %v, want %v", tc.host, body.SetupTokenRequired, tc.want)
+		}
+	}
+}
+
 func TestGetSetupStatusWizardCompleted(t *testing.T) {
 	accounts := new(fakeAccounts)
 	deps := pilotDeps(nil, nil)

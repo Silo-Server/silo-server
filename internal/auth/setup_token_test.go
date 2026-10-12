@@ -60,6 +60,33 @@ func TestSetupAccessFor(t *testing.T) {
 			t.Errorf("%s: SetupAccessFor = %+v, want local %v", tc.name, access, tc.local)
 		}
 	}
+	// A same-origin browser request from the local network keeps the
+	// exemption only when the host it addressed cannot be a rebound public
+	// name. An app request (no browser headers) is not a rebinding target.
+	for _, tc := range []struct {
+		host    string
+		browser bool
+		local   bool
+	}{
+		{"192.168.1.10:8090", true, true},
+		{"[fd00::10]:8090", true, true},
+		{"localhost:8090", true, true},
+		{"nas:8090", true, true},
+		{"silo.local:8090", true, true},
+		{"silo.home.arpa", true, true},
+		{"attacker.example:8090", true, false},
+		{"silo.example.com", true, false},
+		{"silo.example.com", false, true},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/api/v2/auth/setup", nil)
+		if tc.browser {
+			r.Header.Set("Sec-Fetch-Site", "same-origin")
+			r.Header.Set("Origin", "http://"+tc.host)
+		}
+		if got := SetupAccessFor(lan, r, "").Local; got != tc.local {
+			t.Errorf("host %s (browser %v): local = %v, want %v", tc.host, tc.browser, got, tc.local)
+		}
+	}
 	if SetupAccessFor(lan, nil, "").Local {
 		t.Error("a missing request counted as local")
 	}

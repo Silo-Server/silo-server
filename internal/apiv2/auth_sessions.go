@@ -145,7 +145,7 @@ type SetupServerInput struct {
 		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
-		SetupToken           string `json:"setup_token,omitempty" maxLength:"128" doc:"The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required, that is when the client is not on the server's local network" example:"QK3V7XN2M4PLR6TYW5HBJ8CDFA"`
+		SetupToken           string `json:"setup_token,omitempty" maxLength:"128" doc:"The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required" example:"QK3V7XN2M4PLR6TYW5HBJ8CDFA"`
 	}
 }
 
