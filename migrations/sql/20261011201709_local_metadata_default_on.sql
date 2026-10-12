@@ -76,8 +76,10 @@ WHERE c.media_folder_id = b.media_folder_id
 -- state back to what it was before the upgrade, each only while it still has
 -- the value the Up gave it, so edits made after the upgrade stay. Builtin NFO
 -- rows added since (new libraries, the startup sync) go back to the old
--- default, off. Each chain is then renumbered so a restored priority and one
--- an admin set since never tie; the admin's comes first.
+-- default, off. Per-level rows the startup sync copied from a legacy ('')
+-- chain after the upgrade take that legacy row's snapshot. Each chain is then
+-- renumbered so a restored priority and one an admin set since never tie; the
+-- admin's comes first.
 UPDATE plugin_capabilities pc
 SET metadata = jsonb_set(pc.metadata, '{default_enabled}', 'false'::jsonb)
 FROM plugin_installations pi
@@ -96,6 +98,24 @@ WHERE c.media_folder_id = b.media_folder_id
   AND (c.priority = b.up_priority OR c.enabled = b.up_enabled);
 
 UPDATE library_provider_chains c
+SET priority = CASE WHEN c.priority = b.up_priority THEN b.priority ELSE c.priority END,
+    enabled = CASE WHEN c.enabled = b.up_enabled THEN b.enabled ELSE c.enabled END
+FROM local_metadata_default_on_chain_backup b
+WHERE b.content_level = ''
+  AND c.content_level <> ''
+  AND c.media_folder_id = b.media_folder_id
+  AND c.plugin_installation_id = b.plugin_installation_id
+  AND c.capability_id = b.capability_id
+  AND (c.priority = b.up_priority OR c.enabled = b.up_enabled)
+  AND NOT EXISTS (
+      SELECT 1 FROM local_metadata_default_on_chain_backup e
+      WHERE e.media_folder_id = c.media_folder_id
+        AND e.plugin_installation_id = c.plugin_installation_id
+        AND e.capability_id = c.capability_id
+        AND e.content_level = c.content_level
+  );
+
+UPDATE library_provider_chains c
 SET enabled = false
 FROM plugin_installations pi
 WHERE c.plugin_installation_id = pi.id
@@ -107,7 +127,7 @@ WHERE c.plugin_installation_id = pi.id
       WHERE b.media_folder_id = c.media_folder_id
         AND b.plugin_installation_id = c.plugin_installation_id
         AND b.capability_id = c.capability_id
-        AND b.content_level = c.content_level
+        AND b.content_level IN (c.content_level, '')
   );
 
 UPDATE library_provider_chains c

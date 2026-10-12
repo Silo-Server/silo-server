@@ -10,8 +10,9 @@ import (
 // moves them to the front, and keeps the other providers' order. Rolling back
 // puts each row's priority and on/off state back as they were, including an
 // NFO row an admin had turned on, keeps a field an admin edited after the
-// upgrade, turns off NFO rows added since, and renumbers each chain so a
-// restored priority never ties with one an admin set.
+// upgrade, turns off NFO rows added since, gives per-level rows copied from a
+// legacy chain after the upgrade that legacy row's state, and renumbers each
+// chain so a restored priority never ties with one an admin set.
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -31,7 +32,11 @@ INSERT INTO plugin_capabilities VALUES
 -- 12: a library created after NFO existed, NFO first but disabled.
 -- 13: an admin turned NFO on, still last.
 -- 15: two remote providers, NFO off and last.
+-- 16, 17: legacy unlevelled chains, NFO on (16) and off (17), not yet copied
+--         to per-level rows.
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
+    (16, 2, 'tmdb', '', 0, true), (16, 1, 'nfo', '', 1, true),
+    (17, 2, 'tmdb', '', 0, true), (17, 1, 'nfo', '', 1, false),
     (15, 2, 'tmdb', 'movie', 0, true), (15, 3, 'tvdb', 'movie', 1, true), (15, 1, 'nfo', 'movie', 2, false),
     (10, 2, 'tmdb', 'movie', 0, true), (10, 1, 'nfo', 'movie', 1, false),
     (11, 3, 'tvdb', 'series', 0, true), (11, 2, 'tmdb', 'series', 1, false), (11, 1, 'nfo', 'series', 2, false),
@@ -81,18 +86,25 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		{12, "nfo", 0, true}, {12, "tmdb", 1, true},
 		{13, "nfo", 0, true}, {13, "tmdb", 1, true},
 		{15, "nfo", 0, true}, {15, "tmdb", 1, true}, {15, "tvdb", 2, true},
+		{16, "nfo", 0, true}, {16, "tmdb", 1, true},
+		{17, "nfo", 0, true}, {17, "tmdb", 1, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
 	}
 
 	// After the upgrade: a new library seeds NFO on, an admin turns on TMDB
-	// in library 11, and another turns NFO off in library 13.
+	// in library 11, another turns NFO off in library 13 and swaps the remote
+	// providers in library 15, and the startup sync copies the legacy chains
+	// of 16 and 17 to per-level rows.
 	migrationExec(t, tx, `INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
     (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true);
 UPDATE library_provider_chains SET enabled = true WHERE media_folder_id = 11 AND capability_id = 'tmdb';
 UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AND capability_id = 'nfo';
-UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id = 15 AND capability_id IN ('tmdb', 'tvdb');`)
+UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id = 15 AND capability_id IN ('tmdb', 'tvdb');
+INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled)
+SELECT media_folder_id, plugin_installation_id, capability_id, 'movie', priority, enabled
+FROM library_provider_chains WHERE media_folder_id IN (16, 17) AND content_level = '';`)
 
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	if defaultEnabled() {
@@ -106,6 +118,10 @@ UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id
 		{14, "nfo", 0, false}, {14, "tmdb", 1, true},
 		// The admin's swap of the remote providers stays; NFO goes back last.
 		{15, "tvdb", 0, true}, {15, "tmdb", 1, true}, {15, "nfo", 2, false},
+		// Legacy rows and the per-level copies made after the upgrade both
+		// return to the legacy chain's state, NFO on in 16 and off in 17.
+		{16, "tmdb", 0, true}, {16, "nfo", 1, true}, {16, "tmdb", 0, true}, {16, "nfo", 1, true},
+		{17, "tmdb", 0, true}, {17, "nfo", 1, false}, {17, "tmdb", 0, true}, {17, "nfo", 1, false},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)
