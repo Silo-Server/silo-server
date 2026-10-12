@@ -269,3 +269,27 @@ func TestProxyDownloadArtifactRelayKeepsBoundedHeaderWait(t *testing.T) {
 		t.Fatalf("artifact download sent %d request(s) through the unbounded node relay client", relay.requests)
 	}
 }
+
+func TestProxyDownloadBandwidthFollowsReloadedLimitsWithoutRedis(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	w.SetConfigForTest(&config.Config{})
+	srv := NewServer(w, nil)
+	srv.SetDownloadBandwidth(nil, nil)
+
+	src := strings.NewReader("payload")
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got != io.Reader(src) {
+		t.Fatal("unlimited startup config should return the raw reader")
+	}
+
+	limited := &config.Config{}
+	limited.Download.UserBandwidthBPS = 1_000_000
+	w.SetConfigForTest(limited)
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got == io.Reader(src) {
+		t.Fatal("a reloaded user limit should throttle new transfers")
+	}
+
+	w.SetConfigForTest(&config.Config{})
+	if got := srv.downloadBandwidthManager().ThrottledStreamReader(context.Background(), src, 7); got != io.Reader(src) {
+		t.Fatal("clearing the limits should stop throttling new transfers")
+	}
+}

@@ -75,10 +75,13 @@ type Server struct {
 	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
-	// Download byte budgets are shared with API instances. Only DB-less test
-	// servers use the standalone manager.
+	// Download byte budgets are shared with API instances when Redis is
+	// configured. Without it the manager keeps node-local limiters, which
+	// follow hot-reloaded settings through Reload.
 	downloadBandwidthMu sync.Mutex
 	downloadBandwidth   *downloads.BandwidthManager
+	downloadServerBPS   int64
+	downloadUserBPS     int64
 
 	// capabilityHash is the last computed capability snapshot's hash, published
 	// by /health without probing. Nil until the first snapshot or capability
@@ -907,19 +910,31 @@ func (s *Server) SetDownloadBandwidth(pool *pgxpool.Pool, client *redis.Client) 
 	if cfg := s.watcher.Config(); cfg != nil {
 		serverBPS, userBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
 	}
+	s.downloadBandwidthMu.Lock()
+	defer s.downloadBandwidthMu.Unlock()
 	s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
+	s.downloadServerBPS, s.downloadUserBPS = serverBPS, userBPS
 	s.downloadBandwidth.SetSharedBudget(client, downloads.BandwidthRates(pool))
 }
 
+// downloadBandwidthManager applies hot-reloaded limits to the manager. A
+// standalone manager has no other source for them; a shared one also reads
+// the settings itself, so the reload only refreshes its cached rates sooner.
 func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
 	s.downloadBandwidthMu.Lock()
 	defer s.downloadBandwidthMu.Unlock()
+	cfg := s.watcher.Config()
 	if s.downloadBandwidth == nil {
-		cfg := s.watcher.Config()
 		if cfg == nil {
 			return nil
 		}
 		s.downloadBandwidth = downloads.NewBandwidthManager(cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS)
+		s.downloadServerBPS, s.downloadUserBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
+		return s.downloadBandwidth
+	}
+	if cfg != nil && (cfg.Download.ServerBandwidthBPS != s.downloadServerBPS || cfg.Download.UserBandwidthBPS != s.downloadUserBPS) {
+		s.downloadServerBPS, s.downloadUserBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
+		s.downloadBandwidth.Reload(s.downloadServerBPS, s.downloadUserBPS)
 	}
 	return s.downloadBandwidth
 }
