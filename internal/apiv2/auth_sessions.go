@@ -413,7 +413,7 @@ func (reg *Registry) setupServer(ctx context.Context, in *SetupServerInput) (*To
 		return nil, p
 	}
 	registration := reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName)
-	registration.SetupToken = in.Body.SetupToken
+	registration.Setup = auth.SetupAccessFor(ctx, requestFrom(ctx), in.Body.SetupToken)
 	view, err := reg.deps.Sessions.SetupInitialUser(withClientDevice(ctx), registration)
 	if err != nil {
 		var apiErr *handlers.APIError

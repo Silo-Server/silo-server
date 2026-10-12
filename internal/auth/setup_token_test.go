@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -28,6 +30,37 @@ func TestSetupTokenRequired(t *testing.T) {
 		if got := SetupTokenRequired(tc.ctx); got != tc.required {
 			t.Errorf("%s: SetupTokenRequired = %v, want %v", tc.name, got, tc.required)
 		}
+	}
+}
+
+// A browser request that another site started never earns the local
+// exemption, even from a local address; requests without browser headers,
+// such as a native app's, keep it.
+func TestSetupAccessFor(t *testing.T) {
+	lan := clientip.SetContext(t.Context(), "192.168.1.20")
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		headers map[string]string
+		local   bool
+	}{
+		{"lan app, no browser headers", lan, nil, true},
+		{"lan browser, same origin", lan, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://silo.lan:8090"}, true},
+		{"lan browser, cross site", lan, map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://attacker.example"}, false},
+		{"lan browser, foreign origin only", lan, map[string]string{"Origin": "https://attacker.example"}, false},
+		{"internet browser, same origin", clientip.SetContext(t.Context(), "203.0.113.9"), map[string]string{"Sec-Fetch-Site": "same-origin"}, false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "http://silo.lan:8090/api/v1/auth/setup", nil)
+		for k, v := range tc.headers {
+			r.Header.Set(k, v)
+		}
+		access := SetupAccessFor(tc.ctx, r, "token")
+		if access.Local != tc.local || access.Token != "token" {
+			t.Errorf("%s: SetupAccessFor = %+v, want local %v", tc.name, access, tc.local)
+		}
+	}
+	if SetupAccessFor(lan, nil, "").Local {
+		t.Error("a missing request counted as local")
 	}
 }
 

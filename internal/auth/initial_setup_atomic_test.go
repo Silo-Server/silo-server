@@ -392,9 +392,9 @@ func TestInitialSetupProfileFailureRollsBackDB(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := atomicSetupDatabase(t, "rollback_"+tc.name)
-			ctx := clientip.SetContext(t.Context(), "127.0.0.1")
+			ctx := t.Context()
 			svc := d.service(t, tc.stores(d))
-			_, _, err := svc.SetupInitialUser(ctx, "owner", "owner@silo.example.test", atomicSetupPassword, true, "Home", "fixture", "", "")
+			_, _, err := svc.SetupInitialUser(ctx, "owner", "owner@silo.example.test", atomicSetupPassword, true, "Home", "fixture", "", auth.SetupAccess{Local: true})
 			if err == nil || errors.Is(err, auth.ErrSetupAlreadyComplete) {
 				t.Fatalf("setup with failing profile err = %v, want profile failure", err)
 			}
@@ -406,7 +406,7 @@ func TestInitialSetupProfileFailureRollsBackDB(t *testing.T) {
 				t.Fatalf("NeedsSetup after rollback = %v, %v; want true", needs, err)
 			}
 			healthy := d.service(t, pgstore.NewPostgresProvider(d.pool))
-			pair, user, err := healthy.SetupInitialUser(ctx, "owner", "owner@silo.example.test", atomicSetupPassword, true, "Home", "fixture", "", "")
+			pair, user, err := healthy.SetupInitialUser(ctx, "owner", "owner@silo.example.test", atomicSetupPassword, true, "Home", "fixture", "", auth.SetupAccess{Local: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -416,7 +416,7 @@ func TestInitialSetupProfileFailureRollsBackDB(t *testing.T) {
 			if c := d.counts(t); c != (atomicCounts{users: 1, admins: 1, profiles: 1, sessions: 1}) {
 				t.Fatalf("counts after retry = %+v", c)
 			}
-			if _, _, err := healthy.SetupInitialUser(ctx, "later", "later@silo.example.test", atomicSetupPassword, false, "", "fixture", "", ""); !errors.Is(err, auth.ErrSetupAlreadyComplete) {
+			if _, _, err := healthy.SetupInitialUser(ctx, "later", "later@silo.example.test", atomicSetupPassword, false, "", "fixture", "", auth.SetupAccess{Local: true}); !errors.Is(err, auth.ErrSetupAlreadyComplete) {
 				t.Fatalf("sequential second setup err = %v, want ErrSetupAlreadyComplete", err)
 			}
 			if c := d.counts(t); c != (atomicCounts{users: 1, admins: 1, profiles: 1, sessions: 1}) {

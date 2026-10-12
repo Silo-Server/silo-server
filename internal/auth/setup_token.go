@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,19 @@ var (
 // through a network-access provider, needs the token.
 func SetupTokenRequired(ctx context.Context) bool {
 	return streamlocation.FromContext(ctx) != streamlocation.Local
+}
+
+// setupCrossOrigin recognizes browser requests that another site started.
+var setupCrossOrigin = http.NewCrossOriginProtection()
+
+// SetupAccessFor decides how the setup request r qualifies. ctx carries the
+// resolved client address. A browser request that another site started
+// (Sec-Fetch-Site, or an Origin that does not match Host) never counts as
+// local, so a page cannot use a browser on the local network to set the
+// server up; neither does a missing request.
+func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAccess {
+	local := r != nil && !SetupTokenRequired(ctx) && setupCrossOrigin.Check(r) == nil
+	return SetupAccess{Local: local, Token: token}
 }
 
 // SetupAccess is how a caller qualifies for first-run setup.
@@ -105,7 +119,10 @@ func checkSetupAccess(ctx context.Context, tx pgx.Tx, access SetupAccess) error 
 		return ErrSetupTokenRequired
 	}
 	presented := setupTokenHash(access.Token)
-	rows, _ := tx.Query(ctx, "SELECT token_hash FROM setup_tokens")
+	rows, err := tx.Query(ctx, "SELECT token_hash FROM setup_tokens")
+	if err != nil {
+		return fmt.Errorf("reading setup tokens: %w", err)
+	}
 	stored, err := pgx.CollectRows(rows, pgx.RowTo[[]byte])
 	if err != nil {
 		return fmt.Errorf("reading setup tokens: %w", err)

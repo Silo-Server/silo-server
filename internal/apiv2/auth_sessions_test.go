@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
 func TestListAuthProviders(t *testing.T) {
@@ -182,8 +184,23 @@ func TestSetupServerSetupToken(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, "/api/v2/auth/setup", body, nil); rec.Code != 201 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if sessions.lastSetup.SetupToken != "QK3V7XN2M4PLR6TYW5HBJ8CDFA" {
-		t.Fatalf("setup token passed = %q", sessions.lastSetup.SetupToken)
+	if sessions.lastSetup.Setup.Token != "QK3V7XN2M4PLR6TYW5HBJ8CDFA" {
+		t.Fatalf("setup token passed = %q", sessions.lastSetup.Setup.Token)
+	}
+	// A browser on the local network keeps the local exemption only for its
+	// own page's requests, not for one another site started.
+	for _, tc := range []struct {
+		fetchSite string
+		local     bool
+	}{{"same-origin", true}, {"cross-site", false}} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v2/auth/setup", strings.NewReader(`{"username":"admin","email":"admin@example.test","password":"password"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r.WithContext(clientip.SetContext(r.Context(), "192.168.1.20")))
+		if rec.Code != 201 || sessions.lastSetup.Setup.Local != tc.local {
+			t.Fatalf("%s: %d local=%v, want local=%v", tc.fetchSite, rec.Code, sessions.lastSetup.Setup.Local, tc.local)
+		}
 	}
 	for _, tc := range []struct {
 		code string

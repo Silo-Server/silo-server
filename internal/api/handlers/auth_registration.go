@@ -167,18 +167,20 @@ func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userI
 }
 
 // RegistrationInput is a first-run setup or invited signup as the transport
-// received it. InviteCode is only read by Signup, SetupToken only by
+// received it. InviteCode is only read by Signup, Setup only by
 // SetupInitialUser.
 type RegistrationInput struct {
 	Username             string
 	Email                string
 	Password             string
 	InviteCode           string
-	SetupToken           string
 	CreateDefaultProfile bool
 	DefaultProfileName   string
 	DeviceName           string
 	IP                   string
+	// Setup is how the request qualifies for first-run setup
+	// (auth.SetupAccessFor).
+	Setup auth.SetupAccess
 }
 
 // SetupInitialUser creates the first administrator and opens its session.
@@ -192,7 +194,7 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 	if err := validateRegistrationPassword(in.Password); err != nil {
 		return TokenPairView{}, err
 	}
-	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP, in.SetupToken)
+	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP, in.Setup)
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrSetupAlreadyComplete):

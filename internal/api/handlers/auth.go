@@ -383,7 +383,7 @@ func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		Password:             req.Password,
 		CreateDefaultProfile: req.CreateDefaultProfile,
 		DefaultProfileName:   req.DefaultProfileName,
-		SetupToken:           req.SetupToken,
+		Setup:                auth.SetupAccessFor(r.Context(), r, req.SetupToken),
 		DeviceName:           r.UserAgent(),
 		IP:                   clientip.FromContext(r.Context()),
 	})
