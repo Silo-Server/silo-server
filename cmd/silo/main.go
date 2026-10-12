@@ -1923,8 +1923,8 @@ func main() {
 		// before serving: materialize legacy content_level='' chains per level,
 		// then append registered builtins and move them to the front of each
 		// chain (idempotent; also the repair path after a stale chain-editor
-		// save drops a builtin row). Runs before
-		// the metadata service exists, so no chain cache to invalidate here.
+		// save drops a builtin row). Runs before the metadata service exists,
+		// so no chain cache to invalidate here.
 		syncCtx, syncCancel := context.WithTimeout(appCtx, 30*time.Second)
 		syncErr := metadata.SyncBuiltinProviderChains(syncCtx, chainRepo)
 		syncCancel()
