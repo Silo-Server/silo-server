@@ -156,10 +156,13 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		} else {
 			// Expired, reused, consumed on a different node, or minted for
 			// another user: degrade to an unbound connection instead of
-			// failing the handshake. The binding grants nothing on its own —
-			// the client retries it when its notifications subscription is
-			// rejected — whereas a hard 403 would take down every realtime
-			// channel over a notifications-only concern.
+			// failing the handshake, which would take down every realtime
+			// channel. An unbound connection cannot subscribe to
+			// notifications, and on an admin account it is judged as acting
+			// with no profile below, so a household that requires a profile
+			// gets the user channels. Both fail closed: the client gets the
+			// binding back by reconnecting with a fresh ticket, which it does
+			// when its notifications subscription is rejected.
 			slog.WarnContext(r.Context(), "events: websocket ticket rejected; connection unbound", "component", "api",
 				"user_id", claims.UserID)
 		}

@@ -116,7 +116,10 @@ accounts' events only while it is the acting admin (see
 [api-contract.md](architecture/api-contract.md)), judged on the handshake's
 `X-Profile-Id` or, without one, on the profile its ticket was minted for. Any
 other profile on the account, such as a child profile, connects with the user
-channels. The socket rechecks the login session on the same interval and closes
+channels. A rejected ticket (expired, reused, or for another account) leaves the
+connection unbound and judged as acting with no profile, so on a household with
+a PIN-protected or limited profile it also gets the user channels until the
+client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
 without a frame once the session ends, the account's role differs from the
 token's, or a connection holding the administrator channels is no longer the
 acting admin or that check fails.

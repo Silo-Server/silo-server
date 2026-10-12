@@ -141,8 +141,15 @@ func TestActingAdminFailsClosed(t *testing.T) {
 	ctx := SetActingAdminDecider(SetClaims(context.Background(), adminClaims()), func(context.Context, ActingAdminRequest) (bool, error) {
 		return true, down
 	})
-	if _, err := ActingAdmin(ctx); !errors.Is(err, down) {
-		t.Fatalf("decider error = %v, want %v", err, down)
+	if ok, err := ActingAdmin(ctx); ok || !errors.Is(err, down) {
+		t.Fatalf("decider error: ActingAdmin = %v, %v; want false, %v", ok, err, down)
+	}
+	// The legacy decider allows a profile-less session whose household
+	// lookup failed, alongside the error; ActingAdmin must not.
+	legacy := NewActingAdminDecider(nil, func(context.Context, int) (bool, error) { return false, down })
+	ctx = SetActingAdminDecider(SetClaims(context.Background(), adminClaims()), legacy)
+	if ok, err := ActingAdmin(ctx); ok || !errors.Is(err, down) {
+		t.Fatalf("legacy household lookup error: ActingAdmin = %v, %v; want false, %v", ok, err, down)
 	}
 	called := false
 	ctx = SetActingAdminDecider(SetClaims(context.Background(), userClaims()), func(context.Context, ActingAdminRequest) (bool, error) {

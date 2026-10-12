@@ -105,5 +105,11 @@ func ActingAdminAs(ctx context.Context, profileID string) (bool, error) {
 	if source == nil || source.decide == nil {
 		return false, nil
 	}
-	return source.decide(ctx, ActingAdminRequest{Claims: claims, ProfileID: profileID, DeviceID: source.deviceID})
+	allowed, err := source.decide(ctx, ActingAdminRequest{Claims: claims, ProfileID: profileID, DeviceID: source.deviceID})
+	if err != nil {
+		// A decider may report an allowance alongside its error (the legacy
+		// one does when the household lookup fails); never pass it on.
+		return false, err
+	}
+	return allowed, nil
 }
