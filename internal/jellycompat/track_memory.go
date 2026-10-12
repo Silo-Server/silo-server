@@ -94,9 +94,18 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 		return
 	}
 
+	// The viewer's Remember settings are read before claiming: when they cannot
+	// be read, nothing is claimed or written, so an opt-out is never ignored
+	// and the next report tries again.
+	saved, err := compatSavedConfiguration(ctx, h.storeProvider, session)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat could not read the remember-selection settings", "component", "jellycompat",
+			"profile_id", session.ProfileID, "error", err)
+		return
+	}
 	// Claim the change on the play before writing it, so overlapping reports
 	// (a retry, a Stopped beside a Progress, another replica) write it once.
-	audio, subtitle, err := h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle, stop)
+	audio, subtitle, err = h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle, stop)
 	// A play that ended meanwhile is not a failure either.
 	if err != nil && !errors.Is(err, errCompatTracksUnchanged) && !errors.Is(err, ErrSessionNotFound) {
 		slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
@@ -105,14 +114,14 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	if err != nil || (audio == nil && subtitle == nil) {
 		return
 	}
-	saved := compatSavedConfiguration(ctx, h.storeProvider, session)
 	key := playSession.PreferenceKey
 	// A later report can claim another track while this one writes, and its
 	// write can land first. After each write the play's latest claim is read
-	// back and written again when it moved on, so whichever write lands last
-	// leaves the latest claimed track.
+	// back and written again until it matches, so whichever write lands last
+	// leaves the latest claimed track. Claims need new reports, so this ends;
+	// the report's deadline bounds it if writes stall.
 	if audio != nil && saved.remembersAudio() {
-		for index, round := *audio, 0; round < compatTrackWriteRounds; round++ {
+		for index := *audio; ctx.Err() == nil; {
 			pref := compatAudioPreference(session, key, *source, index)
 			if err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, pref); err != nil {
 				slog.WarnContext(ctx, "jellycompat could not remember the audio track", "component", "jellycompat",
@@ -127,7 +136,7 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 		}
 	}
 	if subtitle != nil && saved.remembersSubtitles() {
-		for index, round := *subtitle, 0; round < compatTrackWriteRounds; round++ {
+		for index := *subtitle; ctx.Err() == nil; {
 			if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, subtitlePref); err != nil {
 				slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
 					"series_id", key, "subtitle_track_index", subtitlePref.SubtitleTrackIndex, "error", err)
@@ -144,10 +153,6 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 		}
 	}
 }
-
-// compatTrackWriteRounds bounds how often one report rewrites a remembered
-// track that later reports kept claiming while it wrote.
-const compatTrackWriteRounds = 3
 
 // latestCompatTrackClaim is the play's source as the store holds it now, with
 // the tracks most recently claimed for it.
