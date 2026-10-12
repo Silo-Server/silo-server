@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -156,28 +157,58 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		} else {
 			// Expired, reused, consumed on a different node, or minted for
 			// another user: degrade to an unbound connection instead of
-			// failing the handshake. The binding grants nothing on its own —
-			// the client retries it when its notifications subscription is
-			// rejected — whereas a hard 403 would take down every realtime
-			// channel over a notifications-only concern.
+			// failing the handshake, which would take down every realtime
+			// channel. An unbound connection cannot subscribe to
+			// notifications, and on an admin account it is judged as acting
+			// with no profile below, so a household that requires a profile
+			// gets the user channels. Both fail closed: the client gets the
+			// binding back by reconnecting with a fresh ticket, which it does
+			// when its notifications subscription is rejected.
 			slog.WarnContext(r.Context(), "events: websocket ticket rejected; connection unbound", "component", "api",
 				"user_id", claims.UserID)
+		}
+	}
+
+	// Admin channels and other accounts' events follow the acting profile, as
+	// on the v2 socket: another profile on an admin's account connects with
+	// the user role. A handshake that declares no profile acts as the profile
+	// its ticket was minted for, which the viewer gate verified then. The
+	// session check below still compares the account's real role.
+	effective := claims
+	var stillActingAdmin func(context.Context) (bool, error)
+	if claims.Role == models.RoleAdmin {
+		stillActingAdmin = apimw.ActingAdmin
+		if apimw.GetProfileID(r.Context()) == "" && boundProfileID != "" {
+			stillActingAdmin = func(ctx context.Context) (bool, error) { return apimw.ActingAdminAs(ctx, boundProfileID) }
+		}
+		actingAdmin, err := stillActingAdmin(r.Context())
+		if err != nil {
+			http.Error(w, "failed to verify active profile", http.StatusInternalServerError)
+			return
+		}
+		if !actingAdmin {
+			demoted := *claims
+			demoted.Role = models.RoleUser
+			effective = &demoted
+			stillActingAdmin = nil
 		}
 	}
 
 	if h.sessionRoles != nil && claims.SessionID != "" {
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		go h.closeOnSessionChange(ctx, cancel, claims)
+		go h.closeOnSessionChange(ctx, cancel, claims, stillActingAdmin)
 		r = r.WithContext(ctx)
 	}
-	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader, nil)
+	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil)
 }
 
 // closeOnSessionChange cancels a v1 connection once its login session is no
-// longer active or the account's role differs from the access token's. A
-// failed check is skipped; the next one decides.
-func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims) {
+// longer active or the account's role differs from the access token's, and,
+// for a connection holding the admin channels, once stillActingAdmin stops
+// holding (say the household gained a PIN). A failed check is skipped; the
+// next one decides.
+func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) {
 	interval := h.sessionCheckInterval
 	if interval <= 0 {
 		interval = eventsSessionCheckInterval
@@ -190,15 +221,32 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 			return
 		case <-ticker.C:
 			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-			authority, active, err := h.sessionRoles.ActiveSession(checkCtx, claims.SessionID)
+			changed := h.sessionChanged(checkCtx, claims, stillActingAdmin)
 			stop()
-			// A remote-playback handoff never holds a v1 socket.
-			if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
+			if changed {
 				cancel()
 				return
 			}
 		}
 	}
+}
+
+// sessionChanged reports whether one recheck found the connection's access
+// gone: the session ended, the account's role changed, or stillActingAdmin
+// (when set) no longer holds. A failed session lookup reports no change; a
+// failed acting-admin decision counts as lost, so a connection holding the
+// administrator channels fails closed like the HTTP routes and reconnects.
+func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
+	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID)
+	// A remote-playback handoff never holds a v1 socket.
+	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
+		return true
+	}
+	if stillActingAdmin == nil {
+		return false
+	}
+	acting, err := stillActingAdmin(ctx)
+	return err != nil || !acting
 }
 
 // serveWebSocket runs one events connection. When accessChanged closes, the

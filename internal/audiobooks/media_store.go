@@ -526,15 +526,6 @@ func (s *ABSMediaStore) GetMediaFiles(ctx context.Context, contentID string, acc
 	return catalog.FilterMediaFilesByAccess(files, access), nil
 }
 
-// GetMediaFileByID fetches a single media_file by its integer PK.
-func (s *ABSMediaStore) GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error) {
-	file, err := s.Files.GetByID(ctx, fileID)
-	if err != nil {
-		return nil, fmt.Errorf("abs_media_store: get media file %d: %w", fileID, err)
-	}
-	return file, nil
-}
-
 // ListAudiobookLibraries returns media_folder rows where type='audiobooks'
 // (the canonical silo type for the audiobooks sub-plan).
 func (s *ABSMediaStore) ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]abs.AudiobookLibrary, error) {

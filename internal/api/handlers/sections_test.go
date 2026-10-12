@@ -11,6 +11,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -757,6 +758,28 @@ func TestSaveProfileOverridesRejectsNewAdminOnlyRecipe(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	h.HandleSaveProfileOverrides(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin: a child profile
+// on an admin's account is not the admin an admin-only recipe asks for.
+func TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin(t *testing.T) {
+	h := &SectionHandler{}
+	body := []byte(`{"scope":"home","library_id":"","overrides":[{"is_user_added":true,"user_section_type":"admin_curated_list","user_config":{"item_ids":["a"]}}]}`)
+	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "admin", UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "kid")
+	ctx = access.SetScope(ctx, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
+	ctx = apimw.SetActingAdminDecider(ctx, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	})
+	rec := httptest.NewRecorder()
+
+	h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())

@@ -84469,6 +84469,28 @@
         "operationId": "getAdminJob",
         "parameters": [
           {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "id",
             "required": true,
@@ -84514,6 +84536,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -84581,11 +84613,11 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result.",
+        "summary": "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result.",
         "tags": [
           "admin-tasks"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -165964,6 +165996,28 @@
             }
           },
           {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "job_id",
             "required": true,
@@ -166038,6 +166092,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -166127,7 +166191,7 @@
         "tags": [
           "libraries"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
         "x-silo-service-backed": true
       }

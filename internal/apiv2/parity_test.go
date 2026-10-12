@@ -199,12 +199,13 @@ func parityDeps(demo bool) Dependencies {
 		}
 		return false, false, nil
 	}
+	actingAdmin := apimw.NewActingAdminDecider(primary, nil)
 	return Dependencies{
 		CursorSecret:     []byte("synthetic-test-cursor-key"),
 		Auth:             fakeAuth(users),
 		ViewerAccess:     apimw.NewViewerAccessMiddleware(fakeResolver{}),
 		HouseholdProfile: apimw.NewHouseholdProfileGate(fakeHouseholds{}).Require,
-		ActingAdmin:      apimw.RequireActingAdmin(primary, nil),
+		ActingAdmin:      actingAdmin,
 		PermissionGates: map[string]func(http.Handler) http.Handler{
 			"marker_edit": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary, nil).RequireMarkerEdit,
 		},

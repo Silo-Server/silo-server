@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/models"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	"github.com/jackc/pgx/v5"
@@ -210,13 +210,17 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		if requests == nil {
 			return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: StateNotConfigured}}}, nil
 		}
-		status, err := requests.GetFeatureStatus(ctx, lifecycleViewer(ctx))
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
+		status, err := requests.GetFeatureStatus(ctx, viewer)
 		if err != nil {
 			return nil, requestProblem(err)
 		}
 		allowed := false
 		if status.RequestsEnabled {
-			allowed, err = requests.RequestCapabilityAllowed(ctx, lifecycleViewer(ctx))
+			allowed, err = requests.RequestCapabilityAllowed(ctx, viewer)
 			if err != nil {
 				return nil, requestProblem(err)
 			}
@@ -228,7 +232,10 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
-		viewer := lifecycleViewer(ctx)
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
 		result, err := requests.Cancel(ctx, viewer, string(in.ID), in.Body.Reason)
 		if err != nil {
 			return nil, requestProblem(err)
@@ -402,9 +409,16 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		return out, nil
 	})
 }
-func lifecycleViewer(ctx context.Context) mediarequests.Viewer {
-	c := claimsFrom(ctx)
-	return mediarequests.Viewer{UserID: c.UserID, ProfileID: profileFrom(ctx), IsAdmin: c.Role == models.RoleAdmin}
+
+// lifecycleViewer is the request service's viewer for the current profile.
+// Admin reach over other accounts' requests follows the acting profile
+// (apimw.ActingAdmin), not the account role.
+func lifecycleViewer(ctx context.Context) (mediarequests.Viewer, *Problem) {
+	isAdmin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return mediarequests.Viewer{}, serviceProblem(err)
+	}
+	return mediarequests.Viewer{UserID: claimsFrom(ctx).UserID, ProfileID: profileFrom(ctx), IsAdmin: isAdmin}, nil
 }
 func watchProviderProblem(err error) *Problem {
 	if errors.Is(err, watchsync.ErrSettingsCleanupUnavailable) {

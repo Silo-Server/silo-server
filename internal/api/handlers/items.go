@@ -2595,7 +2595,18 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		return false
 	}
 	if claims.Role == "admin" {
-		return true
+		// Only the acting admin sees paths by role. Another profile on the
+		// admin's account needs metadata curation assigned to the account,
+		// the bar the curation gate holds it to.
+		actingAdmin, err := apimw.ActingAdmin(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "checking file path visibility for an admin account", "component", "api", "user_id", claims.UserID, "error", err)
+			return false
+		}
+		if actingAdmin {
+			return true
+		}
+		return h.hasAssignedMetadataCuration(ctx, claims.UserID)
 	}
 	if h == nil || h.UserRepo == nil {
 		return false
@@ -2606,4 +2617,19 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		return false
 	}
 	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+}
+
+// hasAssignedMetadataCuration reports whether the account has metadata
+// curation assigned explicitly, not by its admin role. A failed lookup fails
+// closed.
+func (h *ItemsHandler) hasAssignedMetadataCuration(ctx context.Context, userID int) bool {
+	if h == nil || h.UserRepo == nil {
+		return false
+	}
+	user, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "checking file path visibility permissions", "component", "api", "user_id", userID, "error", err)
+		return false
+	}
+	return user != nil && user.Enabled && auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
 }

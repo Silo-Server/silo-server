@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
@@ -107,7 +108,7 @@ func registerAdminTaskJobs(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs", "listAdminJobs", "admin-tasks", "List retained administrator jobs with bounded cursor pagination."), Class: ClassActingAdmin, ServiceBacked: true}, func(ctx context.Context, in *AdminTaskJobsInput) (*AdminTaskJobsOutput, error) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
-	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result."), Class: ClassAuthenticated, ServiceBacked: true}, reg.getAdminTaskJob)
+	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, reg.getAdminTaskJob)
 	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.")
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
@@ -247,7 +248,10 @@ func (reg *Registry) getAdminTaskJob(ctx context.Context, in *AdminTaskJobInput)
 		return nil, serviceProblem(err)
 	}
 	claims := claimsFrom(ctx)
-	admin := claims != nil && claims.Role == models.RoleAdmin
+	admin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
 	if !admin && (claims == nil || job.JobType != adminjob.JobTypeItemRefresh || job.CreatedByUserID != claims.UserID) {
 		return nil, NewProblem(TypeNotFound, "Job not found")
 	}
