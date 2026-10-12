@@ -96,7 +96,9 @@ func (v *SiloCredValidator) Validate(
 		return abs.Principal{}, fmt.Errorf("list profiles: %w", err)
 	}
 	principal := abs.Principal{UserID: strconv.Itoa(user.ID), DisplayName: user.Username}
-	profile, err := selectSignInProfile(profiles, authName, profileSelector)
+	// The account's own username, not the name typed: a sign-in by email
+	// selects the same account-named profile.
+	profile, err := selectSignInProfile(profiles, user.Username, profileSelector)
 	if err != nil {
 		return abs.Principal{}, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,11 @@ type absPINHousehold struct {
 // PIN and whose "Kid" profile has none.
 func newABSPINHousehold(t *testing.T) absPINHousehold {
 	t.Helper()
+	return newABSPINHouseholdWithPassword(t, absPINTestPassword)
+}
+
+func newABSPINHouseholdWithPassword(t *testing.T, password string) absPINHousehold {
+	t.Helper()
 	pool := newClaimTestPool(t)
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
@@ -41,7 +47,7 @@ func newABSPINHousehold(t *testing.T) absPINHousehold {
 		sessions, users, nil, nil, nil)
 
 	user, err := users.Create(ctx, models.CreateUserInput{Username: fmt.Sprintf("abs-household-%d", suffix), Email: fmt.Sprintf("abs-household-%d@example.test", suffix),
-		Password: absPINTestPassword, Role: models.RoleUser})
+		Password: password, Role: models.RoleUser})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,5 +242,42 @@ func TestABSSignInAccountNamedProfileDB(t *testing.T) {
 	got, err := h.validator.Validate(ctx, h.user.Username, absPINTestPassword+"#2468")
 	if err != nil || got.ProfileID != ownID {
 		t.Fatalf("account-named profile with its PIN = %+v, %v; want profile %s", got, err, ownID)
+	}
+}
+
+// TestABSSignInMaxLengthPasswordKeepsPINDB: bcrypt compares only the first 72
+// bytes, so a 72-byte account password followed by "#pin" still carries the
+// PIN rather than matching as the whole password.
+func TestABSSignInMaxLengthPasswordKeepsPINDB(t *testing.T) {
+	password := strings.Repeat("p", auth.MaximumPasswordBytes)
+	h := newABSPINHouseholdWithPassword(t, password)
+	ctx := context.Background()
+
+	got, err := h.validator.Validate(ctx, h.user.Username+"#Parent", password+"#4321")
+	if err != nil || got.ProfileID != h.parentID {
+		t.Fatalf("72-byte password with the PIN = %+v, %v; want the Parent profile", got, err)
+	}
+	if _, err := h.validator.Validate(ctx, h.user.Username+"#Parent", password+"#0000"); !errors.Is(err, abs.ErrProfilePINIncorrect) {
+		t.Fatalf("72-byte password with a wrong PIN: %v, want ErrProfilePINIncorrect", err)
+	}
+	if _, err := h.validator.Validate(ctx, h.user.Username+"#Kid", password); err != nil {
+		t.Fatalf("72-byte password alone for a profile without a PIN: %v", err)
+	}
+}
+
+// TestABSSignInByEmailSelectsAccountNamedProfileDB: signing in with the
+// account's email picks the profile named like the account, as the username
+// does.
+func TestABSSignInByEmailSelectsAccountNamedProfileDB(t *testing.T) {
+	h := newABSPINHousehold(t)
+	ctx := context.Background()
+	ownID := uuid.New().String()
+	if err := h.store.CreateProfile(ctx, userstore.Profile{ID: ownID, Name: h.user.Username}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := h.validator.Validate(ctx, h.user.Email, absPINTestPassword)
+	if err != nil || got.ProfileID != ownID {
+		t.Fatalf("email sign-in = %+v, %v; want the account-named profile %s", got, err, ownID)
 	}
 }
