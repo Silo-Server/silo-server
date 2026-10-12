@@ -187,3 +187,29 @@ it("gives a page that opened during a discarded prefetch an ordinary read", asyn
   finishWrite();
   await writing;
 });
+
+it("keeps the view pending when the page closes before its view read finishes", async () => {
+  const queryClient = client(true);
+  const wrapper = wrapperFor(queryClient);
+  const prefetch = renderHook(() => usePrefetchCatalogItemDetail(), { wrapper });
+  act(() => prefetch.result.current("movie-1"));
+  await waitFor(() =>
+    expect(queryClient.getQueryData(catalogKeys.itemDetail("movie-1"))).toBeDefined(),
+  );
+
+  let releaseRead = () => {};
+  heldReads.until = new Promise<void>((resolve) => (releaseRead = resolve));
+  const firstVisit = renderHook(() => useCatalogItemDetailView("movie-1"), { wrapper });
+  await waitFor(() => expect(firstVisit.result.current.isFetching).toBe(true));
+  firstVisit.unmount();
+  await act(async () => {
+    await queryClient.cancelQueries({ queryKey: catalogKeys.itemDetail("movie-1") });
+  });
+  releaseRead();
+  heldReads.until = null;
+  await act(async () => {});
+
+  renderHook(() => useCatalogItemDetailView("movie-1"), { wrapper });
+
+  await waitFor(() => expect(reads.filter((read) => !read.query?.prefetch)).toHaveLength(2));
+});

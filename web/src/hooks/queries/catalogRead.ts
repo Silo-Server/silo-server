@@ -131,17 +131,23 @@ const pendingItemDetailViews = new Set<string>();
 /**
  * The item page's detail query. A detail a prefetch cached renders at once,
  * and the page then reads it again as a view in the background. The pending
- * view is consumed when the read starts, so a failing view read is not
- * retried in a loop.
+ * view is consumed once that read finishes, so a failing view read is not
+ * retried in a loop; a read that was cancelled (the page closed, or a write
+ * cancelled it) left nothing new in the cache, so the view stays pending.
  */
 export function useCatalogItemDetailView(id: string | undefined, libraryId?: number) {
   const query = useCatalogItemDetail(id, libraryId);
-  const { data, isFetching, refetch } = query;
+  const { data, dataUpdatedAt, isFetching, refetch } = query;
   useEffect(() => {
     if (!id || !data || isFetching) return;
-    if (!pendingItemDetailViews.delete(hashKey(catalogKeys.itemDetail(id, libraryId)))) return;
-    void refetch();
-  }, [id, libraryId, data, isFetching, refetch]);
+    const pendingView = hashKey(catalogKeys.itemDetail(id, libraryId));
+    if (!pendingItemDetailViews.delete(pendingView)) return;
+    void refetch().then((result) => {
+      if (!result.isError && result.dataUpdatedAt === dataUpdatedAt) {
+        pendingItemDetailViews.add(pendingView);
+      }
+    });
+  }, [id, libraryId, data, dataUpdatedAt, isFetching, refetch]);
   return query;
 }
 
