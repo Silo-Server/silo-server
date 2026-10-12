@@ -90,15 +90,21 @@ function collectSlides(children: ReactNode): CarouselSlide[] {
   return slides;
 }
 
-/** Scrolls Embla to the snap holding `slide` unless the slide is fully in view. */
+/**
+ * Scrolls Embla to the snap holding `slide` unless the slide will be fully in
+ * view where the row comes to rest. Measuring at the scroll target, not the
+ * current position, catches a reversal mid-scroll: the previous card is still
+ * on screen but the running animation would carry it out of view.
+ */
 function revealSlide(api: EmblaCarouselType | undefined, slide: HTMLElement, index: number) {
-  if (!api) return;
+  // Embla exposes its scroll target and slide-to-snap map only internally.
+  const engine = api?.internalEngine?.();
+  if (!api || !engine) return;
   const viewport = api.rootNode().getBoundingClientRect();
   const rect = slide.getBoundingClientRect();
-  if (rect.left >= viewport.left && rect.right <= viewport.right) return;
-  // Embla maps slides to snaps only internally; its public API has no lookup.
-  const registry = api.internalEngine?.().slideRegistry ?? [];
-  const snap = registry.findIndex((group) => group.includes(index));
+  const shift = engine.target.get() - engine.offsetLocation.get();
+  if (rect.left + shift >= viewport.left && rect.right + shift <= viewport.right) return;
+  const snap = engine.slideRegistry.findIndex((group) => group.includes(index));
   if (snap >= 0) api.scrollTo(snap);
 }
 

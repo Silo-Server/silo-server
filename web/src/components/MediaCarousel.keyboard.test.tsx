@@ -10,7 +10,11 @@ const embla = vi.hoisted(() => ({
     | undefined
     | {
         rootNode: () => HTMLElement;
-        internalEngine: () => { slideRegistry: number[][] };
+        internalEngine: () => {
+          slideRegistry: number[][];
+          target: { get: () => number };
+          offsetLocation: { get: () => number };
+        };
         scrollTo: (index: number) => void;
       },
 }));
@@ -240,26 +244,60 @@ describe("MediaCarousel keyboard navigation", () => {
     expect(card("Drive")).toHaveFocus();
   });
 
-  it("scrolls the row to a card that is outside the viewport", async () => {
+  /**
+   * A 300px viewport over 150px slides, two per snap. `scroll.offset` is where
+   * Embla draws the row now and `scroll.target` where it will come to rest.
+   */
+  function renderScrollableRow() {
     const scrollTo = vi.fn();
+    const scroll = { offset: 0, target: 0 };
     const root = document.createElement("div");
     root.getBoundingClientRect = () => ({ left: 0, right: 300 }) as DOMRect;
     embla.api = {
       rootNode: () => root,
-      internalEngine: () => ({ slideRegistry: [[0, 1], [2, 3], [4]] }),
+      internalEngine: () => ({
+        slideRegistry: [[0, 1], [2, 3], [4]],
+        target: { get: () => scroll.target },
+        offsetLocation: { get: () => scroll.offset },
+      }),
       scrollTo,
     };
-    const user = userEvent.setup();
     const { container } = renderRow();
     container.querySelectorAll<HTMLElement>("li.embla__slide").forEach((slide, index) => {
       slide.getBoundingClientRect = () =>
-        ({ left: index * 150, right: index * 150 + 140 }) as DOMRect;
+        ({
+          left: index * 150 + scroll.offset,
+          right: index * 150 + 140 + scroll.offset,
+        }) as DOMRect;
     });
+    return { scrollTo, scroll };
+  }
+
+  it("scrolls the row to a card that is outside the viewport", async () => {
+    const user = userEvent.setup();
+    const { scrollTo } = renderScrollableRow();
 
     await user.click(card("Heat"));
     await user.keyboard("{ArrowRight}");
     expect(scrollTo).not.toHaveBeenCalled();
     await user.keyboard("{ArrowRight}");
     expect(scrollTo).toHaveBeenCalledWith(1);
+  });
+
+  it("scrolls back when focus reverses while the row is still scrolling", async () => {
+    const user = userEvent.setup();
+    const { scrollTo, scroll } = renderScrollableRow();
+
+    await user.click(card("Ronin"));
+    await user.keyboard("{ArrowRight}");
+    expect(scrollTo).toHaveBeenLastCalledWith(1);
+    // Mid-animation toward snap 1: Ronin is still on screen, but where the
+    // row comes to rest it would sit left of the viewport.
+    scroll.offset = -100;
+    scroll.target = -300;
+    await user.keyboard("{ArrowLeft}");
+
+    expect(card("Ronin")).toHaveFocus();
+    expect(scrollTo).toHaveBeenLastCalledWith(0);
   });
 });
