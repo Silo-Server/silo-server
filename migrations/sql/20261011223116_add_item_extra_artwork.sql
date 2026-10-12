@@ -31,8 +31,9 @@ CREATE TABLE public.media_item_backdrops (
 );
 
 -- The artwork revision GC checks references by path on every sweep surface.
+-- A row's path stays '' until its image is cached.
 CREATE INDEX idx_media_item_backdrops_path_gc
-    ON public.media_item_backdrops (path) WHERE path IS NOT NULL;
+    ON public.media_item_backdrops (path) WHERE path <> '';
 
 DROP TRIGGER IF EXISTS media_items_artwork_revision_gc_update ON public.media_items;
 DROP TRIGGER IF EXISTS media_items_artwork_revision_gc_delete ON public.media_items;
