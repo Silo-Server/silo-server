@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -21,8 +22,8 @@ func TestHTTPPreparerSendsAuthenticatedRecipe(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/downloads/prepare" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if auth := r.Header.Get("Authorization"); auth != "Bearer secret" {
-			t.Fatalf("Authorization = %q", auth)
+		if !nodeauthtest.Signed(r, "secret") {
+			t.Fatalf("request is not signed: Authorization = %q", r.Header.Get("Authorization"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatal(err)
@@ -304,8 +305,8 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 		if r.URL.Path != "/downloads/artifacts/artifact-1" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+		if !nodeauthtest.Signed(r, "secret") {
+			t.Fatalf("request is not signed: Authorization = %q", r.Header.Get("Authorization"))
 		}
 		switch r.Method {
 		case http.MethodHead:
@@ -534,7 +535,7 @@ func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
 
 func TestHTTPPreparerProgress(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer secret" {
+		if !nodeauthtest.Signed(r, "secret") {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

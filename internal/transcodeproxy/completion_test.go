@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 func TestAcknowledgeSurvivesCompletedDownstreamRequest(t *testing.T) {
@@ -18,8 +20,8 @@ func TestAcknowledgeSurvivesCompletedDownstreamRequest(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %q, want POST", r.Method)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer "+jwtSecret {
-			t.Errorf("Authorization = %q", got)
+		if !nodeauthtest.Signed(r, jwtSecret) {
+			t.Errorf("acknowledgement is not signed: Authorization = %q", r.Header.Get("Authorization"))
 		}
 		if got := r.Header.Get(GenerationHeader); got != generation {
 			t.Errorf("generation = %q, want %q", got, generation)

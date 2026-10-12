@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
@@ -98,7 +99,9 @@ func Acknowledge(ctx context.Context, client *http.Client, targetURL, jwtSecret,
 	if err != nil {
 		return fmt.Errorf("build acknowledgement: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+jwtSecret)
+	if err := nodeauth.Sign(req, jwtSecret); err != nil {
+		return fmt.Errorf("sign acknowledgement: %w", err)
+	}
 	req.Header.Set(GenerationHeader, generation)
 	resp, err := telemetry.DoTrustedNode(client, req, "stream_ack")
 	if err != nil {

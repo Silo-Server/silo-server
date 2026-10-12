@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
@@ -259,10 +260,11 @@ func TestProxyGrantRoutesEnforceCommittedProxyEgress(t *testing.T) {
 // A transcode grant is relayed to the node exactly like the token route, with
 // the node-facing token minted here — never handed to the client.
 func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
-	var forwarded, authorization, relayPath string
+	var forwarded, relayPath string
+	var signed bool
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		forwarded = r.Header.Get("X-Silo-Stream-Token")
-		authorization = r.Header.Get("Authorization")
+		signed = nodeauthtest.Signed(r, grantTestSecret)
 		relayPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		_, _ = w.Write([]byte("#EXTM3U\nsegment/seg_00001.m4s\n"))
@@ -290,8 +292,8 @@ func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
 	if relayPath != "/transcode/session-hls-plan-a/master.m3u8" {
 		t.Fatalf("relay path = %q, want the plan-scoped transport manifest", relayPath)
 	}
-	if authorization != "Bearer "+grantTestSecret {
-		t.Fatalf("node authorization = %q", authorization)
+	if !signed {
+		t.Fatal("node request was not signed with the shared secret")
 	}
 	claims, err := streamtoken.Verify(forwarded, grantTestSecret)
 	if err != nil {

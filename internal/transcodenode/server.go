@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -1537,7 +1538,9 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	})
 }
 
-// requireBearer is middleware that checks for Authorization: Bearer {secret}.
+// requireBearer is middleware that admits only API servers and proxies: it
+// checks the request's node signature (see nodeauth). The name predates
+// signing and is kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1546,8 +1549,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.Auth.JWTSecret {
+		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1831,7 +1833,7 @@ func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request
 // identity-only by design (see internal/noderecipe), and a header-authenticated
 // (tokenless) attempt, where no client-visible URL carries a credential and the
 // relayed request therefore has no token to forward. The token was never this
-// route's authorization — the static bearer already authenticated the caller —
+// route's authorization — the node signature already authenticated the caller —
 // so its absence only removes a recipe source, never a permission.
 //
 // Returns nil when no source yields a complete transcode recipe for the session
@@ -2190,7 +2192,7 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-// handleRemux executes a progressive remux on demand. The static bearer
+// handleRemux executes a progressive remux on demand. The node signature
 // authenticates the proxy process; the independently verified stream token
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {

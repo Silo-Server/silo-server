@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -45,7 +46,9 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	if err := nodeauth.Sign(httpRequest, h.JWTSecret); err != nil {
+		return transcodenode.TranscodeStartResponse{}, 0, err
+	}
 	response, err := telemetry.DoTrustedNode(http.DefaultClient, httpRequest, "transcode_start")
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)

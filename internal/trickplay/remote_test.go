@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -27,7 +28,7 @@ func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32
 	calls := &atomic.Int32{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/trickplay/extract" || r.Header.Get("Authorization") != "Bearer secret" {
+		if r.URL.Path != "/trickplay/extract" || !nodeauthtest.Signed(r, "secret") {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

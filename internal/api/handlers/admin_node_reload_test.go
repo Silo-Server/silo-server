@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -23,7 +24,7 @@ func TestAdminNodeReloadBulk(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-secret" {
+		if r.Method != "POST" || !nodeauthtest.Signed(r, "synthetic-secret") {
 			t.Error("wrong command authority or method")
 		}
 		entered <- r.URL.Path
@@ -77,7 +78,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 			defer target.Close()
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
-				if r.Method != "POST" || r.URL.Path != "/admin/force-reload" || r.Header.Get("Authorization") != "Bearer synthetic-secret" {
+				if r.Method != "POST" || r.URL.Path != "/admin/force-reload" || !nodeauthtest.Signed(r, "synthetic-secret") {
 					t.Error("wrong command")
 				}
 				w.Header().Set("Location", target.URL)
