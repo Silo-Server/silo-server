@@ -229,9 +229,10 @@ sits in the chain.
   timeout, once per folder, before the sidecar itself is looked up. This
   applies only at a level (item, season, episode) where the local provider
   answered a request for artwork in this refresh (`withLocalArtworkSearched`):
-  with local metadata off for that level, during an Identify, or when the
-  local provider's call failed, cached local art is stored artwork like any
-  other and no library folder is probed.
+  with local metadata off for that level, during an Identify, in a run that
+  leaves local metadata out because the NFO names another title (see
+  Identity above), or when the local provider's call failed, cached local art
+  is stored artwork like any other and no library folder is probed.
 - Localization: local art is language-neutral. Localization rows skip local
   candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
   base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
