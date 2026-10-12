@@ -2137,9 +2137,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		allImages = append(allImages, images...)
 	}
-	if !s.localArtworkUsable() {
-		allImages = withoutLocalImages(allImages)
-	}
+	allImages = withoutUnusableLocalImages(allImages, s.localSourceUsable)
 
 	// Phase 4a: Seasons — resolve with "season" content level.
 	var allSeasons []SeasonResult
@@ -2200,9 +2198,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				// A fill-empty pass keeps the seasons the local provider could read.
 				localMetadataUnreadable |= localArtworkSeason
 			}
-			if !s.localArtworkUsable() {
-				dropLocalSeasonArtwork(seasons)
-			}
+			dropLocalSeasonArtwork(seasons, s.localSourceUsable)
 			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
@@ -2270,9 +2266,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						// A fill-empty pass keeps the episodes the local provider could read.
 						localMetadataUnreadable |= localArtworkEpisode
 					}
-					if !s.localArtworkUsable() {
-						dropLocalEpisodeArtwork(episodes)
-					}
+					dropLocalEpisodeArtwork(episodes, s.localSourceUsable)
 					if isIdentityHinter {
 						localArtworkSearched |= localArtworkEpisode
 					}
@@ -4522,9 +4516,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
-		if !s.localArtworkUsable() {
-			dropLocalSeasonArtwork(seasons)
-		}
+		dropLocalSeasonArtwork(seasons, s.localSourceUsable)
 		if _, local := p.(IdentityHintProvider); local {
 			searched |= localArtworkSeason
 		}
@@ -4574,9 +4566,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
-		if !s.localArtworkUsable() {
-			dropLocalEpisodeArtwork(episodes)
-		}
+		dropLocalEpisodeArtwork(episodes, s.localSourceUsable)
 		if _, local := p.(IdentityHintProvider); local {
 			searched |= localArtworkEpisode
 		}
@@ -4688,36 +4678,53 @@ func (s *MetadataService) localArtworkUsable() bool {
 	return s != nil && s.imageCacheJobs != nil
 }
 
+// localSourceUsable reports whether a refresh may select a local artwork
+// source: a sidecar file whenever local artwork is usable, and an image URL an
+// NFO names only while metadata.cache_images is on. Such a URL is never served
+// directly, and the image cache's download is the only path that fetches it,
+// so with caching off it would leave the slot empty instead of falling back to
+// provider artwork.
+func (s *MetadataService) localSourceUsable(source string) bool {
+	if !s.localArtworkUsable() {
+		return false
+	}
+	if _, nfoURL := localMetadataImageURL(source); nfoURL {
+		return s.autoCacheImages.Load()
+	}
+	return true
+}
+
+// withoutUnusableLocalImages returns images minus the local candidates usable
+// rejects. It returns images itself when it rejects none.
+func withoutUnusableLocalImages(images []RemoteImage, usable func(string) bool) []RemoteImage {
+	unusable := func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) && !usable(img.URL) }
+	if !slices.ContainsFunc(images, unusable) {
+		return images
+	}
+	return slices.DeleteFunc(slices.Clone(images), unusable)
+}
+
 // withoutLocalImages returns images minus local sidecar candidates. It returns
 // images itself when none are local.
 func withoutLocalImages(images []RemoteImage) []RemoteImage {
-	if !slices.ContainsFunc(images, func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) }) {
-		return images
-	}
-	remote := make([]RemoteImage, 0, len(images))
-	for _, img := range images {
-		if !isLocalImageSourcePath(img.URL) {
-			remote = append(remote, img)
-		}
-	}
-	return remote
+	return withoutUnusableLocalImages(images, func(string) bool { return false })
 }
 
-// dropLocalSeasonArtwork clears local sidecar posters so a later provider in
-// the chain can fill the slot.
-func dropLocalSeasonArtwork(seasons []SeasonResult) {
+// dropLocalSeasonArtwork clears the local posters usable rejects so a later
+// provider in the chain can fill the slot.
+func dropLocalSeasonArtwork(seasons []SeasonResult, usable func(string) bool) {
 	for i := range seasons {
-		if isLocalImageSourcePath(seasons[i].PosterPath) {
+		if isLocalImageSourcePath(seasons[i].PosterPath) && !usable(seasons[i].PosterPath) {
 			seasons[i].PosterPath = ""
 		}
 	}
 }
 
-// dropLocalEpisodeArtwork clears local sidecar stills so a later provider in
-// the chain can fill the slot.
-func dropLocalEpisodeArtwork(episodes []EpisodeResult) {
+// dropLocalEpisodeArtwork clears the local stills usable rejects so a later
+// provider in the chain can fill the slot.
+func dropLocalEpisodeArtwork(episodes []EpisodeResult, usable func(string) bool) {
 	for i := range episodes {
-		if isLocalImageSourcePath(episodes[i].StillPath) {
+		if isLocalImageSourcePath(episodes[i].StillPath) && !usable(episodes[i].StillPath) {
 			episodes[i].StillPath = ""
 		}
 	}

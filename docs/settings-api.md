@@ -1033,7 +1033,8 @@ without a restart.
 requires a public S3 bucket because local artwork storage is available. It
 governs provider artwork only: local sidecar artwork found next to media files
 is copied into artwork storage and served whatever its value, because clients
-cannot load it any other way.
+cannot load it any other way. An image URL an NFO file names is downloaded like
+provider artwork, so it is used only while the setting is on.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

@@ -431,12 +431,16 @@ Caching and refresh:
   not see, the remote one it chose. The slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update, and a refresh
   that offers no artwork at all leaves the slot, local source included, as it
-  is. Locked artwork gets no stand-in.
+  is. Locked artwork gets no stand-in, and neither does an image URL an NFO
+  names: its slot stays empty until the image cache has downloaded it.
 - `metadata.cache_images` governs remote artwork only. With it off, local art
-  is still selected, copied, and served: the drain claims local jobs only
-  (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
+  files are still selected, copied, and served: the drain claims local jobs
+  only (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
   remote jobs left queued are not read), a manual refresh waits for local jobs
-  only, and the provider-artwork backfill stays off.
+  only, and the provider-artwork backfill stays off. An image URL an NFO names
+  is a download, never served directly, so with caching off it is not selected
+  (`localSourceUsable`) and the slot takes provider artwork, as it does for
+  person photos.
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.

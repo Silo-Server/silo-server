@@ -102,8 +102,10 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 	return visible
 }
 
-// applyLocalArtworkFallback fills each item slot waiting on its local copy,
-// with nothing cached to show, from the best remote candidate. A slot with a
+// applyLocalArtworkFallback fills each item slot waiting on the copy of its
+// sidecar file, with nothing cached to show, from the best remote candidate.
+// An image URL an NFO names gets no stand-in: its slot stays empty until the
+// image cache has downloaded it. A slot with a
 // cached copy keeps serving it (preserveCachedArtwork); an empty one would
 // leave a new item without a poster until the copy lands. The copy replaces
 // the stand-in through the source-matched update, because the slot's source
@@ -114,7 +116,7 @@ func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, pre
 	}
 	var remote []itemArtworkField
 	for i, field := range itemArtworkFields(item) {
-		if strings.TrimSpace(*field.path) != "" || !isLocalImageSourcePath(*field.source) {
+		if strings.TrimSpace(*field.path) != "" || !isLocalSidecarSource(*field.source) {
 			continue
 		}
 		if remote == nil {
@@ -127,15 +129,15 @@ func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, pre
 }
 
 // isLocalArtworkStandIn reports whether a stored slot serves a remote stand-in
-// while the copy of its local source is pending.
+// while the copy of its sidecar file is pending.
 func isLocalArtworkStandIn(path, source string) bool {
-	return isRemoteImageSourcePath(path) && isLocalImageSourcePath(source)
+	return isRemoteImageSourcePath(path) && isLocalSidecarSource(source)
 }
 
 // localArtworkFallbackPath returns fallback in place of an empty path whose
-// source is local, and path otherwise.
+// source is a sidecar file, and path otherwise.
 func localArtworkFallbackPath(path, source, fallback string) string {
-	if strings.TrimSpace(path) == "" && isLocalImageSourcePath(source) && isRemoteImageSourcePath(fallback) {
+	if strings.TrimSpace(path) == "" && isLocalSidecarSource(source) && isRemoteImageSourcePath(fallback) {
 		return fallback
 	}
 	return path
