@@ -6,7 +6,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -39,20 +38,35 @@ func apiShutdownDelay(value string) time.Duration {
 // maxDurationSeconds is the most whole seconds a time.Duration holds.
 const maxDurationSeconds = int(math.MaxInt64 / int64(time.Second))
 
-// routeAwayBeforeShutdown fails readiness and keeps serving for delay, so load
+// waitForAPIStop blocks until the API process must shut down. A signal calls
+// beginRouteAway, which fails readiness, and keeps serving for delay, so load
 // balancers and Kubernetes stop sending new requests before the listeners
-// close. Another signal on sigCh ends the wait early.
-func routeAwayBeforeShutdown(shuttingDown *atomic.Bool, delay time.Duration, sigCh <-chan os.Signal) {
-	shuttingDown.Store(true)
-	if delay <= 0 {
-		return
-	}
-	slog.Info("failing readiness before shutdown so traffic routes away", "delay", delay)
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-	case sig := <-sigCh:
-		slog.Warn("second signal: stopping without waiting for traffic to route away", "signal", sig)
+// close. A restart request or a listener failure stops at once, before or
+// during that wait, and so does a second signal during it.
+func waitForAPIStop(signals <-chan os.Signal, restarts <-chan struct{}, serverErrs <-chan error, delay time.Duration, beginRouteAway func()) {
+	var routedAway <-chan time.Time
+	for {
+		select {
+		case sig := <-signals:
+			if routedAway != nil {
+				slog.Warn("second signal: stopping without waiting for traffic to route away", "signal", sig)
+				return
+			}
+			slog.Info("received signal, shutting down", "signal", sig)
+			beginRouteAway()
+			if delay <= 0 {
+				return
+			}
+			slog.Info("failing readiness before shutdown so traffic routes away", "delay", delay)
+			routedAway = time.After(delay)
+		case <-routedAway:
+			return
+		case <-restarts:
+			slog.Info("server restart requested, shutting down")
+			return
+		case serverErr := <-serverErrs:
+			slog.Error("server error, shutting down", "error", serverErr)
+			return
+		}
 	}
 }

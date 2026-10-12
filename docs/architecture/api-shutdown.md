@@ -22,10 +22,11 @@ On SIGTERM or SIGINT, `cmd/silo/main.go`:
    30 seconds for in-flight requests, then playback cleanup, stale session
    cleanup and heartbeat removal run.
 
-A restart request skips the wait and stops at once, as before: an
-administrator's restart has already told players the server is restarting,
-and the loss of storage admission sends one after it has stopped storage
-writers. A listener that fails on its own also stops the process at once.
+A restart request stops at once, as before, and ends the wait if it arrives
+during it: an administrator's restart has already told players the server is
+restarting, and the loss of storage admission sends one after it has stopped
+storage writers. A listener that fails on its own also stops the process at
+once, during the wait or not.
 
 Only the native API listener's readiness changes. The Jellyfin-compatible and
 Audiobookshelf-compatible listeners have no readiness probe; a load balancer

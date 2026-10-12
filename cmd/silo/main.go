@@ -3794,24 +3794,15 @@ func main() {
 
 	// A signal fails readiness first and keeps serving for
 	// SILO_SHUTDOWN_DELAY, so a load balancer routes traffic away before the
-	// listeners close. A restart request stops at once, as before: storage
-	// admission loss sends one after it has already stopped storage writers,
-	// and an administrator's restart has told players it is restarting now. A
-	// listener failure stops at once too.
-	shutdownDelay := apiShutdownDelay(os.Getenv(apiShutdownDelayEnv))
-	select {
-	case sig := <-sigCh:
-		slog.Info("received signal, shutting down", "signal", sig)
+	// listeners close. A restart request stops at once, even during that wait:
+	// storage admission loss sends one after it has already stopped storage
+	// writers, and an administrator's restart has told players it is
+	// restarting now. A listener failure stops at once too.
+	waitForAPIStop(sigCh, restartReqCh, errCh, apiShutdownDelay(os.Getenv(apiShutdownDelayEnv)), func() {
+		shuttingDown.Store(true)
 		stopLANDiscovery()
-		routeAwayBeforeShutdown(&shuttingDown, shutdownDelay, sigCh)
-		appCancel()
-	case <-restartReqCh:
-		appCancel()
-		slog.Info("server restart requested, shutting down")
-	case serverErr := <-errCh:
-		appCancel()
-		slog.Error("server error, shutting down", "error", serverErr)
-	}
+	})
+	appCancel()
 
 	// Step 12: Graceful shutdown sequence.
 	slog.Info("beginning graceful shutdown")
