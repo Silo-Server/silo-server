@@ -184,7 +184,7 @@ describe("SectionItemCard", () => {
           }}
         />,
       );
-      const card = screen.getAllByRole("link")[0]!.closest(".media-card")!;
+      const card = screen.getAllByRole("link")[0]!.parentElement!;
 
       fireEvent.pointerEnter(card, { pointerType: "mouse" });
       act(() => vi.advanceTimersByTime(100));

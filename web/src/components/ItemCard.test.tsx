@@ -355,15 +355,45 @@ describe("ItemCard detail prefetch", () => {
           <ItemCard item={{ ...baseItem, content_id: "movie-1", type: "movie" }} libraryId={7} />
         </MemoryRouter>,
       );
-      const card = screen
-        .getAllByRole("link", { name: "The Last of Us" })[0]!
-        .closest(".media-card")!;
+      const poster = screen.getAllByRole("link", { name: "The Last of Us" })[0]!.parentElement!;
 
-      fireEvent.pointerEnter(card, { pointerType: "mouse" });
+      fireEvent.pointerEnter(poster, { pointerType: "mouse" });
       act(() => vi.advanceTimersByTime(100));
 
       expect(prefetchItemDetail).toHaveBeenCalledExactlyOnceWith("movie-1");
       expect(prefetchLibraryIds.at(-1)).toBe(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("warms the series when the pointer rests on an episode card's series title", () => {
+    vi.useFakeTimers();
+    prefetchItemDetail.mockClear();
+    try {
+      render(
+        <MemoryRouter>
+          <ItemCard
+            item={{
+              ...baseItem,
+              content_id: "episode-1",
+              type: "episode",
+              series_id: "series-1",
+              series_title: "The Last of Us",
+              season_number: 1,
+              episode_number: 1,
+            }}
+          />
+        </MemoryRouter>,
+      );
+      const [poster, seriesTitle] = screen.getAllByRole("link", { name: "The Last of Us" });
+
+      fireEvent.pointerEnter(seriesTitle!, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(100));
+
+      expect(poster).toHaveAttribute("href", "/item/episode-1");
+      expect(seriesTitle).toHaveAttribute("href", "/item/series-1");
+      expect(prefetchItemDetail).toHaveBeenCalledExactlyOnceWith("series-1");
     } finally {
       vi.useRealTimers();
     }

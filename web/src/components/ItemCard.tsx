@@ -202,21 +202,23 @@ export default function ItemCard({
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
-  const headingHref =
-    item.type === "episode" && item.series_id
-      ? buildItemHref({ contentId: item.series_id, libraryId })
-      : itemHref;
+  const headingContentId =
+    item.type === "episode" && item.series_id ? item.series_id : item.content_id;
+  const headingHref = buildItemHref({ contentId: headingContentId, libraryId });
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
   const { cardPresentation } = useUICustomization();
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
-  const prefetchHandlers = useItemDetailPrefetchIntent(item.content_id, libraryId);
+  // The poster and the caption title can open different items (an episode
+  // and its series), so each warms the item it opens.
+  const posterPrefetch = useItemDetailPrefetchIntent(item.content_id, libraryId);
+  const headingPrefetch = useItemDetailPrefetchIntent(headingContentId, libraryId);
 
   return (
-    <div ref={cardRef} className="media-card media-card-longpress group/card" {...prefetchHandlers}>
-      <div className="group/media relative">
+    <div ref={cardRef} className="media-card media-card-longpress group/card">
+      <div className="group/media relative" {...posterPrefetch}>
         <ViewTransitionLink
           to={itemHref}
           aria-label={displayTitle}
@@ -320,7 +322,11 @@ export default function ItemCard({
       </div>
       {showCaption ? (
         <div className={MEDIA_CARD_CAPTION_CLASS}>
-          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+          <ViewTransitionLink
+            to={headingHref}
+            className={MEDIA_CARD_TITLE_CLASS}
+            {...headingPrefetch}
+          >
             {displayTitle}
           </ViewTransitionLink>
           {showMetadata && episodeLabels?.episodeTitle ? (
