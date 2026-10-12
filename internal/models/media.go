@@ -594,6 +594,11 @@ type ItemPerson struct {
 	Kind      PersonKind
 	Character string
 	SortOrder int
+	// LocalPhotoSource is a photo the item's local metadata (an NFO actor
+	// <thumb>) names for the person: a file:// sidecar or an http(s) URL. It
+	// travels through the metadata pipeline only; the person's photo takes it
+	// when the person has no cached photo (see metadata.applyLocalPersonPhotos).
+	LocalPhotoSource string
 }
 
 // AudiobookSeriesMembership captures a book's membership in an audiobook

@@ -808,11 +808,14 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		return imageCacheProcessResult{outcome: "skipped"}
 	}
 
-	if isLocalImageSourcePath(job.SourcePath) {
+	downloadURL := job.SourcePath
+	if url, ok := localMetadataImageURL(job.SourcePath); ok {
+		// An image URL an NFO names downloads like a provider's, through the
+		// cacher's public-address guard.
+		downloadURL = url
+	} else if isLocalImageSourcePath(job.SourcePath) {
 		return p.processLocalOne(ctx, job, imageType)
 	}
-
-	downloadURL := job.SourcePath
 	if isProviderImagePath(downloadURL) {
 		if p.resolver == nil {
 			p.markFailed(ctx, job, "missing image resolver")

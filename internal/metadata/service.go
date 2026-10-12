@@ -2915,6 +2915,7 @@ func (s *MetadataService) mergeAndPersist(
 		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
 		}
+		s.applyLocalPersonPhotos(ctx, contentID, valid)
 	}
 
 	// Persist remote videos (trailers etc.), filtered by the library's
@@ -4554,12 +4555,15 @@ func isRemoteImageSourcePath(path string) bool {
 		!isNonProviderImageScheme(lower)
 }
 
-// isLocalImageSourcePath reports whether path is a local sidecar artwork
-// source (file:// scheme, produced by the NFO provider). Local sources route
-// into *_source_path like remote sources and are copied into the S3 image
-// cache by the processor; they are never served directly.
+// isLocalImageSourcePath reports whether path is an artwork source the
+// item's local metadata supplies (produced by the NFO provider): a sidecar
+// file (file://) or an image URL an NFO names (nfo+http(s)://, see
+// LocalMetadataURLSource). Local sources route into *_source_path like remote
+// sources and are copied into the S3 image cache by the processor; they are
+// never served directly, and they outrank remote providers' artwork.
 func isLocalImageSourcePath(path string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(path)), "file://")
+	lower := strings.ToLower(strings.TrimSpace(path))
+	return strings.HasPrefix(lower, "file://") || isLocalMetadataURLSource(lower)
 }
 
 // localArtworkUsable reports whether refreshes may select local sidecar
@@ -4615,6 +4619,7 @@ func isCacheableImageSourcePath(path string) bool {
 func isNonProviderImageScheme(lowerPath string) bool {
 	return strings.HasPrefix(lowerPath, "s3://") ||
 		strings.HasPrefix(lowerPath, "file://") ||
+		strings.HasPrefix(lowerPath, localMetadataURLPrefix) ||
 		strings.HasPrefix(lowerPath, "local://") ||
 		strings.HasPrefix(lowerPath, "upload://") ||
 		strings.HasPrefix(lowerPath, "generated://")
@@ -5186,7 +5191,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		// Local sidecar sources attribute to the synthetic "local" provider,
 		// keyed by the series' own content ID (mirrors item attribution).
 		if isLocalImageSourcePath(sourcePath) {
-			return imageCacheLocalProviderID, seriesID
+			return localSourceProviderID(sourcePath), seriesID
 		}
 		providerID := providerIDFromPluginURL(sourcePath)
 		if providerID == "" {
@@ -8732,7 +8737,7 @@ func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]st
 		if item != nil {
 			contentID = item.ContentID
 		}
-		return imageCacheLocalProviderID, contentID
+		return localSourceProviderID(sourcePath), contentID
 	}
 	providerID := providerIDFromPluginURL(sourcePath)
 	if providerID == "" {

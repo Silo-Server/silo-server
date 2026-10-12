@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -22,16 +23,17 @@ type Provider struct {
 
 func NewProvider() *Provider { return &Provider{} }
 
-func (p *Provider) Slug() string { return "nfo" }
+// providerSlug is the NFO provider's capability id.
+const providerSlug = "nfo"
 
-// RatingSources declares the Rotten Tomatoes scores the provider reads from
-// local .nfo files into the rt_critic and rt_audience rating columns, so an
-// administrator can choose to show them.
+func (p *Provider) Slug() string { return providerSlug }
+
+// RatingSources declares the rating sources beyond IMDb and TMDB the provider
+// reads from local .nfo files: the Rotten Tomatoes scores it stores in the
+// rt_critic and rt_audience rating columns, and the other named ratings Kodi
+// writers carry, so an administrator can choose to show them.
 func (p *Provider) RatingSources() []models.RatingSourceDefinition {
-	return []models.RatingSourceDefinition{
-		{Source: models.RatingSourceRTCritic, Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
-		{Source: models.RatingSourceRTAudience, Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
-	}
+	return slices.Clone(ratingSourceDefinitions)
 }
 func (p *Provider) Name() string       { return "NFO Files" }
 func (p *Provider) ForTypes() []string { return []string{typeMovie, typeSeries} }
@@ -85,37 +87,49 @@ func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]me
 // A URL-only NFO names the item but carries no fields, so it returns no
 // metadata. An NFO that exists but cannot be read returns an error wrapping
 // metadata.ErrLocalMetadataUnavailable, never an empty result.
+//
+// An actor's <thumb> comes back in the credit's LocalPhotoSource, resolved
+// to an image source (see artResolver); the metadata service decides whether
+// the person takes it.
 func (p *Provider) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
-	parsed, err := p.findNFOForRequest(ctx, req)
+	mediaFiles, sidecarDirs := requestPaths(req)
+	nfoPath, parsed, err := p.newLookup(ctx).findItemNFO(mediaFiles, sidecarDirs, req.ContentType)
 	if err != nil {
 		return nil, err
 	}
 	if parsed == nil || parsed.LinkOnly {
 		return &metadata.MetadataResult{}, nil
 	}
+	resolvePeoplePhotos(parsed.People, newArtResolver(newSidecarFinder(ctx), nfoPath, itemFolders(sidecarDirs, mediaFiles)))
 	return &metadata.MetadataResult{
-		HasMetadata:   true,
-		Title:         parsed.Title,
-		OriginalTitle: parsed.OriginalTitle,
-		Tagline:       parsed.Tagline,
-		Year:          parsed.Year,
-		Overview:      parsed.Overview,
-		Runtime:       parsed.Runtime,
-		ReleaseDate:   parsed.ReleaseDate,
-		FirstAirDate:  parsed.FirstAirDate,
-		ContentRating: parsed.ContentRating,
-		Genres:        parsed.Genres,
-		Studios:       parsed.Studios,
-		Countries:     parsed.Countries,
-		Keywords:      parsed.Keywords,
+		HasMetadata:      true,
+		Title:            parsed.Title,
+		OriginalTitle:    parsed.OriginalTitle,
+		SortTitle:        parsed.SortTitle,
+		Tagline:          parsed.Tagline,
+		Year:             parsed.Year,
+		Overview:         parsed.Overview,
+		Runtime:          parsed.Runtime,
+		ReleaseDate:      parsed.ReleaseDate,
+		FirstAirDate:     parsed.FirstAirDate,
+		ContentRating:    parsed.ContentRating,
+		OriginalLanguage: parsed.OriginalLanguage,
+		ShowStatus:       parsed.ShowStatus,
+		Genres:           parsed.Genres,
+		Studios:          parsed.Studios,
+		Networks:         parsed.Networks,
+		Countries:        parsed.Countries,
+		Keywords:         parsed.Keywords,
 		Ratings: metadata.Ratings{
 			IMDB:       parsed.RatingIMDB,
 			TMDB:       parsed.RatingTMDB,
 			RTCritic:   parsed.RatingRTCritic,
 			RTAudience: parsed.RatingRTAudience,
 		},
-		People:      parsed.People,
-		ProviderIDs: parsed.providerIDs(),
+		RatingSources: parsed.ratingSources(p.Slug()),
+		People:        parsed.People,
+		Videos:        parsed.Videos,
+		ProviderIDs:   parsed.providerIDs(),
 	}, nil
 }
 
@@ -144,10 +158,11 @@ func (p *Provider) findNFOForQuery(ctx context.Context, query metadata.SearchQue
 	return parsed, err
 }
 
-func (p *Provider) findNFOForRequest(ctx context.Context, req metadata.MetadataRequest) (*parsedNFO, error) {
-	mediaFiles := compactNFOPaths(append([]string{req.FilePath, req.RepresentativeFilePath}, req.AllGroupFilePaths...))
-	_, parsed, err := p.newLookup(ctx).findItemNFO(mediaFiles, compactNFOPaths(req.PrimarySidecarSearchPaths), req.ContentType)
-	return parsed, err
+// requestPaths returns a metadata request's media files and directory-level
+// sidecar folders.
+func requestPaths(req metadata.MetadataRequest) (mediaFiles, sidecarDirs []string) {
+	mediaFiles = compactNFOPaths(append([]string{req.FilePath, req.RepresentativeFilePath}, req.AllGroupFilePaths...))
+	return mediaFiles, compactNFOPaths(req.PrimarySidecarSearchPaths)
 }
 
 func compactNFOPaths(paths []string) []string {

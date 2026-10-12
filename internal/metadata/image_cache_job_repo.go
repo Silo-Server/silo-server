@@ -414,9 +414,10 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 // refresh only reaches them through series_id. Item and item_localization
 // rows carry series_id = the item's own content ID, so a movie or a
 // season/episode target still matches on target_content_id alone. Person
-// jobs have an empty series_id and stay out of scope.
+// jobs stay out of scope: a photo an NFO names carries the title's content
+// ID in series_id only to confine its read to that title's library roots.
 func imageCacheTargetScope(param string) string {
-	return "(target_content_id = " + param + " OR series_id = " + param + ")"
+	return "(target_content_id = " + param + " OR (series_id = " + param + " AND target_type <> '" + ImageCacheTargetPerson + "'))"
 }
 
 // recoverExpiredRunning releases jobs whose worker lease expired, burning one
@@ -1661,7 +1662,7 @@ const imageCacheLocalProviderID = "local"
 
 func imageCacheProviderIDFromSource(sourcePath, fallback string) string {
 	if isLocalImageSourcePath(sourcePath) {
-		return imageCacheLocalProviderID
+		return localSourceProviderID(sourcePath)
 	}
 	if provider := providerIDFromPluginURL(sourcePath); provider != "" {
 		return provider

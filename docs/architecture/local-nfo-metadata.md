@@ -175,6 +175,52 @@ it rejects silently counts as "no NFO".
   metadata phases of one pass parse a file once, and a rewrite is seen even
   when it keeps the file's size and modification time.
 
+### Fields read
+
+`nfo.go` maps every field Silo has a slot for:
+
+- Titles and text: `<title>`, `<originaltitle>`, `<sorttitle>`, `<tagline>`,
+  `<plot>` (then `<outline>`), `<mpaa>` (then `<certification>`, whose
+  country-tagged list such as `US:PG-13 / GB:12A` gives its first rating), and
+  `<originallanguage>` when it is a language code. `<language>` is not read:
+  Jellyfin and Emby write the library's metadata language there.
+- Dates and numbers: `<year>`, `<premiered>`/`<releasedate>`/`<aired>`, and
+  `<runtime>` as minutes, also in the "117 min" and "1h 57m" spellings.
+- Lists: `<genre>`, `<studio>`, `<country>`, `<director>`, `<credits>` and
+  `<writer>` (both writers, one credit per name), split on Kodi's ` / `
+  separator. A show's `<studio>` also fills its networks; Kodi has no network
+  element. `<tag>` is not split.
+- Shows: `<status>` through `NormalizeShowStatus`.
+- Trailers: `<trailer>` as a YouTube or Vimeo video, from the YouTube add-on
+  link Kodi's scrapers write (`plugin://plugin.video.youtube/...`) or a web
+  link. A link to any other site is dropped: videos are stored as a site and a
+  key, and clients play only the sites they know.
+- Ratings (`ratings.go`): each named `<rating>` fills its source once, on its
+  headline scale (IMDb and TMDB out of 10, Rotten Tomatoes out of 100), and the
+  sources beyond IMDb and TMDB also fill `RatingSources` with their `<votes>`.
+  The provider declares those sources (Rotten Tomatoes, Metacritic, Trakt,
+  TVDB, Letterboxd); a name that maps to none is dropped. IMDb and TMDB stay
+  out of `RatingSources`: their rows hold the vote counts discovery ranks by,
+  which an NFO's frozen or missing `<votes>` must not replace. The legacy bare
+  `<rating>` (with its `<votes>`) fills the IMDb slot only in an NFO without a
+  `<ratings>` block: a writer that emits both, such as Radarr, copies its
+  default source there, which is TMDB until IMDb has a score. Jellyfin's
+  `<criticrating>` is the Rotten Tomatoes critics score.
+- People: `<actor>` with `<order>` (or Jellyfin's `<sortorder>`), `<type>`
+  (GuestStar, Director, ...), and the `<tmdbid>`/`<imdbid>`/`<tvdbid>`
+  tinyMediaManager writes; its `<thumb>` is described below. Merging credits
+  matches a provider ID within one role group (the cast, actors and guest
+  stars together, or one crew kind), so a person credited as both actor and
+  director keeps both credits.
+- Episodes: `<uniqueid>`s become the episode's provider ids, unless the file
+  describes several episodes, serves several (one NFO beside a
+  multi-episode video), or declares numbers other than the filename's. The
+  air date falls back from `<aired>` to `<premiered>` and `<releasedate>`. Episodes have
+  no Rotten Tomatoes columns, so those ratings are read but not stored.
+- Seasons: a tvshow `<namedseason number="N">` titles season N when its
+  `season.nfo` gives no title; `season.nfo` reads `<title>` (or
+  `<seasonname>`) and `<premiered>`/`<aired>` as the season's air date.
+
 ## Identity: hint-first, never candidate-first
 
 NFO ids are **trusted identity hints** seeded before remote search
@@ -366,11 +412,56 @@ sits in the chain.
 must mount the media libraries at the same paths as the scanner/metadata
 worker, otherwise local artwork jobs fail until the mount is present.
 
+### Artwork and photos an NFO names
+
+An NFO's `<thumb aspect="...">` (no aspect is a poster, tried after the
+thumbs that name an aspect, and never a TVDB banner path), `<fanart><thumb>`, a
+tvshow's `<thumb season="N">`, and an episode's `<thumb>` fill the poster,
+logo, backdrop, season poster, and episode still slots (`nfo/art.go`). A
+reference is a path relative to the NFO or an http(s) URL:
+
+- A local path must stay inside the folders holding the item's media files or
+  directory-level sidecars, also with symlinks resolved, and pass the sidecar
+  checks. It becomes a fingerprinted `file://` source, like a sidecar's.
+- A URL loses credentials and literal non-public addresses up front and
+  becomes an `nfo+http(s)://` source (`metadata.LocalMetadataURLSource`). The
+  NFO's author is not a trusted provider, so such a URL is handled like a
+  sidecar file: `isLocalImageSourcePath` counts it, it waits in
+  `*_source_path` until the image cache downloads it through its
+  public-address guard, it is never served to clients or fetched by
+  jellycompat's image proxy, and it is not used while
+  `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
+  refresh or the ladder backfill, not by the provider-artwork sweeps. Its
+  copy is attributed to the `nfo` provider and keyed like a provider's
+  (`nfo/{contentType}/{contentID}/{imageType}/...`); only `file://` copies
+  use the content-hashed `local/` keys, so a refresh that no longer finds the
+  URL in the NFO lets remote art take the slot instead of keeping the copy.
+
+Banner, clear art, disc, key art, and landscape references are parsed with no
+slot to fill: `nfoArtImageTypes` is where a new slot connects.
+
+Precedence: a sidecar file wins its slot, so the provider offers NFO-named art
+only for slots discovery left empty; being local, NFO-named art then outranks
+every remote provider in `applyBestImages`, and an NFO-named season poster
+or episode still replaces a remote one in the season and episode merges.
+
+An actor's `<thumb>` resolves the same way into the credit's
+`LocalPhotoSource`. People are shared across titles, so after the credits are
+stored `applyLocalPersonPhotos` gives a person the photo only when they have
+none (nothing, or `-`), or when their photo came from the same NFO (the same
+source, or a local file in the same folder). A provider's photo, even one
+still waiting for its copy, stays. It queues a person image-cache job whose `series_id` is the
+title, so the processor confines a local read to that title's library roots;
+a title's interactive artwork refresh leaves those person jobs out of its
+scope. A person refresh keeps a cached NFO photo over a provider's. Like all
+local artwork, these need `metadata.cache_images`.
+
 ## Series depth and mixed libraries
 
 `SeasonsRequest`/`EpisodesRequest` carry local path context; `season.nfo`
-supplies season name/plot, `<basename>.nfo` and the episode still (see above) supply
-episode metadata/thumbs (`internal/metadata/nfo/series_depth.go`). **Naming
+(and the show's `tvshow.nfo`) supply season name/plot/air date, `<basename>.nfo`
+and the episode still (see above) supply episode metadata/thumbs
+(`internal/metadata/nfo/series_depth.go`). **Naming
 supplies structure; NFOs supply metadata**: NFO season/episode numbers are
 advisory — directory/filename-derived numbers win with a warning. Episode NFOs
 work without a `season.nfo`; `SynthesizeFallbackEpisodes` still covers

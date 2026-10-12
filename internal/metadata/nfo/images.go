@@ -53,15 +53,18 @@ func itemArtworkNames(contentType string, imageType metadata.ImageType) (suffixe
 // the item's media files. Returned URLs are file:// sources with a size and
 // mtime fingerprint (metadata.LocalImageSourceURL); the image cache processor
 // copies them into artwork storage so library files are never served
-// directly. Local art applies even when no .nfo file is present.
+// directly. Local art applies even when no .nfo file is present. A slot with
+// no sidecar file takes the artwork the item's NFO names, if any (see
+// nfoItemArt).
 func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]metadata.RemoteImage, error) {
 	searchDirs := compactNFOPaths(req.PrimarySidecarSearchPaths)
 	// A series has no media file of its own: its request lists every episode
 	// file, so basename art such as "S01E01-poster.jpg" belongs to an episode
 	// and never becomes series art.
+	groupFiles := compactNFOPaths(append([]string{req.RepresentativeFilePath}, req.AllGroupFilePaths...))
 	var mediaFiles []string
 	if req.ContentType != typeSeries {
-		mediaFiles = compactNFOPaths(append([]string{req.RepresentativeFilePath}, req.AllGroupFilePaths...))
+		mediaFiles = groupFiles
 	}
 	if len(searchDirs) == 0 && len(mediaFiles) == 0 {
 		return nil, nil
@@ -80,7 +83,7 @@ func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]
 			})
 		}
 	}
-	return images, nil
+	return append(images, p.nfoItemArt(ctx, req, finder, groupFiles, searchDirs, images)...), nil
 }
 
 // findItemArtwork returns the source of the first usable sidecar: basename

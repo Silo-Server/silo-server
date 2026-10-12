@@ -463,15 +463,16 @@ func enrichPeople(target []models.ItemPerson, source []models.ItemPerson, cast b
 }
 
 // personMatchIndexes indexes credits by each key findPersonMatch tries, in
-// its order: TMDB, TVDB and IMDb IDs, Plex GUID, then name and kind.
+// its order: TMDB, TVDB and IMDb IDs and Plex GUID within the role group,
+// then name and kind.
 func personMatchIndexes(people []models.ItemPerson) []map[string]int {
 	return []map[string]int{
-		indexPeopleBy(people, func(p models.ItemPerson) string { return p.TmdbID }),
-		indexPeopleBy(people, func(p models.ItemPerson) string { return p.TvdbID }),
-		indexPeopleBy(people, func(p models.ItemPerson) string { return p.ImdbID }),
-		indexPeopleBy(people, func(p models.ItemPerson) string { return p.PlexGUID }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return creditKey(p.TmdbID, creditGroup(p.Kind)) }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return creditKey(p.TvdbID, creditGroup(p.Kind)) }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return creditKey(p.ImdbID, creditGroup(p.Kind)) }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return creditKey(p.PlexGUID, creditGroup(p.Kind)) }),
 		indexPeopleBy(people, func(p models.ItemPerson) string {
-			return strings.ToLower(p.Name) + "|" + strconv.Itoa(int(p.Kind))
+			return creditKey(strings.ToLower(p.Name), p.Kind)
 		}),
 	}
 }
@@ -486,9 +487,17 @@ func indexPeopleBy(people []models.ItemPerson, keyFn func(models.ItemPerson) str
 	return m
 }
 
+// findPersonMatch finds sp's credit among the indexed target credits: the same
+// person by provider ID in the same role group, else by name in the same
+// kind. One person credited as both actor and director has two credits, so an
+// ID match alone must not fold a director credit into the actor's; an actor
+// one provider lists as a guest star is still one cast credit.
 func findPersonMatch(sp models.ItemPerson, maps ...map[string]int) (int, bool) {
-	keys := []string{sp.TmdbID, sp.TvdbID, sp.ImdbID, sp.PlexGUID,
-		strings.ToLower(sp.Name) + "|" + strconv.Itoa(int(sp.Kind))}
+	group := creditGroup(sp.Kind)
+	keys := []string{
+		creditKey(sp.TmdbID, group), creditKey(sp.TvdbID, group), creditKey(sp.ImdbID, group),
+		creditKey(sp.PlexGUID, group), creditKey(strings.ToLower(sp.Name), sp.Kind),
+	}
 	for i, m := range maps {
 		if i < len(keys) {
 			if idx, ok := m[keys[i]]; ok && keys[i] != "" {
@@ -497,6 +506,24 @@ func findPersonMatch(sp models.ItemPerson, maps ...map[string]int) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// creditGroup is the role group an ID match stays within: the cast (actors
+// and guest stars) as one, each crew kind on its own.
+func creditGroup(kind models.PersonKind) models.PersonKind {
+	if kind == models.PersonKindGuestStar {
+		return models.PersonKindActor
+	}
+	return kind
+}
+
+// creditKey keys a credit by a person identifier and its kind, or "" when the
+// identifier is empty.
+func creditKey(identifier string, kind models.PersonKind) string {
+	if identifier == "" {
+		return ""
+	}
+	return identifier + "|" + strconv.Itoa(int(kind))
 }
 
 func mergePersonFields(dst *models.ItemPerson, src models.ItemPerson) {
@@ -520,6 +547,9 @@ func mergePersonFields(dst *models.ItemPerson, src models.ItemPerson) {
 	}
 	if dst.PhotoThumbhash == "" {
 		dst.PhotoThumbhash = src.PhotoThumbhash
+	}
+	if dst.LocalPhotoSource == "" {
+		dst.LocalPhotoSource = src.LocalPhotoSource
 	}
 	if dst.Character == "" {
 		dst.Character = src.Character

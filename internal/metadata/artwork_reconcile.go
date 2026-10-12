@@ -81,7 +81,7 @@ type ArtworkObjectChecker interface {
 
 // nonProviderImageSchemesSQL mirrors isNonProviderImageScheme for use inside
 // SQL predicates: source paths with these schemes cannot be re-downloaded.
-const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%']`
+const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'nfo+%', 'local://%', 'upload://%', 'generated://%']`
 
 const (
 	artworkReconcileSampleTarget = 200

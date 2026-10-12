@@ -882,9 +882,11 @@ outside 0-100, and a vote count that is not a whole, non-negative number while
 keeping its score.
 
 Silo itself names only IMDb and TMDB. Every other rating comes from a metadata
-provider that declares it. The built-in NFO provider declares `rt_critic` and
-`rt_audience`, the Rotten Tomatoes scores it reads from local `.nfo` files. A
-plugin declares its ratings in its capability's manifest metadata, at the top
+provider that declares it. The built-in NFO provider declares the named ratings
+it reads from local `.nfo` files: `rt_critic` and `rt_audience` (percentages),
+`metacritic` (scale 100), `trakt` (a percentage), `tvdb` (scale 10), and
+`letterboxd` (scale 5). It reports no `imdb` or `tmdb` source rows; its IMDb
+and TMDB scores fill the rating columns. A plugin declares its ratings in its capability's manifest metadata, at the top
 level or inside the SDK's `metadata` envelope:
 
 ```json
