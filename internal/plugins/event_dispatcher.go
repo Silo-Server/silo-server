@@ -44,13 +44,14 @@ const (
 	// it was not woken for: retries, rows another server produced but could
 	// not deliver yet, and rows whose claimer died.
 	eventDeliveryPoll = 10 * time.Second
-	// eventDeliveryTimeout bounds resolving the plugin client and its
-	// HandleEvent call.
-	eventDeliveryTimeout = time.Minute
+	// eventResolveTimeout bounds resolving the plugin client, which may
+	// start the plugin. The HandleEvent call has the host's
+	// pluginhost.DefaultEventTimeout.
+	eventResolveTimeout = time.Minute
 	// eventDeliveryLease is how long a claimed delivery stays hidden from
-	// other servers. It outlasts eventDeliveryTimeout so a slow delivery is
-	// not claimed twice.
-	eventDeliveryLease = 2 * eventDeliveryTimeout
+	// other servers. It outlasts eventResolveTimeout plus the call, so a slow
+	// delivery is not claimed twice.
+	eventDeliveryLease = 2 * time.Minute
 	// eventOutcomeTimeout bounds recording a delivery's outcome, which
 	// outlives a server that starts shutting down after the plugin answered.
 	eventOutcomeTimeout = 10 * time.Second
@@ -270,7 +271,11 @@ func (d *EventDispatcher) ObservePublish(channel string, event cache.Event) {
 	if !d.mayHaveSubscribers(event.Type) {
 		return
 	}
-	produced := busEvent(event)
+	d.offer(busEvent(event))
+}
+
+// offer queues an event without waiting, and logs it when the intake is full.
+func (d *EventDispatcher) offer(produced producedEvent) {
 	select {
 	case d.intake <- produced:
 	default:
@@ -295,23 +300,20 @@ func hubEvent(env events.Envelope) producedEvent {
 	}
 }
 
+// consumeHub reads until Stop unsubscribes, so envelopes published while the
+// server drains after its context ended still reach the intake for Stop to
+// store. Until then it waits for room in the intake, leaving envelopes in
+// the hub's buffer.
 func (d *EventDispatcher) consumeHub(ctx context.Context, ch <-chan events.Envelope) {
-	for {
+	for env := range ch {
+		if env.SourceID != d.hub.SourceID() || !d.mayHaveSubscribers(env.Event) {
+			continue
+		}
+		produced := hubEvent(env)
 		select {
+		case d.intake <- produced:
 		case <-ctx.Done():
-			return
-		case env, ok := <-ch:
-			if !ok {
-				return
-			}
-			if env.SourceID != d.hub.SourceID() || !d.mayHaveSubscribers(env.Event) {
-				continue
-			}
-			select {
-			case d.intake <- hubEvent(env):
-			case <-ctx.Done():
-				return
-			}
+			d.offer(produced)
 		}
 	}
 }
@@ -625,12 +627,13 @@ func (d *EventDispatcher) handleEvent(ctx context.Context, delivery EventDeliver
 			return fmt.Errorf("%w: decode payload: %w", errUndeliverable, err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, eventDeliveryTimeout)
-	defer cancel()
-	client, err := d.resolveClient(ctx, delivery)
+	resolveCtx, cancel := context.WithTimeout(ctx, eventResolveTimeout)
+	client, err := d.resolveClient(resolveCtx, delivery)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("resolve client: %w", err)
 	}
+	// The client gives the call the host's event timeout.
 	_, err = client.HandleEvent(ctx, &pluginv1.HandleEventRequest{
 		EventId:   delivery.EventID,
 		EventName: delivery.EventName,

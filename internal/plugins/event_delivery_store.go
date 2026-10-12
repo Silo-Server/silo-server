@@ -35,27 +35,33 @@ func NewEventDeliveryStore(pool *pgxpool.Pool) *EventDeliveryStore {
 	return &EventDeliveryStore{pool: pool}
 }
 
-// Enqueue inserts deliveries, due at once.
+// Enqueue inserts deliveries, due at once. A delivery for an installation
+// uninstalled since the caller listed its subscribers is skipped rather than
+// failing the others' insert.
 func (s *EventDeliveryStore) Enqueue(ctx context.Context, deliveries []EventDelivery) error {
 	if len(deliveries) == 0 {
 		return nil
 	}
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO plugin_event_deliveries
-		(event_id, event_name, payload, plugin_installation_id, capability_id) VALUES `)
+		(event_id, event_name, payload, plugin_installation_id, capability_id)
+		SELECT v.event_id, v.event_name, v.payload, v.installation_id, v.capability_id
+		FROM (VALUES `)
 	args := make([]any, 0, len(deliveries)*5)
 	for i, delivery := range deliveries {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
 		base := len(args)
-		fmt.Fprintf(&sb, "($%d, $%d, $%d, $%d, $%d)", base+1, base+2, base+3, base+4, base+5)
+		fmt.Fprintf(&sb, "($%d::text, $%d::text, $%d::json, $%d::bigint, $%d::text)", base+1, base+2, base+3, base+4, base+5)
 		var payload any
 		if len(delivery.Payload) > 0 {
-			payload = []byte(delivery.Payload)
+			payload = string(delivery.Payload)
 		}
 		args = append(args, delivery.EventID, delivery.EventName, payload, delivery.InstallationID, delivery.CapabilityID)
 	}
+	sb.WriteString(`) AS v(event_id, event_name, payload, installation_id, capability_id)
+		WHERE EXISTS (SELECT 1 FROM plugin_installations i WHERE i.id = v.installation_id)`)
 	if _, err := s.pool.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("enqueue plugin event deliveries: %w", err)
 	}

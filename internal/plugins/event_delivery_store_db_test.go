@@ -165,6 +165,25 @@ func TestEventDeliveryOutboxPostgres(t *testing.T) {
 		}
 	})
 
+	t.Run("an uninstalled installation does not fail the others", func(t *testing.T) {
+		installation := seedResidentQueryInstallation(t, pool, true)
+		gone := seedResidentQueryInstallation(t, pool, true)
+		t.Cleanup(func() { drain(t) })
+		if _, err := pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, gone); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Enqueue(ctx, []EventDelivery{
+			{EventID: "evt", EventName: "scan_complete", InstallationID: gone, CapabilityID: "events"},
+			{EventID: "evt", EventName: "scan_complete", InstallationID: installation, CapabilityID: "events"},
+		}); err != nil {
+			t.Fatalf("enqueue with an uninstalled installation: %v", err)
+		}
+		claimed := claim(t, 10, time.Hour)
+		if len(claimed) != 1 || claimed[0].InstallationID != installation {
+			t.Fatalf("claimed = %+v, want only installation %d's delivery", claimed, installation)
+		}
+	})
+
 	t.Run("payload round trip and uninstall", func(t *testing.T) {
 		installation := seedResidentQueryInstallation(t, pool, true)
 		t.Cleanup(func() { drain(t) })

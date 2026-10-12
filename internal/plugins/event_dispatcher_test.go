@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -140,13 +141,16 @@ func (d *EventDispatcher) dispatchEnvelope(ctx context.Context, env events.Envel
 // dispatcher's own loop does the delivering.
 func (d *EventDispatcher) deliverDue(ctx context.Context) {
 	store := d.deliveries.(*memoryDeliveryStore)
+	deadline := time.Now().Add(10 * time.Second)
 	for store.busy() {
-		if d.cancel != nil {
-			time.Sleep(time.Millisecond)
-			continue
+		if time.Now().After(deadline) {
+			panic(fmt.Sprintf("deliverDue: outbox still busy after 10s: %+v", store.pending()))
 		}
-		d.claimAndDeliver(ctx)
-		d.inflight.Wait()
+		if d.cancel == nil {
+			d.claimAndDeliver(ctx)
+			d.inflight.Wait()
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

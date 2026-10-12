@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -265,26 +266,35 @@ func TestUnsubscribedEventsAreNotQueued(t *testing.T) {
 }
 
 // TestStopStoresEventsPublishedWhileDraining: the server's context ends
-// before it drains its requests, and events those requests publish must still
-// reach the outbox.
+// before it drains its requests, and the bus events and hub envelopes those
+// requests publish must still reach the outbox.
 func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
 	deliveries := newMemoryDeliveryStore()
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
-		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete, "plugin.silo.other.ping")}},
 	}
-	d := NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: &flakyClient{}}, deliveries, 4)
+	bus := newFakeBus()
+	hub := events.NewHub("api", bus)
+	d := NewEventDispatcher(bus, hub, store, staticResolver{client: &flakyClient{}}, deliveries, 4)
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := d.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
-	d.loops.Wait()
 
 	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	if err := hub.Publish(context.Background(), events.Envelope{Channel: events.ChannelPlugins, Event: "plugin.silo.other.ping"}); err != nil {
+		t.Fatal(err)
+	}
 	d.Stop()
-	if pending := deliveries.pending(); len(pending) != 1 || pending[0].EventName != cache.EventScanComplete {
-		t.Fatalf("outbox after Stop = %+v, want the event published while draining", pending)
+	var names []string
+	for _, pending := range deliveries.pending() {
+		names = append(names, pending.EventName)
+	}
+	slices.Sort(names)
+	if want := []string{"plugin.silo.other.ping", cache.EventScanComplete}; !slices.Equal(names, want) {
+		t.Fatalf("outbox after Stop = %v, want %v", names, want)
 	}
 }
 

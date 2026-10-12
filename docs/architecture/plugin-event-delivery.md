@@ -37,7 +37,8 @@ subscribing installation and wakes its delivery loop. Every API server runs
 that loop. It claims due rows with `FOR UPDATE SKIP LOCKED` inside a
 `MATERIALIZED` CTE, which counts the attempt and pushes `next_attempt_at` out
 by a two-minute lease. It then calls `HandleEvent` on its own process for the
-installation, with one minute for starting the plugin and the call together.
+installation. Starting the plugin may take up to a minute, and the call has
+the host's 10-second event timeout.
 
 | Outcome | Row |
 | --- | --- |
@@ -47,7 +48,9 @@ installation, with one minute for starting the plugin and the call together.
 | A payload that is not a JSON object | Deleted and logged. |
 | The server dies or shuts down mid-delivery | Claimed again by any server once the lease runs out. |
 
-Uninstalling a plugin deletes its rows through the foreign key. A disabled
+Uninstalling a plugin deletes its rows through the foreign key, and a row for
+an installation uninstalled since the producer listed its subscribers is
+skipped rather than failing the other rows' insert. A disabled
 installation is retried rather than dropped because the delivering server's
 installation cache can lag an enable made on another server.
 
@@ -78,12 +81,13 @@ published while the server drains its requests after its context ended.
 
 - An event is lost before it is stored when its server dies first, when the
   intake queue (1024 events) is full, or when the outbox write fails. A full
-  queue drops bus events with a log line; hub envelopes wait in the hub's
-  64-envelope buffer for that subscriber, and `Hub.Dropped` counts the ones
-  it drops.
+  queue drops bus events with a log line. Hub envelopes wait in the hub's
+  64-envelope buffer for the dispatcher, and `Hub.Dropped` counts the ones it
+  drops; once the server's context has ended, they are dropped with a log
+  line too.
 - Each server delivers four events at a time across all plugins. A plugin
-  that hangs holds a slot for up to a minute per attempt, so its backlog
-  delays other plugins' events.
+  that hangs holds a slot for 10 seconds per attempt, or a minute when it
+  will not start, so its backlog delays other plugins' events.
 - One process sees each event, so a plugin that keeps per-process state
   cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver from their
