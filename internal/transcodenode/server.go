@@ -317,7 +317,9 @@ type Server struct {
 	drainAnnouncer atomic.Pointer[func()]
 	// drainWatch is set while announceWhenDrained runs.
 	drainWatch atomic.Bool
-	// drainedReported latches a drained health answer; see healthStatus.
+	// drainedReported latches a drained health answer; drainFence orders it
+	// against work admission. See healthStatus.
+	drainFence      sync.Mutex
 	drainedReported atomic.Bool
 	// trickplay admits one trickplay run at a time.
 	trickplay trickplayWork

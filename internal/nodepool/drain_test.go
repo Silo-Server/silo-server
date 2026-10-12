@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func drainingNode(id int, url string, activeJobs int) *Node {
@@ -139,6 +141,42 @@ func TestHealthSweepAppliesDrainState(t *testing.T) {
 	}
 	if checker.CheckTranscodeNode(context.Background(), 8) {
 		t.Fatal("CheckTranscodeNode reported an unknown node")
+	}
+}
+
+// Checks of one node run one at a time, so the answer written last is the one
+// asked for last: a sweep answer from before the node began draining must not
+// overwrite the recheck its announcement caused.
+func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
+	var requests atomic.Int32
+	firstArrived, releaseFirst := make(chan struct{}), make(chan struct{})
+	url := newStatsHealthNodeFunc(t, func() string {
+		if requests.Add(1) == 1 {
+			close(firstArrived)
+			<-releaseFirst
+			return `{"status":"ok"}`
+		}
+		return `{"status":"draining"}`
+	})
+	pool := NewTranscodePool()
+	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
+	checker := NewHealthChecker(NewProxyPool(), pool, nil)
+
+	sweepDone, recheckDone := make(chan struct{}), make(chan struct{})
+	go func() { checker.checkAll(context.Background()); close(sweepDone) }()
+	<-firstArrived
+	go func() { checker.CheckTranscodeNode(context.Background(), 7); close(recheckDone) }()
+	// Give an unserialized recheck the chance to answer first; a serialized one
+	// waits for the sweep's check whatever the timing.
+	select {
+	case <-recheckDone:
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFirst)
+	<-sweepDone
+	<-recheckDone
+	if got := pool.Nodes()[0]; requests.Load() != 2 || got.DrainState != DrainStateDraining {
+		t.Fatalf("after a sweep answer and a later recheck: %d requests, drain state %q", requests.Load(), got.DrainState)
 	}
 }
 

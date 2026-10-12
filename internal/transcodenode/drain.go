@@ -45,7 +45,13 @@ func (s *Server) drained() bool {
 // progressive remux, since whoever read the answer may stop the node. Before
 // that both are ordinary work the drain waits for, so a viewer coming back
 // from a long pause or seeking is not refused by a node that is still serving.
+//
+// The work check and the latch happen under drainFence, which reportedDrained
+// also takes, so a rebuild or remux that counted itself in flight first is
+// either seen by the check or refused after the latch.
 func (s *Server) healthStatus() string {
+	s.drainFence.Lock()
+	defer s.drainFence.Unlock()
 	switch {
 	case s.drained():
 		s.drainedReported.Store(true)
@@ -59,8 +65,11 @@ func (s *Server) healthStatus() string {
 }
 
 // reportedDrained reports whether a draining node has told someone it is
-// drained, so it must start no rebuild and no fresh progressive remux.
+// drained, so it must start no rebuild and no fresh progressive remux. Callers
+// count themselves with trackInFlight before asking; see healthStatus.
 func (s *Server) reportedDrained() bool {
+	s.drainFence.Lock()
+	defer s.drainFence.Unlock()
 	return s.draining() && s.drainedReported.Load()
 }
 

@@ -79,16 +79,18 @@ yet announces nothing and is found by the sweep.
 `nodepool.CheckNodeReport` reads the health `status` into
 `stream_nodes.drain_state` (`none`, `draining`, `drained`), written with the
 other health columns by every check. A node that does not answer, or predates
-draining, reads as `none`. A resume and a URL repoint also reset it to `none`:
-the state described the lifted request, or another machine. `Node.Draining()` is
+draining, reads as `none`. Lifting a set request and a URL repoint also reset
+it to `none`: the state described the lifted request, or another machine. A
+node draining for SIGTERM sees the request change, announces, and reports
+`draining` again on the recheck. Lifting a request that was not set keeps the
+state, since the node would announce nothing. `Node.Draining()` is
 true when `drain_requested` is set or `drain_state` is not `none`, and
 `Node.TakesNewWork()` is enabled, healthy and not draining.
 
 The API rechecks a node when it announces a change, at most one check per node
-at a time, plus one more when announcements arrived during it. A sweep check
-that started before the change can still land after the recheck and restore
-the old state until the next sweep; the node refuses new work meanwhile, so
-that costs a retry, not a stream.
+at a time, plus one more when announcements arrived during it. The health
+checker runs one check of a node at a time, from the sweep or a recheck, so a
+sweep answer from before the change cannot land after the recheck.
 
 A draining node stays in the pools, so it is still health-checked, its jobs
 still count against a shared GPU, and its prepared downloads are still served.

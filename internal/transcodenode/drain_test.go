@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,6 +152,35 @@ func TestHealthReportsDrainProgress(t *testing.T) {
 	done()
 	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q after the request finished, want drained", got)
+	}
+}
+
+// Health never reports drained while a rebuild or remux that counted itself in
+// flight goes ahead: the work check and the latch are one step against
+// reportedDrained, so the admission is either seen by the check or refused.
+func TestDrainedLatchFencesAdmission(t *testing.T) {
+	s := newLoopingFFmpegServer(t)
+	s.BeginShutdownDrain()
+	for range 2000 {
+		s.drainedReported.Store(false)
+		var admitted bool
+		var status string
+		healthDone := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			release := s.trackInFlight()
+			admitted = !s.reportedDrained()
+			<-healthDone
+			release()
+		})
+		wg.Go(func() {
+			status = s.healthStatus()
+			close(healthDone)
+		})
+		wg.Wait()
+		if status == HealthStatusDrained && admitted {
+			t.Fatal("health reported drained while a counted admission went ahead")
+		}
 	}
 }
 

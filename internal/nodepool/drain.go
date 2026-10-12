@@ -107,15 +107,17 @@ func (p *Planner) TranscodeNodeURLsForNewWork() []string {
 // SetDrainRequested records or clears an administrator's drain request. It is
 // not configuration: it does not move the node's admin revision.
 //
-// Clearing it also clears the drain state the node last reported. That report
-// described the request being lifted, and keeping it would hold the node out of
-// placement, and show it as stopping, until its next health check. A node that
-// is draining for another reason (SIGTERM) says so again on that check, which
-// its own announcement triggers, and refuses new work meanwhile.
+// Lifting a request also clears the drain state the node last reported. That
+// report described the request being lifted, and keeping it would hold the node
+// out of placement, and show it as stopping, until its next health check. A
+// node that is draining for another reason (SIGTERM) sees the request change,
+// announces, and says so again on the check that triggers, refusing new work
+// meanwhile. Clearing a request that was not set changes nothing the node would
+// announce, so the reported state stays.
 func (r *Repository) SetDrainRequested(ctx context.Context, id int, requested bool) (*Node, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE stream_nodes SET drain_requested = $2,
-		        drain_state = CASE WHEN $2 THEN drain_state ELSE 'none' END
+		        drain_state = CASE WHEN $2 OR NOT drain_requested THEN drain_state ELSE 'none' END
 		 WHERE id = $1`, id, requested)
 	if err != nil {
 		return nil, fmt.Errorf("set node drain request: %w", err)

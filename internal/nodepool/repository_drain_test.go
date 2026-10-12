@@ -76,6 +76,15 @@ func TestRepositoryDrainRequestRoundTrip(t *testing.T) {
 	if _, err := repo.SetDrainRequested(ctx, node.ID, false); err != nil {
 		t.Fatal(err)
 	}
+	// A node draining on its own (SIGTERM) keeps its reported state when a
+	// request that was never set is lifted: it would announce no change, so
+	// nothing would put the state back before the next sweep.
+	if err := repo.UpdateHealthReport(ctx, node.ID, node.URL, HealthReport{Healthy: true, DrainState: DrainStateDraining}); err != nil {
+		t.Fatal(err)
+	}
+	if kept, err := repo.SetDrainRequested(ctx, node.ID, false); err != nil || kept.DrainState != DrainStateDraining || !kept.Draining() {
+		t.Fatalf("lifting an unset request must keep the reported state: %+v, %v", kept, err)
+	}
 	if _, err := repo.SetDrainRequested(ctx, -1, true); !errors.Is(err, ErrNodeNotFound) {
 		t.Fatalf("unknown node = %v, want ErrNodeNotFound", err)
 	}

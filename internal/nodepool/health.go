@@ -280,6 +280,9 @@ type HealthChecker struct {
 	// a fetch that outlives the sweep that started it is not started again by
 	// the next sweep. Node ids are unique across both pools (one table).
 	capabilityRefreshInFlight sync.Map
+	// nodeChecks holds one lock per node id; see lockNodeCheck.
+	nodeChecksMu sync.Mutex
+	nodeChecks   map[int]*sync.Mutex
 }
 
 // NewHealthChecker creates a health checker for the given pools.
@@ -383,9 +386,31 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 	wg.Wait()
 }
 
+// lockNodeCheck waits until no other health check of node id runs, and returns
+// the func that ends this one.
+func (hc *HealthChecker) lockNodeCheck(id int) func() {
+	hc.nodeChecksMu.Lock()
+	mu := hc.nodeChecks[id]
+	if mu == nil {
+		if hc.nodeChecks == nil {
+			hc.nodeChecks = make(map[int]*sync.Mutex)
+		}
+		mu = new(sync.Mutex)
+		hc.nodeChecks[id] = mu
+	}
+	hc.nodeChecksMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
 // checkOne checks one pooled node and publishes the result to its pool and the
 // database.
 func (hc *HealthChecker) checkOne(ctx context.Context, n *Node, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
+	// One check per node at a time, from the sweep or a recheck, so the result
+	// written last is also the one asked for last: a sweep answer from before a
+	// node began draining cannot overwrite the recheck its announcement caused.
+	unlock := hc.lockNodeCheck(n.ID)
+	defer unlock()
 	report := CheckNodeReport(ctx, n)
 	healthy, capabilitiesHash := report.Healthy, report.CapabilitiesHash
 
