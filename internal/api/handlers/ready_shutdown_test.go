@@ -88,3 +88,19 @@ func TestShuttingDownReadinessDoesNotWaitOnProbes(t *testing.T) {
 		t.Fatalf("with no earlier probe: %d pings, status %d", got, rec.Code)
 	}
 }
+
+// A shutdown that begins while readiness probes fails that answer too, so a
+// probe in flight at the signal does not keep the server in rotation.
+func TestShutdownDuringProbeFailsReadiness(t *testing.T) {
+	var shuttingDown atomic.Bool
+	h := NewReadyHandler(pingerFunc(func(context.Context) error {
+		shuttingDown.Store(true)
+		return nil
+	}), nil)
+	h.SetShuttingDown(shuttingDown.Load)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d with a shutdown during the probe, want 503", rec.Code)
+	}
+}

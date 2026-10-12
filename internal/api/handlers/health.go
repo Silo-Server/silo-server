@@ -137,11 +137,13 @@ func (h *ReadyHandler) SetShuttingDown(fn func() bool) {
 func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A shutting-down answer does not wait on the dependencies: it reports
 	// their last probe, so a slow storage probe cannot hold back the 503 that
-	// routes traffic away. It probes only when nothing has probed before.
-	shuttingDown := h.shuttingDown != nil && h.shuttingDown()
+	// routes traffic away. It probes only when nothing has probed before, and
+	// a shutdown that began while it probed still fails the answer.
+	shuttingDown := h.isShuttingDown()
 	probes := h.lastProbes.Load()
 	if !shuttingDown || probes == nil {
 		probes = h.probe(r.Context())
+		shuttingDown = h.isShuttingDown()
 	}
 	pgOK, s3OK, artworkOK := probes.postgres, probes.s3, probes.artwork
 
@@ -178,6 +180,11 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+// isShuttingDown reports whether the process has begun shutting down.
+func (h *ReadyHandler) isShuttingDown() bool {
+	return h.shuttingDown != nil && h.shuttingDown()
 }
 
 // probe checks every dependency and remembers the results.
