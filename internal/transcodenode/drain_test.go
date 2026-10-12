@@ -14,11 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // The health status values are what nodepool parses into a drain state.
@@ -312,5 +317,47 @@ func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("no announcement for %s", what)
 		}
+	}
+}
+
+// A fresh progressive remux GET (a reconnect or seek) is refused once the node
+// has reported itself drained, since whoever read that may stop it.
+func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claims := streamtoken.Claims{
+		SessionID: "playback-drained-remux", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-drained-remux",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.BeginShutdownDrain()
+	if got := healthStatusOf(t, server).Status; got != HealthStatusDrained {
+		t.Fatalf("status = %q, want drained", got)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID+"?seek=2", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+	server.handleRemux(rr, request)
+	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "draining") {
+		t.Fatalf("remux after drained = %d %q, want 503 node is draining", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d after a refused remux", got)
 	}
 }

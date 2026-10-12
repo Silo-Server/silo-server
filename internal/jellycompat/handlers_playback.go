@@ -163,6 +163,12 @@ type compatTranscodeNodeHealth interface {
 	TranscodeNodeHealthy(nodeURL string) bool
 }
 
+// compatTranscodeNodeDrain reports whether a pooled transcode node has
+// drained; *nodepool.Planner implements it.
+type compatTranscodeNodeDrain interface {
+	TranscodeNodeDrained(nodeURL string) bool
+}
+
 // compatTranscodeNodeLookup resolves the pooled record behind a transcode node
 // URL, which carries that node's own acceleration override. Optional, like the
 // enumerators above: without it dispatch falls back to the cluster-wide
@@ -1574,8 +1580,12 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			current.Recipe.SourceAudioChannels == expectedSourceAudioChannels &&
 			current.Recipe.AudioTrackIndex == expectedAudioTrackIndex &&
 			playback.ValidateCopyFMP4RecipeCard(*current.Recipe) == nil {
+			// A drained node runs no session, so the runtime recorded on it is
+			// gone; start a fresh one instead of pinning the client to it.
+			drain, canDrain := h.NodePlanner.(compatTranscodeNodeDrain)
 			if upstream, sessionErr := h.sessionMgr.GetSession(upstreamSessionID); sessionErr == nil && upstream != nil &&
-				strings.TrimRight(upstream.TranscodeNodeURL, "/") == strings.TrimRight(current.Recipe.TranscodeNodeURL, "/") {
+				strings.TrimRight(upstream.TranscodeNodeURL, "/") == strings.TrimRight(current.Recipe.TranscodeNodeURL, "/") &&
+				(!canDrain || !drain.TranscodeNodeDrained(current.Recipe.TranscodeNodeURL)) {
 				return &remoteStartAdoptedRemoteError{nodeURL: current.Recipe.TranscodeNodeURL}
 			}
 		}

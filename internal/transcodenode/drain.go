@@ -41,10 +41,10 @@ func (s *Server) drained() bool {
 }
 
 // healthStatus is the status health reports. Reporting drained latches it:
-// from then on the node also rebuilds no lost session, since whoever read the
-// answer may stop the node. Before that a rebuild is ordinary work the drain
-// waits for, so a viewer coming back from a long pause is not refused by a
-// node that is still serving.
+// from then on the node also starts no rebuild of a lost session and no fresh
+// progressive remux, since whoever read the answer may stop the node. Before
+// that both are ordinary work the drain waits for, so a viewer coming back
+// from a long pause or seeking is not refused by a node that is still serving.
 func (s *Server) healthStatus() string {
 	switch {
 	case s.drained():
@@ -58,9 +58,9 @@ func (s *Server) healthStatus() string {
 	}
 }
 
-// refusesReconstruct reports whether the node must not rebuild a lost session:
-// it has told someone it is drained.
-func (s *Server) refusesReconstruct() bool {
+// reportedDrained reports whether a draining node has told someone it is
+// drained, so it must start no rebuild and no fresh progressive remux.
+func (s *Server) reportedDrained() bool {
 	return s.draining() && s.drainedReported.Load()
 }
 

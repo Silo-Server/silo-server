@@ -2021,7 +2021,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// A draining node that has reported itself drained rebuilds no lost
 	// session: whoever read that may stop it. The client's next plan puts the
 	// session on another node.
-	if s.shuttingDown || s.refusesReconstruct() {
+	if s.shuttingDown || s.reportedDrained() {
 		return nil, nil
 	}
 	if s.watcher.Config() != cfg {
@@ -2301,6 +2301,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if s.shuttingDown {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	// A draining node still serves its viewers' reconnects and seeks, which
+	// each arrive as a fresh GET, until it has reported itself drained.
+	if r.Method != http.MethodHead && s.reportedDrained() {
+		s.reloadMu.RUnlock()
+		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
 	if s.watcher.Config() != cfg {

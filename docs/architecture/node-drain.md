@@ -47,9 +47,10 @@ While draining, the node:
   extraction and media sampling with the `503` shapes their clients already
   treat as an unavailable node;
 - rebuilds a lost session (one the 10-minute idle reaper closed while its
-  viewer was paused) only until it has reported itself drained. Once a health
-  check has read `drained`, whoever read it may stop the node, so from then on
-  it rebuilds none and the client's next plan moves the session;
+  viewer was paused), and starts a progressive remux for a reconnect or seek,
+  only until it has reported itself drained. Once a health check has read
+  `drained`, whoever read it may stop the node, so from then on it starts
+  neither and the client's next plan moves the session;
 - keeps serving manifests, segments, segment acks, `DELETE /transcode/{id}`,
   prepared-artifact reads and deletes, progressive remux requests, status and
   metrics, and restarts FFmpeg for its own sessions on a seek.
@@ -93,12 +94,15 @@ A draining node stays in the pools, so it is still health-checked, its jobs
 still count against a shared GPU, and its prepared downloads are still served.
 New placement skips it: `ReserveTranscodeWorkWith`, `TranscodeWorkAvailableWith`
 and `Reservations.Reserve` exclude it (`Reserve` reports `CapacityExhausted`
-when it was the only node), Jellyfin negotiation of a Dolby Vision strip or an
-HEVC encode does not count it as a capable node, and session planning admits it
-only as the session's current transcode node. That exception keeps a Jellyfin stream alive
+when it was the only node), v3 capability planning and Jellyfin negotiation of
+a Dolby Vision strip or an HEVC encode do not count what it advertises, and
+session planning admits it only as the session's current transcode node, and
+only until it reports `drained`. That exception keeps a Jellyfin stream alive
 when its client asks for the master playlist again, which plans the session
 once more; a v3 seek or quality change asks the node for a new transport,
-which the node refuses, and the session moves.
+which the node refuses, and the session moves. Once the node reports `drained`
+it runs no session, so a returning Jellyfin client is planned on another node
+and the runtime recorded on the drained node is not adopted.
 
 The web admin nodes page shows `Draining · N transcodes left` while work
 remains and `Drained · safe to stop` only once the node itself reports

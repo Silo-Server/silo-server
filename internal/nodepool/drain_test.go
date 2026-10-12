@@ -190,3 +190,25 @@ func TestTakesNewWork(t *testing.T) {
 		}
 	}
 }
+
+// A drained node runs no session, so even a session it used to run is planned
+// elsewhere; the new-work node list and the drained lookup agree.
+func TestDrainedNodeLosesCurrentSessionAffinity(t *testing.T) {
+	drained := drainingNode(2, "http://tc-drained", 0)
+	drained.DrainState = DrainStateDrained
+	f := newFixture([]*Node{proxyNode(1, "http://proxy", nil)}, []*Node{drained, transcodeNode(3, "http://tc-open", nil, 4)})
+
+	plan := f.planner.PlanSession("s1", "http://tc-drained", true, 0)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-open" {
+		t.Fatalf("session from a drained node planned onto %+v, want tc-open", plan.TranscodeNode)
+	}
+	if !f.planner.TranscodeNodeDrained("http://tc-drained/") || f.planner.TranscodeNodeDrained("http://tc-open") {
+		t.Fatal("TranscodeNodeDrained disagrees with the pooled drain states")
+	}
+	if got := f.planner.TranscodeNodeURLsForNewWork(); len(got) != 1 || got[0] != "http://tc-open" {
+		t.Fatalf("TranscodeNodeURLsForNewWork = %v, want only tc-open", got)
+	}
+	if got := f.planner.TranscodeNodeURLs(); len(got) != 2 {
+		t.Fatalf("TranscodeNodeURLs = %v, want both pooled nodes", got)
+	}
+}

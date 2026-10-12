@@ -63,16 +63,45 @@ func (n *Node) TakesNewWork() bool {
 
 // admitsSession reports whether the node may be picked for a playback session
 // whose current transcode node is currentURL. A draining node takes no new
-// session, but it stays eligible for the one it already runs: a Jellyfin
-// client that asks for its master playlist again is planned once more, and
-// planning it away would tear down a stream the node is still serving. The
-// node itself refuses a new transport for such a session (a v3 seek or quality
-// change), which moves it to another node.
+// session, but until it reports drained it stays eligible for the one it
+// already runs: a Jellyfin client that asks for its master playlist again is
+// planned once more, and planning it away would tear down a stream the node is
+// still serving. The node itself refuses a new transport for such a session (a
+// v3 seek or quality change), which moves it to another node. A drained node
+// runs no session, so a returning client is planned elsewhere.
 func admitsSession(n *Node, currentURL string) bool {
 	if !n.Draining() {
 		return true
 	}
+	if n.DrainState.normalized() == DrainStateDrained {
+		return false
+	}
 	return currentURL != "" && sameNodeURL(n.URL, currentURL)
+}
+
+// TranscodeNodeDrained reports whether the pooled transcode node at nodeURL
+// has reported itself drained. A drained node runs no session, so a runtime
+// recorded on it is gone and must not be adopted.
+func (p *Planner) TranscodeNodeDrained(nodeURL string) bool {
+	node, ok := p.TranscodeNodeByURL(nodeURL)
+	return ok && node.DrainState.normalized() == DrainStateDrained
+}
+
+// TranscodeNodeURLsForNewWork is TranscodeNodeURLs without draining nodes. A
+// draining node accepts no new transport, so capability planning for a new
+// plan must not count what it advertises.
+func (p *Planner) TranscodeNodeURLsForNewWork() []string {
+	if p == nil || p.transcodes == nil {
+		return nil
+	}
+	nodes := p.transcodes.Nodes()
+	urls := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node != nil && node.URL != "" && !node.Draining() {
+			urls = append(urls, node.URL)
+		}
+	}
+	return urls
 }
 
 // SetDrainRequested records or clears an administrator's drain request. It is
