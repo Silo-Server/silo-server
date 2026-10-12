@@ -13,8 +13,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -594,15 +596,20 @@ func (d *EventDispatcher) deliver(ctx context.Context, delivery EventDelivery) {
 		"event_id", delivery.EventID,
 		"attempt", delivery.Attempts,
 	}
+	// A plugin's error text can carry credentials it was given.
+	var message string
+	if err != nil {
+		message = logredact.SanitizeText(err.Error())
+	}
 	var recordErr error
 	switch {
 	case err == nil:
 		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
 	case errors.Is(err, errUndeliverable):
-		slog.WarnContext(ctx, "plugin event dispatcher: delivery dropped", append(logArgs, "error", err)...)
+		slog.WarnContext(ctx, "plugin event dispatcher: delivery dropped", append(logArgs, "error", message)...)
 		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
 	case delivery.Attempts > len(eventRetryDelays):
-		slog.WarnContext(ctx, "plugin event dispatcher: delivery failed, giving up", append(logArgs, "error", err)...)
+		slog.WarnContext(ctx, "plugin event dispatcher: delivery failed, giving up", append(logArgs, "error", message)...)
 		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
 	default:
 		delay := eventRetryDelays[delivery.Attempts-1]
@@ -613,8 +620,8 @@ func (d *EventDispatcher) deliver(ctx context.Context, delivery EventDelivery) {
 			// change made on another server, so it is retried too.
 			level = slog.LevelDebug
 		}
-		slog.Log(ctx, level, "plugin event dispatcher: delivery failed, will retry", append(logArgs, "retry_in", delay, "error", err)...)
-		recordErr = d.deliveries.Retry(ctx, delivery.ID, delivery.Attempts, delay, err.Error())
+		slog.Log(ctx, level, "plugin event dispatcher: delivery failed, will retry", append(logArgs, "retry_in", delay, "error", message)...)
+		recordErr = d.deliveries.Retry(ctx, delivery.ID, delivery.Attempts, delay, message)
 	}
 	if recordErr != nil {
 		// The lease runs out and the delivery is attempted again.

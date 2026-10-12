@@ -37,7 +37,9 @@ func NewEventDeliveryStore(pool *pgxpool.Pool) *EventDeliveryStore {
 
 // Enqueue inserts deliveries, due at once. A delivery for an installation
 // uninstalled since the caller listed its subscribers is skipped rather than
-// failing the others' insert.
+// failing the others' insert. FOR KEY SHARE holds each installation row until
+// the insert commits, so an uninstall cannot remove it between the join and
+// the foreign-key check.
 func (s *EventDeliveryStore) Enqueue(ctx context.Context, deliveries []EventDelivery) error {
 	if len(deliveries) == 0 {
 		return nil
@@ -61,7 +63,8 @@ func (s *EventDeliveryStore) Enqueue(ctx context.Context, deliveries []EventDeli
 		args = append(args, delivery.EventID, delivery.EventName, payload, delivery.InstallationID, delivery.CapabilityID)
 	}
 	sb.WriteString(`) AS v(event_id, event_name, payload, installation_id, capability_id)
-		WHERE EXISTS (SELECT 1 FROM plugin_installations i WHERE i.id = v.installation_id)`)
+		JOIN plugin_installations i ON i.id = v.installation_id
+		FOR KEY SHARE OF i`)
 	if _, err := s.pool.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("enqueue plugin event deliveries: %w", err)
 	}

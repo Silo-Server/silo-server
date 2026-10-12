@@ -184,6 +184,54 @@ func TestEventDeliveryOutboxPostgres(t *testing.T) {
 		}
 	})
 
+	t.Run("an uninstall racing the insert does not fail the others", func(t *testing.T) {
+		installation := seedResidentQueryInstallation(t, pool, true)
+		gone := seedResidentQueryInstallation(t, pool, true)
+		t.Cleanup(func() { drain(t) })
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, gone); err != nil {
+			t.Fatal(err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- store.Enqueue(ctx, []EventDelivery{
+				{EventID: "evt", EventName: "scan_complete", InstallationID: gone, CapabilityID: "events"},
+				{EventID: "evt", EventName: "scan_complete", InstallationID: installation, CapabilityID: "events"},
+			})
+		}()
+		// Wait until the insert waits on the uninstall's row lock.
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var waiting int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE wait_event_type = 'Lock' AND query LIKE 'INSERT INTO plugin_event_deliveries%'`).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			if waiting > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the insert never waited on the uninstall")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("enqueue racing an uninstall: %v", err)
+		}
+		claimed := claim(t, 10, time.Hour)
+		if len(claimed) != 1 || claimed[0].InstallationID != installation {
+			t.Fatalf("claimed = %+v, want only installation %d's delivery", claimed, installation)
+		}
+	})
+
 	t.Run("payload round trip and uninstall", func(t *testing.T) {
 		installation := seedResidentQueryInstallation(t, pool, true)
 		t.Cleanup(func() { drain(t) })

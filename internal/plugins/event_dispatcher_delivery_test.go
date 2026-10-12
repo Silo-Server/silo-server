@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
 )
@@ -370,5 +372,19 @@ func TestDeliveryClaimedByDeadServerIsDeliveredByAnother(t *testing.T) {
 	}
 	if pending := deliveries.pending(); len(pending) != 0 {
 		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
+// TestDeliveryErrorIsSanitized: a plugin's error text can carry credentials,
+// and the outbox keeps the last one.
+func TestDeliveryErrorIsSanitized(t *testing.T) {
+	ctx := t.Context()
+	client := &flakyClient{failures: 1, err: errors.New("rpc error: desc = api_key=SECRET rejected")}
+	d, deliveries := newDeliveryFixture(client)
+
+	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+	pending := deliveries.pending()
+	if len(pending) != 1 || strings.Contains(pending[0].lastError, "SECRET") || !strings.Contains(pending[0].lastError, "api_key=") {
+		t.Fatalf("stored error = %+v, want the message with the key's value masked", pending)
 	}
 }
