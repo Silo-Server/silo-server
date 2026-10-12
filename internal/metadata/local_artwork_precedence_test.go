@@ -2,10 +2,12 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -587,5 +589,64 @@ func TestLocalArtworkRetentionFollowsTheLevelThatSearched(t *testing.T) {
 	}
 	if got := episodeRepo.episodes[episodeKey(seriesID, 1, 1)].StillSourcePath; got != remoteStill {
 		t.Fatalf("episode still source = %q, want the remote still: the episode chain did not search", got)
+	}
+}
+
+// localHintEpisodeProvider stands in for the local (NFO) provider at the
+// season and episode levels; a non-nil err makes both calls fail.
+type localHintEpisodeProvider struct {
+	seasonArtProvider
+	err error
+}
+
+func (p *localHintEpisodeProvider) IdentityHints(context.Context, SearchQuery) map[string]string {
+	return nil
+}
+
+func (p *localHintEpisodeProvider) GetSeasons(ctx context.Context, req SeasonsRequest) ([]SeasonResult, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.seasonArtProvider.GetSeasons(ctx, req)
+}
+
+func (p *localHintEpisodeProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) ([]EpisodeResult, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.seasonArtProvider.GetEpisodes(ctx, req)
+}
+
+// A season or episode refresh, like a full refresh, counts a level as searched
+// only when the local provider answered: a failed call never looked at the
+// sidecars, so it cannot confirm cached local art is gone.
+func TestTargetRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderAnswered(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want localArtworkLevel
+	}{
+		{"local provider answered", nil, localArtworkSeason | localArtworkEpisode},
+		{"local provider failed", errors.New("season.nfo unreadable"), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			local := &localHintEpisodeProvider{seasonArtProvider: seasonArtProvider{slug: "nfo"}, err: tc.err}
+			service := &MetadataService{chainCache: map[string]chainCacheEntry{
+				"0:season":  {providers: []Provider{local}, expiresAt: time.Now().Add(time.Hour)},
+				"0:episode": {providers: []Provider{local}, expiresAt: time.Now().Add(time.Hour)},
+			}}
+			ctx := context.Background()
+			_, seasonSearched, err := service.fetchTargetSeasonResults(ctx, nil, 0, "en", 1, seriesChildLocalContext{})
+			if err != nil {
+				t.Fatalf("fetch seasons: %v", err)
+			}
+			_, episodeSearched, err := service.fetchTargetEpisodeResults(ctx, nil, 0, "en", 1, 1, seriesChildLocalContext{})
+			if err != nil {
+				t.Fatalf("fetch episodes: %v", err)
+			}
+			if got := seasonSearched | episodeSearched; got != tc.want {
+				t.Fatalf("searched levels = %b, want %b", got, tc.want)
+			}
+		})
 	}
 }

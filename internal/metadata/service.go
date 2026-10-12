@@ -4090,25 +4090,21 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
+		seasons, seasonSearched, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
 		if err != nil {
 			return err
 		}
-		episodes, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
+		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
 		if err != nil {
 			return err
 		}
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		var searched localArtworkLevel
-		if s.localArtworkInChain(ctx, folderID, "season") {
-			searched |= localArtworkSeason
+		persistCtx := ctx
+		if s.localArtworkUsable() {
+			persistCtx = withLocalArtworkSearched(ctx, seasonSearched|episodeSearched)
 		}
-		if s.localArtworkInChain(ctx, folderID, "episode") {
-			searched |= localArtworkEpisode
-		}
-		persistCtx := withLocalArtworkSearched(ctx, searched)
 		if s.persistSeasonAndEpisodeRows(persistCtx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 			updated = true
 		}
@@ -4201,11 +4197,14 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 	return accumulatedIDs, nil
 }
 
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, error) {
+// fetchTargetSeasonResults also reports localArtworkSeason when the local
+// provider answered, as processInternal records it.
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, localArtworkLevel, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
-		return nil, fmt.Errorf("resolve season provider chain: %w", err)
+		return nil, 0, fmt.Errorf("resolve season provider chain: %w", err)
 	}
+	var searched localArtworkLevel
 	seasonResults := make(map[int]*SeasonResult)
 	for _, p := range seasonChain {
 		ep, ok := p.(EpisodeProvider)
@@ -4230,6 +4229,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 		if !s.localArtworkUsable() {
 			dropLocalSeasonArtwork(seasons)
 		}
+		if _, local := p.(IdentityHintProvider); local {
+			searched |= localArtworkSeason
+		}
 		for _, season := range seasons {
 			if season.SeasonNumber != seasonNumber {
 				continue
@@ -4237,14 +4239,17 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			accumulateSeasonResults(seasonResults, []SeasonResult{season})
 		}
 	}
-	return flattenSeasonResults(seasonResults), nil
+	return flattenSeasonResults(seasonResults), searched, nil
 }
 
-func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, error) {
+// fetchTargetEpisodeResults also reports localArtworkEpisode when the local
+// provider answered, as processInternal records it.
+func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, localArtworkLevel, error) {
 	episodeChain, err := s.resolveChainCached(ctx, folderID, "episode")
 	if err != nil {
-		return nil, fmt.Errorf("resolve episode provider chain: %w", err)
+		return nil, 0, fmt.Errorf("resolve episode provider chain: %w", err)
 	}
+	var searched localArtworkLevel
 	episodeResults := make(map[episodeResultKey]*EpisodeResult)
 	for _, p := range episodeChain {
 		ep, ok := p.(EpisodeProvider)
@@ -4269,6 +4274,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 		if !s.localArtworkUsable() {
 			dropLocalEpisodeArtwork(episodes)
 		}
+		if _, local := p.(IdentityHintProvider); local {
+			searched |= localArtworkEpisode
+		}
 		for _, episode := range episodes {
 			if episode.SeasonNumber != seasonNumber {
 				continue
@@ -4279,7 +4287,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			accumulateEpisodeResults(episodeResults, []EpisodeResult{episode})
 		}
 	}
-	return flattenEpisodeResults(episodeResults), nil
+	return flattenEpisodeResults(episodeResults), searched, nil
 }
 
 func (s *MetadataService) enqueueSeriesChildImages(ctx context.Context, seriesID string, inputs []EnqueueImageCacheJobInput) {

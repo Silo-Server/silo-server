@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -86,19 +85,6 @@ func withLocalArtworkSearched(ctx context.Context, levels localArtworkLevel) con
 func localArtworkSearchedLevels(ctx context.Context) localArtworkLevel {
 	levels, _ := ctx.Value(localArtworkSearchedKey{}).(localArtworkLevel)
 	return levels
-}
-
-// localArtworkInChain reports whether the chain for contentLevel asks the
-// local provider for artwork that the image cache can use.
-func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int, contentLevel string) bool {
-	if !s.localArtworkUsable() {
-		return false
-	}
-	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
-	return err == nil && slices.ContainsFunc(chain, func(p Provider) bool {
-		_, local := p.(IdentityHintProvider)
-		return local
-	})
 }
 
 // localArtworkRetention keeps cached local artwork through a refresh that did
