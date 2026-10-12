@@ -2386,7 +2386,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if !stop || !unidentified {
-		h.rememberCompatTracks(r.Context(), session, playSession, remembered)
+		h.rememberCompatTracks(r.Context(), session, playSession, remembered, stop)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(

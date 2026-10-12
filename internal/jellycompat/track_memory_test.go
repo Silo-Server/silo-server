@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -408,12 +409,13 @@ func TestRememberCompatTracksClaimsAgainstTheCurrentPlay(t *testing.T) {
 	if !ok {
 		t.Fatal("play-1 missing")
 	}
+	stale.MediaSources = slices.Clone(stale.MediaSources)
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	off := compatIntValue(-1)
 	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &off}
 
-	handler.rememberCompatTracks(t.Context(), session, stale, req)
-	handler.rememberCompatTracks(t.Context(), session, stale, req)
+	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
+	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
 
 	if prefs.attempts != 1 {
 		t.Fatalf("write attempts = %d for one change seen twice, want 1", prefs.attempts)
@@ -451,7 +453,7 @@ func TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave(t *testing
 		}
 		value := compatIntValue(index)
 		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value})
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
 	}
 	prefs.beforeSubtitleWrite = func() { report(-1) }
 
@@ -460,5 +462,70 @@ func TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave(t *testing
 	last := prefs.subtitles[len(prefs.subtitles)-1]
 	if last.SubtitleMode != profileSubtitleOff {
 		t.Fatalf("last subtitle write = %+v (all: %d), want the later off choice", last, len(prefs.subtitles))
+	}
+}
+
+// TestRememberCompatTracksJudgesAStopAgainstTheStoredPlay covers a replica
+// whose copy of the play predates a change another replica saved: a Progress
+// report it judges unchanged waits for the next report, but a Stopped report
+// is the last one, so it is judged against the stored play.
+func TestRememberCompatTracksJudgesAStopAgainstTheStoredPlay(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	stale, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	// The replica's copy does not share sources with the stored play.
+	stale.MediaSources = slices.Clone(stale.MediaSources)
+	// Another replica saved subtitles off.
+	if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+		s.MediaSources[0].RememberedSubtitleStreamIndex = intPtr(compatSubtitleOff)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	forced := compatIntValue(trackMemoryForcedSubtitle)
+	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &forced}
+
+	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
+	if prefs.attempts != 0 {
+		t.Fatalf("progress write attempts = %d from a stale copy, want 0 until the next report", prefs.attempts)
+	}
+	handler.rememberCompatTracks(t.Context(), session, stale, req, true)
+	if len(prefs.subtitles) != 1 || prefs.subtitles[0].TrackSignature == nil || !prefs.subtitles[0].TrackSignature.Forced {
+		t.Fatalf("subtitle saves = %+v, want the forced track the stop switched back to", prefs.subtitles)
+	}
+}
+
+// terminalRowStore stands in for the durable store when its stored row is
+// terminal while the replica's cached copy is not: Update runs the callback on
+// the stored row.
+type terminalRowStore struct {
+	CompatPlaybackStore
+	row PlaybackSession
+}
+
+func (s *terminalRowStore) Update(_ string, fn func(*PlaybackSession) error) error {
+	return fn(&s.row)
+}
+
+func TestClaimCompatTrackChangeRejectsATerminalStoredRow(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	current, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	row := *current
+	row.Terminal = true
+	handler.playbackStore = &terminalRowStore{CompatPlaybackStore: handler.playbackStore, row: row}
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	off := compatIntValue(-1)
+
+	handler.rememberCompatTracks(t.Context(), session, current,
+		sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &off}, true)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("write attempts = %d for a play the stored row has finished, want 0", prefs.attempts)
 	}
 }
