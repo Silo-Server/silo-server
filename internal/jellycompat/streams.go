@@ -3764,7 +3764,6 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ItemID:              detail.ContentID,
 		RouteItemID:         routeID,
 		ClientPlaySessionID: clientPlaySessionID,
-		PreferenceKey:       compatTrackPreferenceKey(detail),
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
 	}
