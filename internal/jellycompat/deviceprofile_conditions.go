@@ -384,8 +384,9 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		"isinterlaced":   {text: strconv.FormatBool(video.Interlaced)},
 	}
 
-	// Everything below is only inserted when Silo actually knows the value.
-	// An absent key falls through to conditionMatches' IsRequired handling,
+	// Everything below is only inserted when Silo actually knows the value,
+	// except reference frames (see below). An absent key falls through to
+	// conditionMatches' IsRequired handling,
 	// mirroring how Jellyfin's ConditionProcessor treats a null value.
 	if strings.TrimSpace(video.Profile) != "" {
 		values["videoprofile"] = conditionValue{text: video.Profile}
@@ -395,6 +396,17 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 	}
 	if refFrames := intConditionValue(video.ReferenceFrames); refFrames.hasNum {
 		values["refframes"] = refFrames
+	} else {
+		// FFmpeg 8.1 reports a stream's reference frames only while reading
+		// frames, so no scanned file carries a count (see mediaprobe.Stream).
+		// Under FFmpeg 7, which Jellyfin 10.x ships, ffprobe reported the
+		// decoder default of 1 for every file, and clients tuned their rules
+		// against that: Moonfin requires RefFrames <= 4 from 1900 pixels wide.
+		// Failing such a rule here would force an encode of every HD H.264
+		// file those clients direct play on Jellyfin, so evaluate it against
+		// the same 1. Reading max_num_ref_frames from the SPS at scan time
+		// would replace this with the real count.
+		values["refframes"] = intConditionValue(1)
 	}
 	if width := intConditionValue(video.Width); width.hasNum {
 		values["width"] = width

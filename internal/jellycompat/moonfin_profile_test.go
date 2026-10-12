@@ -46,3 +46,23 @@ func TestMoonfinIOSProfileCanTranscodeH264(t *testing.T) {
 		t.Errorf("SupportsTranscoding = false: the encode target can satisfy profile, level and reference-frame rules")
 	}
 }
+
+// FFmpeg 8.1 never reports reference frames, so Moonfin's required
+// RefFrames <= 4 rule evaluates against the 1 that FFmpeg 7 reported, and a
+// 1080p H.264 file Moonfin direct plays on Jellyfin direct plays here too.
+func TestMoonfinIOSProfileDirectPlaysH264WithUnreportedRefFrames(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	req := playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1), MaxStreamingBitrate: 120_000_000}
+	source := h.buildPlaybackSource("item", "play", moonfinH264Version(), moonfinIOSProfile(t), req, true)
+	if !source.SupportsDirectPlay {
+		t.Errorf("SupportsDirectPlay = false for a file Moonfin direct plays on Jellyfin")
+	}
+
+	// A count the probe did report is still enforced.
+	version := moonfinH264Version()
+	version.VideoTracks[0].ReferenceFrames = 8
+	source = h.buildPlaybackSource("item", "play", version, moonfinIOSProfile(t), req, true)
+	if source.SupportsDirectPlay || !source.SupportsTranscoding {
+		t.Errorf("eight known reference frames: direct=%v transcoding=%v, want an encode", source.SupportsDirectPlay, source.SupportsTranscoding)
+	}
+}
