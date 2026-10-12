@@ -324,7 +324,7 @@ func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersio
 		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && channels > maxChannels {
 			continue
 		}
-		if !conditionsMatch(profile.Conditions, outputValues) {
+		if !matchOutput(profile.Conditions, outputValues) {
 			continue
 		}
 		if (requireExplicitProfile && strings.TrimSpace(profile.VideoCodec) == "") || !matchesCSV(profile.VideoCodec, videoCodec) {
@@ -348,11 +348,17 @@ const h264StreamingLevel = 41
 // h264EncodeFacts states the profile and level of an H.264 encode of video,
 // whose frame size and rate are already the output's. Every H.264 encode
 // here is High profile (playback.H264EncodeProfile). The level is the one the
-// stream needs at the rate the encoder gets, as the download path checks it
-// (playback.H264EncodeKbps), and never below the 4.1 the streaming libx264
-// encode is pinned to, so a rule checks the higher of the two.
+// stream needs at the rate the encoder is configured with: a capped encode
+// sets its maximum rate to videoBitrateKbps (appendCappedVBRArgs), whatever
+// the source's rate; an uncapped encode has no rate ceiling and is estimated
+// at the source's H.264-equivalent rate. It is never below the 4.1 the
+// streaming libx264 encode is pinned to, so a rule checks the higher of the
+// two.
 func h264EncodeFacts(video models.VideoTrack, videoBitrateKbps int, source catalog.FileVersion) (profile string, level int) {
-	kbps := playback.H264EncodeKbps(videoBitrateKbps, source.Bitrate, source.CodecVideo)
+	kbps := videoBitrateKbps
+	if kbps <= 0 {
+		kbps = playback.H264EquivalentKbps(source.Bitrate, source.CodecVideo)
+	}
 	level = max(playback.H264LevelFor(video.Width, video.Height, parseCompatFrameRate(video.FrameRate), kbps), h264StreamingLevel)
 	return playback.H264EncodeProfile, level
 }

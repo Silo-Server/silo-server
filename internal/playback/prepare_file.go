@@ -246,16 +246,11 @@ func H264LevelFor(width, height int, frameRate float64, kbps int) int {
 	return h264LevelFor(width, height, frameRate, kbps)
 }
 
-// H264EncodeKbps is the rate an H.264 encode under capKbps (0 for none) gets
-// from a source at sourceKbps in sourceCodec, as downloadLadderClass checks a
-// level against it: the cap, never above the source's H.264-equivalent rate.
-// It is 0 when neither is known.
-func H264EncodeKbps(capKbps, sourceKbps int, sourceCodec string) int {
-	encodeKbps := capKbps
-	if equivalent := sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, transcodeCodecH264); equivalent > 0 && (encodeKbps <= 0 || equivalent < encodeKbps) {
-		encodeKbps = equivalent
-	}
-	return encodeKbps
+// H264EquivalentKbps is the rate an H.264 encode of a source at sourceKbps in
+// sourceCodec needs for the same quality (sourceEquivalentKbps), or 0 when
+// the source's rate is unknown.
+func H264EquivalentKbps(sourceKbps int, sourceCodec string) int {
+	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, transcodeCodecH264)
 }
 
 // h264LevelBitrateKbps is the highest cap whose rate and doubled buffer fit

@@ -136,3 +136,64 @@ func TestPlaybackBitrateResolutionDoesNotUpscale(t *testing.T) {
 		})
 	}
 }
+
+// A transcoding profile's own RefFrames rule describes the same encode as a
+// codec profile's, so an H.264 encode treats it as an encode target too and
+// an HEVC encode fails it closed.
+func TestTranscodingProfileRefFramesRuleOnEncode(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID: 42, Container: "mkv", CodecVideo: "vp9", CodecAudio: "aac", Bitrate: 8000, Resolution: "1080p",
+		VideoTracks: []models.VideoTrack{{Codec: "vp9", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+	}
+	refFrames := []ProfileCondition{{Condition: "LessThanEqual", Property: "RefFrames", Value: "4", IsRequired: true}}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	req := playbackInfoRequest{EnableDirectPlay: new(false), AllowVideoStreamCopy: new(false)}
+
+	profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{
+		{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac", Conditions: refFrames},
+	}}
+	if source := h.buildPlaybackSource("item", "play", version, profile, req, true); !source.SupportsTranscoding {
+		t.Fatal("SupportsTranscoding = false for an H.264 encode under a transcoding profile's RefFrames rule")
+	}
+
+	profile = DeviceProfile{TranscodingProfiles: []TranscodingProfile{
+		{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc", AudioCodec: "aac", Conditions: refFrames},
+		{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"},
+	}}
+	if source := h.buildPlaybackSource("item", "play", version, profile, req, true, true); !source.SupportsTranscoding || source.TargetVideoCodec != "h264" {
+		t.Fatalf("transcoding=%v codec=%q, want an H.264 fallback from the HEVC profile's RefFrames rule", source.SupportsTranscoding, source.TargetVideoCodec)
+	}
+}
+
+// The streaming encoder's maximum rate is the requested cap, not the source's
+// rate, so a client's level rule is checked at the cap: a 4,000 kbps source
+// capped near 60,000 kbps needs level 5.0, above a required 4.1.
+func TestH264EncodeLevelUsesTheConfiguredRate(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 4000, Resolution: "1080p",
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24"}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+	}
+	profile := DeviceProfile{
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"}},
+		CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Conditions: []ProfileCondition{
+			{Condition: "LessThanEqual", Property: "VideoLevel", Value: "41", IsRequired: true},
+		}}},
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	req := playbackInfoRequest{EnableDirectPlay: new(false), EnableDirectStream: new(false), MaxStreamingBitrate: 64_000_000}
+	source := h.buildPlaybackSource("item", "play", version, profile, req, true)
+	if source.TargetBitrateKbps < 60_000 {
+		t.Fatalf("target rate %d kbps, want a cap of at least 60,000", source.TargetBitrateKbps)
+	}
+	if source.SupportsTranscoding {
+		t.Fatalf("SupportsTranscoding = true: a %d kbps cap needs level 5.0, above the required 4.1", source.TargetBitrateKbps)
+	}
+
+	// Uncapped, the encode is estimated at the source's rate: level 4.0, so 4.1.
+	req.MaxStreamingBitrate = 0
+	if source := h.buildPlaybackSource("item", "play", version, profile, req, true); !source.SupportsTranscoding {
+		t.Fatal("SupportsTranscoding = false for an uncapped encode of a 4,000 kbps 1080p24 source")
+	}
+}
