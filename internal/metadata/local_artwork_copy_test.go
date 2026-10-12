@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // localClaimingImageCacheJobs records which claim a drain used.
@@ -244,6 +246,39 @@ func TestOnlyVisibleLocalArtworkGoesToTheCopier(t *testing.T) {
 	}
 	if len(jobs.inputs) != 1 || jobs.inputs[0].SourcePath != unseen {
 		t.Fatalf("queued %#v, want only the unseen backdrop", jobs.inputs)
+	}
+}
+
+// A folder that does not answer in time makes its sidecars unseen, without
+// looking the files up, and each folder is probed once.
+func TestVisibleLocalSidecarsProbesEachFolderOnce(t *testing.T) {
+	answering := t.TempDir()
+	writeTestBytes(t, filepath.Join(answering, "poster.jpg"))
+	stalled := filepath.Join(t.TempDir(), "stalled-share")
+	src := func(dir, name string) EnqueueImageCacheJobInput {
+		return EnqueueImageCacheJobInput{SourcePath: "file://" + filepath.Join(dir, name) + "?v=1-1"}
+	}
+	var probed []string
+	probe := func(_ context.Context, paths []string, _ time.Duration) []rootcheck.Result {
+		probed = append(probed, paths...)
+		results := make([]rootcheck.Result, len(paths))
+		for i, p := range paths {
+			if p == answering {
+				results[i] = rootcheck.Result{Reachable: true}
+			} else {
+				results[i] = rootcheck.Result{ErrorCode: rootcheck.ErrCodeTimeout}
+			}
+		}
+		return results
+	}
+	got := visibleLocalSidecars(context.Background(), []EnqueueImageCacheJobInput{
+		src(answering, "poster.jpg"), src(answering, "fanart.jpg"), src(stalled, "poster.jpg"), src(stalled, "fanart.jpg"),
+	}, probe)
+	if want := []bool{true, false, false, false}; !slices.Equal(got, want) {
+		t.Fatalf("visible = %v, want %v", got, want)
+	}
+	if len(probed) != 2 {
+		t.Fatalf("probed %v, want each folder once", probed)
 	}
 }
 

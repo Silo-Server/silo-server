@@ -4,9 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // SetLocalArtworkCopier wires the copier that copies local sidecar artwork a
@@ -29,8 +32,9 @@ func (s *MetadataService) copyLocalArtwork(ctx context.Context, targetKind, targ
 	}
 	local, rest := splitLocalImageCacheInputs(inputs)
 	var seen []EnqueueImageCacheJobInput
-	for _, in := range local {
-		if localSidecarVisible(in.SourcePath) {
+	visible := visibleLocalSidecars(ctx, local, rootcheck.ProbeManyWithTimeout)
+	for i, in := range local {
+		if visible[i] {
 			seen = append(seen, in)
 		} else {
 			rest = append(rest, in)
@@ -47,15 +51,48 @@ func (s *MetadataService) copyLocalArtwork(ctx context.Context, targetKind, targ
 	return rest
 }
 
-// localSidecarVisible reports whether the file a local source names exists
-// on this server.
-func localSidecarVisible(source string) bool {
-	path, ok := localImageSourceFilePath(source)
-	if !ok {
-		return false
+// folderProber probes folders with a timeout; rootcheck.ProbeManyWithTimeout
+// in production.
+type folderProber func(ctx context.Context, paths []string, timeout time.Duration) []rootcheck.Result
+
+// visibleLocalSidecars reports, for each local input, whether the file it
+// names exists on this server. Each folder is probed first, once, through
+// probe with rootcheck's timeout and coalescing, so a share that does not
+// answer costs the refresh at most that timeout and counts as unseen; the
+// file is looked up only in a folder that answered.
+func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput, probe folderProber) []bool {
+	paths := make([]string, len(local))
+	folderOf := make([]int, len(local)) // index into folders, -1 when not local
+	folderIndex := make(map[string]int)
+	var folders []string
+	for i, in := range local {
+		folderOf[i] = -1
+		path, ok := localImageSourceFilePath(in.SourcePath)
+		if !ok {
+			continue
+		}
+		dir := filepath.Dir(path)
+		idx, ok := folderIndex[dir]
+		if !ok {
+			idx = len(folders)
+			folderIndex[dir] = idx
+			folders = append(folders, dir)
+		}
+		paths[i], folderOf[i] = path, idx
 	}
-	_, err := os.Lstat(path)
-	return err == nil
+	visible := make([]bool, len(local))
+	if len(folders) == 0 {
+		return visible
+	}
+	probes := probe(ctx, folders, rootcheck.DefaultProbeTimeout)
+	for i, path := range paths {
+		if folderOf[i] < 0 || !probes[folderOf[i]].Reachable {
+			continue
+		}
+		_, err := os.Lstat(path)
+		visible[i] = err == nil
+	}
+	return visible
 }
 
 // applyLocalArtworkFallback fills each item slot waiting on its local copy,
