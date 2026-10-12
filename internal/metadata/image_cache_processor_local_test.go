@@ -320,3 +320,105 @@ func TestProcessLocalImageFailsWithoutRootResolver(t *testing.T) {
 		t.Fatal("must not cache without confinement roots")
 	}
 }
+
+func fingerprintedSource(t *testing.T, path string) string {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat %s: %v", path, err)
+	}
+	return LocalImageSourceURL(path, info.Size(), info.ModTime())
+}
+
+func TestProcessLocalImageStripsFingerprintBeforeReading(t *testing.T) {
+	root := t.TempDir()
+	// A "?" in the file name must survive stripping the fingerprint.
+	posterPath := filepath.Join(root, "What If?-poster.jpg")
+	if err := os.WriteFile(posterPath, []byte("poster-bytes"), 0o644); err != nil {
+		t.Fatalf("writing poster: %v", err)
+	}
+	source := fingerprintedSource(t, posterPath)
+	job := localArtworkJob(source)
+	p, jobs, cacher, items, _ := newLocalProcessorForTest(job, []string{root}, "")
+
+	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Succeeded != 1 {
+		t.Fatalf("stats = %+v, want 1 succeeded (failed text %q)", stats, jobs.failedText)
+	}
+	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "poster-bytes" {
+		t.Fatalf("read %q, want the poster bytes", cacher.byteReqs)
+	}
+	// The target update matches on the stored, fingerprinted source.
+	if items.sourcePath != source {
+		t.Fatalf("updated source = %q, want %q", items.sourcePath, source)
+	}
+}
+
+func TestProcessLocalImageFingerprintKeepsConfinement(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	outside := writeLocalPoster(t, other)
+	rel, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatalf("rel: %v", err)
+	}
+	for name, source := range map[string]string{
+		"outside root": fingerprintedSource(t, outside),
+		"dot-dot":      "file://" + root + string(filepath.Separator) + rel + "?v=12-1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			job := localArtworkJob(source)
+			p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+			stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if stats.Failed != 1 || len(cacher.byteReqs) != 0 {
+				t.Fatalf("stats = %+v, reads = %d: a fingerprinted source escaped the library roots", stats, len(cacher.byteReqs))
+			}
+			if !isStableProviderImageFailure(jobs.failedText) {
+				t.Fatalf("confinement failure %q must be a stable failure", jobs.failedText)
+			}
+		})
+	}
+}
+
+func TestProcessLocalImageSizeCapMatchesRemoteImages(t *testing.T) {
+	root := t.TempDir()
+	// Above the old 8 MiB local cap, within the 25 MiB remote cap.
+	large := filepath.Join(root, "poster.jpg")
+	if err := os.WriteFile(large, make([]byte, 9<<20), 0o644); err != nil {
+		t.Fatalf("writing poster: %v", err)
+	}
+	job := localArtworkJob(fingerprintedSource(t, large))
+	p, jobs, _, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Succeeded != 1 {
+		t.Fatalf("9 MiB poster: stats = %+v (failed text %q)", stats, jobs.failedText)
+	}
+
+	oversized := filepath.Join(root, "fanart.jpg")
+	f, err := os.Create(oversized)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := f.Truncate(MaxArtworkSourceBytes + 1); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	_ = f.Close()
+	job = localArtworkJob(fingerprintedSource(t, oversized))
+	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	stats, err = p.RunOnce(context.Background(), "w1", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Failed != 1 || len(cacher.byteReqs) != 0 || !isStableProviderImageFailure(jobs.failedText) {
+		t.Fatalf("oversized: stats = %+v failed text %q", stats, jobs.failedText)
+	}
+}

@@ -212,13 +212,13 @@ func TestGetSeasons_SeasonNFOAndPoster(t *testing.T) {
 	if seasons[0].SeasonNumber != 1 || seasons[0].Title != "Course A: Classic" || seasons[0].Overview != "Classic plan." {
 		t.Errorf("season 1 = %#v", seasons[0])
 	}
-	if want := "file://" + filepath.Join(s1, "poster.jpg"); seasons[0].PosterPath != want {
+	if want := filepath.Join(s1, "poster.jpg"); sidecarPath(t, seasons[0].PosterPath) != want {
 		t.Errorf("season 1 poster = %q, want %q", seasons[0].PosterPath, want)
 	}
 	if seasons[1].SeasonNumber != 2 || seasons[1].Title != "Course B" {
 		t.Errorf("season 2 = %#v", seasons[1])
 	}
-	if want := "file://" + filepath.Join(root, "season02-poster.jpg"); seasons[1].PosterPath != want {
+	if want := filepath.Join(root, "season02-poster.jpg"); sidecarPath(t, seasons[1].PosterPath) != want {
 		t.Errorf("season 2 poster = %q, want %q", seasons[1].PosterPath, want)
 	}
 }
@@ -288,9 +288,142 @@ func TestGetSeasons_NonSeriesContentTypeReturnsNothing(t *testing.T) {
 	}
 }
 
+func TestGetSeasons_PosterNamesIgnoreCase(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s1 := filepath.Join(root, "Season 01")
+	s2 := filepath.Join(root, "Season 02")
+	specials := filepath.Join(root, "Specials")
+	writeTestFile(t, filepath.Join(s1, "Folder.JPG"), "img")
+	writeTestFile(t, filepath.Join(s2, "episode.mkv"), "video")
+	writeTestFile(t, filepath.Join(root, "Season02-Poster.PNG"), "img")
+	writeTestFile(t, filepath.Join(specials, "episode.mkv"), "video")
+	writeTestFile(t, filepath.Join(root, "Season-Specials-Poster.jpg"), "img")
+
+	p := NewProvider()
+	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+		ContentType:     "series",
+		SeriesRootPaths: []string{root},
+		SeasonDirectoryPaths: map[int][]string{
+			0: {specials},
+			1: {s1},
+			2: {s2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetSeasons: %v", err)
+	}
+	want := map[int]string{
+		0: filepath.Join(root, "Season-Specials-Poster.jpg"),
+		1: filepath.Join(s1, "Folder.JPG"),
+		2: filepath.Join(root, "Season02-Poster.PNG"),
+	}
+	if len(seasons) != len(want) {
+		t.Fatalf("seasons = %#v, want %d", seasons, len(want))
+	}
+	for _, season := range seasons {
+		if got := sidecarPath(t, season.PosterPath); got != want[season.SeasonNumber] {
+			t.Errorf("season %d poster = %q, want %q", season.SeasonNumber, got, want[season.SeasonNumber])
+		}
+	}
+}
+
+// In a flat layout the episodes sit in the series root, so the root's
+// poster.jpg is the series poster and must not become every season's poster.
+// The root's seasonNN-poster still applies.
+func TestGetSeasons_FlatLayoutKeepsSeriesPosterOffSeasons(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "Show S01E01.mkv"), "video")
+	writeTestFile(t, filepath.Join(root, "Show S02E01.mkv"), "video")
+	writeTestFile(t, filepath.Join(root, "poster.jpg"), "img")
+	writeTestFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
+
+	p := NewProvider()
+	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+		ContentType:          "series",
+		SeriesRootPaths:      []string{root},
+		SeasonDirectoryPaths: map[int][]string{1: {root}, 2: {root}},
+	})
+	if err != nil {
+		t.Fatalf("GetSeasons: %v", err)
+	}
+	if len(seasons) != 1 || seasons[0].SeasonNumber != 2 {
+		t.Fatalf("seasons = %#v, want only season 2 from season02-poster.jpg", seasons)
+	}
+	if got := sidecarPath(t, seasons[0].PosterPath); got != filepath.Join(root, "season02-poster.jpg") {
+		t.Fatalf("season 2 poster = %q", got)
+	}
+}
+
+// Season folder art does not depend on the series root being known: a show
+// whose root is not a validated sidecar location still finds it.
+func TestGetSeasons_SeasonFolderPosterWithoutSeriesRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s1 := filepath.Join(root, "Season 01")
+	writeTestFile(t, filepath.Join(s1, "Cover.jpg"), "img")
+
+	p := NewProvider()
+	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+		ContentType:          "series",
+		SeasonDirectoryPaths: map[int][]string{1: {s1}},
+	})
+	if err != nil {
+		t.Fatalf("GetSeasons: %v", err)
+	}
+	if len(seasons) != 1 || sidecarPath(t, seasons[0].PosterPath) != filepath.Join(s1, "Cover.jpg") {
+		t.Fatalf("seasons = %#v, want Season 01/Cover.jpg", seasons)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Provider: GetEpisodes
 // ---------------------------------------------------------------------------
+
+func TestGetEpisodes_ThumbnailNames(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s1 := filepath.Join(root, "Season 01")
+	e1 := filepath.Join(s1, "Show S01E01.mkv")
+	e2 := filepath.Join(s1, "Show S01E02.mkv")
+	e3 := filepath.Join(s1, "Show S01E03.mkv")
+	for _, path := range []string{e1, e2, e3} {
+		writeTestFile(t, path, "video")
+	}
+	// -thumb beats the bare basename image; either name matches ignoring case.
+	writeTestFile(t, filepath.Join(s1, "Show S01E01-thumb.jpg"), "img")
+	writeTestFile(t, filepath.Join(s1, "Show S01E01.jpg"), "img")
+	writeTestFile(t, filepath.Join(s1, "Show S01E02.PNG"), "img")
+	writeTestFile(t, filepath.Join(s1, "show s01e03-THUMB.jpg"), "img")
+
+	p := NewProvider()
+	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+		SeasonNumber:     1,
+		SeriesRootPaths:  []string{root},
+		EpisodeFilePaths: map[int][]string{1: {e1}, 2: {e2}, 3: {e3}},
+	})
+	if err != nil {
+		t.Fatalf("GetEpisodes: %v", err)
+	}
+	want := map[int]string{
+		1: filepath.Join(s1, "Show S01E01-thumb.jpg"),
+		2: filepath.Join(s1, "Show S01E02.PNG"),
+		3: filepath.Join(s1, "show s01e03-THUMB.jpg"),
+	}
+	if len(episodes) != len(want) {
+		t.Fatalf("episodes = %#v, want %d", episodes, len(want))
+	}
+	for _, ep := range episodes {
+		if got := sidecarPath(t, ep.StillPath); got != want[ep.EpisodeNumber] {
+			t.Errorf("episode %d still = %q, want %q", ep.EpisodeNumber, got, want[ep.EpisodeNumber])
+		}
+	}
+}
 
 func TestGetEpisodes_EpisodeNFOAndThumb(t *testing.T) {
 	t.Parallel()
@@ -335,7 +468,7 @@ func TestGetEpisodes_EpisodeNFOAndThumb(t *testing.T) {
 	if ep.Runtime != 53 {
 		t.Errorf("Runtime = %d, want 53", ep.Runtime)
 	}
-	if want := "file://" + filepath.Join(s1, "P90X S01E01 - Chest and Back-thumb.jpg"); ep.StillPath != want {
+	if want := filepath.Join(s1, "P90X S01E01 - Chest and Back-thumb.jpg"); sidecarPath(t, ep.StillPath) != want {
 		t.Errorf("StillPath = %q, want %q", ep.StillPath, want)
 	}
 }

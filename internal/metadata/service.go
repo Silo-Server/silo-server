@@ -1915,6 +1915,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
+	var localArtworkSearched localArtworkLevel
 	for _, p := range itemChain {
 		ip, ok := p.(ImageProvider)
 		if !ok {
@@ -1923,7 +1924,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// A manual Identify skips the local hint provider (NFO) across every
 		// phase: its sidecar art is resolved by file path, not by the chosen id,
 		// so a stale poster/fanart must not be re-applied over the user's choice.
-		if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+		_, isIdentityHinter := p.(IdentityHintProvider)
+		if isIdentityHinter && req.Mode == ModeIdentify {
 			continue
 		}
 		images, err := ip.GetImages(ctx, ImageRequest{
@@ -1943,6 +1945,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
 			continue
+		}
+		if isIdentityHinter {
+			localArtworkSearched |= localArtworkItem
 		}
 		allImages = append(allImages, images...)
 	}
@@ -1977,7 +1982,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			// Identify skips the local hint provider (NFO): a stale season.nfo
 			// must not overlay season names on the user's chosen identity.
-			if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+			_, isIdentityHinter := p.(IdentityHintProvider)
+			if isIdentityHinter && req.Mode == ModeIdentify {
 				continue
 			}
 			seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
@@ -2002,6 +2008,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			if !s.localArtworkUsable() {
 				dropLocalSeasonArtwork(seasons)
+			}
+			if isIdentityHinter {
+				localArtworkSearched |= localArtworkSeason
 			}
 			accumulateSeasonResults(seasonResults, seasons)
 		}
@@ -2036,7 +2045,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					// Identify skips the local hint provider (NFO): stale episode
 					// NFOs/thumbs must not overlay the user's chosen identity.
-					if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+					_, isIdentityHinter := p.(IdentityHintProvider)
+					if isIdentityHinter && req.Mode == ModeIdentify {
 						continue
 					}
 					episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
@@ -2059,6 +2069,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					if !s.localArtworkUsable() {
 						dropLocalEpisodeArtwork(episodes)
+					}
+					if isIdentityHinter {
+						localArtworkSearched |= localArtworkEpisode
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
 				}
@@ -2087,6 +2100,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
+	if s.localArtworkUsable() {
+		ctx = withLocalArtworkSearched(ctx, localArtworkSearched)
+	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
 		return nil, err
@@ -2641,6 +2657,7 @@ func (s *MetadataService) mergeAndPersist(
 	// Apply best images.
 	if handleArtwork {
 		applyBestImages(item, images, mergeMode, req.Language)
+		keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -4073,18 +4090,22 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
+		seasons, seasonSearched, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
 		if err != nil {
 			return err
 		}
-		episodes, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
+		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
 		if err != nil {
 			return err
 		}
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		if s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
+		persistCtx := ctx
+		if s.localArtworkUsable() {
+			persistCtx = withLocalArtworkSearched(ctx, seasonSearched|episodeSearched)
+		}
+		if s.persistSeasonAndEpisodeRows(persistCtx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 			updated = true
 		}
 	}
@@ -4176,11 +4197,14 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 	return accumulatedIDs, nil
 }
 
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, error) {
+// fetchTargetSeasonResults also reports localArtworkSeason when the local
+// provider answered, as processInternal records it.
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, localArtworkLevel, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
-		return nil, fmt.Errorf("resolve season provider chain: %w", err)
+		return nil, 0, fmt.Errorf("resolve season provider chain: %w", err)
 	}
+	var searched localArtworkLevel
 	seasonResults := make(map[int]*SeasonResult)
 	for _, p := range seasonChain {
 		ep, ok := p.(EpisodeProvider)
@@ -4205,6 +4229,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 		if !s.localArtworkUsable() {
 			dropLocalSeasonArtwork(seasons)
 		}
+		if _, local := p.(IdentityHintProvider); local {
+			searched |= localArtworkSeason
+		}
 		for _, season := range seasons {
 			if season.SeasonNumber != seasonNumber {
 				continue
@@ -4212,14 +4239,17 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			accumulateSeasonResults(seasonResults, []SeasonResult{season})
 		}
 	}
-	return flattenSeasonResults(seasonResults), nil
+	return flattenSeasonResults(seasonResults), searched, nil
 }
 
-func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, error) {
+// fetchTargetEpisodeResults also reports localArtworkEpisode when the local
+// provider answered, as processInternal records it.
+func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, localArtworkLevel, error) {
 	episodeChain, err := s.resolveChainCached(ctx, folderID, "episode")
 	if err != nil {
-		return nil, fmt.Errorf("resolve episode provider chain: %w", err)
+		return nil, 0, fmt.Errorf("resolve episode provider chain: %w", err)
 	}
+	var searched localArtworkLevel
 	episodeResults := make(map[episodeResultKey]*EpisodeResult)
 	for _, p := range episodeChain {
 		ep, ok := p.(EpisodeProvider)
@@ -4244,6 +4274,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 		if !s.localArtworkUsable() {
 			dropLocalEpisodeArtwork(episodes)
 		}
+		if _, local := p.(IdentityHintProvider); local {
+			searched |= localArtworkEpisode
+		}
 		for _, episode := range episodes {
 			if episode.SeasonNumber != seasonNumber {
 				continue
@@ -4254,7 +4287,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			accumulateEpisodeResults(episodeResults, []EpisodeResult{episode})
 		}
 	}
-	return flattenEpisodeResults(episodeResults), nil
+	return flattenEpisodeResults(episodeResults), searched, nil
 }
 
 func (s *MetadataService) enqueueSeriesChildImages(ctx context.Context, seriesID string, inputs []EnqueueImageCacheJobInput) {
@@ -4468,6 +4501,7 @@ func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []Season
 			continue
 		}
 
+		preferLocalSeasonPoster(existing, &season)
 		MergeSeasonResult(&season, existing, MergeFillEmpty)
 	}
 }
@@ -4503,6 +4537,7 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			continue
 		}
 
+		preferLocalEpisodeStill(existing, &episode)
 		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
 	}
 }
@@ -4617,6 +4652,12 @@ func buildSeasonLocalizationRecord(
 	previousPosterPath := loc.PosterPath
 	previousPosterSourcePath := loc.PosterSourcePath
 	previousPosterThumbhash := loc.PosterThumbhash
+
+	// Local art belongs to the base season row; the localization row takes
+	// the provider poster a local one displaced.
+	if season.remotePosterPath != "" {
+		season.PosterPath, season.PosterThumbhash = season.remotePosterPath, season.remotePosterThumbhash
+	}
 
 	mergeScalar(&loc.Title, season.Title, mergeMode)
 	mergeScalar(&loc.Overview, season.Overview, mergeMode)
@@ -4937,6 +4978,8 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
+	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
+	episodeArtwork := seasonArtwork.atLevel(localArtworkEpisode)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,
@@ -5090,7 +5133,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				season.PosterPath,
+				seasonArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5485,7 +5528,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					ep.StillPath,
+					episodeArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,

@@ -123,6 +123,10 @@ func canonicalizeCompatPath(path string) string {
 		return "/Localization/Cultures"
 	case "/syncplay/list":
 		return "/SyncPlay/List"
+	case "/branding/css":
+		return "/Branding/Css"
+	case "/branding/css.css":
+		return "/Branding/Css.css"
 	}
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]

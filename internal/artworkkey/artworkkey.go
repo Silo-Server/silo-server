@@ -11,6 +11,16 @@ import (
 
 const OriginalVariant = "original"
 
+// LocalPrefix starts the key of every cached copy of artwork Silo read from
+// the library itself (sidecar images, embedded covers) rather than from a
+// metadata provider.
+const LocalPrefix = "local/"
+
+// IsLocal reports whether objectPath is a cached copy of library artwork.
+func IsLocal(objectPath string) bool {
+	return strings.HasPrefix(objectPath, LocalPrefix)
+}
+
 // Image types the variant ladder is keyed by. These name the directory segment
 // in a cached artwork key (".../{imageType}/{variant}.{ext}") and the argument
 // every ladder lookup takes, so they are the shared vocabulary for the packages
