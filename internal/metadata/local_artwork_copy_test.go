@@ -574,3 +574,115 @@ func TestCacheTargetArtworkStopsWhenAPageMakesNoProgress(t *testing.T) {
 		t.Fatalf("claims = %d, want one", jobs.targetCalls)
 	}
 }
+
+// A refresh on a server without the library mount keeps a local source whose
+// copy is still pending, and the remote stand-in it serves meanwhile, rather
+// than letting the remote pick take the slot and its queued job.
+func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
+	const (
+		contentID    = "movie:tmdb:7"
+		standIn      = "https://img.example/stand-in.jpg"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	for _, tc := range []struct {
+		name, path, wantPath string
+	}{
+		{name: "serving a stand-in", path: standIn, wantPath: standIn},
+		{name: "serving nothing yet", path: "", wantPath: remotePoster},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			localSource := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
+			h := newTestHarness()
+			enqueuer := &recordingImageCacheJobEnqueuer{}
+			h.service.SetImageCacheJobEnqueuer(enqueuer)
+			ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
+			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+				PosterPath: tc.path, PosterSourcePath: localSource,
+				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+			}); err != nil {
+				t.Fatalf("upsert existing item: %v", err)
+			}
+			providerRepo := newFakeProviderIDRepo()
+			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+			h.service.providerIDRepo = providerRepo
+
+			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
+				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+				[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
+				nil, nil, "movie"); err != nil {
+				t.Fatalf("mergeAndPersist: %v", err)
+			}
+			got, err := h.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got.PosterSourcePath != localSource || got.PosterPath != tc.wantPath {
+				t.Fatalf("poster = path %q source %q, want path %q and the local source kept", got.PosterPath, got.PosterSourcePath, tc.wantPath)
+			}
+			for _, job := range enqueuer.inputs {
+				if job.ImageType == ImageCacheImagePoster && job.SourcePath != localSource {
+					t.Fatalf("queued %q over the pending local poster", job.SourcePath)
+				}
+			}
+		})
+	}
+}
+
+// Seasons and episodes keep a pending local source and its stand-in the same
+// way, also when the refresh offers no artwork at all.
+func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
+	const (
+		seriesID      = "series:tvdb:123"
+		seasonStandIn = "https://img.example/season-stand-in.jpg"
+		stillStandIn  = "https://img.example/still-stand-in.jpg"
+	)
+	for _, tc := range []struct{ name, remoteSeason, remoteStill string }{
+		{name: "remote artwork offered", remoteSeason: "tvdb://remote-season.jpg", remoteStill: "tvdb://remote-still.jpg"},
+		{name: "no artwork offered"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			folder := filepath.Join(t.TempDir(), "missing-mount", "Show", "Season 01")
+			seasonSource := "file://" + filepath.Join(folder, "poster.jpg") + "?v=12-1"
+			stillSource := "file://" + filepath.Join(folder, "Show S01E01-thumb.jpg") + "?v=9-1"
+			service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+			enqueuer := &recordingImageCacheJobEnqueuer{}
+			service.SetImageCacheJobEnqueuer(enqueuer)
+			seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+				ContentID: "season-1", SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1",
+				PosterPath: seasonStandIn, PosterSourcePath: seasonSource, PosterThumbhash: "season-thumb",
+			}
+			episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
+				ContentID: "episode-1", SeriesID: seriesID, SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 1,
+				Title: "Pilot", StillPath: stillStandIn, StillSourcePath: stillSource, StillThumbhash: "still-thumb",
+			}
+
+			service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background(), localArtworkSeason|localArtworkEpisode),
+				&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
+				map[string]string{"tvdb": "123"}, "en", "en",
+				[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: tc.remoteSeason}},
+				[]EpisodeResult{{
+					ProviderIDs: map[string]string{"tvdb": "ep-1"}, SeasonNumber: 1, EpisodeNumber: 1,
+					Title: "Pilot", StillPath: tc.remoteStill,
+				}},
+				MergeReplaceUnlocked,
+			)
+
+			season := seasonRepo.seasons[seasonKey(seriesID, 1)]
+			if season.PosterPath != seasonStandIn || season.PosterSourcePath != seasonSource || season.PosterThumbhash != "season-thumb" {
+				t.Fatalf("season poster = path %q source %q thumb %q, want the stand-in and the local source kept",
+					season.PosterPath, season.PosterSourcePath, season.PosterThumbhash)
+			}
+			episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
+			if episode.StillPath != stillStandIn || episode.StillSourcePath != stillSource || episode.StillThumbhash != "still-thumb" {
+				t.Fatalf("episode still = path %q source %q thumb %q, want the stand-in and the local source kept",
+					episode.StillPath, episode.StillSourcePath, episode.StillThumbhash)
+			}
+			for _, job := range enqueuer.inputs {
+				if job.SourcePath == tc.remoteSeason || job.SourcePath == tc.remoteStill {
+					t.Fatalf("queued remote artwork over pending local artwork: %+v", job)
+				}
+			}
+		})
+	}
+}

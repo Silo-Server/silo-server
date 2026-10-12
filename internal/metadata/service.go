@@ -4761,16 +4761,18 @@ func splitProviderImagePath(path string) (servedPath, sourcePath string) {
 func preserveCachedArtwork(providerPath, providerThumbhash, existingCachedPath, existingSourcePath, existingThumbhash string) (string, string, string) {
 	// A local file:// source must never land in the served *_path column: it
 	// routes into *_source_path and, during the pre-cache window, the path
-	// keeps the prior cached key (or stays empty) until the job completes.
+	// keeps the prior cached key or remote stand-in (or stays empty) until the
+	// job completes.
+	keepExisting := isCachedImagePath(existingCachedPath) || isLocalArtworkStandIn(existingCachedPath, existingSourcePath)
 	if isLocalImageSourcePath(providerPath) {
 		providerPath = strings.TrimSpace(providerPath)
-		if isCachedImagePath(existingCachedPath) {
+		if keepExisting {
 			return existingCachedPath, existingThumbhash, providerPath
 		}
 		return "", "", providerPath
 	}
 	if !isRemoteImageSourcePath(providerPath) {
-		if strings.TrimSpace(providerPath) == "" && isCachedImagePath(existingCachedPath) {
+		if strings.TrimSpace(providerPath) == "" && keepExisting {
 			return existingCachedPath, existingThumbhash, existingSourcePath
 		}
 		return providerPath, providerThumbhash, ""
@@ -5440,7 +5442,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				seasonArtwork.providerPath(ImagePoster, season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
+				seasonArtwork.providerPath(ImagePoster, season.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5845,7 +5847,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					episodeArtwork.providerPath(ImageStill, ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
+					episodeArtwork.providerPath(ImageStill, ep.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,

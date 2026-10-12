@@ -441,8 +441,11 @@ sits in the chain.
   write that touches only a season's localization row (a refresh in a
   language other than the item's canonical one) stores that provider poster,
   as item localization rows skip local candidates.
-- A refresh that does not rediscover a slot's cached local copy (a `local/`
-  key with a `file://` source) keeps it unless the sidecar's own folder answers
+- A refresh that does not rediscover a slot's local art (a `file://` source,
+  served from its cached `local/` copy or, while that copy is pending, from
+  what the slot served before or a remote stand-in) keeps it, so a server
+  without the mount cannot hand the slot and its queued job to a provider,
+  unless the sidecar's own folder answers
   and lists entries: then the file is either missing or still on disk but no
   longer offered (renamed out of the naming rules, replaced by a better match,
   or local metadata disabled), and the slot takes the provider's art. A folder

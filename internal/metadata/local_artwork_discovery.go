@@ -59,6 +59,12 @@ func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, pre
 	}
 }
 
+// isLocalArtworkStandIn reports whether a stored slot serves a remote stand-in
+// while the copy of its local source is pending.
+func isLocalArtworkStandIn(path, source string) bool {
+	return isRemoteImageSourcePath(path) && isLocalImageSourcePath(source)
+}
+
 // localArtworkFallbackPath returns fallback in place of an empty path whose
 // source is local, and path otherwise.
 func localArtworkFallbackPath(path, source, fallback string) string {
