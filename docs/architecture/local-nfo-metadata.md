@@ -388,8 +388,10 @@ Caching and refresh:
   on two background workers per process, claiming each job by slot. That claim
   ignores the hold but not the backoff of an attempt that failed. The copies
   share one per-process budget with the queue drain and manual refreshes,
-  sized from `metadata.image_workers` and its memory cap; a claimed job that
-  cannot start in time to finish inside its lease goes back to the queue.
+  sized from `metadata.image_workers` and its memory cap. Freed slots go to
+  waiting callers in arrival order, a manual refresh ahead of background work;
+  a claimed job that cannot start in time to finish inside its lease goes back
+  to the queue.
   Refreshes never wait for a copy, and a manual refresh claims its own held
   discoveries without making them due for other servers. A slot that does not fit the in-memory backlog
   waits out the hold, after which any drain copies it.
@@ -408,8 +410,9 @@ Caching and refresh:
   deferred job goes back to the queue without counting an attempt, for a
   server that has the mount: after 10 minutes, or an hour when it was last
   deferred for the same reason, so storage no server mounts any more stays
-  cheap. A manual refresh reports its artwork as still pending while a job of
-  its target waits this way. Otherwise missing/unreadable/out-of-root and
+  cheap. A manual refresh makes such a job due again and starts its deferral
+  over, and reports its artwork as still pending while a job of its target
+  waits this way. Otherwise missing/unreadable/out-of-root and
   structurally-unusable (non-regular, over-cap) paths are stable failures with
   a long retry deferral; recovery is refresh-driven — the provider-artwork
   backfill sweep deliberately skips `file://` sources.

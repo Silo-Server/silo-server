@@ -547,6 +547,10 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 			next_attempt_at = NOW(),
 			locked_at = NULL,
 			locked_by = '',
+			-- A deferral for missing storage starts over, so a refresh on a
+			-- server without the mount does not push it to the long repeat
+			-- delay.
+			last_error = CASE WHEN starts_with(last_error, $2) THEN '' ELSE last_error END,
 			completed_at = NULL,
 			updated_at = NOW()
 		WHERE ` + imageCacheTargetScope("$1") + `
@@ -556,7 +560,7 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 	if localOnly {
 		query += " AND " + localImageCacheSourceSQL
 	}
-	_, err := r.pool.Exec(ctx, query, targetContentID)
+	_, err := r.pool.Exec(ctx, query, targetContentID, localImageStorageUnavailable)
 	if err != nil {
 		return fmt.Errorf("retrying target metadata image cache jobs: %w", err)
 	}

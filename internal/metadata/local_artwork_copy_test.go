@@ -489,16 +489,7 @@ func TestImageWorkBudgetHandsFreedSlotsToWaitingCallers(t *testing.T) {
 		}
 		waiting <- release
 	}()
-	// Wait until the second caller is queued.
-	for {
-		budget.mu.Lock()
-		queued := len(budget.waiting)
-		budget.mu.Unlock()
-		if queued == 1 {
-			break
-		}
-		runtime.Gosched()
-	}
+	waitForBudgetWaiters(&budget, 1)
 	worker()
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -506,6 +497,61 @@ func TestImageWorkBudgetHandsFreedSlotsToWaitingCallers(t *testing.T) {
 		t.Fatalf("releasing caller retook the slot: acquire = %v", err)
 	}
 	(<-waiting)()
+}
+
+// waitForBudgetWaiters returns once n callers are queued for budget slots.
+func waitForBudgetWaiters(budget *imageWorkBudget, n int) {
+	for {
+		budget.mu.Lock()
+		queued := len(budget.waiting)
+		budget.mu.Unlock()
+		if queued == n {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+// A manual refresh waits for a budget slot only behind other manual
+// refreshes, not behind queued background work.
+func TestImageWorkBudgetServesInteractiveCallersFirst(t *testing.T) {
+	var budget imageWorkBudget
+	budget.set(1)
+	held, _ := budget.acquire(context.Background())
+	started := make(chan string, 2)
+	wait := func(name string, interactive bool) {
+		go func() {
+			release, err := budget.acquireFor(context.Background(), interactive)
+			if err != nil {
+				t.Errorf("%s acquire: %v", name, err)
+				started <- ""
+				return
+			}
+			started <- name
+			release()
+		}()
+	}
+	wait("background", false)
+	waitForBudgetWaiters(&budget, 1)
+	wait("refresh", true)
+	waitForBudgetWaiters(&budget, 2)
+	held()
+	if first := <-started; first != "refresh" {
+		t.Fatalf("first served = %q, want the refresh", first)
+	}
+	<-started
+}
+
+// A canceled manual refresh reports the cancellation, not pending artwork.
+func TestCacheTargetArtworkReturnsCancellation(t *testing.T) {
+	page := []*models.MetadataImageCacheJob{localArtworkJob("file:///media/Film/poster.jpg?v=1-1")}
+	jobs := &targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{page}}
+	p := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := p.CacheTargetArtwork(ctx, "movie-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CacheTargetArtwork error = %v, want context.Canceled", err)
+	}
 }
 
 // A manual refresh whose claimed page makes no progress leaves it to the

@@ -415,6 +415,13 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 			got.nextAttemptIn < imageCacheRootUnavailableRepeatRetry-time.Minute {
 			t.Fatalf("repeat deferral = %+v, want queued again in %s with no attempt counted", got, imageCacheRootUnavailableRepeatRetry)
 		}
+
+		// A manual refresh starts the deferral over, so refreshing on this
+		// server does not push the job to the long delay.
+		if err := repo.retryTargetNow(ctx, contentID, false); err != nil {
+			t.Fatalf("retryTargetNow: %v", err)
+		}
+		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
 	})
 
 	t.Run("folder removed from mounted storage", func(t *testing.T) {

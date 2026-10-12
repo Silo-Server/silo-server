@@ -14,7 +14,8 @@ import (
 // It counts running jobs across limit changes: after the limit is lowered, no
 // job starts until enough running ones have finished. Waiting callers get
 // freed slots first come, first served, so a caller that just released a slot
-// cannot take it straight back ahead of them.
+// cannot take it straight back ahead of them; an interactive caller (a manual
+// refresh) waits only behind other interactive callers.
 type imageWorkBudget struct {
 	mu      sync.Mutex
 	limit   int // zero: unbounded
@@ -23,8 +24,9 @@ type imageWorkBudget struct {
 }
 
 type imageWorkWaiter struct {
-	granted bool
-	ready   chan struct{}
+	interactive bool
+	granted     bool
+	ready       chan struct{}
 }
 
 // set changes the limit; zero leaves jobs unbounded.
@@ -38,14 +40,25 @@ func (b *imageWorkBudget) set(limit int) {
 // acquire waits for a slot and returns the function that frees it. A free
 // slot nobody is waiting for is taken even when ctx is already done.
 func (b *imageWorkBudget) acquire(ctx context.Context) (release func(), err error) {
+	return b.acquireFor(ctx, false)
+}
+
+// acquireFor is acquire for an interactive caller when interactive is set.
+func (b *imageWorkBudget) acquireFor(ctx context.Context, interactive bool) (release func(), err error) {
 	b.mu.Lock()
 	if len(b.waiting) == 0 && b.freeLocked() {
 		b.running++
 		b.mu.Unlock()
 		return b.releaser(), nil
 	}
-	w := &imageWorkWaiter{ready: make(chan struct{})}
-	b.waiting = append(b.waiting, w)
+	w := &imageWorkWaiter{interactive: interactive, ready: make(chan struct{})}
+	at := len(b.waiting)
+	if interactive {
+		if i := slices.IndexFunc(b.waiting, func(q *imageWorkWaiter) bool { return !q.interactive }); i >= 0 {
+			at = i
+		}
+	}
+	b.waiting = slices.Insert(b.waiting, at, w)
 	b.mu.Unlock()
 
 	select {

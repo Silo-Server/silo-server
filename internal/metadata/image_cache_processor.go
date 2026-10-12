@@ -412,7 +412,10 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			return err
 		}
 		if len(jobs) > 0 {
-			stats := p.processClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency)
+			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, true)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			// Failures are collected rather than returned: the remaining
 			// artwork still gets cached, and a failed job carries its own
 			// backoff so it is not reclaimed by the loop below. A deferred
@@ -478,6 +481,12 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 // each also holding a slot of the process's artwork budget, which drains,
 // manual refreshes and discovery copies share (see imageWorkBudget).
 func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int) ImageCacheRunStats {
+	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, false)
+}
+
+// runClaimedJobs is processClaimedJobs for a manual refresh when interactive
+// is set: its jobs wait for budget slots ahead of background work.
+func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, interactive bool) ImageCacheRunStats {
 	stats := ImageCacheRunStats{Claimed: len(jobs)}
 	if len(jobs) == 0 {
 		return stats
@@ -519,7 +528,7 @@ loop:
 			leaveFrom(i)
 			break loop
 		}
-		release, err := p.workBudget.acquire(startCtx)
+		release, err := p.workBudget.acquireFor(startCtx, interactive)
 		// A free slot can still be taken after the deadline passed.
 		if err == nil && startCtx.Err() != nil {
 			release()
