@@ -19,7 +19,13 @@ import (
 const (
 	unreachableRecheckAttempts = 3
 	unreachableRecheckInterval = 5 * time.Second
+	// unreachableRecheckWindow is how long this process's own recheck stays
+	// the freshest evidence about a node it marked.
+	unreachableRecheckWindow = unreachableRecheckAttempts * unreachableRecheckInterval
 )
+
+// dialOp is the net.OpError operation for opening a connection.
+const dialOp = "dial"
 
 // IsConnectFailure reports whether err means a connection to a node could not
 // be opened: refused, timed out, no route, or a name that does not resolve. An
@@ -36,7 +42,7 @@ func IsConnectFailure(err error) bool {
 		}
 	}
 	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == "dial"
+	return errors.As(err, &opErr) && opErr.Op == dialOp
 }
 
 // unreachableMarker is implemented by *Planner.
@@ -47,9 +53,17 @@ type unreachableMarker interface {
 // ReportConnectFailure marks the transcode node at nodeURL unreachable when err
 // is a connect failure and planner can mark nodes. Reports whether a healthy
 // node was marked.
+//
+// A name that fails to resolve is left to the sweep: the lookup runs against
+// this server's resolver, and a resolver having a bad moment would otherwise
+// mark every node it is asked about, on every API server.
 func ReportConnectFailure(planner SessionPlanner, nodeURL string, err error) bool {
 	marker, ok := planner.(unreachableMarker)
 	if !ok || !IsConnectFailure(err) {
+		return false
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
 		return false
 	}
 	return marker.MarkTranscodeNodeUnreachable(nodeURL)
@@ -120,7 +134,20 @@ func (hc *HealthChecker) ReportUnreachable(nodeURL string) bool {
 // ApplyPeerUnreachable marks a transcode node another API server could not
 // connect to. This process rechecks it on its own, so a node that answers here
 // is back in selection within one health request.
+//
+// The event bus also delivers this server's own announcements back to it. A
+// report about a node this server marked itself within the recheck window is
+// ignored: its own recheck is the fresher evidence, and taking the echo would
+// pull a node the recheck just restored back out of selection.
 func (hc *HealthChecker) ApplyPeerUnreachable(nodeURL string) {
+	if hc == nil || nodeURL == "" {
+		return
+	}
+	if stored, ok := hc.localMarks.Load(normalizeNodeURL(nodeURL)); ok {
+		if markedAt, ok := stored.(time.Time); ok && time.Since(markedAt) < unreachableRecheckWindow {
+			return
+		}
+	}
 	hc.markUnreachable(nodeURL, false)
 }
 
@@ -131,6 +158,9 @@ func (hc *HealthChecker) markUnreachable(nodeURL string, local bool) bool {
 	nodeURL = normalizeNodeURL(nodeURL)
 	if !hc.transcodePool.MarkUnreachable(nodeURL) {
 		return false
+	}
+	if local {
+		hc.localMarks.Store(nodeURL, time.Now())
 	}
 	hc.mu.RLock()
 	ctx, broadcast := hc.ctx, hc.broadcastUnreachable
@@ -160,7 +190,17 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 		return
 	}
 	hc.rechecks.Go(func() {
-		defer hc.recheckInFlight.Delete(nodeURL)
+		// The slot is released before the node is published healthy, so a
+		// report that lands right after starts a recheck of its own. Released
+		// once only: by then a newer recheck may hold the slot.
+		released := false
+		release := func() {
+			if !released {
+				released = true
+				hc.recheckInFlight.Delete(nodeURL)
+			}
+		}
+		defer release()
 		for attempt := range unreachableRecheckAttempts {
 			if attempt > 0 {
 				select {
@@ -177,9 +217,15 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 			if !healthy {
 				continue
 			}
+			release()
 			hc.transcodePool.ApplyHealth(n.ID, n.URL, true, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
 			slog.InfoContext(ctx, "stream node answered a recheck after a connection failure", "component", "nodepool",
 				"id", n.ID, "name", n.Name, "url", n.URL)
+			// A node back from a crash may come back with different hardware,
+			// which the sweep would otherwise only notice on its next pass.
+			if capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
+				hc.startCapabilityRefresh(ctx, n, hc.transcodePool.ApplyCapabilities)
+			}
 			return
 		}
 	})

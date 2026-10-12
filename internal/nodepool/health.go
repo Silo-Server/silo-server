@@ -265,6 +265,10 @@ type HealthChecker struct {
 	// one node share a single recheck.
 	rechecks        sync.WaitGroup
 	recheckInFlight sync.Map
+	// localMarks holds, by node URL, when this process last marked a node
+	// unreachable on its own evidence; ApplyPeerUnreachable reads it to drop
+	// the event bus's echo of this process's own announcement.
+	localMarks sync.Map
 }
 
 // NewHealthChecker creates a health checker for the given pools.

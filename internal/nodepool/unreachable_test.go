@@ -30,15 +30,16 @@ func closedNodeURL(t *testing.T) string {
 
 func refusedConnectError(t *testing.T) error {
 	t.Helper()
-	_, err := http.Get(closedNodeURL(t) + "/api/v1/health")
+	resp, err := http.Get(closedNodeURL(t) + "/api/v1/health")
 	if err == nil {
+		_ = resp.Body.Close()
 		t.Fatal("request to a closed port succeeded")
 	}
 	return err
 }
 
 func TestIsConnectFailure(t *testing.T) {
-	timeout := &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}
+	timeout := &net.OpError{Op: dialOp, Net: "tcp", Err: os.ErrDeadlineExceeded}
 	tests := []struct {
 		name string
 		err  error
@@ -46,12 +47,12 @@ func TestIsConnectFailure(t *testing.T) {
 	}{
 		{name: "refused", err: refusedConnectError(t), want: true},
 		{name: "dial timeout", err: &url.Error{Op: "Post", URL: "http://node", Err: timeout}, want: true},
-		{name: "no route", err: &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.EHOSTUNREACH)}, want: true},
-		{name: "name does not resolve", err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "node", IsNotFound: true}}, want: true},
+		{name: "no route", err: &net.OpError{Op: dialOp, Net: "tcp", Err: os.NewSyscallError("connect", syscall.EHOSTUNREACH)}, want: true},
+		{name: "name does not resolve", err: &net.OpError{Op: dialOp, Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "node", IsNotFound: true}}, want: true},
 		{name: "nil", err: nil, want: false},
-		{name: "caller gave up", err: &url.Error{Op: "Get", URL: "http://node", Err: &net.OpError{Op: "dial", Net: "tcp", Err: context.Canceled}}, want: false},
-		{name: "local descriptors exhausted", err: &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("socket", syscall.EMFILE)}, want: false},
-		{name: "local ports exhausted", err: &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.EADDRNOTAVAIL)}, want: false},
+		{name: "caller gave up", err: &url.Error{Op: "Get", URL: "http://node", Err: &net.OpError{Op: dialOp, Net: "tcp", Err: context.Canceled}}, want: false},
+		{name: "local descriptors exhausted", err: &net.OpError{Op: dialOp, Net: "tcp", Err: os.NewSyscallError("socket", syscall.EMFILE)}, want: false},
+		{name: "local ports exhausted", err: &net.OpError{Op: dialOp, Net: "tcp", Err: os.NewSyscallError("connect", syscall.EADDRNOTAVAIL)}, want: false},
 		{name: "reset after connecting", err: &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, want: false},
 		{name: "plain error", err: errors.New("node returned 503"), want: false},
 	}
@@ -85,6 +86,10 @@ func TestPlannerSkipsTranscodeNodeMarkedUnreachable(t *testing.T) {
 	}
 	if ReportConnectFailure(planner, live.URL, errors.New("node returned 503")) {
 		t.Fatal("an HTTP-level failure marked a node")
+	}
+	unresolved := &net.OpError{Op: dialOp, Net: "tcp", Err: &net.DNSError{Err: "i/o timeout", Name: "live", IsTimeout: true}}
+	if ReportConnectFailure(planner, live.URL, unresolved) || !planner.TranscodeNodeHealthy(live.URL) {
+		t.Fatal("a failed name lookup marked a node")
 	}
 }
 
@@ -225,5 +230,55 @@ func waitForRechecks(t *testing.T, checker *HealthChecker) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("recheck did not stop")
+	}
+}
+
+func TestOwnAnnouncementEchoDoesNotUndoARecheck(t *testing.T) {
+	nodeURL, calls := flakyHealthNode(t, 0)
+	f := newUnreachableFixture(t, nodeURL)
+
+	f.planner.MarkTranscodeNodeUnreachable(nodeURL)
+	f.checker.rechecks.Wait()
+	f.checker.ApplyPeerUnreachable(nodeURL)
+	f.checker.rechecks.Wait()
+
+	if !f.planner.TranscodeNodeHealthy(nodeURL) {
+		t.Fatal("the echo of this server's own announcement pulled a rechecked node out")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("health requests = %d, want only the first recheck", got)
+	}
+}
+
+func TestNodeMarkedAgainAfterARecheckIsRecheckedAgain(t *testing.T) {
+	nodeURL, calls := flakyHealthNode(t, 0)
+	f := newUnreachableFixture(t, nodeURL)
+
+	for range 2 {
+		if !f.planner.MarkTranscodeNodeUnreachable(nodeURL) {
+			t.Fatal("mark did not flip a healthy node")
+		}
+		f.checker.rechecks.Wait()
+		if !f.planner.TranscodeNodeHealthy(nodeURL) {
+			t.Fatal("node stayed out after answering its recheck")
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("health requests = %d, want one recheck per mark", got)
+	}
+}
+
+func TestRecheckRefreshesCapabilitiesOfANodeThatCameBackChanged(t *testing.T) {
+	nodeURL := newHealthNode(t, "hash-after-restart")
+	f := newUnreachableFixture(t, nodeURL)
+	fetcher := &fakeCapabilityFetcher{payload: []byte(`{"transformations":[]}`), hash: "hash-after-restart"}
+	f.checker.SetCapabilityFetcher(fetcher.fetch)
+
+	f.planner.MarkTranscodeNodeUnreachable(nodeURL)
+	f.checker.rechecks.Wait()
+	f.checker.waitForCapabilityRefreshes()
+
+	if got := fetcher.callCount(); got != 1 {
+		t.Fatalf("capability fetches = %d, want 1 after the node came back with a new hash", got)
 	}
 }

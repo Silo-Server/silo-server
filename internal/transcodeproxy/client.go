@@ -1,22 +1,15 @@
 package transcodeproxy
 
 import (
-	"net"
 	"net/http"
-	"time"
-)
 
-// NodeDialTimeout bounds opening a TCP connection to a transcode node. Nodes
-// sit on the same network as the API or on a private overlay, where a connect
-// takes milliseconds, so a few seconds only ever expires on a node that is
-// gone. Go's default of 30 seconds would hold every playback start and relay
-// aimed at a dead host for that long before a caller could try another node.
-const NodeDialTimeout = 3 * time.Second
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+)
 
 // nodeClient is shared by every hop that relays transcode output from a node
 // (the API's native and Jellyfin-compatible relays and the dedicated proxy) and
-// by the API's control calls to nodes: transcode start, capability reads, and
-// stop.
+// by the API's playback control calls to nodes: transcode start and capability
+// reads.
 //
 // It sets no overall timeout, because segment bodies stream at the viewer's
 // download speed, and no response-header timeout, because no fixed limit
@@ -58,9 +51,9 @@ func newStreamTransport() *http.Transport {
 		base = &http.Transport{}
 	}
 	t := base.Clone()
-	// Only the connect is bounded. Once a connection is open, the request
-	// context bounds the call, as below.
-	t.DialContext = (&net.Dialer{Timeout: NodeDialTimeout, KeepAlive: 30 * time.Second}).DialContext
+	// Only the connect is bounded (nodepool.NodeDialTimeout). Once a
+	// connection is open, the request context bounds the call, as below.
+	t.DialContext = nodepool.NodeDialContext()
 	t.MaxIdleConns = 128
 	t.MaxIdleConnsPerHost = 32
 	// See nodeClient: the request context, not a header deadline, bounds a

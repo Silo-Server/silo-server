@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -1129,13 +1129,17 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
-// remoteTranscodeControlClient sends stop requests to transcode nodes. Its
-// connect bound matches transcodeproxy.NodeDialTimeout, which this package
-// cannot import: playback paths call the stop synchronously, so a stop aimed
-// at a dead host must give up as quickly as the start that found it dead.
+// remoteTranscodeControlClient sends stop requests to transcode nodes. Playback
+// paths call the stop synchronously, so a stop aimed at a dead host must give
+// up as quickly as the start that found it dead: it uses the same connect bound
+// as playback's other node calls.
 var remoteTranscodeControlClient = func() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.DialContext = nodepool.NodeDialContext()
 	return &http.Client{Transport: transport}
 }()
 
