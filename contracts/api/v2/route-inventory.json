@@ -3472,7 +3472,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3508,7 +3507,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3544,7 +3542,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3580,7 +3577,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3616,7 +3612,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3652,7 +3647,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3688,7 +3682,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3724,7 +3717,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3760,7 +3752,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3796,7 +3787,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3832,7 +3822,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3868,7 +3857,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3904,7 +3892,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3940,7 +3927,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -3976,7 +3962,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4012,7 +3997,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4048,7 +4032,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4084,7 +4067,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4120,7 +4102,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4156,7 +4137,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4192,7 +4172,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4228,7 +4207,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4264,7 +4242,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4300,7 +4277,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4336,7 +4312,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4372,7 +4347,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4408,7 +4382,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4444,7 +4417,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4480,7 +4452,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4516,7 +4487,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4552,7 +4522,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4588,7 +4557,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4624,7 +4592,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4660,7 +4627,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4696,7 +4662,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4732,7 +4697,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4768,7 +4732,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4804,7 +4767,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4840,7 +4802,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4875,7 +4836,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4911,7 +4871,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4947,7 +4906,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -4983,7 +4941,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5019,7 +4976,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5055,7 +5011,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5091,7 +5046,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5127,7 +5081,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5163,7 +5116,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5199,7 +5151,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5235,7 +5186,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5271,7 +5221,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5307,7 +5256,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5343,7 +5291,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5379,7 +5326,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5415,7 +5361,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5451,7 +5396,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5487,7 +5431,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5523,7 +5466,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5559,7 +5501,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5595,7 +5536,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5631,7 +5571,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5666,7 +5605,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5701,7 +5639,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5736,7 +5673,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5771,7 +5707,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5806,7 +5741,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5841,7 +5775,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5877,7 +5810,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5913,7 +5845,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5949,7 +5880,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -5985,7 +5915,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6021,7 +5950,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6057,7 +5985,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6093,7 +6020,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6128,7 +6054,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6164,7 +6089,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6200,7 +6124,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6236,7 +6159,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6272,7 +6194,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6308,7 +6229,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6344,7 +6264,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6380,7 +6299,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6416,7 +6334,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6452,7 +6369,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6488,7 +6404,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6524,7 +6439,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6560,7 +6474,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6596,7 +6509,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6632,7 +6544,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6668,7 +6579,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6704,7 +6614,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6740,7 +6649,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6776,7 +6684,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6812,7 +6719,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6848,7 +6754,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6884,7 +6789,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6920,7 +6824,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6956,7 +6859,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -6992,7 +6894,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7028,7 +6929,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7064,7 +6964,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7100,7 +6999,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7136,7 +7034,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7172,7 +7069,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7208,7 +7104,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7244,7 +7139,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7280,7 +7174,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7316,7 +7209,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7351,7 +7243,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7387,7 +7278,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7423,7 +7313,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7459,7 +7348,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7495,7 +7383,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7531,7 +7418,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7566,7 +7452,6 @@
         "demo_guarded",
         "metadata_curation",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7602,7 +7487,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7637,7 +7521,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7672,7 +7555,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7707,7 +7589,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7742,7 +7623,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7777,7 +7657,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7812,7 +7691,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7848,7 +7726,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7884,7 +7761,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7920,7 +7796,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7956,7 +7831,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -7992,7 +7866,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8028,7 +7901,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8064,7 +7936,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8100,7 +7971,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8136,7 +8006,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8172,7 +8041,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8208,7 +8076,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8244,7 +8111,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8280,7 +8146,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8316,7 +8181,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8352,7 +8216,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8388,7 +8251,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8424,7 +8286,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8460,7 +8321,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8496,7 +8356,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8532,7 +8391,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8568,7 +8426,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8604,7 +8461,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8640,7 +8496,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8676,7 +8531,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8712,7 +8566,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8748,7 +8601,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8784,7 +8636,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8820,7 +8671,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8856,7 +8706,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8893,7 +8742,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8930,7 +8778,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -8967,7 +8814,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9004,7 +8850,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9040,7 +8885,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9076,7 +8920,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9112,7 +8955,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9148,7 +8990,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9184,7 +9025,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9220,7 +9060,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9256,7 +9095,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9292,7 +9130,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9327,7 +9164,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9362,7 +9198,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9398,7 +9233,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9434,7 +9268,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9470,7 +9303,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9506,7 +9338,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9542,7 +9373,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9578,7 +9408,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9614,7 +9443,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9650,7 +9478,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9686,7 +9513,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9722,7 +9548,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9758,7 +9583,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9794,7 +9618,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9830,7 +9653,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9866,7 +9688,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9902,7 +9723,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9938,7 +9758,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -9974,7 +9793,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10010,7 +9828,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10046,7 +9863,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10082,7 +9898,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10118,7 +9933,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10154,7 +9968,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10190,7 +10003,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10226,7 +10038,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10262,7 +10073,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10298,7 +10108,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10334,7 +10143,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10370,7 +10178,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10406,7 +10213,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10442,7 +10248,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10478,7 +10283,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10514,7 +10318,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10550,7 +10353,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10586,7 +10388,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10622,7 +10423,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10658,7 +10458,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10694,7 +10493,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10730,7 +10528,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10766,7 +10563,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10802,7 +10598,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10838,7 +10633,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10874,7 +10668,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10910,7 +10703,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10946,7 +10738,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -10982,7 +10773,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11018,7 +10808,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11054,7 +10843,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11090,7 +10878,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11126,7 +10913,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11162,7 +10948,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11198,7 +10983,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11234,7 +11018,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11270,7 +11053,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11306,7 +11088,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11342,7 +11123,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11378,7 +11158,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11414,7 +11193,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11450,7 +11228,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11487,7 +11264,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11523,7 +11299,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11559,7 +11334,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11595,7 +11369,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11631,7 +11404,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11667,7 +11439,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11702,7 +11473,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11737,7 +11507,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11772,7 +11541,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11807,7 +11575,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11843,7 +11610,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11879,7 +11645,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11915,7 +11680,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11951,7 +11715,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -11987,7 +11750,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12022,7 +11784,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12057,7 +11818,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12092,7 +11852,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12127,7 +11886,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12162,7 +11920,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12198,7 +11955,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12234,7 +11990,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12269,7 +12024,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12304,7 +12058,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12339,7 +12092,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12374,7 +12126,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12409,7 +12160,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12444,7 +12194,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12479,7 +12228,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12514,7 +12262,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12549,7 +12296,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12585,7 +12331,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12621,7 +12366,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12657,7 +12401,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12693,7 +12436,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12729,7 +12471,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12765,7 +12506,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12801,7 +12541,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12836,7 +12575,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12871,7 +12609,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12906,7 +12643,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12942,7 +12678,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -12978,7 +12713,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13014,7 +12748,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13050,7 +12783,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13086,7 +12818,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13122,7 +12853,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13158,7 +12888,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13193,7 +12922,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13228,7 +12956,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13263,7 +12990,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13298,7 +13024,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13333,7 +13058,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13368,7 +13092,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13403,7 +13126,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13439,7 +13161,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13474,7 +13195,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13510,7 +13230,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13546,7 +13265,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13582,7 +13300,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13615,8 +13332,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
-        "unclassified_middleware"
+        "demo_guarded"
       ],
       "conditions": [
         "apiKeyRepo != nil && authMiddleware != nil"
@@ -13646,8 +13362,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
-        "unclassified_middleware"
+        "demo_guarded"
       ],
       "conditions": [
         "apiKeyRepo != nil && authMiddleware != nil"
@@ -13677,8 +13392,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
-        "unclassified_middleware"
+        "demo_guarded"
       ],
       "conditions": [
         "apiKeyRepo != nil && authMiddleware != nil"
@@ -13708,8 +13422,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
-        "unclassified_middleware"
+        "demo_guarded"
       ],
       "conditions": [
         "apiKeyRepo != nil && authMiddleware != nil"
@@ -13742,7 +13455,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13777,7 +13489,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13812,7 +13523,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -13844,8 +13554,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "optional_viewer_access",
-        "unclassified_middleware"
+        "optional_viewer_access"
       ],
       "conditions": [
         "authHandler != nil",
@@ -13877,8 +13586,7 @@
       "auth_traits": [
         "authenticated",
         "optional_viewer_access",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -13907,9 +13615,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -13938,8 +13644,7 @@
       "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -13970,8 +13675,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14003,7 +13707,6 @@
       "auth_traits": [
         "authenticated",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -14034,9 +13737,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil"
       ],
@@ -14065,8 +13766,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14095,9 +13795,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14126,8 +13824,7 @@
       "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14156,9 +13853,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14187,8 +13882,7 @@
       "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14218,8 +13912,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14248,9 +13941,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14279,8 +13970,7 @@
       "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14310,8 +14000,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14341,8 +14030,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14371,9 +14059,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "oauthHandler != nil"
@@ -14401,9 +14087,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "oauthHandler != nil"
@@ -14431,9 +14115,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "oauthHandler != nil"
@@ -14463,8 +14145,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "optional_viewer_access",
-        "unclassified_middleware"
+        "optional_viewer_access"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14493,9 +14174,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil"
       ],
@@ -14522,9 +14201,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil"
       ],
@@ -14552,8 +14229,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14583,8 +14259,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14613,9 +14288,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil"
       ],
@@ -14642,9 +14315,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14673,8 +14344,7 @@
       "middleware_chain": 23,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14703,9 +14373,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil"
       ],
@@ -14732,9 +14400,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14763,8 +14429,7 @@
       "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -14793,9 +14458,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "autoscanHandler != nil",
         "!(deps.RateLimitMW != nil)"
@@ -14824,8 +14487,7 @@
       "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "autoscanHandler != nil",
@@ -14854,9 +14516,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "settingsRepo != nil",
         "brandingHandler != nil"
@@ -14889,7 +14549,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -14924,7 +14583,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -14959,7 +14617,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -14994,7 +14651,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15029,7 +14685,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15064,7 +14719,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15100,7 +14754,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15136,7 +14789,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15172,7 +14824,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15208,7 +14859,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15243,7 +14893,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15279,7 +14928,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15315,7 +14963,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15351,7 +14998,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15386,7 +15032,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15421,7 +15066,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15456,7 +15100,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15491,7 +15134,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15526,7 +15168,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15561,7 +15202,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15596,7 +15236,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15632,7 +15271,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15668,7 +15306,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15704,7 +15341,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15740,7 +15376,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15776,7 +15411,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15811,7 +15445,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15846,7 +15479,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15882,7 +15514,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15917,7 +15548,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15952,7 +15582,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -15988,7 +15617,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16023,7 +15651,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16058,7 +15685,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16093,7 +15719,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16128,7 +15753,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16163,7 +15787,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16198,7 +15821,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16233,7 +15855,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16266,8 +15887,7 @@
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authMiddleware != nil"
@@ -16300,7 +15920,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16335,7 +15954,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16370,7 +15988,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16405,7 +16022,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16438,8 +16054,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16470,8 +16085,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16502,8 +16116,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16534,8 +16147,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16566,8 +16178,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16598,8 +16209,7 @@
       "auth_traits": [
         "authenticated",
         "demo_guarded",
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "diagnosticsHandler != nil && authMiddleware != nil"
@@ -16632,7 +16242,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16666,7 +16275,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16700,7 +16308,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16734,7 +16341,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16768,7 +16374,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16802,7 +16407,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16835,7 +16439,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16868,7 +16471,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16901,7 +16503,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16934,7 +16535,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -16967,7 +16567,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17000,7 +16599,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17033,7 +16631,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17066,7 +16663,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17100,7 +16696,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17133,7 +16728,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17166,7 +16760,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17200,7 +16793,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17234,7 +16826,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17268,7 +16859,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17302,7 +16892,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17335,7 +16924,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17368,7 +16956,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17402,7 +16989,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17437,7 +17023,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17472,7 +17057,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17507,7 +17091,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17542,7 +17125,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17577,7 +17159,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17612,7 +17193,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17647,7 +17227,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17682,7 +17261,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17717,7 +17295,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17752,7 +17329,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17786,7 +17362,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17820,7 +17395,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17855,7 +17429,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17890,7 +17463,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17925,7 +17497,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17960,7 +17531,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -17995,7 +17565,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18025,9 +17594,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [],
       "conditional": false,
       "request_kind": "none",
@@ -18056,7 +17623,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18090,7 +17656,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18124,7 +17689,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18158,7 +17722,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18192,7 +17755,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18226,7 +17788,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18260,7 +17821,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18295,7 +17855,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18330,7 +17889,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18365,7 +17923,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18400,7 +17957,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18435,7 +17991,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18470,7 +18025,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18505,7 +18059,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18539,7 +18092,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18568,9 +18120,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "invitationService != nil",
@@ -18600,8 +18150,7 @@
       "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -18631,9 +18180,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "authHandler != nil",
         "invitationService != nil",
@@ -18663,8 +18210,7 @@
       "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
-        "rate_limited",
-        "unclassified_middleware"
+        "rate_limited"
       ],
       "conditions": [
         "authHandler != nil",
@@ -18698,7 +18244,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18733,7 +18278,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18769,7 +18313,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18805,7 +18348,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18840,7 +18382,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18875,7 +18416,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18910,7 +18450,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18945,7 +18484,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -18980,7 +18518,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19015,7 +18552,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19050,7 +18586,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19085,7 +18620,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19120,7 +18654,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19155,7 +18688,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19190,7 +18722,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19225,7 +18756,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19260,7 +18790,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19295,7 +18824,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19330,7 +18858,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19365,7 +18892,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19400,7 +18926,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19435,7 +18960,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19470,7 +18994,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19505,7 +19028,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19540,7 +19062,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19575,7 +19096,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19610,7 +19130,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19645,7 +19164,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19680,7 +19198,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19715,7 +19232,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19750,7 +19266,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19785,7 +19300,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19820,7 +19334,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19855,7 +19368,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19890,7 +19402,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19925,7 +19436,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19960,7 +19470,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -19996,7 +19505,6 @@
         "household_profile_gate",
         "marker_edit",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20032,7 +19540,6 @@
         "household_profile_gate",
         "marker_edit",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20067,7 +19574,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20103,7 +19609,6 @@
         "household_profile_gate",
         "marker_edit",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20137,7 +19642,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20171,7 +19675,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20206,7 +19709,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20241,7 +19743,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20275,7 +19776,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20310,7 +19810,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20345,7 +19844,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20376,9 +19874,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.Notifications != nil"
       ],
@@ -20409,7 +19905,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20445,7 +19940,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20480,7 +19974,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20515,7 +20008,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20550,7 +20042,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20580,9 +20071,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.Notifications != nil"
       ],
@@ -20609,9 +20098,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.Notifications != nil"
       ],
@@ -20638,9 +20125,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.Notifications != nil"
       ],
@@ -20672,7 +20157,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20707,7 +20191,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20741,7 +20224,6 @@
         "authenticated",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20775,7 +20257,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20810,7 +20291,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20845,7 +20325,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20880,7 +20359,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20915,7 +20393,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20950,7 +20427,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -20985,7 +20461,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21020,7 +20495,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21055,7 +20529,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21090,7 +20563,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21125,7 +20597,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21160,7 +20631,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21195,7 +20665,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21230,7 +20699,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21265,7 +20733,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21300,7 +20767,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21335,7 +20801,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21370,7 +20835,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21405,7 +20869,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21440,7 +20903,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21475,7 +20937,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21510,7 +20971,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21545,7 +21005,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21579,7 +21038,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21614,7 +21072,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21648,7 +21105,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21683,7 +21139,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21717,7 +21172,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21751,7 +21205,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21786,7 +21239,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21821,7 +21273,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21856,7 +21307,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21890,7 +21340,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21924,7 +21373,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21958,7 +21406,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -21992,7 +21439,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22026,7 +21472,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22060,7 +21505,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22090,9 +21534,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "webhookSyncHandler != nil"
       ],
@@ -22119,9 +21561,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22148,9 +21588,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22177,9 +21615,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22206,9 +21642,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22235,9 +21669,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22264,9 +21696,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22293,9 +21723,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22322,9 +21750,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22351,9 +21777,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22380,9 +21804,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "deps.PluginHTTPProxy != nil"
       ],
@@ -22413,7 +21835,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22448,7 +21869,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22483,7 +21903,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22518,7 +21937,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22554,7 +21972,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22589,7 +22006,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22623,7 +22039,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22657,7 +22072,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22691,7 +22105,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22725,7 +22138,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22759,7 +22171,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22793,7 +22204,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22827,7 +22237,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22861,7 +22270,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22896,7 +22304,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22931,7 +22338,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -22967,7 +22373,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23003,7 +22408,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23039,7 +22443,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23070,9 +22473,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [],
       "conditional": false,
       "request_kind": "none",
@@ -23102,7 +22503,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23137,7 +22537,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23172,7 +22571,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23207,7 +22605,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23242,7 +22639,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23277,7 +22673,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23312,7 +22707,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23347,7 +22741,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23382,7 +22775,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23417,7 +22809,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23452,7 +22843,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23487,7 +22877,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23522,7 +22911,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23557,7 +22945,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23592,7 +22979,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23627,7 +23013,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23662,7 +23047,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23697,7 +23081,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23732,7 +23115,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23767,7 +23149,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23802,7 +23183,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23837,7 +23217,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23872,7 +23251,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23907,7 +23285,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23942,7 +23319,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -23977,7 +23353,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24012,7 +23387,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24047,7 +23421,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24082,7 +23455,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24117,7 +23489,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24152,7 +23523,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24187,7 +23557,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24221,7 +23590,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24254,7 +23622,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24287,7 +23654,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24321,7 +23687,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24356,7 +23721,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24391,7 +23755,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24427,7 +23790,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24462,7 +23824,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24497,7 +23858,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24532,7 +23892,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24567,7 +23926,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24602,7 +23960,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24636,7 +23993,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24671,7 +24027,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24705,7 +24060,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24740,7 +24094,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24775,7 +24128,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24811,7 +24163,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24846,7 +24197,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24882,7 +24232,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24918,7 +24267,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24954,7 +24302,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -24990,7 +24337,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25026,7 +24372,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25062,7 +24407,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25097,7 +24441,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25131,7 +24474,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25165,7 +24507,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25199,7 +24540,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25233,7 +24573,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25267,7 +24606,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25301,7 +24639,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25335,7 +24672,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25370,7 +24706,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25405,7 +24740,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25440,7 +24774,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25475,7 +24808,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25511,7 +24843,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25547,7 +24878,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25582,7 +24912,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25617,7 +24946,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25652,7 +24980,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25688,7 +25015,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25723,7 +25049,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25758,7 +25083,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25792,7 +25116,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25826,7 +25149,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25861,7 +25183,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25896,7 +25217,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25931,7 +25251,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -25966,7 +25285,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26001,7 +25319,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26031,9 +25348,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "settingsRepo != nil"
       ],
@@ -26060,9 +25375,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "settingsRepo != nil",
         "brandingHandler != nil"
@@ -26091,8 +25404,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "settingsRepo != nil",
@@ -26123,8 +25435,7 @@
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "settingsRepo != nil",
@@ -26154,8 +25465,7 @@
       "middleware_chain": 2,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated",
-        "unclassified_middleware"
+        "authenticated"
       ],
       "conditions": [
         "settingsRepo != nil",
@@ -26188,7 +25498,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26223,7 +25532,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26258,7 +25566,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26293,7 +25600,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26328,7 +25634,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26363,7 +25668,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26398,7 +25702,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26433,7 +25736,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26468,7 +25770,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26503,7 +25804,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26538,7 +25838,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26573,7 +25872,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26608,7 +25906,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26643,7 +25940,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26678,7 +25974,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26713,7 +26008,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26748,7 +26042,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26783,7 +26076,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26818,7 +26110,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26853,7 +26144,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26888,7 +26178,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26923,7 +26212,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26957,7 +26245,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -26992,7 +26279,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27027,7 +26313,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27062,7 +26347,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27097,7 +26381,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27132,7 +26415,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27167,7 +26449,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27202,7 +26483,6 @@
         "demo_guarded",
         "profile_required",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27236,7 +26516,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27270,7 +26549,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27304,7 +26582,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27338,7 +26615,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27372,7 +26648,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27406,7 +26681,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27440,7 +26714,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27474,7 +26747,6 @@
         "authenticated",
         "demo_guarded",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
@@ -27504,9 +26776,7 @@
       "handler_resolved": true,
       "middleware_chain": 1,
       "auth_class": "public",
-      "auth_traits": [
-        "unclassified_middleware"
-      ],
+      "auth_traits": [],
       "conditions": [
         "webhookSyncHandler != nil"
       ],
@@ -27538,7 +26808,6 @@
         "demo_guarded",
         "household_profile_gate",
         "rate_limited",
-        "unclassified_middleware",
         "viewer_access"
       ],
       "conditions": [
