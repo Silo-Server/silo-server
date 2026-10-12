@@ -660,7 +660,7 @@ func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, p
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	if err := nodeauth.Sign(req, jwtSecret); err != nil {
+	if err := nodeauth.Sign(req, nodeURL, jwtSecret); err != nil {
 		return nil, err
 	}
 	return req, nil

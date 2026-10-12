@@ -21,7 +21,7 @@ func Signed(r *http.Request, secret string) bool {
 // first: the signature covers them.
 func Sign(t testing.TB, r *http.Request, secret string) {
 	t.Helper()
-	if err := nodeauth.Sign(r, secret); err != nil {
+	if err := nodeauth.Sign(r, "", secret); err != nil {
 		t.Fatalf("sign worker request: %v", err)
 	}
 }

@@ -43,7 +43,7 @@ func FetchHWCapabilitiesPayload(ctx context.Context, baseClient *http.Client, no
 	if err != nil {
 		return playback.HWAccelInfo{}, nil, 0, logredact.SanitizeURLError(err)
 	}
-	if err := nodeauth.Sign(request, jwtSecret); err != nil {
+	if err := nodeauth.Sign(request, nodeURL, jwtSecret); err != nil {
 		return playback.HWAccelInfo{}, nil, 0, err
 	}
 

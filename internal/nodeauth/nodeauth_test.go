@@ -30,7 +30,7 @@ func signedServerRequest(t *testing.T, method, target string, body []byte, signe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sign(client, testSecret, signedAt); err != nil {
+	if err := sign(client, "http://node.test", testSecret, signedAt); err != nil {
 		t.Fatalf("sign: %v", err)
 	}
 	server := httptest.NewRequest(method, client.URL.RequestURI(), bytes.NewReader(body))
@@ -43,7 +43,7 @@ func TestSignNeverSendsTheSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Sign(req, testSecret); err != nil {
+	if err := Sign(req, "http://node.test", testSecret); err != nil {
 		t.Fatal(err)
 	}
 	auth := req.Header.Get("Authorization")
@@ -205,7 +205,7 @@ func TestVerifyRequiresACredential(t *testing.T) {
 
 func TestNoSecretSignsAndVerifiesNothing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
-	if err := Sign(req, ""); err != nil || req.Header.Get("Authorization") != "" {
+	if err := Sign(req, "http://node.test", ""); err != nil || req.Header.Get("Authorization") != "" {
 		t.Fatalf("Sign = %v with Authorization %q, want an unsigned request", err, req.Header.Get("Authorization"))
 	}
 	req.Header.Set("Authorization", "Bearer ")
@@ -247,7 +247,7 @@ func TestSignKeepsUnrewindableBodiesReadable(t *testing.T) {
 	if req.GetBody != nil {
 		t.Fatal("test needs a body without GetBody")
 	}
-	if err := sign(req, testSecret, testNow); err != nil {
+	if err := sign(req, "http://node.test", testSecret, testNow); err != nil {
 		t.Fatal(err)
 	}
 	got, err := io.ReadAll(req.Body)
@@ -276,7 +276,7 @@ func TestSignedRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Sign(req, testSecret); err != nil {
+	if err := Sign(req, server.URL, testSecret); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := server.Client().Do(req)
@@ -306,5 +306,77 @@ func TestLogThrottleCountsSuppressedWarningsAndSurvivesClockSteps(t *testing.T) 
 	// A clock stepped back behind the last warning must not mute the next one.
 	if _, ok := throttle.allow(testNow.Add(-time.Hour)); !ok {
 		t.Fatal("a warning after a backward clock step was suppressed")
+	}
+}
+
+// A worker registered under a path prefix that its reverse proxy strips
+// serves, and verifies, the path without the prefix.
+func TestSignedPathIsRelativeToTheNodeURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, nodeURL, target, workerSees string
+	}{
+		{"no prefix", "http://gateway.test", "http://gateway.test/transcode/abc/master.m3u8?x=1", "/transcode/abc/master.m3u8?x=1"},
+		{"prefix", "http://gateway.test/node1", "http://gateway.test/node1/transcode/abc/master.m3u8?x=1", "/transcode/abc/master.m3u8?x=1"},
+		{"prefix with trailing slash", "http://gateway.test/node1/", "http://gateway.test/node1/status", "/status"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := http.NewRequest(http.MethodGet, tc.target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sign(client, tc.nodeURL, testSecret, testNow); err != nil {
+				t.Fatal(err)
+			}
+			worker := httptest.NewRequest(http.MethodGet, tc.workerSees, nil)
+			worker.Header.Set("Authorization", client.Header.Get("Authorization"))
+			if err := verify(worker, testSecret, testNow); err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+		})
+	}
+	// The prefix is not a wildcard: a different route still fails.
+	client, err := http.NewRequest(http.MethodGet, "http://gateway.test/node1/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sign(client, "http://gateway.test/node1", testSecret, testNow); err != nil {
+		t.Fatal(err)
+	}
+	worker := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
+	worker.Header.Set("Authorization", client.Header.Get("Authorization"))
+	if err := verify(worker, testSecret, testNow); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("verify = %v, want ErrUnauthorized", err)
+	}
+}
+
+// A worker behind a reverse proxy that strips the path prefix of its
+// registered URL still verifies the request, over a real connection.
+func TestSignedRequestThroughAPrefixStrippingProxy(t *testing.T) {
+	worker := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := Verify(r, testSecret); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, r.URL.Path)
+	})
+	server := httptest.NewServer(http.StripPrefix("/node1", worker))
+	defer server.Close()
+
+	nodeURL := server.URL + "/node1"
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, nodeURL+"/transcode/start", strings.NewReader(`{"session_id":"abc"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Sign(req, nodeURL, testSecret); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(got) != "/transcode/start" {
+		t.Fatalf("status %d body %q, want 200 /transcode/start", resp.StatusCode, got)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -59,17 +60,22 @@ var (
 
 var emptyBodyHash = sha256.Sum256(nil)
 
-// Sign authenticates req for a Silo worker. Call it once the URL and body are
-// final and just before sending: the signature expires after maxSkew. A body
-// without GetBody is read into memory and replaced.
+// Sign authenticates req for the Silo worker registered at nodeURL. Call it
+// once the URL and body are final and just before sending: the signature
+// expires after maxSkew. A body without GetBody is read into memory and
+// replaced.
+//
+// The signature covers the request path relative to nodeURL, which is the
+// path the worker serves: a reverse proxy that puts the worker under a path
+// prefix strips that prefix before the worker sees it.
 //
 // Without a secret, Sign leaves req unsigned and the worker refuses it. Every
 // server generates the secret at startup, so this happens only in tests.
-func Sign(req *http.Request, secret string) error {
-	return sign(req, secret, time.Now())
+func Sign(req *http.Request, nodeURL, secret string) error {
+	return sign(req, nodeURL, secret, time.Now())
 }
 
-func sign(req *http.Request, secret string, now time.Time) error {
+func sign(req *http.Request, nodeURL, secret string, now time.Time) error {
 	if secret == "" {
 		return nil
 	}
@@ -79,7 +85,7 @@ func sign(req *http.Request, secret string, now time.Time) error {
 	}
 	timestamp := strconv.FormatInt(now.Unix(), 10)
 	body := hex.EncodeToString(bodyHash)
-	mac, err := requestMAC(secret, timestamp, req.Method, req.URL.EscapedPath(), req.URL.RawQuery, body)
+	mac, err := requestMAC(secret, timestamp, req.Method, workerPath(req.URL, nodeURL), req.URL.RawQuery, body)
 	if err != nil {
 		return err
 	}
@@ -192,6 +198,20 @@ func parseParams(params string) (signedParams, bool) {
 		}
 	}
 	return fields, fields.timestamp != "" && fields.body != "" && fields.signature != ""
+}
+
+// workerPath is target's escaped path without the path prefix of nodeURL, if
+// it has one.
+func workerPath(target *url.URL, nodeURL string) string {
+	path := target.EscapedPath()
+	base, err := url.Parse(nodeURL)
+	if err != nil {
+		return path
+	}
+	if prefix := strings.TrimRight(base.EscapedPath(), "/"); prefix != "" && strings.HasPrefix(path, prefix+"/") {
+		return path[len(prefix):]
+	}
+	return path
 }
 
 // requestMAC signs the canonical form of one request. An empty path is the

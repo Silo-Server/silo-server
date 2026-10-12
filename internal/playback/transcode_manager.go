@@ -1148,7 +1148,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	if err := nodeauth.Sign(req, m.jwtSecret()); err != nil {
+	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 

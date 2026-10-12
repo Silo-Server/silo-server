@@ -78,7 +78,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, jwtSecret); err != nil {
+	if err := nodeauth.Sign(httpReq, node.URL, jwtSecret); err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: sign request: %w", err)
 	}
 

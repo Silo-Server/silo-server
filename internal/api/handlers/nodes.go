@@ -416,7 +416,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	if err != nil {
 		return false
 	}
-	if nodeauth.Sign(req, h.jwtSecret) != nil {
+	if nodeauth.Sign(req, node.URL, h.jwtSecret) != nil {
 		return false
 	}
 	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
@@ -784,7 +784,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	if err != nil {
 		return nodeReprobeResponse{}, err
 	}
-	if err := nodeauth.Sign(req, h.jwtSecret); err != nil {
+	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
 		return nodeReprobeResponse{}, err
 	}
 

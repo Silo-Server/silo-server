@@ -160,7 +160,7 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, secret); err != nil {
+	if err := nodeauth.Sign(httpReq, node.URL, secret); err != nil {
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	resp, err := telemetry.DoTrustedNode(e.client, httpReq, "trickplay_extract")

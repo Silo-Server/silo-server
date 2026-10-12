@@ -46,7 +46,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpRequest, h.JWTSecret); err != nil {
+	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
 	response, err := telemetry.DoTrustedNode(http.DefaultClient, httpRequest, "transcode_start")

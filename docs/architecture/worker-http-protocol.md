@@ -319,7 +319,11 @@ Authorization: Silo-Node-HMAC-SHA256 t=<unix seconds>,b=<hex body SHA-256>,sig=<
 `b` is the SHA-256 of the body, or of the empty string when there is none. The
 MAC covers these values, joined by newlines: the literal
 `silo-node-request-v1`, `t`, the method, the escaped request path (`/` when
-empty), the raw query, and `b` as sent. The worker checks, in order:
+empty), the raw query, and `b` as sent. The sender signs the path relative to
+the worker's registered URL, leaving out any path prefix in that URL: workers
+serve their routes from `/`, so a reverse proxy that puts one under a prefix
+strips it, and the worker verifies the path it receives. The worker checks, in
+order:
 
 1. the MAC, recomputed over the request it received and compared with
    `hmac.Equal`, before reading any body, so a caller without the secret cannot
@@ -338,9 +342,9 @@ most once every ten minutes and counts the refusals it suppressed.
 What this requires and allows:
 
 - Worker clocks stay within 30 seconds of the API servers and proxies.
-- A reverse proxy in front of a worker forwards the path and query unchanged.
-  A worker URL whose path prefix a reverse proxy strips stops working. Headers,
-  including `Host`, are not signed.
+- A reverse proxy in front of a worker may strip the path prefix of the
+  worker's registered URL, but must otherwise forward the path and query
+  unchanged. Headers, including `Host`, are not signed.
 - A captured request can be replayed, to the same or another worker, until its
   timestamp expires. Its method, path, query, and body cannot be altered; its
   headers can, since they are not signed. It reveals nothing that signs another

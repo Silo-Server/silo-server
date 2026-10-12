@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -100,7 +101,7 @@ func (c RemoteClient) Run(ctx context.Context, endpoint, secret string, req Requ
 		return Result{}, &RemoteError{Reason: ReasonNodeUnavailable, Err: err}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, secret); err != nil {
+	if err := nodeauth.Sign(httpReq, strings.TrimSuffix(endpoint, RemotePath), secret); err != nil {
 		return Result{}, &RemoteError{Reason: ReasonNodeUnavailable, Err: err}
 	}
 	resp, err := telemetry.DoTrustedNode(c.HTTP, httpReq, "media_sample")
