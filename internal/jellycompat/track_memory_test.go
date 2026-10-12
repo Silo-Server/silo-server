@@ -703,6 +703,18 @@ func TestRememberCompatTracksCallbacksNeverFail(t *testing.T) {
 			t.Fatalf("replayed update callback %d returned %v, want nil", i, err)
 		}
 	}
+	// A replay after another replica saved a newer claim leaves that claim.
+	newer := *current
+	newer.MediaSources = slices.Clone(current.MediaSources)
+	newer.MediaSources[0].RememberedSubtitleStreamIndex = intPtr(4)
+	for i, fn := range store.callbacks {
+		if err := fn(&newer); err != nil {
+			t.Fatalf("replayed update callback %d on a newer claim returned %v, want nil", i, err)
+		}
+	}
+	if got := newer.MediaSources[0].RememberedSubtitleStreamIndex; got == nil || *got != 4 {
+		t.Fatalf("replayed claim changed the newer subtitle claim to %v, want 4", got)
+	}
 	terminal := *current
 	terminal.MediaSources = slices.Clone(current.MediaSources)
 	terminal.Terminal = true
