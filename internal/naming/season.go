@@ -45,7 +45,7 @@ func seasonLabelStandsAlone(label, rest string) bool {
 		}
 		rest = rest[4:]
 	}
-	return startsWithMatch(episodeTechnicalRe, rest) || startsWithMatch(inferReleaseTokenRe, rest)
+	return startsWithMatch(episodeTechnicalRe, rest) || startsWithMatch(inferReleaseTokenRe, rest) || startsWithMatch(inferTechnicalSuffixRe, rest)
 }
 
 func startsWithMatch(re *regexp.Regexp, value string) bool {
