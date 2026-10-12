@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -193,10 +194,16 @@ func (h *PlaybackHandler) latestCompatTrackClaim(playSession *PlaybackSession, s
 // returns the ones this report changed. The durable store runs the callback on
 // its cached copy and then on the stored row, and replays it after a failed
 // database write, so the callback never fails: it only records what it found,
-// and the stored row's run decides.
+// and the stored row's run decides. A replay runs after this Update returned,
+// possibly over a newer claim another replica saved since, so a replayed run
+// changes nothing.
 func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int) (claimedAudio, claimedSubtitle *int, err error) {
 	ended := false
+	var returned atomic.Bool
 	err = h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+		if returned.Load() {
+			return nil
+		}
 		claimedAudio, claimedSubtitle = nil, nil
 		// The stored row can be terminal while a replica's copy is not.
 		ended = current.Terminal
@@ -219,6 +226,7 @@ func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string,
 		}
 		return nil
 	})
+	returned.Store(true)
 	if err == nil && ended {
 		err = ErrSessionNotFound
 	}
