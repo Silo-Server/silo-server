@@ -167,7 +167,7 @@ describe("LibraryBrowse", () => {
       expect(mocks.itemGridTotalItems).toBe(1);
     });
 
-    it("waits for the browse before trusting the index", () => {
+    it("holds the bar's place, greyed, until the browse and the index land", () => {
       mocks.useCatalogWindow.mockReturnValue({ data: undefined, isLoading: true });
       mocks.useCatalogLetters.mockReturnValue({
         data: {
@@ -176,6 +176,25 @@ describe("LibraryBrowse", () => {
           runs: [{ letter: "A", position: 0 }],
         },
       });
+
+      const loadingBrowse = render({ field: "title", order: "asc" });
+      expect(loadingBrowse).toContain('aria-label="Jump to letter"');
+      expect(loadingBrowse).toContain('aria-busy="true"');
+      expect(loadingBrowse).not.toContain("3 titles");
+
+      // The browse is in, the index isn't yet.
+      mocks.useCatalogWindow.mockReturnValue({
+        data: { totalItems: 1, knownItems: 1, pages: new Map([[0, []]]) },
+        isLoading: false,
+      });
+      mocks.useCatalogLetters.mockReturnValue({ data: undefined, isLoading: true });
+      const loadingIndex = render({ field: "title", order: "asc" });
+      expect(loadingIndex).toContain('aria-busy="true"');
+      expect(loadingIndex).toContain('aria-label="Q"');
+    });
+
+    it("steps aside when the index can't be read", () => {
+      mocks.useCatalogLetters.mockReturnValue({ data: undefined, isError: true });
 
       expect(render({ field: "title", order: "asc" })).not.toContain("Jump to letter");
     });

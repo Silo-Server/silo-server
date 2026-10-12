@@ -249,6 +249,12 @@ export default function LibraryBrowse({
   // over-filtered view keeps pointing at its filters.
   const browseCameBackEmpty =
     !isGroupedAxis && !catalogQuery.isLoading && !catalogQuery.isError && totalItems === 0;
+  // The bar holds its place from the first render of a title-ordered browse,
+  // greyed until the index lands, so the grid doesn't reflow and the bar
+  // doesn't pop in. It steps aside only when there is nothing to index or the
+  // index can't be read at all.
+  const reservesLetterBar =
+    titleOrdered && !browseCameBackEmpty && !(lettersQuery.isError && !lettersQuery.data);
   const libraryHasItemsQuery = useLibraryHasItems(libraryId, { enabled: browseCameBackEmpty });
   const isLoading =
     catalogQuery.isLoading || (browseCameBackEmpty && libraryHasItemsQuery.isLoading);
@@ -388,7 +394,9 @@ export default function LibraryBrowse({
         />
       ) : (
         <div
-          className={showLetterBar ? "pr-6 sm:pr-9 [@media(max-height:599px)]:pr-14" : undefined}
+          className={
+            reservesLetterBar ? "pr-6 sm:pr-9 [@media(max-height:599px)]:pr-14" : undefined
+          }
         >
           <ItemGrid
             gridRef={gridRef}
@@ -404,10 +412,12 @@ export default function LibraryBrowse({
           />
         </div>
       )}
-      {showLetterBar && !browseFailed ? (
+      {reservesLetterBar && !browseFailed ? (
         <LetterBar
-          letters={letterIndex.letters}
-          activeLetter={jumpedLetter ?? letterAtIndex(letterIndex.runs, topRowEnd)}
+          letters={showLetterBar ? letterIndex.letters : undefined}
+          activeLetter={
+            showLetterBar ? (jumpedLetter ?? letterAtIndex(letterIndex.runs, topRowEnd)) : undefined
+          }
           onJump={(letter) => {
             setJumpedLetter(letter.letter);
             gridRef.current?.scrollToItem(letter.position);

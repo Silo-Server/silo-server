@@ -110,4 +110,21 @@ describe("LetterBar", () => {
     expect(event.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(a);
   });
+
+  it("holds its place, greyed and inert, while the index loads", () => {
+    const onJump = vi.fn();
+    render(<LetterBar letters={undefined} onJump={onJump} />);
+
+    const bar = screen.getByRole("toolbar", { name: "Jump to letter" });
+    expect(bar.getAttribute("aria-busy")).toBe("true");
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(27);
+    expect(buttons.every((b) => b.getAttribute("aria-disabled") === "true")).toBe(true);
+    expect(buttons.every((b) => b.tabIndex === -1)).toBe(true);
+
+    const q = screen.getByRole("button", { name: "Q" });
+    fireEvent.click(q);
+    fireEvent.keyDown(q, { key: "ArrowDown" });
+    expect(onJump).not.toHaveBeenCalled();
+  });
 });

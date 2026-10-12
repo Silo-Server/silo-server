@@ -187,9 +187,13 @@ export default function ItemGrid(props: ItemGridProps) {
   const scrollOffset = virtualizer.scrollOffset ?? 0;
   useEffect(() => {
     if (!onTopRowChange) return;
+    // The top row is the first row at least half visible below the sticky
+    // header. Rounding, not flooring, also absorbs the fraction of a pixel a
+    // long list's scroll can settle short of a jump's offset, which would
+    // otherwise count the row hidden under the header.
     const row = Math.max(
       0,
-      Math.floor((scrollOffset + headerInsetRef.current - scrollMargin) / rowHeight),
+      Math.round((scrollOffset + headerInsetRef.current - scrollMargin) / rowHeight),
     );
     onTopRowChange(row * columnCount, (row + 1) * columnCount - 1);
   }, [onTopRowChange, scrollOffset, scrollMargin, rowHeight, columnCount]);

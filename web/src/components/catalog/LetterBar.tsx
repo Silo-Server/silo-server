@@ -6,8 +6,11 @@ import { cn } from "@/lib/utils";
 import { LETTER_BAR_LETTERS, spokenLetter, titleCount } from "./letterIndex";
 
 export interface LetterBarProps {
-  /** Letters with titles, from the letter index. Letters missing here are greyed out. */
-  letters: readonly CatalogLetter[];
+  /**
+   * Letters with titles, from the letter index. Letters missing here are
+   * greyed out; undefined while the index loads, which greys them all.
+   */
+  letters: readonly CatalogLetter[] | undefined;
   /** The letter the top of the list is in, marked as the current one. */
   activeLetter?: string;
   onJump: (letter: CatalogLetter) => void;
@@ -18,10 +21,13 @@ export interface LetterBarProps {
  * phone's contacts index. One tab stop: arrow keys, Home/End, or typing a
  * letter move between letters that have titles, Enter or Space jumps. On a
  * touchscreen, sliding a finger along the bar jumps as it passes each letter.
+ * While the index loads, the bar holds its place with every letter greyed, so
+ * it doesn't pop in after the grid.
  */
 export default function LetterBar({ letters, activeLetter, onJump }: LetterBarProps) {
+  const loading = letters === undefined;
   const byLetter = useMemo(
-    () => new Map(letters.map((letter) => [letter.letter, letter])),
+    () => new Map((letters ?? []).map((letter) => [letter.letter, letter])),
     [letters],
   );
   const enabled = useMemo(
@@ -55,6 +61,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (enabled.length === 0) return;
     const at = enabled.indexOf(tabStop ?? "");
     let next: string | undefined;
     switch (event.key) {
@@ -107,6 +114,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       role="toolbar"
       aria-label="Jump to letter"
       aria-orientation="vertical"
+      aria-busy={loading || undefined}
       onKeyDown={onKeyDown}
       onPointerDown={(event) => {
         if (event.pointerType === "mouse") return;
@@ -144,7 +152,11 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             tabIndex={letter === tabStop ? 0 : -1}
             aria-disabled={entry ? undefined : true}
             aria-current={isActive ? "true" : undefined}
-            aria-label={`${spokenLetter(letter)}, ${entry ? titleCount(entry.count) : "no titles"}`}
+            aria-label={
+              loading
+                ? spokenLetter(letter)
+                : `${spokenLetter(letter)}, ${entry ? titleCount(entry.count) : "no titles"}`
+            }
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}
             className={cn(
