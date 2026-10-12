@@ -96,7 +96,9 @@ function revealSlide(api: EmblaCarouselType | undefined, slide: HTMLElement, ind
   const viewport = api.rootNode().getBoundingClientRect();
   const rect = slide.getBoundingClientRect();
   if (rect.left >= viewport.left && rect.right <= viewport.right) return;
-  const snap = api.internalEngine().slideRegistry.findIndex((group) => group.includes(index));
+  // Embla maps slides to snaps only internally; its public API has no lookup.
+  const registry = api.internalEngine?.().slideRegistry ?? [];
+  const snap = registry.findIndex((group) => group.includes(index));
   if (snap >= 0) api.scrollTo(snap);
 }
 

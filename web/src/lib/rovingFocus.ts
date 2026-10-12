@@ -33,9 +33,9 @@ function itemIndex(item: HTMLElement): number {
 
 /**
  * Whether `el` belongs in the Tab order when its card is the active one.
- * Disabled controls count: one can be re-enabled by an attribute change alone
- * (the card menu swaps its disabled placeholder that way), which the observer
- * below would not see.
+ * Disabled controls count, so an inactive card's control is already out of
+ * the Tab order when an attribute change alone re-enables it (the card menu
+ * swaps its disabled placeholder that way).
  */
 function isOwnTabStop(el: HTMLElement): boolean {
   return el.hasAttribute(SAVED_TABINDEX_ATTR) || el.tabIndex >= 0;
