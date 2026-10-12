@@ -269,8 +269,11 @@ func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersio
 	output.HDR = false
 	sourceVideo := compatPrimaryVideoTrack(version)
 	// Source codec levels, reference frames and HDR metadata do not describe
-	// the encoded stream. Profile and level depend on the chosen worker's
-	// encoder; leave them unknown so required conditions remain fail-closed.
+	// the encoded stream. Profile, level and reference frames depend on the
+	// chosen worker's encoder, so they stay unknown. For the H.264 route
+	// every client falls back to, rules on them are encode targets, as in
+	// Jellyfin (see encodeOutputConditionsMatch); the opt-in HEVC route keeps
+	// failing them closed so an uncertain HEVC encode falls back to H.264.
 	// Full HDR encodes are separately gated on tone-map availability.
 	video := models.VideoTrack{
 		Codec: videoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
@@ -295,7 +298,11 @@ func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersio
 	audioIndex := len(output.VideoTracks)
 	// Both encoded outputs use HLS. Apply codec profiles scoped to its
 	// segment container, including Container=hls with SubContainer=mp4/ts.
-	if !p.codecProfileCompatibilityWithValues(output, &audioIndex, buildConditionValues(output, &audioIndex), container, true).supportsDirectPlay() {
+	matchOutput := conditionsMatch
+	if videoCodec == compatTargetVideoCodec {
+		matchOutput = encodeOutputConditionsMatch
+	}
+	if !p.codecProfileCompatibilityWithMatcher(output, &audioIndex, buildConditionValues(output, &audioIndex), container, true, matchOutput).supportsDirectPlay() {
 		return false
 	}
 

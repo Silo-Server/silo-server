@@ -307,6 +307,33 @@ func conditionsOnlyTargetAudio(conditions []ProfileCondition) bool {
 	return true
 }
 
+// encoderChosenConditionProperties are output facts the encoder picks rather
+// than inherits from the source. Jellyfin turns a client's rules on them into
+// encoder limits (StreamBuilder.ApplyTranscodingConditions) instead of
+// refusing the transcode.
+var encoderChosenConditionProperties = map[string]bool{
+	"videoprofile": true,
+	"videolevel":   true,
+	"refframes":    true,
+}
+
+// encodeOutputConditionsMatch matches conditions against a planned encode's
+// output, whose profile, level and reference frames stay unknown until a
+// worker's encoder is chosen. A rule on any of them is an encode target
+// there, not a refusal; every known value is still checked.
+func encodeOutputConditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
+	for _, condition := range conditions {
+		property := normalizeConditionToken(condition.Property)
+		if _, known := values[property]; !known && encoderChosenConditionProperties[property] {
+			continue
+		}
+		if !conditionMatches(condition, values) {
+			return false
+		}
+	}
+	return true
+}
+
 func conditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
 	for _, condition := range conditions {
 		if !conditionMatches(condition, values) {

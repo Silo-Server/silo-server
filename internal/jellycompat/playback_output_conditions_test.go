@@ -84,8 +84,10 @@ func TestEncodedOutputConditionsDoNotUseSourceCodecFacts(t *testing.T) {
 		{"scaled width", ProfileCondition{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}, 4000000, true},
 		{"scaled height", ProfileCondition{Condition: "LessThanEqual", Property: "Height", Value: "720", IsRequired: true}, 4000000, true},
 		{"known width exceeds constraint", ProfileCondition{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}, 0, false},
-		{"required encoder level unknown", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: true}, 0, false},
-		{"required encoder profile unknown", ProfileCondition{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline", IsRequired: true}, 0, false},
+		// The encoder picks profile and level, so a client's rule on them is an
+		// encode target, as Jellyfin's StreamBuilder treats it, not a refusal.
+		{"required encoder level unknown", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: true}, 0, true},
+		{"required encoder profile unknown", ProfileCondition{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline", IsRequired: true}, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profile := DeviceProfile{
