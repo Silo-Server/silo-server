@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -199,10 +200,19 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // CompatLoginWithLocalFallback selects a provider once and retries a rejected
 // password only with that local provider. It reports whether fallback succeeded
 // so the caller can verify the PIN it split from the original password.
+//
+// A local password longer than MaximumPasswordBytes cannot be the account's
+// own, and bcrypt compares only its first 72 bytes, so such a password goes
+// straight to the fallback: otherwise a 72-byte password followed by "#pin"
+// would match as the full password and lose its PIN.
 func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string) (*TokenPair, *models.User, bool, error) {
 	providerID, err := s.routePasswordLogin(ctx, username)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	if providerID == LocalProviderID && fallback != "" && len(password) > MaximumPasswordBytes {
+		pair, user, err := s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
+		return pair, user, err == nil, err
 	}
 	pair, user, err := s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
 	if providerID != LocalProviderID || fallback == "" || !errors.Is(err, ErrInvalidCredentials) {
@@ -210,6 +220,18 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	}
 	pair, user, err = s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
 	return pair, user, err == nil, err
+}
+
+// SplitPasswordPIN splits the compatibility sign-ins' "password#pin" at the
+// last '#', giving the fallback password for CompatLoginWithLocalFallback and
+// the profile PIN to check when that fallback is what matched. Returns
+// ("", "") if there is no '#' or the split would produce empty parts.
+func SplitPasswordPIN(password string) (basePw, pin string) {
+	idx := strings.LastIndex(password, "#")
+	if idx <= 0 || idx >= len(password)-1 {
+		return "", ""
+	}
+	return password[:idx], password[idx+1:]
 }
 
 func (s *Service) LoginWithProvider(
@@ -1290,6 +1312,12 @@ func (s *Service) CurrentLoginSession(ctx context.Context, userID int, sessionID
 		return nil, ErrSessionNotFound
 	}
 	return session, nil
+}
+
+// LoginSessionActive reports whether a login session is live: not revoked
+// and not expired. An error means the store could not be read.
+func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (bool, error) {
+	return s.sessions.IsValid(ctx, sessionID)
 }
 
 // RevokeSession revokes a specific session. It verifies the session belongs

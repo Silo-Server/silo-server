@@ -256,3 +256,8 @@
 ./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
 ./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
+
+# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
+# the frozen legacy bridge alike.
+./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
+./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB

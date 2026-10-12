@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
@@ -247,6 +248,21 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 						writeRateLimitResponse(w, epResult, reject)
 						return
 					}
+
+					// A client IP taken from forwarding headers is a new
+					// budget whenever the sender names a new client, and every
+					// private address is a trusted proxy by default. The
+					// connection's own address also spends a looser budget
+					// that all clients behind it share. Network access ingress
+					// writes the header itself and needs no such cap.
+					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+						peerKey := fmt.Sprintf("authpeer:%s:%s", peer, endpoint)
+						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
+						if !peerResult.Allowed {
+							writeRateLimitResponse(w, peerResult, reject)
+							return
+						}
+					}
 				}
 			}
 
@@ -259,6 +275,20 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// authPeerBudgetMultiplier sizes the budget that every forwarded client behind
+// one transport peer shares, relative to one client's endpoint budget. A
+// reverse proxy fronting many users needs more than one client's allowance;
+// a client rotating forwarding headers gets no more than this.
+const authPeerBudgetMultiplier = 10
+
+func authPeerRate(endpointRate Rate) Rate {
+	return Rate{
+		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
 	}
 }
 

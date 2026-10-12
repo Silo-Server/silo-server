@@ -3372,8 +3372,10 @@ func main() {
 			Files:    deps.FileRepo,
 			Settings: settingsRepo,
 			Auth: &audiobooks.SiloCredValidator{
-				Auth: absAuthSvc,
-				Pool: deps.DB,
+				Auth:        absAuthSvc,
+				Pool:        deps.DB,
+				Stores:      userStoreProvider,
+				PINAttempts: deps.ProfilePINAttempts,
 			},
 			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore),
 			Recs:           recommendations.NewRepo(deps.DB),

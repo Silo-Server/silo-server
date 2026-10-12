@@ -242,7 +242,7 @@ func TestQuickConnectAuthorizeApprovesAsTheSession(t *testing.T) {
 func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	service := &fakeQuickConnect{collect: &auth.DeviceLoginPollResult{
 		Status:      auth.DeviceLoginStatusApproved,
-		TokenPair:   &auth.TokenPair{AccessToken: "native-access", RefreshToken: "native-refresh", ExpiresIn: 3600},
+		TokenPair:   &auth.TokenPair{AccessToken: "native-access", RefreshToken: "native-refresh", ExpiresIn: 3600, SessionID: "login-1"},
 		User:        &models.User{ID: 7, Username: "alice"},
 		ProfileID:   "kids",
 		ProfileName: "Kids",
@@ -261,7 +261,7 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 		t.Fatalf("response = %+v", out)
 	}
 	session, ok := store.Get(token)
-	if !ok || session.ProfileID != "kids" || session.StreamAppUserID != 7 || session.StreamAppRefreshToken != "native-refresh" {
+	if !ok || session.ProfileID != "kids" || session.StreamAppUserID != 7 || session.StreamAppRefreshToken != "native-refresh" || session.LoginSessionID != "login-1" {
 		t.Fatalf("stored session = %+v, %v", session, ok)
 	}
 

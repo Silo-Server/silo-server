@@ -137,7 +137,11 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 		return
 	}
 
-	body, _ := io.ReadAll(r.Body)
+	body, status := readPluginRouteBody(w, r)
+	if status != http.StatusOK {
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
 	headers := forwardedRequestHeaders(r.Header)
 	if _, _, userID, contextProfileID := pluginAccessUserFromContext(r.Context()); userID > 0 {
 		headers["X-Silo-User-Id"] = strconv.Itoa(userID)
@@ -195,6 +199,37 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 	}
 	w.WriteHeader(int(response.GetStatusCode()))
 	_, _ = w.Write(response.GetBody())
+}
+
+// pluginRPCMaxMessageBytes is the gRPC default receive limit (4 MiB). The
+// plugin SDK serves plugins with go-plugin's default gRPC server and sets no
+// larger limit, so a HandleHTTPRequest bigger than this cannot reach a plugin.
+const pluginRPCMaxMessageBytes = 4 << 20
+
+// maxPluginRouteBodyBytes caps a dynamic plugin route's request body. It
+// leaves room under the plugin RPC limit for the method, path, forwarded
+// headers, and query that travel in the same message.
+const maxPluginRouteBodyBytes = pluginRPCMaxMessageBytes - 256<<10
+
+// readPluginRouteBody buffers the request body for the plugin RPC under the
+// host cap, whatever the method or transfer encoding. It returns
+// http.StatusOK on success, 413 when the body exceeds the cap, and 400 for any
+// other read failure; the plugin is never called in the error cases.
+func readPluginRouteBody(w http.ResponseWriter, r *http.Request) ([]byte, int) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil, http.StatusOK
+	}
+	if r.ContentLength > maxPluginRouteBodyBytes {
+		return nil, http.StatusRequestEntityTooLarge
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPluginRouteBodyBytes))
+	if err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return nil, http.StatusRequestEntityTooLarge
+		}
+		return nil, http.StatusBadRequest
+	}
+	return body, http.StatusOK
 }
 
 func (p *HTTPProxy) ServeAsset(w http.ResponseWriter, r *http.Request, installationID int, assetPath string) {

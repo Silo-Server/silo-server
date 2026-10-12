@@ -165,26 +165,37 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 				t.Fatalf("runs = %+v, want # split around the Latin letters", got.Runs)
 			}
 
-			// A seek to a letter's position lands on that letter's first title.
-			for _, b := range got.Letters {
-				seekReq := req
-				seekReq.CursorPaging = true
-				seekReq.Limit = 1
-				seekReq.Seek = new(b.Position)
-				page, err := resolver.Resolve(ctx, seekReq, access)
-				if err != nil {
-					t.Fatalf("seek to %s: %v", b.Letter, err)
-				}
-				if len(page.Items) != 1 {
-					t.Fatalf("seek to %s at %d returned %d items", b.Letter, b.Position, len(page.Items))
-				}
-				item := page.Items[0]
-				key := strings.Trim(item.SortTitle, " ")
-				if key == "" {
-					key = item.Title
-				}
-				if letterOf(key) != b.Letter {
-					t.Fatalf("seek to %s at %d landed on %q", b.Letter, b.Position, item.Title)
+			// The same query is answered from the cache.
+			again, err := resolver.LetterIndex(ctx, req, access)
+			if err != nil || !slices.Equal(again.Runs, got.Runs) {
+				t.Fatalf("second letter index = %+v, %v", again, err)
+			}
+
+			// A seek to a letter's position lands on that letter's first
+			// title, whether it numbers rows (no snapshot) or walks from a
+			// seek anchor (a snapshot the client pins).
+			for _, snapshot := range []*time.Time{nil, new(time.Now())} {
+				for _, b := range got.Letters {
+					seekReq := req
+					seekReq.CursorPaging = true
+					seekReq.Limit = 1
+					seekReq.Seek = new(b.Position)
+					seekReq.SnapshotAt = snapshot
+					page, err := resolver.Resolve(ctx, seekReq, access)
+					if err != nil {
+						t.Fatalf("seek to %s: %v", b.Letter, err)
+					}
+					if len(page.Items) != 1 {
+						t.Fatalf("seek to %s at %d returned %d items", b.Letter, b.Position, len(page.Items))
+					}
+					item := page.Items[0]
+					key := strings.Trim(item.SortTitle, " ")
+					if key == "" {
+						key = item.Title
+					}
+					if letterOf(key) != b.Letter {
+						t.Fatalf("seek to %s at %d landed on %q", b.Letter, b.Position, item.Title)
+					}
 				}
 			}
 		})
