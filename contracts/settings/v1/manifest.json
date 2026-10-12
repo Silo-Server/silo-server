@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 20,
+  "revision": 21,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1563,7 +1563,8 @@
       "label": "Show title art",
       "description": "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
       "recommended_control": "switch",
-      "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos."
+      "admin_default": true,
+      "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos. The administrator can replace the default for the whole server; a profile or device with no stored value inherits it with source \"default\", and clearing both the profile value and this device's value returns a device to it."
     }
   ]
 }
