@@ -95,8 +95,8 @@ const sqlName = `(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:"[^"]+"|[A-Za-z_][A-
 var (
 	gooseDownRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+down\b`)
 	gooseNoTxRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+no\s+transaction\s*$`)
-	createTableRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+|UNLOGGED\s+)?(?:TABLE|MATERIALIZED\s+VIEW)\s+(IF\s+NOT\s+EXISTS\s+)?(` + sqlName + `)`)
-	createIndexRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\b(.*?)\bON\s+(?:ONLY\s+)?(` + sqlName + `)`)
+	createTableRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(TEMP|TEMPORARY)\s+|UNLOGGED\s+)?(?:TABLE|MATERIALIZED\s+VIEW)\s+(IF\s+NOT\s+EXISTS\s+)?(` + sqlName + `)`)
+	createIndexRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\b((?:"(?:[^"]|"")*"|[^"])*?)\bON\s+(?:ONLY\s+)?(` + sqlName + `)`)
 	alterTableRE     = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(` + sqlName + `)\s+(.*)$`)
 	concurrentlyRE   = regexp.MustCompile(`(?i)\bCONCURRENTLY\b`)
 	refreshMatViewRE = regexp.MustCompile(`(?i)^REFRESH\s+MATERIALIZED\s+VIEW\b`)
@@ -128,7 +128,16 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 	if loc := gooseDownRE.FindStringIndex(src); loc != nil {
 		src = src[:loc[0]]
 	}
-	created := map[string]bool{} // tables this file created
+	created := map[string]bool{} // tables this file created; temporary ones under pg_temp
+	// resolve names a table the way the search path would: an unqualified
+	// name means this file's temporary table when there is one.
+	resolve := func(name string) string {
+		table := normalizeTableName(name)
+		if len(namePartRE.FindAllString(name, -1)) == 1 && created["pg_temp."+table] {
+			return "pg_temp." + table
+		}
+		return table
+	}
 	altered := map[string]bool{} // tables this file already locked with ALTER TABLE
 	var findings []onlineDDLFinding
 	for _, st := range splitSQLStatements(src) {
@@ -142,19 +151,23 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 		}
 		// IF NOT EXISTS does not prove the table is new: it may already exist
 		// and hold rows.
-		if m := createTableRE.FindStringSubmatch(st.text); m != nil && m[1] == "" {
-			created[normalizeTableName(m[2])] = true
+		if m := createTableRE.FindStringSubmatch(st.text); m != nil && m[2] == "" {
+			table := normalizeTableName(m[3])
+			if m[1] != "" {
+				table = "pg_temp." + table
+			}
+			created[table] = true
 		}
 		if !noTx && hasKeyword(concurrentlyRE, st.text) && !refreshMatViewRE.MatchString(st.text) {
 			hit(ruleConcurrentlyInTx, "")
 		}
 		if m := createIndexRE.FindStringSubmatch(st.text); m != nil {
-			if table := normalizeTableName(m[2]); !created[table] && !hasKeyword(concurrentlyRE, m[1]) {
+			if table := resolve(m[2]); !created[table] && !hasKeyword(concurrentlyRE, m[1]) {
 				hit(ruleCreateIndex, table)
 			}
 		}
-		if m := alterTableRE.FindStringSubmatch(st.text); m != nil && !created[normalizeTableName(m[1])] {
-			table := normalizeTableName(m[1])
+		if m := alterTableRE.FindStringSubmatch(st.text); m != nil && !created[resolve(m[1])] {
+			table := resolve(m[1])
 			actions := splitTopLevel(m[2], ',')
 			validates, others := 0, 0
 			for _, action := range actions {
@@ -184,7 +197,11 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 		// The renamed table keeps what this file knows about it, including the
 		// lock the rename takes.
 		if m := renameTableRE.FindStringSubmatch(st.text); m != nil {
-			from, to := normalizeTableName(m[1]), normalizeTableName(m[2])
+			// RENAME TO keeps the table in its schema.
+			from, to := resolve(m[1]), normalizeTableName(m[2])
+			if schema, _, ok := strings.Cut(from, "."); ok {
+				to = schema + "." + to
+			}
 			created[to], altered[to] = created[from], altered[from]
 		}
 		findings = append(findings, applyAllowances(st, hits)...)
@@ -491,6 +508,10 @@ func TestCheckOnlineDDL(t *testing.T) {
 		{"quoted mixed-case table is not the new lower-case one", "CREATE TABLE t (x int);\nCREATE INDEX i ON \"T\" (x);", []string{ruleCreateIndex}},
 		{"index named concurrently", "-- +goose NO TRANSACTION\nCREATE INDEX \"concurrently\" ON media_files (x);", []string{ruleCreateIndex}},
 		{"validate after a rename", "ALTER TABLE old_t RENAME TO new_t;\nALTER TABLE new_t VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
+		{"quoted index name containing ON", "-- +goose NO TRANSACTION\nCREATE INDEX \"concurrently on placeholder\" ON media_files (x);", []string{ruleCreateIndex}},
+		{"rename keeps the schema", "ALTER TABLE archive.t RENAME TO u;\nALTER TABLE archive.u VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
+		{"renamed new table in another schema does not exempt public", "CREATE TABLE archive.t (x int);\nALTER TABLE archive.t RENAME TO u;\nCREATE INDEX i ON u (x);", []string{ruleCreateIndex}},
+		{"temporary table does not exempt the public table", "CREATE TEMP TABLE media_files (x int);\nCREATE INDEX i ON public.media_files (x);", []string{ruleCreateIndex}},
 		{"nested block comment", "/* outer /* inner */ still a comment */ CREATE INDEX i ON media_files (x);", []string{ruleCreateIndex}},
 		{"E-string with an escaped quote", "INSERT INTO t VALUES (E'it\\'s');\nCREATE INDEX i ON media_files (x);\nSELECT 'x';", []string{ruleCreateIndex}},
 
@@ -519,6 +540,7 @@ ALTER TABLE public.marker_jobs ADD CONSTRAINT one CHECK (id > 0);`, nil},
 		{"allow on a statement about a new table", "CREATE TABLE t (x int);\n-- online-ddl allow create-index: stale\nALTER TABLE t ADD CHECK (x > 0);", []string{ruleAllowComment}},
 		{"renamed new table stays new", "CREATE TABLE a (x int);\nALTER TABLE a RENAME TO b;\nCREATE INDEX i ON public.b (x);", nil},
 		{"quoted and unquoted lower-case names match", "CREATE TABLE \"jobs\" (x int);\nCREATE INDEX i ON public.jobs (x);", nil},
+		{"unqualified name means the temporary table", "CREATE TEMP TABLE scratch (x int) ON COMMIT DROP;\nCREATE INDEX i ON scratch (x);", nil},
 		{"new materialized view", "CREATE MATERIALIZED VIEW mv AS SELECT 1 AS x;\nCREATE UNIQUE INDEX mv_x ON mv (x);\nREFRESH MATERIALIZED VIEW CONCURRENTLY mv;", nil},
 		{"DDL in comments and strings", "-- CREATE INDEX i ON t (x);\n/* ALTER TABLE t ADD CHECK (x > 0); */\nINSERT INTO notes VALUES ('CREATE INDEX i ON t (x); ALTER TABLE t ALTER COLUMN x TYPE int');", nil},
 		{"DDL in a function body", "-- +goose StatementBegin\nCREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $fn$\nBEGIN\n  EXECUTE 'CREATE INDEX i ON t (x)';\n  CREATE INDEX j ON t (y);\nEND $fn$;\n-- +goose StatementEnd", nil},
