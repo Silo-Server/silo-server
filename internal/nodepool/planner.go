@@ -915,10 +915,14 @@ func (p *Planner) pickProxy(proxies []*Node, groupHealthy map[string]bool, group
 // underCap reports whether a node can take one more job.
 func (p *Planner) underCap(n *Node, now time.Time) bool {
 	capacity := reportedEncodingCapacity(n)
-	jobs := p.effectiveJobs(n, now)
-	if capacity != nil && capacity.MaxJobs > 0 {
-		jobs = p.effectiveJobsFrom(n, capacity.ActiveJobs, now)
+	if n.MaxJobs == nil && (capacity == nil || capacity.MaxJobs <= 0) {
+		return true
 	}
+	baseJobs := n.ActiveJobs
+	if capacity != nil && capacity.MaxJobs > 0 {
+		baseJobs = capacity.ActiveJobs
+	}
+	jobs := p.effectiveJobsFrom(n, baseJobs, now)
 	if n.MaxJobs != nil && jobs >= *n.MaxJobs {
 		return false
 	}
