@@ -3874,9 +3874,33 @@
       "body_file": "admin_user_policy_defaults.json"
     },
     {
+      "name": "android_push_registration_ok",
+      "operation_id": "registerPushDevice",
+      "scenario": "An Android installation registers for private push; the receipt names the server so the app can route that server's pushes by server and profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/push/devices",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner",
+          "X-Push-Generation": "3",
+          "X-Push-Installation-Key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s"
+        },
+        "body": "{\"device_id\":\"install\",\"platform\":\"android\",\"token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"push_mode\":\"private_push\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AndroidPushRegistrationReceipt",
+      "body_file": "android_push_registration_ok.json"
+    },
+    {
       "name": "apple_push_registration_capability",
       "operation_id": "getApplePushRegistrationCapabilities",
-      "scenario": "Local ordered Apple registration is unavailable when the service is absent; this does not describe provider delivery.",
+      "scenario": "Local ordered Apple registration and current-login validation are configured; this does not describe provider delivery.",
       "request": {
         "method": "GET",
         "path": "/api/v2/devices/push/apple/capabilities",
@@ -3893,6 +3917,30 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ApplePushRegistrationCapability",
       "body_file": "apple_push_registration_capability.json"
+    },
+    {
+      "name": "apple_push_registration_ok",
+      "operation_id": "registerApplePushDevice",
+      "scenario": "An iPhone registers for private push and receives a display credential; the receipt names the server so the app can key that credential by server and profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/devices/push/apple",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner",
+          "X-Push-Generation": "3",
+          "X-Push-Installation-Key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s"
+        },
+        "body": "{\"device_id\":\"install\",\"apns_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"apns_environment\":\"production\",\"apns_topic\":\"org.siloserver.silo\",\"push_mode\":\"private_push\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ApplePushRegistrationReceipt",
+      "body_file": "apple_push_registration_ok.json"
     },
     {
       "name": "approve_device_handoff_ok",

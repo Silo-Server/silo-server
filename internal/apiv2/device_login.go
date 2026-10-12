@@ -406,14 +406,10 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		ClientPurpose:  info.ClientPurpose,
 		Temporary:      info.Temporary,
 		ServerName:     reg.serverDisplayName(ctx),
+		ServerID:       reg.knownServerID(ctx),
 	}
 	if !info.ExpiresAt.IsZero() {
 		out.ExpiresAt = ptr(NewInstant(info.ExpiresAt))
-	}
-	if reg.deps.ServerIdentity != nil {
-		if id, err := reg.deps.ServerIdentity.ServerID(ctx); err == nil {
-			out.ServerID = id
-		}
 	}
 	return &DeviceLoginOutput{Body: out}, nil
 }
