@@ -491,18 +491,16 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 //
 // Fenced on the node's URL by the pools themselves, like every other health
 // write: the row can be repointed while a check is in flight.
-func (h *NodeHandler) applyHealthToPools(
-	node *nodepool.Node, healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess,
-) {
+func (h *NodeHandler) applyHealthToPools(node *nodepool.Node, report nodepool.HealthReport) {
 	checkedAt := time.Now()
 	switch node.Type {
 	case nodepool.NodeTypeProxy:
 		if h.proxyPool != nil {
-			h.proxyPool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
+			h.proxyPool.ApplyHealthReport(node.ID, node.URL, report, checkedAt)
 		}
 	case nodepool.NodeTypeTranscode:
 		if h.transcodePool != nil {
-			h.transcodePool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
+			h.transcodePool.ApplyHealthReport(node.ID, node.URL, report, checkedAt)
 		}
 	}
 }

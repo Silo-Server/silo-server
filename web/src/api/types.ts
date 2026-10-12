@@ -4323,6 +4323,16 @@ export interface StreamNode {
    * note on its next refetch. Nothing routes on it.
    */
   capability_drift?: string | null;
+  /**
+   * An administrator asked this transcode node to drain: placement skips it
+   * while its sessions finish. Absent on servers that predate draining.
+   */
+  drain_requested?: boolean;
+  /**
+   * What the node reported on its last health check: draining while it takes
+   * no new work, drained once it has none left. Absent on older servers.
+   */
+  drain_state?: "none" | "draining" | "drained";
 }
 
 export interface CreateNodeRequest {

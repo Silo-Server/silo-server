@@ -144,6 +144,11 @@ services:
   #   image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
   #   restart: unless-stopped
   #   profiles: [transcode]
+  #   # On stop the node drains: it takes no new work and lets its sessions
+  #   # finish for up to SILO_NODE_DRAIN_TIMEOUT (default 10m, 0 turns it off).
+  #   # Docker kills a container 10s after asking it to stop, so the grace
+  #   # period must cover the drain plus a minute for the shutdown after it.
+  #   stop_grace_period: 11m
   #   environment:
   #     MODE: transcode
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).

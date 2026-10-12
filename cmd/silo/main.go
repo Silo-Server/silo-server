@@ -1197,6 +1197,10 @@ func main() {
 			// Reclaim orphaned transcode dirs at boot and hourly thereafter, bound
 			// to appCtx so it stops on shutdown.
 			srv.StartOrphanSweeper(appCtx)
+			// SIGTERM drains the node before it shuts down, and every drain
+			// change is announced so placement reacts before the next sweep.
+			srv.SetDrainAnnouncer(nodeDrainAnnouncer(appCtx, eventBus, watcher))
+			standaloneHooks.drain = newTranscodeNodeDrain(srv)
 			handler = srv.Handler()
 			shutdownStandalone = srv.Shutdown
 		}
@@ -1428,6 +1432,7 @@ func main() {
 		healthChecker.SetCapabilityFetchBudget(capabilityBudget)
 		deps.NodeHealthChecker = healthChecker
 		healthChecker.Start(appCtx)
+		subscribeNodeDrainChanges(appCtx, eventBus, healthChecker)
 		slog.Info("node pools initialized", "proxy_nodes", len(proxyNodes), "transcode_nodes", len(transcodeNodes))
 
 		// The API host runs the same sampler the nodes do. It is not a
@@ -3911,9 +3916,12 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 // listener's lifetime: afterListen runs once the address is bound (resident
 // plugins reverse-proxy to it, so they start only then), beforeDrain runs
 // before the HTTP server drains (their overlay ingress goes away first).
+// drain, when set, runs first on SIGTERM: the node stops taking new work and
+// finishes what it has while everything keeps running.
 type standaloneServerHooks struct {
 	afterListen func()
 	beforeDrain func(context.Context)
+	drain       *nodeDrain
 }
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
@@ -3952,6 +3960,9 @@ func startStandaloneServer(addr string, handler http.Handler, appCancel context.
 	select {
 	case sig := <-sigCh:
 		slog.Info("received signal, shutting down", "signal", sig)
+		if hooks.drain != nil {
+			hooks.drain.run(sigCh)
+		}
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
 	}

@@ -2795,6 +2795,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
+		v2deps.AdminNodeDrain = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
 		// Network access admin operations fan out to every enabled proxy node
 		// over its bearer routes, the same way force-reload does.

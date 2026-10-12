@@ -1225,6 +1225,10 @@ tombstone. The retained contract is:
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also
   `egress_kbps`); read from already-published snapshots, never a probe, path-redacted because the
   route takes no credential. `internal/nodepool/health.go` `CheckNode` is the internal consumer.
+  Revision (2026-10-11, with node drain): a draining transcode node answers the same `200` shape
+  with `status` `draining`, then `drained` once it has no work left; the values are additive to
+  the frozen shape, and the status code does not change, so probes keep passing while the node
+  finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
