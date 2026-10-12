@@ -747,3 +747,79 @@ func TestChainChecksIDs(t *testing.T) {
 		t.Errorf("chainChecksIDs(local, enrichment, tmdb) = false, want true")
 	}
 }
+
+// detailRejectsNFOID confirms the NFO's TMDB id in search but has no details
+// for it; the folder tag's id is live.
+type detailRejectsNFOID struct {
+	mu       sync.Mutex
+	searched []map[string]string
+}
+
+func (*detailRejectsNFOID) Slug() string       { return "tmdb" }
+func (*detailRejectsNFOID) Name() string       { return "tmdb" }
+func (*detailRejectsNFOID) ForTypes() []string { return []string{"movie"} }
+func (p *detailRejectsNFOID) Search(_ context.Context, q SearchQuery) ([]SearchResult, error) {
+	p.mu.Lock()
+	p.searched = append(p.searched, maps.Clone(q.ProviderIDs))
+	p.mu.Unlock()
+	switch q.ProviderIDs["tmdb"] {
+	case "1091":
+		return []SearchResult{{Name: "The Thing", Year: 1982, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "1091"}}}, nil
+	case "578":
+		return []SearchResult{{Name: "Jaws", Year: 1975, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "578"}}}, nil
+	}
+	return nil, nil
+}
+func (*detailRejectsNFOID) GetMetadata(_ context.Context, r MetadataRequest) (*MetadataResult, error) {
+	if r.ProviderIDs["tmdb"] == "578" {
+		return &MetadataResult{HasMetadata: true, Title: "Jaws", Year: 1975, ProviderIDs: map[string]string{"tmdb": "578"}}, nil
+	}
+	return nil, errors.New("tmdb: HTTP 404")
+}
+
+// A provider that confirms the NFO's id in search and then has no details
+// for it leaves the NFO's identity dead. The match waits with that id
+// recorded stale, and the retry searches with the tag ids instead of keeping
+// them under the NFO's fields.
+func TestInitialMatch_NFOIDRejectedAfterSearchRetriesWithTagIDs(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness()
+	staleRepo := newFakeStaleIDRepo()
+	h.service.staleIDRepo = staleRepo
+	ctx := context.Background()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: "movie-tmdb-578", Type: "movie", Title: "Jaws", Year: 1975, Status: "pending",
+		TmdbID: "578", DefaultMetadataLanguage: "en",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed skeleton: %v", err)
+	}
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "1091"},
+		metadata: &MetadataResult{HasMetadata: true, Title: "The Thing"},
+	}
+	remote := &detailRejectsNFOID{}
+	req := ProcessRequest{
+		ContentID: "movie-tmdb-578",
+		Hints:     &MatchHints{Title: "Jaws", Year: 1975, Type: "movie", TmdbID: "578"},
+		Language:  "en",
+		Mode:      ModeInitialMatch,
+	}
+	first, err := h.service.ProcessWithProviders(ctx, req, []Provider{nfo, remote})
+	if err != nil {
+		t.Fatalf("first attempt: %v", err)
+	}
+	if first == nil || first.Updated || first.Decision == nil || first.Decision.Outcome != MatchOutcomeProviderTransient {
+		t.Fatalf("first attempt = %+v, want a deferral", first)
+	}
+	second, err := h.service.ProcessWithProviders(ctx, req, []Provider{nfo, remote})
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if second == nil || second.Decision == nil || second.Decision.Outcome != MatchOutcomeMatched {
+		t.Fatalf("retry = %+v, want a match on the tag id", second)
+	}
+	if last := remote.searched[len(remote.searched)-1]; last["tmdb"] != "578" {
+		t.Errorf("retry searched with %v, want the tag tmdb", last)
+	}
+}

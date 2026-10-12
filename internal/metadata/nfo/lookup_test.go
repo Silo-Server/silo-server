@@ -208,6 +208,7 @@ func TestStackBaseName(t *testing.T) {
 		"Part 1":                        "",
 		"...And Justice for All-cd1":    "...And Justice for All",
 		"Movie_dvd2":                    "",
+		"Film-cd0":                      "",
 		"Movie.2002.DVD9":               "",
 		"Movie-pt.b":                    "",
 		"The Departed (2006)":           "",
@@ -1391,5 +1392,33 @@ func TestParseSeasonSidecar_ChecksSharedFolderOnce(t *testing.T) {
 	writeFile(t, episode, "video")
 	if _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 2); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
 		t.Fatalf("parseSeasonSidecar(second season, same call) error = %v; want the folder's first answer reused", err)
+	}
+}
+
+// A change during the re-read of a recently written coarse-timestamp file is
+// measured from after that re-read, so one rewrite costs one retry, not an
+// error. Not parallel: it sets the package's read hook.
+func TestReadNFOFile_ChangeDuringReReadRetriesFromItsState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.nfo")
+	writeFile(t, path, `<movie><title>Old</title></movie>`)
+	stamp := time.Now().Truncate(time.Second)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+	reads := 0
+	testHookBeforeNFORead = func() {
+		reads++
+		if reads == 2 { // during the re-read: new size and a new coarse time
+			writeFile(t, path, `<movie><title>New, and a longer title</title></movie>`)
+			later := stamp.Add(time.Second)
+			_ = os.Chtimes(path, later, later)
+		}
+	}
+	t.Cleanup(func() { testHookBeforeNFORead = nil })
+
+	data, err := readNFOFile(path)
+	if err != nil || !strings.Contains(string(data), "longer title") {
+		t.Fatalf("readNFOFile(rewritten during the re-read) = %q, %v; want the settled new content", data, err)
 	}
 }

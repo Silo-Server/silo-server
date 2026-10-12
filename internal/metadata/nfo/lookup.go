@@ -62,6 +62,9 @@ func stackPart(base string) (name string, part int) {
 		return "", 0
 	}
 	part, _ = strconv.Atoi(match[2])
+	if part <= 0 {
+		return "", 0 // the scanner numbers parts from 1
+	}
 	return name, part
 }
 
@@ -518,7 +521,11 @@ func readNFOFile(path string) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			stable = bytes.Equal(data, again)
+			if after, err = f.Stat(); err != nil {
+				return nil, err
+			}
+			stable = bytes.Equal(data, again) &&
+				after.Size() == opened.Size() && after.ModTime().Equal(opened.ModTime())
 		}
 		if stable {
 			if len(data) > maxNFOBytes {

@@ -157,7 +157,10 @@ by mode:
   id it replaced comes back even if the NFO names another provider. When a
   transient failure keeps every remote provider from returning one of the
   NFO's ids, the match waits rather than re-anchor on an id nothing checked;
-  a failure after one did (an enrichment quota) does not hold it. Stored
+  a failure after one did (an enrichment quota) does not hold it. When a
+  provider confirms an NFO id in search and then rejects it (a 404 on its
+  details), the match also waits; the retry, with that id recorded stale,
+  searches with the tag ids. Stored
   durable IDs beat NFO hints;
 - scheduled refresh: stored durable IDs beat NFO hints (no background identity
   flips);

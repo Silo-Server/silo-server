@@ -1987,12 +1987,16 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	// can be read instead of committing an identity it may contradict. Retry
 	// too when the NFO's ids replaced the tag ids and a transient failure kept
 	// every remote provider from returning one of them; a failure after one
-	// did (an enrichment quota, say) does not hold the match. Later phases add
-	// no match errors, so this is decided before their fetches.
+	// did (an enrichment quota, say) does not hold the match. Retry as well
+	// when a provider confirmed an NFO id in search and then rejected it (a
+	// 404 on its details): the retry, with that id recorded stale, searches
+	// with the tag ids instead of keeping them under the NFO's fields. Later
+	// phases add no match errors, so this is decided before their fetches.
 	localUnreadable := localMetadataTemporarilyUnavailable(providerMatchErrors)
-	nfoIDsUnchecked := len(nfoReplacedTagIDs) > 0 && !anyProviderIDKept(accumulatedIDs, nfoVerifiedIDs) &&
-		hasTransientMatchError(providerMatchErrors)
-	if req.Mode == ModeInitialMatch && (localUnreadable || nfoIDsUnchecked) {
+	nfoIDsUnconfirmed := len(nfoReplacedTagIDs) > 0 && !anyProviderIDKept(accumulatedIDs, nfoVerifiedIDs)
+	nfoIDsUnchecked := nfoIDsUnconfirmed && hasTransientMatchError(providerMatchErrors)
+	nfoIDsRejected := nfoIDsUnconfirmed && len(nfoVerifiedIDs) > 0
+	if req.Mode == ModeInitialMatch && (localUnreadable || nfoIDsUnchecked || nfoIDsRejected) {
 		upsertStaleProviderIDValues(ctx, s.staleIDRepo, req.ContentID, provider404s.stale)
 		if matchDecision == nil {
 			matchDecision = &MatchDecision{Threshold: automaticMatchAcceptanceFloor}
