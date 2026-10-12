@@ -181,13 +181,18 @@ func (r *localArtworkRetention) sidecarGone(source string) bool {
 	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 
-// folderAnswers probes dir once per refresh through rootcheck, with its
-// timeout, and reports whether it answered and listed entries.
+// folderAnswers reports whether dir answered its probe and listed entries.
 func (r *localArtworkRetention) folderAnswers(dir string) bool {
+	folder := r.probe(dir)
+	return folder.Reachable && !folder.Empty
+}
+
+// probe probes dir once per refresh through rootcheck, with its timeout.
+func (r *localArtworkRetention) probe(dir string) rootcheck.Result {
 	folder, ok := r.probes[dir]
 	if !ok {
 		folder = rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
 		r.probes[dir] = folder
 	}
-	return folder.Reachable && !folder.Empty
+	return folder
 }

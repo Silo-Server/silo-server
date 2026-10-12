@@ -3179,8 +3179,8 @@ func itemColumnsList(alias string) []string {
 	return prefixed
 }
 
-// itemColumns returns the SELECT column list matching scanMediaItems.
-// Mirrors catalog.browseItemColumns.
+// itemColumns returns the SELECT column list matching scanMediaItems by
+// position. It carries the columns section rows need, not catalog's list.
 func itemColumns(alias string) string {
 	return strings.Join(itemColumnsList(alias), ", ")
 }

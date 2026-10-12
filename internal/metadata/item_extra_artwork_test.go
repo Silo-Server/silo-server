@@ -319,6 +319,49 @@ func TestPlanExtraBackdrops(t *testing.T) {
 			t.Fatalf("planned = %+v, want %+v", got, want)
 		}
 	})
+	t.Run("an emptied extrafanart folder drops its backdrops", func(t *testing.T) {
+		root := writeSidecars(t, t.TempDir(), "fanart.jpg")
+		if err := os.Mkdir(filepath.Join(root, "extrafanart"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stored := []models.ItemBackdrop{{ID: 1, Ordinal: 1, Path: "local/x", SourcePath: localSource(filepath.Join(root, "extrafanart", "x.jpg"))}}
+		primary := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: localSource(filepath.Join(root, "fanart.jpg"))}
+		if got := planExtraBackdrops(itemRetention(searched), primary, stored, []RemoteImage{backdrop(primary.BackdropSourcePath)}); len(got) != 0 {
+			t.Fatalf("planned = %+v, want none", got)
+		}
+	})
+	t.Run("a replaced sidecar keeps its cached copy until the new one is cached", func(t *testing.T) {
+		root := writeSidecars(t, t.TempDir(), "fanart.jpg", "fanart-1.jpg")
+		oldSource := "file://" + filepath.Join(root, "fanart-1.jpg") + "?v=10-1"
+		newSource := "file://" + filepath.Join(root, "fanart-1.jpg") + "?v=20-2"
+		stored := []models.ItemBackdrop{{ID: 1, Ordinal: 1, Path: "local/old", SourcePath: oldSource, Thumbhash: "t"}}
+		primary := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: localSource(filepath.Join(root, "fanart.jpg"))}
+		got := planExtraBackdrops(itemRetention(searched), primary, stored, []RemoteImage{backdrop(primary.BackdropSourcePath), backdrop(newSource)})
+		if want := []models.ItemBackdrop{{Path: "local/old", SourcePath: newSource, Thumbhash: "t"}}; !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("a stored row without a local source goes", func(t *testing.T) {
+		stored := []models.ItemBackdrop{{ID: 1, Ordinal: 1, Path: "tmdb/x", SourcePath: "tmdb://backdrop/x.jpg"}}
+		if got := planExtraBackdrops(itemRetention(context.Background()), item, stored, nil); len(got) != 0 {
+			t.Fatalf("planned = %+v, want none", got)
+		}
+	})
+	t.Run("the stored order holds while a folder is unreadable", func(t *testing.T) {
+		root := writeSidecars(t, t.TempDir(), "fanart.jpg", "fanart-1.jpg", "fanart-2.jpg")
+		unreadable := filepath.Join(t.TempDir(), "share", "extrafanart")
+		a, f1, f2 := localSource(filepath.Join(unreadable, "a.jpg")), localSource(filepath.Join(root, "fanart-1.jpg")), localSource(filepath.Join(root, "fanart-2.jpg"))
+		stored := []models.ItemBackdrop{
+			{ID: 1, Ordinal: 1, Path: "local/a", SourcePath: a},
+			{ID: 2, Ordinal: 2, Path: "local/f1", SourcePath: f1},
+		}
+		primary := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: localSource(filepath.Join(root, "fanart.jpg"))}
+		got := planExtraBackdrops(itemRetention(searched), primary, stored, []RemoteImage{backdrop(primary.BackdropSourcePath), backdrop(f1), backdrop(f2)})
+		want := []models.ItemBackdrop{{Path: "local/a", SourcePath: a}, {Path: "local/f1", SourcePath: f1}, {SourcePath: f2}}
+		if !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("a refresh that did not search keeps every row", func(t *testing.T) {
 		got := planExtraBackdrops(itemRetention(ctx), item, existing, nil)
 		if len(got) != len(existing) {

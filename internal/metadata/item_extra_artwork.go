@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // Banner, thumb, clear art and disc art, and the backdrops after the primary,
@@ -97,71 +98,108 @@ func hasImageOfType(images []RemoteImage, imageType ImageType) bool {
 // backdrops discovery listed, in its display order, other than the one the
 // item shows as its primary. applyBestImages makes the first one the primary
 // unless locked artwork keeps another. A stored backdrop the refresh did not
-// find again follows them while its sidecar is not confirmed gone, so a folder
-// that is briefly unreadable, such as an extrafanart folder on a flaky share,
-// keeps its backdrops. A row keeps its cached copy while it shows the same
-// source.
+// find again stays while its sidecar is not confirmed gone, so a folder that
+// is briefly unreadable, such as an extrafanart folder on a flaky share, keeps
+// its backdrops; while it does, the stored order holds so the backdrops don't
+// reshuffle. A backdrop keeps its cached copy while its file is the same, even
+// when the file was replaced, until the image cache stores the new copy.
 func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem, existing []models.ItemBackdrop, images []RemoteImage) []models.ItemBackdrop {
 	if artworkLocked(item) && len(existing) > 0 {
 		return existing
 	}
-	var sources []string
-	seen := map[string]bool{strings.TrimSpace(item.BackdropSourcePath): true}
+	// Sources are matched by file, without the size and mtime fingerprint.
+	file := func(source string) string {
+		path, _ := localImageSourceFilePath(strings.TrimSpace(source))
+		return path
+	}
+	primary := file(item.BackdropSourcePath)
+	discovered := make(map[string]string) // file -> source
+	var order []string
 	for _, img := range images {
 		url := strings.TrimSpace(img.URL)
-		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) || seen[url] {
+		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) {
 			continue
 		}
-		seen[url] = true
-		sources = append(sources, url)
-	}
-	cached := make(map[string]models.ItemBackdrop, len(existing))
-	for _, b := range existing {
-		if isCachedImagePath(b.Path) {
-			cached[b.SourcePath] = b
+		if f := file(url); f != "" && f != primary && discovered[f] == "" {
+			discovered[f] = url
+			order = append(order, f)
 		}
 	}
-	planned := make([]models.ItemBackdrop, 0, len(sources)+len(existing))
-	for _, source := range sources {
-		b := models.ItemBackdrop{SourcePath: source}
-		if prev, ok := cached[source]; ok {
+	stored := make(map[string]models.ItemBackdrop, len(existing))
+	var storedOrder []string
+	keep := make(map[string]bool) // stored files the refresh did not find again but keeps
+	for _, b := range existing {
+		f := file(b.SourcePath)
+		if f == "" || f == primary || stored[f].SourcePath != "" {
+			continue
+		}
+		stored[f] = b
+		storedOrder = append(storedOrder, f)
+		if discovered[f] == "" && (!retention.searched || !retention.extraBackdropGone(b.SourcePath)) {
+			keep[f] = true
+		}
+	}
+	plan := func(f string) models.ItemBackdrop {
+		b := models.ItemBackdrop{SourcePath: discovered[f]}
+		prev, ok := stored[f]
+		if b.SourcePath == "" {
+			b.SourcePath = prev.SourcePath
+		}
+		if ok && isCachedImagePath(prev.Path) {
 			b.Path, b.Thumbhash = prev.Path, prev.Thumbhash
 		}
-		planned = append(planned, b)
+		return b
 	}
-	for _, b := range existing {
-		if seen[b.SourcePath] {
-			continue
+	var files []string
+	if len(keep) == 0 {
+		files = order
+	} else {
+		for _, f := range storedOrder {
+			if keep[f] || discovered[f] != "" {
+				files = append(files, f)
+			}
 		}
-		if retention.searched && isLocalImageSourcePath(b.SourcePath) && retention.extraBackdropGone(b.SourcePath) {
-			continue
+		for _, f := range order {
+			if stored[f].SourcePath == "" {
+				files = append(files, f)
+			}
 		}
-		seen[b.SourcePath] = true
-		planned = append(planned, models.ItemBackdrop{Path: b.Path, SourcePath: b.SourcePath, Thumbhash: b.Thumbhash})
 	}
-	if len(planned) > MaxItemBackdrops-1 {
-		planned = planned[:MaxItemBackdrops-1]
+	if len(files) > MaxItemBackdrops-1 {
+		files = files[:MaxItemBackdrops-1]
+	}
+	planned := make([]models.ItemBackdrop, 0, len(files))
+	for _, f := range files {
+		planned = append(planned, plan(f))
 	}
 	return planned
 }
 
-// extraBackdropGone is sidecarGone for an extra backdrop. A backdrop from an
-// extrafanart folder is also gone when that folder no longer exists while the
-// folder holding it answers: a removed extrafanart folder reads as unreachable
-// to sidecarGone, which would keep its backdrops forever.
+// extraBackdropGone is sidecarGone for an extra backdrop. A backdrop in an
+// extrafanart folder is judged from the folder holding that folder: once it
+// answers, a missing or emptied extrafanart folder, or a missing file in it,
+// means the backdrop is gone, which sidecarGone alone reads as an unmounted
+// share and keeps forever. An extrafanart folder that cannot be listed keeps
+// its backdrops.
 func (r *localArtworkRetention) extraBackdropGone(source string) bool {
-	if path, ok := localImageSourceFilePath(source); ok && filepath.IsAbs(path) {
-		dir := filepath.Dir(path)
-		if strings.EqualFold(filepath.Base(dir), ExtraFanartFolder) {
-			if !r.folderAnswers(filepath.Dir(dir)) {
-				return false
-			}
-			if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
-				return true
-			}
-		}
+	path, ok := localImageSourceFilePath(source)
+	if !ok || !filepath.IsAbs(path) {
+		return r.sidecarGone(source)
 	}
-	return r.sidecarGone(source)
+	dir := filepath.Dir(path)
+	if !strings.EqualFold(filepath.Base(dir), ExtraFanartFolder) {
+		return r.sidecarGone(source)
+	}
+	if !r.folderAnswers(filepath.Dir(dir)) {
+		return false
+	}
+	// A missing extrafanart folder means a missing file; one that can't be
+	// listed proves nothing.
+	if folder := r.probe(dir); !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodeNotFound {
+		return false
+	}
+	_, err := os.Lstat(path)
+	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 
 func sameItemBackdrops(stored, planned []models.ItemBackdrop) bool {
