@@ -229,7 +229,9 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 
 // sessionChanged reports whether one recheck found the connection's access
 // gone: the session ended, the account's role changed, or stillActingAdmin
-// (when set) no longer holds. A failed lookup reports no change.
+// (when set) no longer holds. A failed session lookup reports no change; a
+// failed acting-admin decision counts as lost, so a connection holding the
+// administrator channels fails closed like the HTTP routes and reconnects.
 func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
 	role, active, err := h.sessionRoles.ActiveSessionRole(ctx, claims.SessionID)
 	if err == nil && (!active || role != claims.Role) {
@@ -239,7 +241,7 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 		return false
 	}
 	acting, err := stillActingAdmin(ctx)
-	return err == nil && !acting
+	return err != nil || !acting
 }
 
 // serveWebSocket runs one events connection. When accessChanged closes, the

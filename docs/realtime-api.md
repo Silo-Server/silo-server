@@ -119,7 +119,7 @@ other profile on the account, such as a child profile, connects with the user
 channels. The socket rechecks the login session on the same interval and closes
 without a frame once the session ends, the account's role differs from the
 token's, or a connection holding the administrator channels is no longer the
-acting admin.
+acting admin or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
