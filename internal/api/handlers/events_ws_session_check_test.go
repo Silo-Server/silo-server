@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -17,6 +18,9 @@ type sessionRoleFixture struct {
 	role    atomic.Value
 	revoked atomic.Bool
 	checks  atomic.Int64
+	// notActingAdmin flips the acting-admin decision, as when the household
+	// gains a PIN under a profile-less connection.
+	notActingAdmin atomic.Bool
 }
 
 func (f *sessionRoleFixture) ActiveSessionRole(context.Context, string) (string, bool, error) {
@@ -26,8 +30,8 @@ func (f *sessionRoleFixture) ActiveSessionRole(context.Context, string) (string,
 
 // TestEventsWebSocketV1ClosesWhenSessionChanges covers the v1 socket, which
 // picks its channels from the token's role at the handshake: once the account's
-// role changes or the session ends, the connection closes so the client
-// reconnects with a refreshed token.
+// role changes, the session ends, or the account stops acting as the admin, the
+// connection closes so the client reconnects with a refreshed token.
 func TestEventsWebSocketV1ClosesWhenSessionChanges(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -35,14 +39,18 @@ func TestEventsWebSocketV1ClosesWhenSessionChanges(t *testing.T) {
 	}{
 		{"role changed", func(f *sessionRoleFixture) { f.role.Store("user") }},
 		{"session revoked", func(f *sessionRoleFixture) { f.revoked.Store(true) }},
+		{"no longer acting admin", func(f *sessionRoleFixture) { f.notActingAdmin.Store(true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := new(sessionRoleFixture)
 			sessions.role.Store("admin")
 			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{}), sessionCheckInterval: 10 * time.Millisecond}
 			handler.SetSessionRoles(sessions)
-			conn, readFrame := eventsWSTestConnWithHandler(t, handler,
-				&auth.Claims{UserID: 1, Role: "admin", SessionID: "session"}, "?channels=user_settings")
+			conn, readFrame := eventsWSTestConnActing(t, handler,
+				&auth.Claims{UserID: 1, Role: "admin", SessionID: "session"}, "?channels=user_settings",
+				func(context.Context, apimw.ActingAdminRequest) (bool, error) {
+					return !sessions.notActingAdmin.Load(), nil
+				})
 			readFrame("hello")
 			readFrame("subscribed")
 

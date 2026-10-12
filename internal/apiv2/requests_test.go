@@ -519,6 +519,45 @@ func TestRequestDownloadServerDetailsAreForAdmins(t *testing.T) {
 	requireAdminMembers(t, "admin cancelRequest", got, serverRequestMembers, serverTargetMembers)
 }
 
+// TestRequestAdminReachFollowsActingProfile: another profile on an admin's
+// account, here one that is not the primary, is not an admin on the request
+// operations. It reads its own account's requests without the download-server
+// details, and is refused another account's request.
+func TestRequestAdminReachFollowsActingProfile(t *testing.T) {
+	svc := fixtureRequests()
+	for _, r := range svc.requests {
+		withSubmissionErrors(r)
+	}
+	lifecycle := &fakeLifecycle{}
+	deps := requestDeps(svc)
+	deps.RequestLifecycle = lifecycle
+	h := newTestHandler(t, deps)
+	child := with(bearer(adminToken), "X-Profile-Id", "p-owner")
+
+	// r-1 belongs to another account.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", child), TypePermissionDenied)
+	if svc.lastViewer.IsAdmin {
+		t.Fatal("getRequest: a non-primary profile was given the admin viewer")
+	}
+	// r-3 is the account's own, requested by its primary profile.
+	got := requireTargets(t, "getRequest", do(t, h, http.MethodGet, "/api/v2/requests/r-3", "", child))
+	requireAdminMembers(t, "getRequest", got, nil, nil)
+
+	if rec := do(t, h, http.MethodPost, "/api/v2/requests/r-1/cancel", `{}`, child); rec.Code != http.StatusOK {
+		t.Fatalf("cancelRequest: %d %s", rec.Code, rec.Body.String())
+	}
+	if lifecycle.viewer.IsAdmin {
+		t.Fatal("cancelRequest: a non-primary profile was given the admin viewer")
+	}
+	if rec := do(t, h, http.MethodGet, "/api/v2/requests/status", "", child); rec.Code != http.StatusOK || lifecycle.viewer.IsAdmin {
+		t.Fatalf("getRequestStatus: %d, admin viewer %v", rec.Code, lifecycle.viewer.IsAdmin)
+	}
+
+	// The primary profile on the same account keeps its admin reach.
+	got = requireTargets(t, "admin getRequest", do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", with(bearer(adminToken), "X-Profile-Id", "p-primary")))
+	requireAdminMembers(t, "admin getRequest", got, adminRequestMembers, adminTargetMembers)
+}
+
 func TestSearchRequestMedia(t *testing.T) {
 	svc := fixtureRequests()
 	h := newTestHandler(t, requestDeps(svc))

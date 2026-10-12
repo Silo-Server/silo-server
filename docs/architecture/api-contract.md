@@ -885,6 +885,15 @@ acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refres
 admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
 This is the same critical bridge fix.
 
+Routes outside the admin groups that widen what an admin sees or may do (another account's
+media requests and their download-server fields, another account's downloaded subtitles,
+on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+that reach from the same decision, the acting admin, never from the account role: v1 and v2 handlers call `apimw.ActingAdmin`, which answers with
+the decider the router hands the acting-admin gate. It counts a declared profile only after the
+viewer gate verified it in the same request, so an operation that relies on it runs the viewer
+gate (v2 `profile_scoped`, optionally with `ProfileOptional`). Without a decider it answers
+false. Another profile on an admin's account is treated like any profile on a regular account.
+
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is

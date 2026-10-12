@@ -2456,7 +2456,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result. */
+    /** Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result. */
     get: operations["getAdminJob"];
     put?: never;
     post?: never;
@@ -54743,7 +54743,12 @@ export interface operations {
   getAdminJob: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path: {
         id: string;
       };
@@ -54772,6 +54777,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -108658,6 +108672,10 @@ export interface operations {
         /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
         "If-Match"?: string;
         "If-None-Match"?: string;
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
       };
       path: {
         job_id: string;
@@ -108699,6 +108717,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

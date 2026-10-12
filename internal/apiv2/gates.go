@@ -123,7 +123,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		if deps.ActingAdmin == nil {
 			return nil, "acting admin"
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, deps.ActingAdmin)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, apimw.RequireActingAdminWith(deps.ActingAdmin))
 	case ClassPermissionGated:
 		gate := deps.PermissionGates[permission]
 		if gate == nil {

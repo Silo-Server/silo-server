@@ -484,13 +484,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Admin authorization for routes: admin role, exercised through the
 	// account's primary household profile.
-	var requireActingAdmin func(http.Handler) http.Handler
+	var actingAdmin apimw.ActingAdminDecider
 	if deps.PolicySystem != nil {
-		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
+		actingAdmin = apimw.NewPolicyActingAdminDecider(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
 	} else {
 		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile, householdRequiresProfile)
+		actingAdmin = apimw.NewActingAdminDecider(checkPrimaryProfile, householdRequiresProfile)
 	}
+	requireActingAdmin := apimw.RequireActingAdminWith(actingAdmin)
+	// Routes outside the admin groups that widen what an admin sees or may do
+	// ask apimw.ActingAdmin, which answers with this same decision.
+	r.Use(apimw.ProvideActingAdmin(actingAdmin))
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
@@ -2408,7 +2412,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsRepo,
 		compatUsers,
 	)
-	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
+	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, actingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
 	// Server identity is public discovery data, so it reads through the raw
 	// settings repo: a SECRET_KEY rotation must not change who the server is.
@@ -5264,7 +5268,7 @@ func v2Dependencies(
 	deps Dependencies,
 	auth *apimw.AuthMiddleware,
 	viewer *apimw.ViewerAccessMiddleware,
-	actingAdmin func(http.Handler) http.Handler,
+	actingAdmin apimw.ActingAdminDecider,
 	metadataCuration func(http.Handler) http.Handler,
 	markerEdit func(http.Handler) http.Handler,
 	settings catalog.SettingsStore,

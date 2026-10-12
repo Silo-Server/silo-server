@@ -110,10 +110,16 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The bridge events socket never sends this frame. It picks its channels from the
-access token's role once, at the handshake, so it rechecks the login session on
-the same interval and closes without a frame once the session ends or the
-account's role differs from the token's.
+The bridge events socket never sends this frame. It picks its channels once, at
+the handshake: an admin account gets the administrator channels and other
+accounts' events only while it is the acting admin (see
+[api-contract.md](architecture/api-contract.md)), judged on the handshake's
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. Any
+other profile on the account, such as a child profile, connects with the user
+channels. The socket rechecks the login session on the same interval and closes
+without a frame once the session ends, the account's role differs from the
+token's, or a connection holding the administrator channels is no longer the
+acting admin.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 

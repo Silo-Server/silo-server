@@ -309,6 +309,13 @@ type HouseholdProfileRequirement func(ctx context.Context, userID int) (bool, er
 // holder themselves. The viewer gate that runs before it on the admin route
 // groups verifies a PIN-locked declared profile's X-Profile-Token.
 func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) func(http.Handler) http.Handler {
+	return RequireActingAdminWith(NewActingAdminDecider(checkPrimary, requiresProfile))
+}
+
+// RequireActingAdminWith is RequireActingAdmin over a prebuilt decision, so
+// the router can hand the same decider to ProvideActingAdmin and the routes
+// outside the admin groups answer exactly as the gate does.
+func RequireActingAdminWith(decide ActingAdminDecider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
@@ -317,14 +324,14 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile Hous
 				return
 			}
 
-			if claims.Role != "admin" {
+			if claims.Role != models.RoleAdmin {
 				writeForbidden(w, "Admin access required")
 				return
 			}
 
-			allowed, err := actingAdminAllowed(r, claims, checkPrimary, requiresProfile)
+			allowed, err := decide(r.Context(), ActingAdminRequest{Claims: claims, ProfileID: declaredProfileID(r), DeviceID: policyDeviceID(r)})
 			if err != nil {
-				writeInternalError(w, "Failed to verify active profile")
+				writeInternalError(w, activeProfileVerificationFailedMsg)
 				return
 			}
 			if !allowed {
@@ -345,15 +352,18 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile Hous
 // one of the caller's profiles fails closed: otherwise a non-primary session
 // could regain admin powers by sending a bogus X-Profile-Id.
 func actingAdminAllowed(r *http.Request, claims *auth.Claims, checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) (bool, error) {
-	profileID := declaredProfileID(r)
+	return actingAdminAllowedFor(r.Context(), claims, declaredProfileID(r), checkPrimary, requiresProfile)
+}
+
+func actingAdminAllowedFor(ctx context.Context, claims *auth.Claims, profileID string, checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) (bool, error) {
 	if profileID == "" {
-		refused, err := profileLessAdminRefused(r.Context(), claims, requiresProfile)
+		refused, err := profileLessAdminRefused(ctx, claims, requiresProfile)
 		return !refused, err
 	}
 	if checkPrimary == nil {
 		return true, nil
 	}
-	isPrimary, found, err := checkPrimary(r.Context(), claims.UserID, profileID)
+	isPrimary, found, err := checkPrimary(ctx, claims.UserID, profileID)
 	if err != nil {
 		return false, err
 	}
@@ -403,6 +413,7 @@ func GetClaims(ctx context.Context) *auth.Claims {
 // IsAdmin reports whether the context's authenticated user account has the
 // admin role. Returns false when no claims are present. Note this is the
 // account-level role; it says nothing about which household profile is active.
+// To decide whether a request may exercise admin powers, use ActingAdmin.
 func IsAdmin(ctx context.Context) bool {
 	claims := GetClaims(ctx)
 	return claims != nil && claims.Role == "admin"
