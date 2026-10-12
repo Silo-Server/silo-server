@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type resetDB struct {
@@ -59,6 +61,15 @@ func newResetDB(t *testing.T) resetDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	// LIKE INCLUDING ALL omits triggers; install the production email policy.
+	migration, err := os.ReadFile("../../migrations/sql/20261012124303_retire_password_resets_on_email_change.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := strings.ReplaceAll(strings.Split(string(migration), "-- +goose Down")[0], "public.", q+".")
+	if _, err := pool.Exec(ctx, up); err != nil {
+		t.Fatal(err)
+	}
 	return resetDB{NewRepository(pool), pool}
 }
 
@@ -84,7 +95,11 @@ func (d resetDB) account(t *testing.T, name string, enabled, localLogin bool) in
 
 func (d resetDB) issue(t *testing.T, userID int, token string, expiresAt time.Time) {
 	t.Helper()
-	if err := d.repo.Issue(t.Context(), userID, auth.HashLinkToken(token), nil, expiresAt); err != nil {
+	user, err := auth.NewUserRepository(d.pool).GetByID(t.Context(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), nil, expiresAt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -183,17 +198,208 @@ func TestResetLinkRetiresWithoutBeingUsed(t *testing.T) {
 	}
 }
 
+func TestResetLinkRetiresOnRecoveryEmailChangeDB(t *testing.T) {
+	d := newResetDB(t)
+	ctx := t.Context()
+	id := d.account(t, "email-change", true, true)
+	d.issue(t, id, "email-link", time.Now().Add(time.Hour))
+	hash := auth.HashLinkToken("email-link")
+	// Resending the same identity with different casing preserves the link.
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET email = upper(email) WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.repo.Lookup(ctx, hash); err != nil {
+		t.Fatal("unchanged recovery identity retired the link", err)
+	}
+	// An email write and the link's retirement must roll back together.
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := tx.Exec(ctx, `UPDATE users SET email = 'rolled-back@example.test' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.repo.Lookup(ctx, hash); err != nil {
+		t.Fatal("rolled-back email write retired the link", err)
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET email = 'replacement@example.test' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.repo.Lookup(ctx, hash); !errors.Is(err, ErrNotFound) {
+		t.Errorf("link issued to the previous address still resolves: %v", err)
+	}
+	if _, err := d.repo.Complete(ctx, hash, "attacker-password"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("link issued to the previous address completed a reset: %v", err)
+	}
+	// Restoring the address must never resurrect the old capability.
+	if _, err := d.pool.Exec(ctx, `UPDATE users SET email = 'email-change@example.invalid' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.repo.Lookup(ctx, hash); !errors.Is(err, ErrNotFound) {
+		t.Errorf("restoring the address resurrected the link: %v", err)
+	}
+	d.issue(t, id, "new-email-link", time.Now().Add(time.Hour))
+	if _, err := d.repo.Complete(ctx, auth.HashLinkToken("new-email-link"), "new-password"); err != nil {
+		t.Fatal("a link issued after the email change must work", err)
+	}
+}
+
+// changingRecoveryEmail returns the real snapshot read before a committed email
+// change, reproducing the gap between the service's lookup and link issuance.
+type changingRecoveryEmail struct {
+	*auth.UserRepository
+	pool *pgxpool.Pool
+}
+
+func (d changingRecoveryEmail) change(ctx context.Context, user *models.User, err error) (*models.User, error) {
+	if err != nil {
+		return nil, err
+	}
+	_, err = d.pool.Exec(ctx, `UPDATE users SET email = 'changed@example.test' WHERE id = $1`, user.ID)
+	return user, err
+}
+
+func (d changingRecoveryEmail) GetByID(ctx context.Context, id int) (*models.User, error) {
+	user, err := d.UserRepository.GetByID(ctx, id)
+	return d.change(ctx, user, err)
+}
+
+func (d changingRecoveryEmail) GetByUsername(ctx context.Context, name string) (*models.User, error) {
+	user, err := d.UserRepository.GetByUsername(ctx, name)
+	return d.change(ctx, user, err)
+}
+
+func TestResetIssuanceRejectsChangedRecoveryEmailDB(t *testing.T) {
+	for _, selfService := range []bool{false, true} {
+		t.Run(fmt.Sprintf("self-service=%t", selfService), func(t *testing.T) {
+			d := newResetDB(t)
+			id := d.account(t, "stale-email", true, true)
+			users := auth.NewUserRepository(d.pool)
+			sender := &fakeMail{enabled: true}
+			s := NewService(d.repo, changingRecoveryEmail{users, d.pool}, nil, sender, selfServiceSettings(), nil, "https://silo.example.test")
+			issue := func() error {
+				if selfService {
+					return s.sendRequested(t.Context(), "stale-email")
+				}
+				_, err := s.Issue(t.Context(), IssueInput{UserID: id, Delivery: DeliveryEmail})
+				return err
+			}
+			wantErr := ErrNotEligible
+			if selfService {
+				wantErr = nil
+			}
+			if err := issue(); !errors.Is(err, wantErr) {
+				t.Errorf("issue against stale email: %v, want %v", err, wantErr)
+			}
+			var links int
+			if err := d.pool.QueryRow(t.Context(), `SELECT count(*) FROM password_reset_tokens WHERE user_id = $1`, id).Scan(&links); err != nil {
+				t.Fatal(err)
+			}
+			if links != 0 || len(sender.sent) != 0 {
+				t.Fatalf("stale address received a reset: %d links, %d emails", links, len(sender.sent))
+			}
+			// A fresh lookup must still be able to deliver a usable link.
+			s.users = users
+			if err := issue(); err != nil {
+				t.Fatal("issuing at the current email", err)
+			}
+			if len(sender.sent) != 1 || len(sender.sent[0].To) != 1 || sender.sent[0].To[0] != "changed@example.test" {
+				t.Fatalf("fresh issue did not deliver to current email: %+v", sender.sent)
+			}
+			_, token, ok := strings.Cut(sender.sent[0].TextBody, "https://silo.example.test/reset-password/")
+			token, _, _ = strings.Cut(token, "\n")
+			if !ok {
+				t.Fatal("email has no reset link")
+			}
+			if _, err := d.repo.Lookup(t.Context(), auth.HashLinkToken(token)); err != nil {
+				t.Fatal("fresh link is unusable", err)
+			}
+		})
+	}
+}
+
+func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
+	for _, selfService := range []bool{false, true} {
+		t.Run(fmt.Sprintf("self-service=%t", selfService), func(t *testing.T) {
+			d := newResetDB(t)
+			id := d.account(t, "pending-email", true, true)
+			tx, err := d.pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
+			if _, err := tx.Exec(t.Context(), `UPDATE users SET email = 'new@example.test' WHERE id = $1`, id); err != nil {
+				t.Fatal(err)
+			}
+			var blocker int
+			if err := tx.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&blocker); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				if selfService {
+					stored, err := d.repo.IssueUnlessRecent(t.Context(), id, "pending-email@example.invalid", "pending-link", time.Now().Add(time.Hour), time.Minute)
+					if stored && err == nil {
+						err = errors.New("stored a link for the previous address")
+					}
+					done <- err
+				} else {
+					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", nil, time.Now().Add(time.Hour))
+				}
+			}()
+			// Observe the real database lock before committing the email change.
+			deadline := time.NewTimer(3 * time.Second)
+			defer deadline.Stop()
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				var waiting bool
+				if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if waiting {
+					break
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("issuance did not wait for the pending email change: %v", err)
+				case <-deadline.C:
+					t.Fatal("issuance never waited for the account")
+				case <-tick.C:
+				}
+			}
+			if err := tx.Commit(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			wantErr := ErrNotEligible
+			if selfService {
+				wantErr = nil
+			}
+			if err := <-done; !errors.Is(err, wantErr) {
+				t.Fatalf("issuance after pending email change: %v, want %v", err, wantErr)
+			}
+			if _, err := d.repo.Lookup(t.Context(), "pending-link"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("stale link survived the email change: %v", err)
+			}
+		})
+	}
+}
+
 func TestResetLinkRefusesIneligibleAccounts(t *testing.T) {
 	d := newResetDB(t)
 	for name, id := range map[string]int{
 		"disabled": d.account(t, "disabled", false, true),
 		"external": d.account(t, "external", true, false),
 	} {
-		if err := d.repo.Issue(t.Context(), id, auth.HashLinkToken(name), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
+		if err := d.repo.Issue(t.Context(), id, name+"@example.invalid", auth.HashLinkToken(name), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
 			t.Fatalf("%s: issue = %v", name, err)
 		}
 	}
-	if err := d.repo.Issue(t.Context(), 999999, auth.HashLinkToken("ghost"), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
+	if err := d.repo.Issue(t.Context(), 999999, "ghost@example.invalid", auth.HashLinkToken("ghost"), nil, time.Now().Add(time.Hour)); !errors.Is(err, ErrNotEligible) {
 		t.Fatalf("missing account: issue = %v", err)
 	}
 }
@@ -242,18 +448,18 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	}
 	expires := time.Now().Add(time.Hour)
 
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "first", expires, time.Minute); err != nil || !stored {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "first", expires, time.Minute); err != nil || !stored {
 		t.Fatalf("first request: %v, %v", stored, err)
 	}
 	// Inside the cooldown the live link survives, whoever asks.
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "second", expires, time.Minute); err != nil || stored || hashOf() != "first" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "second", expires, time.Minute); err != nil || stored || hashOf() != "first" {
 		t.Fatalf("request inside cooldown: %v, %v, link %q", stored, err, hashOf())
 	}
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1`, alice); err != nil {
 		t.Fatal(err)
 	}
 	var issuedBy *int
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "third", expires, time.Minute); err != nil || !stored || hashOf() != "third" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "third", expires, time.Minute); err != nil || !stored || hashOf() != "third" {
 		t.Fatalf("request after cooldown: %v, %v, link %q", stored, err, hashOf())
 	}
 	// A requested link records the account as its own issuer.
@@ -262,37 +468,37 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	}
 	// An administrator's link is not subject to the cooldown.
 	admin := d.account(t, "admin", true, true)
-	if err := d.repo.Issue(ctx, alice, "admin-sent", &admin, expires); err != nil || hashOf() != "admin-sent" {
+	if err := d.repo.Issue(ctx, alice, "alice@example.invalid", "admin-sent", &admin, expires); err != nil || hashOf() != "admin-sent" {
 		t.Fatalf("admin issue inside cooldown: %v, link %q", err, hashOf())
 	}
 	// A request never retires a live admin link, however old.
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours' WHERE user_id = $1`, alice); err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "over-admin", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "over-admin", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
 		t.Fatalf("request replaced a live admin link: %v, %v, link %q", stored, err, hashOf())
 	}
 	// Nor one whose issuing administrator was deleted (issued_by set NULL).
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET issued_by = NULL WHERE user_id = $1`, alice); err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "over-orphan", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "over-orphan", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
 		t.Fatalf("request replaced an admin link whose issuer was deleted: %v, %v, link %q", stored, err, hashOf())
 	}
 	// Once that link is dead, expired or outdated by a password change, it can.
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET password_fingerprint = 'outdated' WHERE user_id = $1`, alice); err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "after-outdated", expires, time.Minute); err != nil || !stored || hashOf() != "after-outdated" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "after-outdated", expires, time.Minute); err != nil || !stored || hashOf() != "after-outdated" {
 		t.Fatalf("request after an outdated admin link: %v, %v, link %q", stored, err, hashOf())
 	}
-	if err := d.repo.Issue(ctx, alice, "admin-again", &admin, expires); err != nil {
+	if err := d.repo.Issue(ctx, alice, "alice@example.invalid", "admin-again", &admin, expires); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours', expires_at = now() - interval '1 minute' WHERE user_id = $1`, alice); err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "after-expired", expires, time.Minute); err != nil || !stored || hashOf() != "after-expired" {
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "alice@example.invalid", "after-expired", expires, time.Minute); err != nil || !stored || hashOf() != "after-expired" {
 		t.Fatalf("request after an expired admin link: %v, %v, link %q", stored, err, hashOf())
 	}
 	// Withdrawing takes only the named link.
@@ -308,11 +514,11 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	}
 
 	for name, id := range map[string]int{
-		"disabled":          d.account(t, "off", false, true),
-		"external provider": d.account(t, "sso", true, false),
-		"unknown":           999999,
+		"disabled": d.account(t, "disabled", false, true),
+		"external": d.account(t, "external", true, false),
+		"unknown":  999999,
 	} {
-		if stored, err := d.repo.IssueUnlessRecent(ctx, id, "never-"+name, expires, time.Minute); err != nil || stored {
+		if stored, err := d.repo.IssueUnlessRecent(ctx, id, name+"@example.invalid", "never-"+name, expires, time.Minute); err != nil || stored {
 			t.Errorf("%s: stored=%v err=%v", name, stored, err)
 		}
 	}

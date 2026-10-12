@@ -188,7 +188,8 @@ opens `/reset-password/{token}` in the web client, which uses two public operati
   password and returns 200.
 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
-used, replaced, or outdated by another password change, or its account is disabled.
+used, replaced, or outdated by a password or recovery email change, or its account
+is disabled. Changing only the email's letter case preserves the link.
 Invalid passwords return `422 validation_failed` at `body.password` and leave the link
 unspent. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
