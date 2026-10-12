@@ -12,6 +12,13 @@ version, `12.1.0` on new installs.
 advertise Chromecast receiver applications; the empty array lets Jellyfin Web
 initialize playback preferences without attempting to iterate a missing field.
 
+`GET` and `POST /System/Ping` return the product name as a JSON string
+(`"Jellyfin Server"`), as Jellyfin does; `HEAD` answers 200 for reachability
+probes. `/Branding/Css` and `/Branding/Css.css` return 200 with an empty
+`text/css` body. Jellyfin Web 10.10 and earlier fetch it at startup. Silo has no
+Jellyfin Web custom CSS: its own custom CSS styles Silo's web client, so it is
+not served here.
+
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.
@@ -54,6 +61,14 @@ mode into Silo's canonical profile settings. Field names are case-insensitive;
 duplicate casing variants of the same field return 400. Other declared
 presentation preferences round-trip for clients. Storage failures produce
 errors instead of success responses.
+
+`/UserViews` lists libraries in the profile's native `ui.library_order`, then
+the server's library order. `OrderedViews` then applies Jellyfin's rule: views
+it lists come first in that order, and the rest keep the order above. IDs match
+regardless of case and dashes, and unknown IDs are ignored. `OrderedViews` is
+stored only in the Jellyfin configuration and is not written to
+`ui.library_order`, so once a Jellyfin client saves it, a later reorder in a
+Silo app moves only the views it doesn't list.
 
 `SubtitleMode` sets both `playback.subtitle_mode` and
 `playback.show_forced_subtitles`, so it reads back unchanged and native clients
@@ -386,7 +401,7 @@ advertised as playable.
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` | VTT/SRT conversion, Jellyfin `.js` track-event JSON, and requested timing windows; raw ASS when compatible with the request. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/{startPositionTicks}/stream.{format}` | Path start position, with query `StartPositionTicks` taking precedence. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Attachments/{index}` | Actual embedded font bytes by original container stream index, with item/source access checks. |
-| `GET /Playback/BitrateTest` | Returns the requested bounded byte count; default 102,400 bytes. |
+| `GET /Playback/BitrateTest` | Returns `Size` random bytes, 1 to 100,000,000; default 102,400. Random bytes keep a compressing proxy from shrinking the probe and inflating the measured bandwidth. |
 
 Text subtitles support `EndPositionTicks`, `CopyTimestamps`, and
 `AddVttTimeMap`. The VTT time map follows the segment container of the play
