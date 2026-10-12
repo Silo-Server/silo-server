@@ -20,6 +20,7 @@ import {
 import type { SectionItem } from "@/api/types";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
+import { useItemDetailPrefetchIntent } from "@/hooks/useItemDetailPrefetchIntent";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 
 interface SectionItemCardProps {
@@ -52,10 +53,11 @@ export default memo(function SectionItemCard({
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
+  const prefetchHandlers = useItemDetailPrefetchIntent(item.content_id, libraryId);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
   return (
-    <div ref={cardRef} className="media-card media-card-longpress group/card">
+    <div ref={cardRef} className="media-card media-card-longpress group/card" {...prefetchHandlers}>
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}

@@ -17,6 +17,7 @@ import { formatBitrate } from "@/lib/mediaFormat";
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
+import { useItemDetailPrefetchIntent } from "@/hooks/useItemDetailPrefetchIntent";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
@@ -211,9 +212,10 @@ export default function ItemCard({
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
+  const prefetchHandlers = useItemDetailPrefetchIntent(item.content_id, libraryId);
 
   return (
-    <div ref={cardRef} className="media-card media-card-longpress group/card">
+    <div ref={cardRef} className="media-card media-card-longpress group/card" {...prefetchHandlers}>
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
