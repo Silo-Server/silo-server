@@ -13,16 +13,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type recordingTrackPreferences struct {
 	audio     []userstore.AudioPreference
 	subtitles []userstore.SubtitlePreference
+	attempts  int
 	fail      error
 }
 
 func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID int, pref userstore.AudioPreference) error {
+	r.attempts++
 	if userID != 1 {
 		return fmt.Errorf("user %d, want 1", userID)
 	}
@@ -34,6 +37,7 @@ func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID
 }
 
 func (r *recordingTrackPreferences) SetSubtitlePreferenceCanonical(_ context.Context, userID int, pref userstore.SubtitlePreference) error {
+	r.attempts++
 	if userID != 1 {
 		return fmt.Errorf("user %d, want 1", userID)
 	}
@@ -227,16 +231,70 @@ func TestPlaybackReportHonorsRememberSelectionSettings(t *testing.T) {
 	}
 }
 
-func TestPlaybackReportRetriesAFailedSave(t *testing.T) {
+// TestPlaybackReportWritesEachChangeOnce covers a write that fails, for
+// example on a value the canonical settings refuse: reports arrive every few
+// seconds, and retrying each one would repeat the failing write for the rest
+// of the play. The next change is written again.
+func TestPlaybackReportWritesEachChangeOnce(t *testing.T) {
 	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
 	prefs.fail = errors.New("store unavailable")
 
 	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
-	prefs.fail = nil
 	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+	if prefs.attempts != 1 {
+		t.Fatalf("write attempts = %d for one change, want 1", prefs.attempts)
+	}
 
-	if len(prefs.subtitles) != 1 || prefs.subtitles[0].SubtitleMode != profileSubtitleOff {
-		t.Fatalf("subtitle saves = %+v, want the retried off choice", prefs.subtitles)
+	prefs.fail = nil
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemorySDHSubtitle)
+	if len(prefs.subtitles) != 1 || prefs.subtitles[0].TrackSignature == nil || prefs.subtitles[0].TrackSignature.Label != "SDH" {
+		t.Fatalf("subtitle saves = %+v, want the next change", prefs.subtitles)
+	}
+}
+
+// TestPlaybackReportIgnoresTerminalPlays covers a retried or late Stopped
+// report for a play whose stop was already handled: the viewer may have
+// picked other tracks in a later play since.
+func TestPlaybackReportIgnoresTerminalPlays(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	current, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	current.Terminal = true
+	handler.playbackStore.Put(*current)
+
+	postTrackReport(t, handler, "/Sessions/Playing/Stopped", sourceID, trackMemoryEnglishAudio, -1)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("write attempts = %d for a terminal play, want 0", prefs.attempts)
+	}
+}
+
+func TestPlaybackReportIgnoresUnknownNegativeSubtitleIndexes(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -2)
+
+	if prefs.attempts != 0 {
+		t.Fatalf("write attempts = %d for SubtitleStreamIndex -2, want 0", prefs.attempts)
+	}
+}
+
+// TestCompatCombinedSubtitleIndexMatchesPlaybackV3 checks the stored track
+// index uses the order Silo clients store: external files, then embedded
+// tracks, then downloaded subtitles.
+func TestCompatCombinedSubtitleIndexMatchesPlaybackV3(t *testing.T) {
+	version := trackMemoryVersion()
+	version.SubtitleTracks = append(version.SubtitleTracks, catalog.VersionSubtitleTrack{
+		Language: "fr", Codec: "subrip", External: true, FileName: "Show.S01E01.fr.srt",
+	})
+	candidates := compatSubtitleCandidates(version, []subtitles.DownloadedSubtitle{{Language: "de", Format: "srt"}})
+	want := map[string]int{"Show.S01E01.fr.srt": 0, "Forced": 1, "English": 2, "SDH": 3, "de": 4}
+	for position, candidate := range candidates {
+		if got := compatCombinedSubtitleIndex(candidates, position); got != want[candidate.Label] {
+			t.Errorf("%s: combined index = %d, want %d", candidate.Label, got, want[candidate.Label])
+		}
 	}
 }
 

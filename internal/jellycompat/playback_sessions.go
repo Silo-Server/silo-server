@@ -47,7 +47,9 @@ type PlaybackSession struct {
 	// that id resolve to this session directly instead of by ambiguous route.
 	ClientPlaySessionID string
 	// PreferenceKey is the series (or movie) id the play's remembered audio
-	// and subtitle tracks are saved under; empty saves none.
+	// and subtitle tracks are saved under; empty saves none. Only PlaybackInfo
+	// sets it: a static play never offered the client its defaults, so its
+	// reports cannot tell a pick from the client's own choice.
 	PreferenceKey      string
 	UserID             string
 	InitialSeekSeconds float64
