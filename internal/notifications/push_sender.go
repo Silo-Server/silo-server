@@ -35,6 +35,11 @@ const (
 	pushRelayMaxRetryAfter  = 23 * time.Hour
 	relayAppleSendPath      = "/v1/apple/send"
 	relayFcmSendPath        = "/v1/fcm/send"
+	relayModePrivateAlert   = "private_alert"
+
+	// relayTargetRecheck is how long sends to a relay that rejected the push
+	// target fields omit them before trying again.
+	relayTargetRecheck = time.Hour
 
 	// relayReplacementCooldown bounds automatic re-registration after the
 	// relay rejects a capability.
@@ -94,6 +99,15 @@ func terminalDeviceRejection(platform string, status int, code, message string) 
 	return terminalAPNsDeviceRejection(status, code, message)
 }
 
+// pushRelayTarget names the deployment and profile a push belongs to, so a
+// device signed into several servers or profiles fetches its display data
+// from the right one. Both are omitted when the server identity cannot be
+// read, and for a relay that predates them.
+type pushRelayTarget struct {
+	ServerID  string `json:"server_id,omitempty"`
+	ProfileID string `json:"profile_id,omitempty"`
+}
+
 type pushRelayAppleRequest struct {
 	Token          string  `json:"token"`
 	Environment    string  `json:"environment"`
@@ -102,6 +116,7 @@ type pushRelayAppleRequest struct {
 	ServerDeviceID string  `json:"server_device_id"`
 	DeliveryID     string  `json:"delivery_id"`
 	CollapseID     *string `json:"collapse_id,omitempty"`
+	pushRelayTarget
 }
 
 type pushRelayAppleResponse struct {
@@ -118,6 +133,7 @@ type pushRelayFcmRequest struct {
 	ServerDeviceID string  `json:"server_device_id"`
 	DeliveryID     string  `json:"delivery_id"`
 	CollapseID     *string `json:"collapse_id,omitempty"`
+	pushRelayTarget
 }
 
 type pushRelayErrorResponse struct {
@@ -147,11 +163,18 @@ type pushSender struct {
 	logger              *slog.Logger
 	developmentRelayURL string
 	now                 func() time.Time
+	// serverID reads the deployment identity getServerIdentity reports.
+	serverID func(context.Context) (string, error)
 
 	// renewMu serializes credential renewal and replacement in this process;
 	// lastRelayReplacement is guarded by it.
 	renewMu              sync.Mutex
 	lastRelayReplacement time.Time
+
+	// targetMu guards relayWithoutTarget: per relay base URL, the time until
+	// which sends omit the push target fields that relay rejected.
+	targetMu           sync.Mutex
+	relayWithoutTarget map[string]time.Time
 }
 
 func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository, cipher *secret.Cipher, settings *Settings) *pushSender {
@@ -168,6 +191,7 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 		logger:              slog.Default().With("component", "notifications.apple_push"),
 		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 		now:                 time.Now,
+		relayWithoutTarget:  map[string]time.Time{},
 	}
 }
 
@@ -262,7 +286,8 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	result = s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
+	target := s.relayTarget(ctx, device)
+	result = s.sendWithCapability(ctx, attempt, device, token, target, credential.RelayURL, credential.APIKey)
 	if result.HTTPStatus != http.StatusUnauthorized {
 		return result
 	}
@@ -273,8 +298,36 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 		}
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	return s.sendWithCapability(ctx, attempt, device, token, recovered.RelayURL, recovered.APIKey)
+	return s.sendWithCapability(ctx, attempt, device, token, target, recovered.RelayURL, recovered.APIKey)
 }
+
+// relayTarget names this deployment and the device's profile. A delivery's
+// profile is the device's: processAttempt refuses a reassigned device. The
+// target is all or nothing, and each part must meet the relay's 1-128
+// character rule: the relay answers an empty or oversized one with 400
+// invalid_field, which would fail every push. Without a target the push still
+// goes out and the device falls back to its active server and profile, as it
+// does for an older server.
+func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) pushRelayTarget {
+	if s.serverID == nil {
+		return pushRelayTarget{}
+	}
+	serverID, err := s.serverID(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "push sent without its server identity", "error", err)
+		}
+		return pushRelayTarget{}
+	}
+	if !relayTargetID(serverID) || !relayTargetID(device.ProfileID) {
+		return pushRelayTarget{}
+	}
+	return pushRelayTarget{ServerID: serverID, ProfileID: device.ProfileID}
+}
+
+// relayTargetID applies the relay's opaque-ID length rule in bytes, which is
+// never fewer than the UTF-16 units the relay counts.
+func relayTargetID(id string) bool { return id != "" && len(id) <= 128 }
 
 func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
 	s.renewMu.Lock()
@@ -449,7 +502,52 @@ func relayCredentialRejection(err error) (string, bool) {
 	return relayErr.Code, true
 }
 
-func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token, relayURL, apiKey string) pushSendResult {
+// sendWithCapability posts one attempt to the relay. A relay that predates
+// the push target fields rejects them before it records the idempotency key,
+// so the attempt is resent once without them under the same key, and later
+// sends to that relay omit them for relayTargetRecheck.
+//
+// Only that rejection (400 unexpected_field naming a target field) may drop
+// the fields or mark a relay as lacking them. The fields are part of the
+// relay's idempotency hash, so a retry of an attempt the relay recorded with
+// them must keep them; a relay that recorded them accepts them and never
+// answers this way, so the mark cannot strip them from such a retry.
+func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string, target pushRelayTarget, relayURL, apiKey string) pushSendResult {
+	if target != (pushRelayTarget{}) && s.relayLacksTarget(relayURL) {
+		target = pushRelayTarget{}
+	}
+	result := s.postRelay(ctx, attempt, device, token, target, relayURL, apiKey)
+	if target == (pushRelayTarget{}) || !relayRejectedTarget(result) {
+		return result
+	}
+	s.markRelayLacksTarget(relayURL)
+	s.logger.InfoContext(ctx, "push relay does not accept server_id and profile_id yet; sending without them")
+	return s.postRelay(ctx, attempt, device, token, pushRelayTarget{}, relayURL, apiKey)
+}
+
+func (s *pushSender) markRelayLacksTarget(relayURL string) {
+	s.targetMu.Lock()
+	defer s.targetMu.Unlock()
+	s.relayWithoutTarget[relayURL] = s.now().Add(relayTargetRecheck)
+}
+
+func (s *pushSender) relayLacksTarget(relayURL string) bool {
+	s.targetMu.Lock()
+	defer s.targetMu.Unlock()
+	return s.now().Before(s.relayWithoutTarget[relayURL])
+}
+
+// relayRejectedTarget recognizes an older relay's strict-field rejection of
+// a push target field. Every other 400 keeps its ordinary handling.
+func relayRejectedTarget(result pushSendResult) bool {
+	if result.HTTPStatus != http.StatusBadRequest || result.UpstreamReason != "unexpected_field" {
+		return false
+	}
+	field := strings.TrimSpace(strings.TrimPrefix(result.Message, "unexpected field:"))
+	return field == "server_id" || field == "profile_id"
+}
+
+func (s *pushSender) postRelay(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string, target pushRelayTarget, relayURL, apiKey string) pushSendResult {
 	deliveryID := attempt.ID
 	if attempt.NotificationDeliveryID != nil {
 		deliveryID = *attempt.NotificationDeliveryID
@@ -457,22 +555,24 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 	collapseID := deliveryID
 	sendPath := relayAppleSendPath
 	var payload any = pushRelayAppleRequest{
-		Token:          token,
-		Environment:    device.APNsEnvironment,
-		Topic:          device.APNsTopic,
-		Mode:           "private_alert",
-		ServerDeviceID: device.ServerDeviceID,
-		DeliveryID:     deliveryID,
-		CollapseID:     &collapseID,
+		Token:           token,
+		Environment:     device.APNsEnvironment,
+		Topic:           device.APNsTopic,
+		Mode:            relayModePrivateAlert,
+		ServerDeviceID:  device.ServerDeviceID,
+		DeliveryID:      deliveryID,
+		CollapseID:      &collapseID,
+		pushRelayTarget: target,
 	}
 	if device.Platform == PushPlatformAndroid {
 		sendPath = relayFcmSendPath
 		payload = pushRelayFcmRequest{
-			Token:          token,
-			Mode:           "private_alert",
-			ServerDeviceID: device.ServerDeviceID,
-			DeliveryID:     deliveryID,
-			CollapseID:     &collapseID,
+			Token:           token,
+			Mode:            relayModePrivateAlert,
+			ServerDeviceID:  device.ServerDeviceID,
+			DeliveryID:      deliveryID,
+			CollapseID:      &collapseID,
+			pushRelayTarget: target,
 		}
 	}
 	body, err := json.Marshal(payload)
