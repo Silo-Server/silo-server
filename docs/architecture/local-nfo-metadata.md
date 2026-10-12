@@ -149,9 +149,11 @@ sits in the chain.
   longer offered (renamed out of the naming rules, replaced by a better match,
   or local metadata disabled), and the slot takes the provider's art. A folder
   that is missing, empty, unreadable or slow to answer is what an unmounted
-  share or a vanished nested mount looks like, so the local copy stays; an
-  item whose folder moved keeps its old local art until its new folder
-  supplies some. The folder is probed through `internal/rootcheck` with its
+  share or a vanished nested mount looks like, so the local copy stays. When
+  an item's media moves, the old art therefore stays only while its former
+  folder is gone; a former folder that still lists entries proves the library
+  is mounted, so the slot takes the new folder's local art or, without any,
+  the provider's. The folder is probed through `internal/rootcheck` with its
   timeout, once per folder, before the sidecar itself is looked up. This
   applies only at a level (item, season, episode) where the local provider
   answered a request for artwork in this refresh (`withLocalArtworkSearched`):
