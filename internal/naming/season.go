@@ -23,22 +23,34 @@ var (
 	seasonDirectoryTokenRe     = regexp.MustCompile(`(?i)(?:^|[ ._\-\[\]])(` + seasonDirectoryLabels + `)[ ._-]*(\d{1,4})(?:$|[ ._\-\[\]])`)
 	reversedSeasonDirectoryRe  = regexp.MustCompile(`(?i)^(\d{1,4})(st|nd|rd|th)?[ ._-]+(` + seasonDirectoryLabels + `)(?:$|[ ._\-\[\]])`)
 	wordSeasonDirectoryLabelRe = regexp.MustCompile(`(?i)^(?:` + wordSeasonDirectoryLabels + `)$`)
-	seasonYearSuffixRe         = regexp.MustCompile(`^[\[({]?(?:19|20)\d{2}(?:$|[^0-9])`)
+	seasonYearPrefixRe         = regexp.MustCompile(`^(?:19|20)\d{2}(?:$|[^0-9])`)
 )
 
 // seasonLabelStandsAlone reports whether a bare season label in a folder
 // directly in the library folder names a season, given the text after its
-// number (or, in the number-first form, after the label).
+// number (or, in the number-first form, after the label): only years,
+// provider tags, and release tokens may follow.
 func seasonLabelStandsAlone(label, rest string) bool {
 	if !wordSeasonDirectoryLabelRe.MatchString(label) {
 		return true
 	}
-	rest = strings.TrimLeft(stripFolderTags(rest), " ._-")
-	if rest == "" || seasonYearSuffixRe.MatchString(rest) {
-		return true
+	rest = stripFolderTags(rest)
+	for {
+		rest = strings.TrimLeft(rest, " ._-[](){}")
+		if rest == "" {
+			return true
+		}
+		if !seasonYearPrefixRe.MatchString(rest) {
+			break
+		}
+		rest = rest[4:]
 	}
-	technical := episodeTechnicalRe.FindStringIndex(rest)
-	return technical != nil && technical[0] == 0
+	return startsWithMatch(episodeTechnicalRe, rest) || startsWithMatch(inferReleaseTokenRe, rest)
+}
+
+func startsWithMatch(re *regexp.Regexp, value string) bool {
+	match := re.FindStringIndex(value)
+	return match != nil && match[0] == 0
 }
 
 // seasonDirectoryNumber recognizes a season directory without borrowing numbers

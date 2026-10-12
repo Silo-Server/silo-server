@@ -168,6 +168,9 @@ func TestSeasonDirectoryLocalizedAndOrdinalLabels(t *testing.T) {
 		{"Series.2.1080p.BluRay.x264-GRP", 2},
 		{"Series 2 [1080p]", 2},
 		{"Series 2 {tvdb-12345}", 2},
+		{"Series 2 HDR", 2},
+		{"Series 2 (2019) [REMUX]", 2},
+		{"Series 2 2019 DV", 2},
 		{"1st Season", 1},
 		{"2nd Season", 2},
 		{"3rd Season", 3},
@@ -205,6 +208,8 @@ func TestSeasonDirectoryWordLabelsAtTheLibraryTop(t *testing.T) {
 		"1st Saisonnier",
 		"Series 7 - The Contenders",
 		"Series 7 (Documentary)",
+		"Series 7 (2019) - The Contenders",
+		"Series 7 2019 Documentary",
 		"21st S.W.A.T. Archive",
 	} {
 		t.Run(segment, func(t *testing.T) {
