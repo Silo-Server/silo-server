@@ -19,10 +19,12 @@ import (
 // applyBestImages. Season and episode results otherwise merge first-provider-
 // wins, so a remote poster from an earlier provider would hide a local one.
 
-// preferLocalSeasonPoster gives target the local poster from source when
-// target's accumulated poster is not local, and keeps the first remote poster
-// beside a local one for localization rows (SeasonResult.remotePosterPath).
-func preferLocalSeasonPoster(target *SeasonResult, source SeasonResult) {
+// preferLocalSeasonPoster settles the poster before source merges into target
+// with MergeFillEmpty. A local poster in source replaces target's remote one,
+// and the first remote poster beside a local one is kept for localization rows
+// (SeasonResult.remotePosterPath). Once settled, source's poster is cleared so
+// the merge cannot fill a local poster's empty thumbhash with a remote one.
+func preferLocalSeasonPoster(target, source *SeasonResult) {
 	sourceLocal := isLocalImageSourcePath(source.PosterPath)
 	targetLocal := isLocalImageSourcePath(target.PosterPath)
 	switch {
@@ -31,18 +33,28 @@ func preferLocalSeasonPoster(target *SeasonResult, source SeasonResult) {
 			target.remotePosterPath, target.remotePosterThumbhash = target.PosterPath, target.PosterThumbhash
 		}
 		target.PosterPath, target.PosterThumbhash = source.PosterPath, source.PosterThumbhash
-	case targetLocal && !sourceLocal && source.PosterPath != "" && target.remotePosterPath == "":
-		target.remotePosterPath, target.remotePosterThumbhash = source.PosterPath, source.PosterThumbhash
+	case targetLocal && !sourceLocal && source.PosterPath != "":
+		if target.remotePosterPath == "" {
+			target.remotePosterPath, target.remotePosterThumbhash = source.PosterPath, source.PosterThumbhash
+		}
+	default:
+		return
 	}
+	source.PosterPath, source.PosterThumbhash = "", ""
 }
 
-// preferLocalEpisodeStill gives target the local still from source when
-// target's accumulated still is not local.
-func preferLocalEpisodeStill(target *EpisodeResult, source EpisodeResult) {
-	if isLocalImageSourcePath(source.StillPath) && !isLocalImageSourcePath(target.StillPath) {
-		target.StillPath = source.StillPath
-		target.StillThumbhash = source.StillThumbhash
+// preferLocalEpisodeStill settles the still before source merges into target,
+// as preferLocalSeasonPoster does for season posters: a local still beats a
+// remote one, and its thumbhash never comes from the remote still.
+func preferLocalEpisodeStill(target, source *EpisodeResult) {
+	sourceLocal := isLocalImageSourcePath(source.StillPath)
+	if sourceLocal == isLocalImageSourcePath(target.StillPath) {
+		return
 	}
+	if sourceLocal {
+		target.StillPath, target.StillThumbhash = source.StillPath, source.StillThumbhash
+	}
+	source.StillPath, source.StillThumbhash = "", ""
 }
 
 type localArtworkSearchedKey struct{}
@@ -76,13 +88,6 @@ func localArtworkSearchedLevels(ctx context.Context) localArtworkLevel {
 	return levels
 }
 
-// isLocalArtworkProvider reports whether p is the local (NFO) provider, which
-// the pipeline recognizes, here as elsewhere, by IdentityHintProvider.
-func isLocalArtworkProvider(p Provider) bool {
-	_, local := p.(IdentityHintProvider)
-	return local
-}
-
 // localArtworkInChain reports whether the chain for contentLevel asks the
 // local provider for artwork that the image cache can use.
 func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int, contentLevel string) bool {
@@ -90,7 +95,10 @@ func (s *MetadataService) localArtworkInChain(ctx context.Context, folderID int,
 		return false
 	}
 	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
-	return err == nil && slices.ContainsFunc(chain, isLocalArtworkProvider)
+	return err == nil && slices.ContainsFunc(chain, func(p Provider) bool {
+		_, local := p.(IdentityHintProvider)
+		return local
+	})
 }
 
 // localArtworkRetention keeps cached local artwork through a refresh that did
@@ -106,7 +114,7 @@ type localArtworkRetention struct {
 	// is kept.
 	searched bool
 	// probes memoizes folder probes, so the episodes of one season folder
-	// cost one probe.
+	// cost one probe. Retentions made with atLevel share it.
 	probes map[string]rootcheck.Result
 }
 
@@ -115,6 +123,15 @@ func newLocalArtworkRetention(ctx context.Context, contentID string, level local
 		ctx: ctx, contentID: contentID, searched: localArtworkSearchedLevels(ctx)&level != 0,
 		probes: make(map[string]rootcheck.Result),
 	}
+}
+
+// atLevel returns a retention for another level of the same content that
+// shares r's folder probes, so a season's poster and its episodes' stills,
+// which usually sit in the same folder, cost one probe.
+func (r *localArtworkRetention) atLevel(level localArtworkLevel) *localArtworkRetention {
+	other := *r
+	other.searched = localArtworkSearchedLevels(r.ctx)&level != 0
+	return &other
 }
 
 // keep reports whether a slot serving a cached copy of a local sidecar should

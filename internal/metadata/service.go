@@ -1924,7 +1924,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// A manual Identify skips the local hint provider (NFO) across every
 		// phase: its sidecar art is resolved by file path, not by the chosen id,
 		// so a stale poster/fanart must not be re-applied over the user's choice.
-		if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+		_, isIdentityHinter := p.(IdentityHintProvider)
+		if isIdentityHinter && req.Mode == ModeIdentify {
 			continue
 		}
 		images, err := ip.GetImages(ctx, ImageRequest{
@@ -1945,7 +1946,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				"provider", p.Slug(), "error", err)
 			continue
 		}
-		if isLocalArtworkProvider(p) {
+		if isIdentityHinter {
 			localArtworkSearched |= localArtworkItem
 		}
 		allImages = append(allImages, images...)
@@ -1981,7 +1982,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			// Identify skips the local hint provider (NFO): a stale season.nfo
 			// must not overlay season names on the user's chosen identity.
-			if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+			_, isIdentityHinter := p.(IdentityHintProvider)
+			if isIdentityHinter && req.Mode == ModeIdentify {
 				continue
 			}
 			seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
@@ -2007,7 +2009,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if !s.localArtworkUsable() {
 				dropLocalSeasonArtwork(seasons)
 			}
-			if isLocalArtworkProvider(p) {
+			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
 			accumulateSeasonResults(seasonResults, seasons)
@@ -2043,7 +2045,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					// Identify skips the local hint provider (NFO): stale episode
 					// NFOs/thumbs must not overlay the user's chosen identity.
-					if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+					_, isIdentityHinter := p.(IdentityHintProvider)
+					if isIdentityHinter && req.Mode == ModeIdentify {
 						continue
 					}
 					episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
@@ -2067,7 +2070,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					if !s.localArtworkUsable() {
 						dropLocalEpisodeArtwork(episodes)
 					}
-					if isLocalArtworkProvider(p) {
+					if isIdentityHinter {
 						localArtworkSearched |= localArtworkEpisode
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
@@ -4490,8 +4493,8 @@ func accumulateSeasonResults(accumulator map[int]*SeasonResult, seasons []Season
 			continue
 		}
 
+		preferLocalSeasonPoster(existing, &season)
 		MergeSeasonResult(&season, existing, MergeFillEmpty)
-		preferLocalSeasonPoster(existing, season)
 	}
 }
 
@@ -4526,8 +4529,8 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			continue
 		}
 
+		preferLocalEpisodeStill(existing, &episode)
 		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
-		preferLocalEpisodeStill(existing, episode)
 	}
 }
 
@@ -4968,7 +4971,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
-	episodeArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkEpisode)
+	episodeArtwork := seasonArtwork.atLevel(localArtworkEpisode)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,

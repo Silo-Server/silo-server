@@ -30,20 +30,28 @@ func TestAccumulateSeasonResultsLocalPosterBeatsEarlierRemote(t *testing.T) {
 
 	// A remote poster from a later provider does not displace it, and the
 	// displaced remote poster stays available for localization rows.
-	accumulateSeasonResults(accumulator, []SeasonResult{{SeasonNumber: 1, PosterPath: "tmdb://season-1.jpg"}})
-	if accumulator[1].PosterPath != testLocalSeasonPoster {
-		t.Fatalf("poster = %q, want the local poster to stay", accumulator[1].PosterPath)
+	accumulateSeasonResults(accumulator, []SeasonResult{{
+		SeasonNumber: 1, PosterPath: "tmdb://season-1.jpg", PosterThumbhash: "tmdb-thumb",
+	}})
+	if accumulator[1].PosterPath != testLocalSeasonPoster || accumulator[1].PosterThumbhash != "" {
+		t.Fatalf("poster = %q thumbhash %q, want the local poster to stay without a remote thumbhash",
+			accumulator[1].PosterPath, accumulator[1].PosterThumbhash)
 	}
 	if got := accumulator[1].remotePosterPath; got != "tvdb://season-1.jpg" {
 		t.Fatalf("remote poster kept for localization = %q, want the first remote poster", got)
 	}
 
-	// Local first: the first later remote poster is kept beside it.
+	// Local first: the first later remote poster is kept beside it, and its
+	// thumbhash stays with it rather than describing the local poster.
 	localFirst := make(map[int]*SeasonResult)
 	accumulateSeasonResults(localFirst, []SeasonResult{{SeasonNumber: 1, PosterPath: testLocalSeasonPoster}})
-	accumulateSeasonResults(localFirst, []SeasonResult{{SeasonNumber: 1, PosterPath: "tvdb://season-1.jpg"}})
-	if localFirst[1].PosterPath != testLocalSeasonPoster || localFirst[1].remotePosterPath != "tvdb://season-1.jpg" {
-		t.Fatalf("local-first season = %+v, want the local poster with the remote one kept beside it", localFirst[1])
+	accumulateSeasonResults(localFirst, []SeasonResult{{
+		SeasonNumber: 1, PosterPath: "tvdb://season-1.jpg", PosterThumbhash: "tvdb-thumb",
+	}})
+	got = localFirst[1]
+	if got.PosterPath != testLocalSeasonPoster || got.PosterThumbhash != "" ||
+		got.remotePosterPath != "tvdb://season-1.jpg" || got.remotePosterThumbhash != "tvdb-thumb" {
+		t.Fatalf("local-first season = %+v, want the local poster with the remote one kept beside it", got)
 	}
 }
 
@@ -57,11 +65,23 @@ func TestAccumulateEpisodeResultsLocalStillBeatsEarlierRemote(t *testing.T) {
 		SeasonNumber: 1, EpisodeNumber: 1, StillPath: localStill,
 	}})
 	accumulateEpisodeResults(accumulator, []EpisodeResult{{
-		SeasonNumber: 1, EpisodeNumber: 1, StillPath: "tmdb://still.jpg",
+		SeasonNumber: 1, EpisodeNumber: 1, StillPath: "tmdb://still.jpg", StillThumbhash: "tmdb-thumb",
 	}})
 	got := accumulator[episodeResultKey{seasonNumber: 1, episodeNumber: 1}]
 	if got.StillPath != localStill || got.StillThumbhash != "" || got.Title != "Pilot" {
 		t.Fatalf("episode = %+v, want the local still and the first provider's title", got)
+	}
+
+	// Local first: a later remote still's thumbhash does not fill the local
+	// still's empty one.
+	localFirst := make(map[episodeResultKey]*EpisodeResult)
+	accumulateEpisodeResults(localFirst, []EpisodeResult{{SeasonNumber: 1, EpisodeNumber: 1, StillPath: localStill}})
+	accumulateEpisodeResults(localFirst, []EpisodeResult{{
+		SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot", StillPath: "tvdb://still.jpg", StillThumbhash: "tvdb-thumb",
+	}})
+	got = localFirst[episodeResultKey{seasonNumber: 1, episodeNumber: 1}]
+	if got.StillPath != localStill || got.StillThumbhash != "" || got.Title != "Pilot" {
+		t.Fatalf("local-first episode = %+v, want the local still without a remote thumbhash", got)
 	}
 }
 
