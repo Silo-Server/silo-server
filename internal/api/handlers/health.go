@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -100,6 +101,14 @@ type ReadyHandler struct {
 	// shuttingDown reports whether the process has begun shutting down; nil
 	// means it never does as far as readiness is concerned.
 	shuttingDown func() bool
+	// lastProbes holds the most recent dependency probe results, which a
+	// shutting-down answer reports instead of probing again.
+	lastProbes atomic.Pointer[readyProbes]
+}
+
+// readyProbes is one round of readiness dependency probes.
+type readyProbes struct {
+	postgres, s3, artwork bool
 }
 
 // NewReadyHandler creates a ReadyHandler with the given PG and S3 dependencies.
@@ -126,11 +135,15 @@ func (h *ReadyHandler) SetShuttingDown(fn func() bool) {
 // with "degraded" in the body when a configured storage backend failed its
 // probe.
 func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	pgOK := h.checkPostgres(ctx)
-	s3OK := h.checkS3(ctx)
-	artworkOK := h.checkArtwork(ctx)
+	// A shutting-down answer does not wait on the dependencies: it reports
+	// their last probe, so a slow storage probe cannot hold back the 503 that
+	// routes traffic away. It probes only when nothing has probed before.
+	shuttingDown := h.shuttingDown != nil && h.shuttingDown()
+	probes := h.lastProbes.Load()
+	if !shuttingDown || probes == nil {
+		probes = h.probe(r.Context())
+	}
+	pgOK, s3OK, artworkOK := probes.postgres, probes.s3, probes.artwork
 
 	// Readiness answers "can this node serve requests", which the database
 	// decides. Object and artwork storage are reported so operators can see an
@@ -141,7 +154,6 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The v1 body shape is frozen: a healthy answer carries only status, and
 	// any other answer carries every dependency boolean, with an unconfigured
 	// dependency reporting true. "degraded" is additive to that contract.
-	shuttingDown := h.shuttingDown != nil && h.shuttingDown()
 	status := readyStatus{Status: readyStatusOK}
 	if !pgOK || !s3OK || !artworkOK || shuttingDown {
 		status.Postgres = new(pgOK)
@@ -166,6 +178,17 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+// probe checks every dependency and remembers the results.
+func (h *ReadyHandler) probe(ctx context.Context) *readyProbes {
+	probes := &readyProbes{
+		postgres: h.checkPostgres(ctx),
+		s3:       h.checkS3(ctx),
+		artwork:  h.checkArtwork(ctx),
+	}
+	h.lastProbes.Store(probes)
+	return probes
 }
 
 func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {

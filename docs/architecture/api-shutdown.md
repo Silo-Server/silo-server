@@ -11,7 +11,8 @@ On SIGTERM or SIGINT, `cmd/silo/main.go`:
 
 1. Marks the process as shutting down. `GET /api/v1/ready` answers `503`
    with `status` `shutting_down` (see the retained probe contract in
-   [api-contract.md](api-contract.md)). `GET /api/v1/health`, the liveness
+   [api-contract.md](api-contract.md)) at once: it reports the last dependency
+   probe instead of waiting on a new one. `GET /api/v1/health`, the liveness
    probe, keeps answering `200`. The LAN discovery advertisement is
    withdrawn.
 2. Keeps serving every request, and keeps its background work running, for

@@ -1224,7 +1224,8 @@ tombstone. The retained contract is:
   Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
   answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
   while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
-  listeners close; `shutting_down` is additive to the frozen shape. See
+  listeners close. The booleans report the last dependency probe, so the answer does not wait
+  on a slow dependency; `shutting_down` is additive to the frozen shape. See
   [api-shutdown.md](api-shutdown.md).
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also

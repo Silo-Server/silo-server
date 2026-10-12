@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -45,5 +47,44 @@ func TestReadinessWithoutShutdownSignal(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+// A shutting-down answer reports the last probe instead of waiting on a new
+// one, so a hung dependency cannot hold back the 503. With no earlier probe it
+// probes once.
+func TestShuttingDownReadinessDoesNotWaitOnProbes(t *testing.T) {
+	var pings atomic.Int32
+	shuttingDown := false
+	h := NewReadyHandler(pingerFunc(func(context.Context) error {
+		pings.Add(1)
+		if shuttingDown {
+			return errors.New("probed while shutting down")
+		}
+		return nil
+	}), nil)
+	h.SetShuttingDown(func() bool { return shuttingDown })
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
+
+	shuttingDown = true
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
+	if got := pings.Load(); got != 1 {
+		t.Fatalf("postgres pinged %d times, want only the probe before shutdown", got)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusServiceUnavailable || body["status"] != "shutting_down" || body["postgres"] != true {
+		t.Fatalf("shutting down: %d %v", rec.Code, body)
+	}
+
+	fresh := NewReadyHandler(pingerFunc(func(context.Context) error { pings.Add(1); return nil }), nil)
+	fresh.SetShuttingDown(func() bool { return true })
+	rec = httptest.NewRecorder()
+	fresh.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
+	if got := pings.Load(); got != 2 || rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("with no earlier probe: %d pings, status %d", got, rec.Code)
 	}
 }
