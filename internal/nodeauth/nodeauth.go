@@ -119,7 +119,7 @@ func verify(r *http.Request, secret string, now time.Time) error {
 		if subtle.ConstantTimeCompare([]byte(params), []byte(secret)) != 1 {
 			return ErrUnauthorized
 		}
-		if suppressed, ok := legacyBearerLog.allow(now); ok {
+		if suppressed, ok := legacyBearerLog.allow(); ok {
 			slog.WarnContext(r.Context(), "accepted a legacy bearer credential from an older Silo API server or proxy; upgrade it, because the next release accepts only signed requests",
 				"component", "nodeauth", "remote_addr", r.RemoteAddr, "suppressed", suppressed)
 		}
@@ -150,7 +150,7 @@ func verifySigned(r *http.Request, secret, params string, now time.Time) error {
 		return ErrUnauthorized
 	}
 	if !hmac.Equal(got, want) {
-		if suppressed, ok := badSignatureLog.allow(now); ok {
+		if suppressed, ok := badSignatureLog.allow(); ok {
 			slog.WarnContext(r.Context(), "refused a node request with an invalid signature; check that the sender uses this worker's secret and that nothing in front of the worker rewrites the request path or query",
 				"component", "nodeauth", "remote_addr", r.RemoteAddr, "suppressed", suppressed)
 		}
@@ -159,14 +159,14 @@ func verifySigned(r *http.Request, secret, params string, now time.Time) error {
 	// The MAC covers the timestamp, so a valid signature outside the window
 	// means the clocks disagree (or an old request was replayed).
 	if skew := now.Sub(time.Unix(seconds, 0)); skew > maxSkew || skew < -maxSkew {
-		if suppressed, ok := staleLog.allow(now); ok {
+		if suppressed, ok := staleLog.allow(); ok {
 			slog.WarnContext(r.Context(), "refused a signed node request outside the 30-second window; check that this worker's clock agrees with its API servers and proxies",
 				"component", "nodeauth", "remote_addr", r.RemoteAddr, "offset_seconds", int64(skew.Seconds()), "suppressed", suppressed)
 		}
 		return ErrUnauthorized
 	}
 	if !bodyMatches(r, bodyHash) {
-		if suppressed, ok := badBodyLog.allow(now); ok {
+		if suppressed, ok := badBodyLog.allow(); ok {
 			slog.WarnContext(r.Context(), "refused a signed node request whose body does not match its signature; check that nothing in front of the worker changes request bodies",
 				"component", "nodeauth", "remote_addr", r.RemoteAddr, "suppressed", suppressed)
 		}
@@ -290,17 +290,26 @@ const logInterval = 10 * time.Minute
 
 var legacyBearerLog, badSignatureLog, staleLog, badBodyLog logThrottle
 
+// processStart anchors the throttles to Go's monotonic clock, which wall-clock
+// corrections do not move, so a clock fix neither silences nor re-opens them.
+var processStart = time.Now()
+
 // allow reports whether a warning may be logged now; if so it records the
-// time and returns the number suppressed since the last one. A clock that
-// stepped backwards counts as a new interval, so a clock correction does not
-// silence the warnings that diagnose clock trouble.
-func (l *logThrottle) allow(now time.Time) (suppressed int64, ok bool) {
+// time and returns the number suppressed since the last one.
+func (l *logThrottle) allow() (suppressed int64, ok bool) {
+	return l.allowAt(time.Since(processStart))
+}
+
+// allowAt is allow at elapsed time since processStart. A concurrent caller
+// that sampled an earlier time than the last recorded one counts as inside the
+// interval.
+func (l *logThrottle) allowAt(elapsed time.Duration) (suppressed int64, ok bool) {
 	last := l.last.Load()
-	if since := now.Sub(time.Unix(0, last)); last != 0 && since >= 0 && since < logInterval {
+	if last != 0 && elapsed-time.Duration(last) < logInterval {
 		l.suppressed.Add(1)
 		return 0, false
 	}
-	if !l.last.CompareAndSwap(last, now.UnixNano()) {
+	if !l.last.CompareAndSwap(last, max(int64(elapsed), 1)) {
 		l.suppressed.Add(1)
 		return 0, false
 	}

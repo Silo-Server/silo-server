@@ -290,22 +290,24 @@ func TestSignedRequestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLogThrottleCountsSuppressedWarningsAndSurvivesClockSteps(t *testing.T) {
+func TestLogThrottleCountsSuppressedWarnings(t *testing.T) {
 	var throttle logThrottle
-	if suppressed, ok := throttle.allow(testNow); !ok || suppressed != 0 {
+	start := time.Hour
+	if suppressed, ok := throttle.allowAt(start); !ok || suppressed != 0 {
 		t.Fatalf("first warning: allow = %d, %v; want 0, true", suppressed, ok)
 	}
 	for range 3 {
-		if _, ok := throttle.allow(testNow.Add(time.Minute)); ok {
+		if _, ok := throttle.allowAt(start + time.Minute); ok {
 			t.Fatal("a warning inside the interval was allowed")
 		}
 	}
-	if suppressed, ok := throttle.allow(testNow.Add(logInterval)); !ok || suppressed != 3 {
-		t.Fatalf("after the interval: allow = %d, %v; want 3, true", suppressed, ok)
+	// A concurrent caller that sampled the time before the last warning was
+	// recorded is inside the interval too, and must not move it backwards.
+	if _, ok := throttle.allowAt(start - time.Millisecond); ok {
+		t.Fatal("an out-of-order earlier sample was allowed")
 	}
-	// A clock stepped back behind the last warning must not mute the next one.
-	if _, ok := throttle.allow(testNow.Add(-time.Hour)); !ok {
-		t.Fatal("a warning after a backward clock step was suppressed")
+	if suppressed, ok := throttle.allowAt(start + logInterval); !ok || suppressed != 4 {
+		t.Fatalf("after the interval: allow = %d, %v; want 4, true", suppressed, ok)
 	}
 }
 
