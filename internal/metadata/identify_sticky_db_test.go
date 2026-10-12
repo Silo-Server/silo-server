@@ -161,14 +161,41 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 	}
 }
 
-// The provider-ID conflict merge records an Identify choice on the survivor
-// the same way.
+// The provider-ID conflict merges record an Identify choice on the item that
+// owns the chosen IDs, and only on it: the generic merge may keep the item
+// being identified, which still has its old IDs.
 func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
 	t.Skip("duplicate merges fail at the personal collection step until #2299 is fixed")
 	pool := chainBuiltinTestPool(t)
-	checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
-		_, err := canonicalizeProviderIDDuplicateInto(context.Background(), pool, from, to, true, markIdentity)
-		return err
+	ctx := context.Background()
+	t.Run("into the owner", func(t *testing.T) {
+		checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
+			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, from, to, true, markIdentity)
+			return err
+		})
+	})
+	t.Run("either survivor", func(t *testing.T) {
+		itemRepo := catalog.NewItemRepository(pool)
+		from, to := "identity-dup-from-"+uuid.NewString(), "identity-dup-to-"+uuid.NewString()
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
+		})
+		for _, id := range []string{from, to} {
+			if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
+				t.Fatalf("seed %s: %v", id, err)
+			}
+		}
+		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, from, to, true, true)
+		if err != nil {
+			t.Fatalf("merge: %v", err)
+		}
+		chosen, err := itemRepo.IdentityChosen(ctx, survivor)
+		if err != nil {
+			t.Fatalf("IdentityChosen: %v", err)
+		}
+		if chosen != (survivor == to) {
+			t.Errorf("survivor %s marked = %v, want marked only when it owns the chosen IDs", survivor, chosen)
+		}
 	})
 }
 
