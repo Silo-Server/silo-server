@@ -158,6 +158,56 @@ func TestCacheTargetArtworkNotPendingOnceADeferredJobIsCopied(t *testing.T) {
 	}
 }
 
+// A pending image URL an NFO names is not kept with caching off, even while
+// the NFO is unreadable: only the image cache could fetch it, so the slot
+// takes the provider poster. With caching on it is kept.
+func TestPendingNFONamedURLNotKeptWithCachingOff(t *testing.T) {
+	const (
+		contentID    = "movie:tmdb:7"
+		nfoPoster    = "nfo+https://img.example.org/poster.jpg"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	for _, tc := range []struct {
+		name    string
+		caching bool
+		want    string
+	}{
+		{name: "caching off", want: remotePoster},
+		{name: "caching on", caching: true, want: nfoPoster},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+			h.service.SetAutoCacheImages(tc.caching)
+			ctx := withLocalMetadataUnreadable(withLocalArtworkSearched(context.Background(), localArtworkItem), localArtworkItem)
+			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+				PosterSourcePath: nfoPoster,
+				Studios:          []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+			}); err != nil {
+				t.Fatalf("upsert existing item: %v", err)
+			}
+			providerRepo := newFakeProviderIDRepo()
+			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+			h.service.providerIDRepo = providerRepo
+
+			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeScheduledRefresh, Language: "en"},
+				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+				[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
+				nil, nil, "movie"); err != nil {
+				t.Fatalf("mergeAndPersist: %v", err)
+			}
+			got, err := h.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got.PosterSourcePath != tc.want {
+				t.Fatalf("poster = path %q source %q, want source %q", got.PosterPath, got.PosterSourcePath, tc.want)
+			}
+		})
+	}
+}
+
 // A local poster outranks remote ones wherever it lands in chain order; the
 // first remote poster it displaces or outranks is kept as the stand-in.
 func TestSeasonAndEpisodeResultsKeepDisplacedRemoteArtwork(t *testing.T) {

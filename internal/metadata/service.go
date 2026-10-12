@@ -2885,6 +2885,7 @@ func (s *MetadataService) mergeAndPersist(
 	var localArt *localArtworkRetention
 	if handleArtwork {
 		localArt = newLocalArtworkRetention(ctx, contentID, localArtworkItem)
+		localArt.usable = s.localMetadataURLUsable
 		imageMode := mergeMode
 		if req.localReapply {
 			// Local images always apply; fill-empty keeps the rest of the
@@ -4685,9 +4686,13 @@ func (s *MetadataService) localArtworkUsable() bool {
 // so with caching off it would leave the slot empty instead of falling back to
 // provider artwork.
 func (s *MetadataService) localSourceUsable(source string) bool {
-	if !s.localArtworkUsable() {
-		return false
-	}
+	return s.localArtworkUsable() && s.localMetadataURLUsable(source)
+}
+
+// localMetadataURLUsable reports whether source may be used when it is an
+// image URL an NFO names: only while metadata.cache_images is on. Any other
+// source passes.
+func (s *MetadataService) localMetadataURLUsable(source string) bool {
 	if _, nfoURL := localMetadataImageURL(source); nfoURL {
 		return s.autoCacheImages.Load()
 	}
@@ -5297,6 +5302,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
+	seasonArtwork.usable = s.localMetadataURLUsable
 	episodeArtwork := seasonArtwork.atLevel(localArtworkEpisode)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
