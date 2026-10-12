@@ -596,3 +596,65 @@ func TestRememberCompatTracksLeavesTheLatestClaimAfterManyInterleavedWrites(t *t
 		t.Fatalf("last subtitle write = %+v, want the newest off choice", last)
 	}
 }
+
+// TestPlaybackReportDoesNotClaimAnOptedOutTrack covers a viewer who turned
+// RememberSubtitleSelections off: the subtitle change is not claimed on the
+// play either, so another report's read-back cannot write it later.
+func TestPlaybackReportDoesNotClaimAnOptedOutTrack(t *testing.T) {
+	handler, prefs, userStore, sourceID := newTrackMemoryPlay(t, "series-1")
+	if err := userStore.SetSetting(context.Background(), configurationKey("profile-1"), `{"RememberSubtitleSelections":false}`); err != nil {
+		t.Fatal(err)
+	}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemorySDHSubtitle)
+
+	current, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	if claimed := current.MediaSources[0].RememberedSubtitleStreamIndex; claimed != nil || prefs.attempts != 0 {
+		t.Fatalf("claimed subtitle %v with %d writes for an opted-out viewer, want neither", claimed, prefs.attempts)
+	}
+}
+
+// staleGetStore serves Get from a copy taken earlier, as a replica's cache
+// can, while Update reaches the stored play.
+type staleGetStore struct {
+	CompatPlaybackStore
+	stale PlaybackSession
+}
+
+func (s *staleGetStore) Get(string) (*PlaybackSession, bool) {
+	copy := s.stale
+	copy.MediaSources = slices.Clone(s.stale.MediaSources)
+	return &copy, true
+}
+
+// TestRememberCompatTracksReadsTheStoredClaimBack covers the read-back after
+// a write when this replica's cached copy lags: it must still see the newer
+// claim another report made and write it.
+func TestRememberCompatTracksReadsTheStoredClaimBack(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	stored := handler.playbackStore
+	before, ok := stored.Get("play-1")
+	if !ok {
+		t.Fatal("play-1 missing")
+	}
+	before.MediaSources = slices.Clone(before.MediaSources)
+	handler.playbackStore = &staleGetStore{CompatPlaybackStore: stored, stale: *before}
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	report := func(index int) {
+		current, _ := stored.Get("play-1")
+		value := compatIntValue(index)
+		handler.rememberCompatTracks(t.Context(), session, current,
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
+	}
+	prefs.beforeSubtitleWrite = func() { report(-1) }
+
+	report(trackMemorySDHSubtitle)
+
+	last := prefs.subtitles[len(prefs.subtitles)-1]
+	if last.SubtitleMode != profileSubtitleOff {
+		t.Fatalf("last subtitle write = %+v, want the newer off choice read from the stored play", last)
+	}
+}
