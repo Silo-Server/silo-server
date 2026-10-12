@@ -121,7 +121,8 @@ func (s *MetadataService) localItemIdentityOutcome(ctx context.Context, folderID
 	if err != nil {
 		return localReapplyNone, err
 	}
-	stored := canonicalIdentityProviderIDs(storedItemIdentity(item, durable))
+	anchors := canonicalIdentityProviderIDs(storedItemIdentity(item, durable))
+	stored := maps.Clone(anchors)
 	suppressProviderIDValues(stored, stale)
 	// The re-anchoring refresh is a manual one, which an admin's Identify
 	// choice outranks: then the item keeps its identity and nothing local
@@ -132,10 +133,10 @@ func (s *MetadataService) localItemIdentityOutcome(ctx context.Context, folderID
 	live := maps.Clone(declared)
 	suppressProviderIDValues(live, stale)
 	added := newlyDeclaredIDs(canonicalIdentityProviderIDs(previousIDs), live)
-	// A new ID corrects the identity when it contradicts a live stored one,
-	// or when the item has none to keep: matched only locally, or anchored
-	// only by IDs recorded as dead.
-	if len(added) > 0 && (localIDsContradict(added, stored) || !hasLiveIdentity(stored) || contentid.IsLocal(item.ContentID)) {
+	// A new ID corrects the identity when it contradicts a stored one, live
+	// or recorded as dead (a dead anchor's replacement), or when the item has
+	// no live ID to keep (matched only locally, or anchored only by dead IDs).
+	if len(added) > 0 && (localIDsContradict(added, anchors) || len(stored) == 0 || contentid.IsLocal(item.ContentID)) {
 		slog.InfoContext(ctx, "metadata: local files declare a new identity; refreshing to re-anchor the item", "component", "metadata",
 			"content_id", item.ContentID, "folder_id", folderID, "previous_ids", previousIDs, "declared_ids", live, "stored_ids", stored)
 		if err := s.RefreshTargetForLibrary(ctx, RefreshTargetItem, item.ContentID, folderID); err != nil {
@@ -152,17 +153,6 @@ func (s *MetadataService) localItemIdentityOutcome(ctx context.Context, folderID
 		return localReapplyNone, nil
 	}
 	return localReapplyMerged, nil
-}
-
-// hasLiveIdentity reports whether stored, with the IDs recorded as dead
-// removed, still holds an identity ID.
-func hasLiveIdentity(stored map[string]string) bool {
-	for _, key := range trustedSearchIDKeys {
-		if strings.TrimSpace(stored[key]) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // newlyDeclaredIDs returns the IDs in declared that previous did not hold

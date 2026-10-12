@@ -518,8 +518,8 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   files itself (`LocalSidecarProvider`, `internal/metadata/nfo/sidecars.go`)
   with the same lookups as `GetMetadata`/`GetImages`/`GetSeasons`/`GetEpisodes`,
   so lookup rules live in one place. A season's files include the show's
-  `tvshow.nfo`, which can name the season and its poster, and an item's
-  include every image slot and backdrop `GetImages` fills. Item rows also
+  `tvshow.nfo` where it names the season or its poster, and an item's include
+  every image slot and backdrop `GetImages` fills. Item rows also
   store a digest of every sidecar-type file in the item's folders (its files'
   directories and observed root) and the provider IDs the NFO declared. Rows
   follow a content ID rename and go with their library.
@@ -652,10 +652,11 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 - Two checks recording an item for the first time at once may take an edit
   saved between their reads as the baseline, when the later read is stored
   first.
-- Images in an item's `extrafanart/` folder are part of its fingerprint and
-  apply with every re-apply, but scans and file events watch only the item's
-  own folders, so a change in `extrafanart/` alone waits for the scheduled
-  refresh's check or the next sidecar change beside the item.
+- Images in a subfolder of an item's folder (`extrafanart/`, or one an NFO
+  names) are part of its fingerprint and apply with every re-apply, but scans
+  and file events watch only the item's own folders, so a change there alone
+  waits for the scheduled refresh's check or the next sidecar change beside
+  the item.
 - An actor photo an NFO names (an `.actors` image) is not fingerprinted:
   replacing it under the same name takes effect at the item's next re-apply
   or refresh.

@@ -59,11 +59,11 @@ func artworkFile(source string) (string, bool) {
 }
 
 // SeasonSidecarPaths returns, per season number, the files GetSeasons
-// applies: the season.nfo, the season poster, and the show's tvshow.nfo,
-// which names seasons and their posters too. Every requested season has an
+// applies: the season.nfo, the season poster, and the show's tvshow.nfo where
+// it names the season or its poster. Every requested season has an
 // entry, empty when it has no sidecars.
 func (p *Provider) SeasonSidecarPaths(ctx context.Context, req metadata.SeasonsRequest) map[int]metadata.LocalSidecars {
-	if req.ContentType != "" && req.ContentType != typeSeries {
+	if (req.ContentType != "" && req.ContentType != typeSeries) || len(req.SeasonDirectoryPaths) == 0 {
 		return nil
 	}
 	seriesRoots := compactNFOPaths(req.SeriesRootPaths)
@@ -73,18 +73,24 @@ func (p *Provider) SeasonSidecarPaths(ctx context.Context, req metadata.SeasonsR
 	out := make(map[int]metadata.LocalSidecars, len(req.SeasonDirectoryPaths))
 	for number, dirs := range req.SeasonDirectoryPaths {
 		dirs = compactNFOPaths(dirs)
-		nfoPath, _, err := parseSeasonSidecar(ctx, lookup, dirs, req.ShowFilePaths, number)
+		nfoPath, parsed, err := parseSeasonSidecar(ctx, lookup, dirs, req.ShowFilePaths, number)
 		found := metadata.LocalSidecars{MetadataErr: keepReadErr(showErr, err)}
 		if nfoPath != "" {
 			found.Metadata = append(found.Metadata, nfoPath)
 		}
-		if show != nil {
-			found.Metadata = append(found.Metadata, showPath)
-		}
+		// The show's NFO counts only where it names the season or its poster,
+		// as GetSeasons uses it; when it starts or stops doing so, the set of
+		// files changes.
+		showNames := show != nil && (parsed == nil || parsed.Title == "") && show.SeasonNames[number] != ""
 		poster := finder.findSeasonPoster(dirs, seriesRoots, number)
 		if poster == "" && show != nil && len(show.Art) > 0 {
 			resolver := newArtResolver(finder, showPath, append(slices.Clone(seriesRoots), dirs...))
-			poster = firstArtSource(show.Art, artPoster, number, true, resolver)
+			if poster = firstArtSource(show.Art, artPoster, number, true, resolver); poster != "" {
+				showNames = true
+			}
+		}
+		if showNames {
+			found.Metadata = append(found.Metadata, showPath)
 		}
 		if poster, ok := artworkFile(poster); ok {
 			found.Artwork = []string{poster}

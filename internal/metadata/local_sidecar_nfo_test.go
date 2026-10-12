@@ -558,6 +558,25 @@ func TestLocalSidecarCheck_NFOReplacingADeadStoredIDReAnchors(t *testing.T) {
 	}
 }
 
+func TestLocalSidecarCheck_NFOReplacingOneDeadStoredIDReAnchors(t *testing.T) {
+	f := newMovieFixture(t, "100")
+	// The item also holds a live IMDb ID; only its TMDB anchor is dead.
+	if err := f.x.SeedMatchedItem(models.MediaItem{
+		ContentID: f.contentID, Type: "movie", Title: "Film NFO v1", Overview: "Plot v1",
+		TmdbID: "100", ImdbID: "tt0000100", DefaultMetadataLanguage: "en",
+	}); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	f.scan(t)
+	f.x.RecordDeadProviderID(f.contentID, "tmdb", "100")
+	processed := f.x.RecordProcess()
+	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2", tmdbID("200")))
+	f.scan(t)
+	if requests := processed(); len(requests) != 1 || requests[0].Mode != metadata.ModeManualRefresh {
+		t.Fatalf("refreshes = %#v, want one manual refresh to replace the dead TMDB anchor", requests)
+	}
+}
+
 func TestLocalSidecarCheck_ConflictingUnchangedIDsAreNotApplied(t *testing.T) {
 	// The item was identified as TMDB 300 while its NFO names 100: a plot
 	// edit must not apply the other title's text, nor change the identity.
