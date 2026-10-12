@@ -126,6 +126,12 @@ Authentication rules for this route only:
 authenticated profile. The route is rate-limited like other authenticated
 routes.
 
+An administrator test push names the profile's newest notification, so this
+fetch returns that notification's display data. A test sent to a profile with
+no notification names its own attempt ID instead, and the fetch returns `404`;
+keep the generic text in that case. Android's `getNotification` fetch behaves
+the same way.
+
 ## Ordered Android registration
 
 `GET /api/v2/notifications/push/devices/capabilities` describes the

@@ -3091,7 +3091,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Dispatch one test push notification and report its current delivery outcome. */
+    /** Dispatch one test push carrying the target profile's newest notification and report its current delivery outcome. */
     post: operations["testAdminApplePushNotification"];
     delete?: never;
     options?: never;
@@ -3108,7 +3108,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Dispatch one test push notification and report its current delivery outcome. */
+    /** Dispatch one test push carrying the target profile's newest notification and report its current delivery outcome. */
     post: operations["testAdminAndroidPushNotification"];
     delete?: never;
     options?: never;
@@ -16176,6 +16176,11 @@ export interface components {
        * @example 1
        */
       attempt_id: string;
+      /**
+       * @description The target profile's newest notification, which the test push carried so the device shows its real text; absent when the profile has no notification and the device can show only generic text.
+       * @example 1
+       */
+      delivery_id?: string;
       failure_message?: string;
       outcome: string;
       /**

@@ -868,6 +868,27 @@
       "body_file": "admin_apple_push_test.json"
     },
     {
+      "name": "admin_apple_push_test_notification",
+      "operation_id": "testAdminApplePushNotification",
+      "scenario": "The test push carries the profile's newest notification and names it, so the device shows that notification's real text.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/notifications/push/apple/test",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"profile_id\":\"notified-profile\",\"server_device_id\":\"target-device\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminNotificationPushTestResult",
+      "body_file": "admin_apple_push_test_notification.json"
+    },
+    {
       "name": "admin_catalog_export_link",
       "operation_id": "publishCatalogExportJob",
       "scenario": "A saved signed URL retains its original seven-day expiry.",

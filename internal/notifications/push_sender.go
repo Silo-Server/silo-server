@@ -712,6 +712,9 @@ type ApplePushTestResult struct {
 	AttemptID      string
 	PushDeviceID   string
 	ServerDeviceID string
+	// DeliveryID is the notification the test carried; empty when the
+	// profile had none.
+	DeliveryID     string
 	Outcome        string
 	RelayRequestID string
 	UpstreamStatus *int
@@ -764,6 +767,9 @@ func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDe
 		ServerDeviceID: device.ServerDeviceID,
 		Outcome:        updated.Outcome,
 		UpstreamStatus: updated.UpstreamStatus,
+	}
+	if updated.NotificationDeliveryID != nil {
+		result.DeliveryID = *updated.NotificationDeliveryID
 	}
 	if updated.RelayRequestID != nil {
 		result.RelayRequestID = *updated.RelayRequestID

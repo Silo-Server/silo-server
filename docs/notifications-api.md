@@ -115,6 +115,19 @@ new outbox attempt, invokes the configured sender, and returns HTTP 200 with
 `attempt_id`, `push_device_id`, `server_device_id`, `outcome`, and any existing
 relay/upstream diagnostic fields. A `retrying` or `failed` outcome is still a
 successful HTTP report of that attempt, not proof that a push was delivered.
+
+The test push carries the newest notification of the selected device's profile
+(matched by account as well, since profile IDs repeat across accounts), and the
+response names it as `delivery_id`. The device fetches that notification's real
+title, body and tap target exactly as for an ordinary push, and because the
+push reuses the notification's collapse ID it replaces that notification on the
+device if it is still shown. When the profile has no notification yet,
+`delivery_id` is absent and the push carries the attempt ID instead: it still
+proves transport, but the display fetch returns `404` and the device shows the
+relay's generic text. The test changes neither the notification's read state
+nor the inbox; it adds one `test` attempt to that notification's push attempt
+history, which nothing counts as a delivery. Pruning the notification removes
+the attempt with it.
 Background attempt recovery and sender retries retain their existing semantics.
 These operations are `non_retryable`: clients must not repeat a lost request
 automatically because another request creates another test attempt.

@@ -10803,6 +10803,14 @@
             "minLength": 1,
             "type": "string"
           },
+          "delivery_id": {
+            "description": "The target profile's newest notification, which the test push carried so the device shows its real text; absent when the profile has no notification and the device can show only generic text.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
           "failure_message": {
             "type": "string"
           },
@@ -91803,7 +91811,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Dispatch one test push notification and report its current delivery outcome.",
+        "summary": "Dispatch one test push carrying the target profile's newest notification and report its current delivery outcome.",
         "tags": [
           "admin"
         ],
@@ -91987,7 +91995,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Dispatch one test push notification and report its current delivery outcome.",
+        "summary": "Dispatch one test push carrying the target profile's newest notification and report its current delivery outcome.",
         "tags": [
           "admin"
         ],
