@@ -25,6 +25,7 @@ type Server struct {
 	validate func(context.Context, Binding) error
 	mu       sync.Mutex
 	bound    bool
+	pending  *Binding
 	done     chan Binding
 }
 
@@ -93,7 +94,20 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "customer configuration could not be validated; check worker access to the database and Redis", http.StatusUnprocessableEntity)
 		return
 	}
-	if err := s.store.Save(b); err != nil {
+	var saveErr error
+	if s.pending != nil {
+		if *s.pending != b {
+			http.Error(w, ErrAlreadyBound.Error(), http.StatusConflict)
+			return
+		}
+		saveErr = s.store.confirm(b)
+	} else {
+		saveErr = s.store.Save(b)
+	}
+	if err := saveErr; err != nil {
+		if errors.Is(err, ErrPublicationIncomplete) {
+			s.pending = &b
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrAlreadyBound) {
 			status = http.StatusConflict
@@ -101,6 +115,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	s.pending = nil
 	s.bound = true
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(Receipt{BindingID: Identity(b.SecretKey), EncodingCapacity: encodinglimit.Snapshot()})

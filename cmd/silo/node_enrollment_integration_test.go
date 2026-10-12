@@ -142,6 +142,9 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 		}
 		return stop
 	}
+	if err := settings.Set(ctx, "redis.url", ""); err != nil {
+		t.Fatal(err)
+	}
 	stop := start(token)
 	store := nodepool.NewAdminConfigurationStore(pool)
 	h := &handlers.NodeHandler{}
@@ -150,7 +153,14 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 	h.SetEnrollmentClient(client)
 	requested := 99
 	input := nodepool.CreateNodeInput{Name: "Sold node", Type: "transcode", URL: url, MaxJobs: &requested}
-	node, err := h.EnrollAdminNode(ctx, input, nodeenrollment.Input{Token: token})
+	if _, err := h.EnrollAdminNode(ctx, input, nodeenrollment.Input{Token: token}); !errors.Is(err, nodeenrollment.ErrRejected) {
+		stop()
+		t.Fatalf("missing Redis consumed enrollment: %v", err)
+	}
+	if saved, err := (nodeenrollment.Store{Path: bindingPath}).Load(); err != nil || saved != nil {
+		t.Fatal("missing Redis persisted an unusable binding", err)
+	}
+	node, err := h.EnrollAdminNode(ctx, input, nodeenrollment.Input{Token: token, RedisURL: redisURL})
 	if err != nil {
 		stop()
 		t.Fatal("automatic handoff failed", err)
@@ -160,7 +170,7 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 		t.Fatal("provider ceiling not stored", node.MaxJobs)
 	}
 	saved, err := (nodeenrollment.Store{Path: bindingPath}).Load()
-	if err != nil || saved == nil || saved.DatabaseURL != dsn || saved.SecretKey != master {
+	if err != nil || saved == nil || saved.DatabaseURL != dsn || saved.SecretKey != master || saved.RedisURL != redisURL {
 		t.Fatal("customer binding not persisted")
 	}
 	stop()

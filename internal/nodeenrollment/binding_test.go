@@ -158,3 +158,55 @@ func TestEnrollmentCannotSetProviderCapacity(t *testing.T) {
 		t.Fatalf("customer capacity override accepted: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestEnrollmentRecoversPostPublicationFailureWithoutReplacingWinner(t *testing.T) {
+	store := bindingStore(t)
+	syncs := 0
+	store.syncDirectory = func(path string) error {
+		syncs++
+		if syncs == 1 {
+			return errors.New("synthetic directory sync failure")
+		}
+		return syncBindingDirectory(path)
+	}
+	s, err := NewServer(testToken, store, func(context.Context, Binding) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := testBinding()
+	if got := requestBinding(t, s, testToken, b); got.Code != http.StatusInternalServerError {
+		t.Fatal("post-publication failure not reproduced", got.Code)
+	}
+	saved, err := store.Load()
+	if err != nil || saved == nil || *saved != b {
+		t.Fatal("published winner was removed", err)
+	}
+	select {
+	case <-s.Done():
+		t.Fatal("started before durability confirmed")
+	default:
+	}
+	competitor := b
+	competitor.SecretKey = strings.Repeat("different", 6)
+	if got := requestBinding(t, s, testToken, competitor); got.Code != http.StatusConflict {
+		t.Fatal("pending winner replaced", got.Code)
+	}
+	if got := requestBinding(t, s, testToken, b); got.Code != http.StatusOK {
+		t.Fatal("matching publication retry failed", got.Code, got.Body.String())
+	}
+	if syncs != 2 {
+		t.Fatal("durability was not retried", syncs)
+	}
+	select {
+	case got := <-s.Done():
+		if got != b {
+			t.Fatal("winner changed")
+		}
+	default:
+		t.Fatal("runtime did not resume after confirmation")
+	}
+	saved, err = store.Load()
+	if err != nil || saved == nil || *saved != b {
+		t.Fatal("retry overwrote winner", err)
+	}
+}

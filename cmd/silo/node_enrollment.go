@@ -41,6 +41,9 @@ func completeNodeBootstrap(ctx context.Context, bc *config.BootstrapConfig) erro
 		return err
 	}
 	if binding != nil {
+		if err := store.ConfirmDurability(*binding); err != nil {
+			return err
+		}
 		return applyCustomerBinding(bc, *binding)
 	}
 	if bc.DatabaseURL != "" {
@@ -109,11 +112,12 @@ func validateCustomerBinding(ctx context.Context, b nodeenrollment.Binding) erro
 	if err != nil {
 		return errors.New("invalid customer Redis configuration")
 	}
-	if client != nil {
-		defer func() { _ = cache.CloseRedisClient(client) }()
-		if client.Ping(ctx).Err() != nil {
-			return errors.New("customer Redis unavailable")
-		}
+	if client == nil {
+		return errors.New("customer Redis is required for transcode mode")
+	}
+	defer func() { _ = cache.CloseRedisClient(client) }()
+	if client.Ping(ctx).Err() != nil {
+		return errors.New("customer Redis unavailable")
 	}
 	return nil
 }

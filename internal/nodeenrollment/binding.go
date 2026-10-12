@@ -25,6 +25,7 @@ const (
 )
 
 var ErrAlreadyBound = errors.New("node already belongs to a customer")
+var ErrPublicationIncomplete = errors.New("binding was saved but durability confirmation failed; retry enrollment")
 
 // Binding contains only customer bootstrap configuration; operator capacity is
 // deliberately absent. This value must never be logged or returned to clients.
@@ -76,7 +77,11 @@ func decodeBinding(data []byte) (Binding, error) {
 
 // Store publishes a complete immutable binding using an atomic create-if-absent
 // link. Even two processes sharing its path cannot replace the first winner.
-type Store struct{ Path string }
+type Store struct {
+	Path string
+	// Injectable only inside this package for post-publication failure coverage.
+	syncDirectory func(string) error
+}
 
 func (s Store) Load() (*Binding, error) {
 	info, err := os.Lstat(s.Path)
@@ -133,6 +138,12 @@ func (s Store) Save(b Binding) error {
 	} else if err != nil {
 		return errors.New("cannot publish node binding")
 	}
+	if err := s.sync(parent); err != nil {
+		return ErrPublicationIncomplete
+	}
+	return nil
+}
+func syncBindingDirectory(parent string) error {
 	dir, err := os.Open(parent)
 	if err != nil {
 		return errors.New("cannot sync binding directory")
@@ -143,3 +154,28 @@ func (s Store) Save(b Binding) error {
 	}
 	return nil
 }
+func (s Store) sync(parent string) error {
+	if s.syncDirectory != nil {
+		return s.syncDirectory(parent)
+	}
+	return syncBindingDirectory(parent)
+}
+
+// confirm retries durability for an already-published winner without modifying
+// its file. Only the pending binding may resume an interrupted publication.
+func (s Store) confirm(b Binding) error {
+	saved, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if saved == nil || *saved != b {
+		return ErrAlreadyBound
+	}
+	if err := s.sync(filepath.Dir(s.Path)); err != nil {
+		return ErrPublicationIncomplete
+	}
+	return nil
+}
+
+// ConfirmDurability is used before restarting a persisted customer binding.
+func (s Store) ConfirmDurability(b Binding) error { return s.confirm(b) }

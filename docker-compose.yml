@@ -117,10 +117,6 @@ services:
   #   stop_grace_period: 2m
   #   environment:
   #     MODE: proxy
-  #     # For automatic first-connect binding, omit the three customer variables
-  #     # below and set these instead. Mount a persistent private binding directory.
-  #     # SILO_NODE_ENROLLMENT_TOKEN: ${SILO_NODE_ENROLLMENT_TOKEN}
-  #     # SILO_NODE_BINDING_FILE: /var/lib/silo/node-binding/binding.json
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
   #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
