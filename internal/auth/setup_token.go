@@ -44,14 +44,16 @@ func SetupTokenRequired(ctx context.Context) bool {
 var setupCrossOrigin = http.NewCrossOriginProtection()
 
 // SetupAccessFor decides how the setup request r qualifies. ctx carries the
-// resolved client address. A browser request (one with Origin or
+// resolved client address; when forwarding headers came from a peer the
+// resolver does not trust, that address is the proxy's and the request is not
+// local. A browser request (one with Origin or
 // Sec-Fetch-Site) counts as local only when another site did not start it
 // and the browser addressed a host only the local network can reach (see
 // localSetupHost), so a page can use a browser on the local network neither
 // across sites nor by rebinding its own domain to the server's address. A
 // missing request never counts as local.
 func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAccess {
-	if r == nil || SetupTokenRequired(ctx) {
+	if r == nil || SetupTokenRequired(ctx) || forwardedByUntrustedPeer(ctx, r) {
 		return SetupAccess{Token: token}
 	}
 	if r.Header.Get("Origin") == "" && r.Header.Get("Sec-Fetch-Site") == "" {
@@ -69,6 +71,26 @@ func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAcc
 		checked.Host = host
 	}
 	return SetupAccess{Local: setupCrossOrigin.Check(checked) == nil, Token: token}
+}
+
+// forwardedByUntrustedPeer reports whether r carries forwarding headers that
+// the client-IP resolver ignored because the peer that sent them is not a
+// trusted proxy, for example a reverse proxy on an IPv6 ULA address. The
+// resolved address is then the proxy's own, which says nothing about where
+// the client is.
+func forwardedByUntrustedPeer(ctx context.Context, r *http.Request) bool {
+	if r.Header.Get("X-Forwarded-For") == "" && r.Header.Get("X-Real-IP") == "" && r.Header.Get("Forwarded") == "" {
+		return false
+	}
+	peer := clientip.PeerFromContext(ctx)
+	if peer == "" {
+		peer = r.RemoteAddr
+	}
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		peer = host
+	}
+	ip := net.ParseIP(peer)
+	return ip != nil && ip.String() == clientip.FromContext(ctx)
 }
 
 // localSetupDomains are special-use or conventional local suffixes that no

@@ -75,7 +75,9 @@ creates it as the administrator. Only these callers may do it:
 - A client on the server's local network: the address `internal/clientip` resolves is
   private, loopback, or link-local, and the request did not arrive through a network-access
   provider. This is the `internal/streamlocation` classification playback uses, through
-  `auth.SetupTokenRequired`. A browser request that another site started (`Sec-Fetch-Site`,
+  `auth.SetupTokenRequired`. When a request carries forwarding headers (`X-Forwarded-For`,
+  `X-Real-IP`, `Forwarded`) that the resolver ignored because the peer is not a trusted
+  proxy, the resolved address is the proxy's own, so the request is not local. A browser request that another site started (`Sec-Fetch-Site`,
   or an `Origin` that does not match the host the client addressed, which a trusted proxy
   may send as `X-Forwarded-Host`; checked with `http.CrossOriginProtection`)
   never counts as local, so a web page cannot use a browser on the local network to set the

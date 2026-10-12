@@ -123,6 +123,47 @@ func TestSetupAccessForBehindHostRewritingProxy(t *testing.T) {
 	}
 }
 
+// Forwarding headers from a peer the resolver does not trust leave the
+// resolved address at the proxy's own, so the request is not local; the
+// default trusted list covers the IPv4 private ranges but not IPv6 ULA.
+func TestSetupAccessForUntrustedProxy(t *testing.T) {
+	defaults, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, onlyOne, err := net.ParseCIDR("10.0.0.5/32")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		trusted []*net.IPNet
+		peer    string
+		xff     string
+		local   bool
+	}{
+		{"untrusted ULA proxy forwarding an internet client", defaults, "[fd00::2]:443", "203.0.113.9", false},
+		{"ULA client without forwarding headers", defaults, "[fd00::20]:51000", "", true},
+		{"trusted proxy forwarding a LAN client", defaults, "10.0.0.1:443", "192.168.1.20", true},
+		{"trusted proxy forwarding an internet client", defaults, "10.0.0.1:443", "203.0.113.9", false},
+		{"private proxy outside a narrowed trusted list", []*net.IPNet{onlyOne}, "10.0.0.6:443", "203.0.113.9", false},
+	} {
+		var got SetupAccess
+		h := clientip.Middleware(clientip.NewResolver(tc.trusted))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = SetupAccessFor(r.Context(), r, "")
+		}))
+		r := httptest.NewRequest(http.MethodPost, "http://192.168.1.10:8090/api/v2/auth/setup", nil)
+		r.RemoteAddr = tc.peer
+		if tc.xff != "" {
+			r.Header.Set("X-Forwarded-For", tc.xff)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got.Local != tc.local {
+			t.Errorf("%s: local = %v, want %v", tc.name, got.Local, tc.local)
+		}
+	}
+}
+
 func setupTokenCount(t *testing.T, r *UserRepository) int {
 	t.Helper()
 	var n int
