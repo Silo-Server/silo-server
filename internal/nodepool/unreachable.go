@@ -2,6 +2,7 @@ package nodepool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -19,9 +20,6 @@ import (
 const (
 	unreachableRecheckAttempts = 3
 	unreachableRecheckInterval = 5 * time.Second
-	// unreachableRecheckWindow is how long this process's own recheck stays
-	// the freshest evidence about a node it marked.
-	unreachableRecheckWindow = unreachableRecheckAttempts * unreachableRecheckInterval
 )
 
 // dialOp is the net.OpError operation for opening a connection.
@@ -121,10 +119,18 @@ func (p *TranscodePool) MarkUnreachable(url string) bool {
 	return false
 }
 
+// unreachableAnnouncement is the payload of an unreachable-node event. Origin
+// identifies the announcing process, so it can ignore the event bus's echo of
+// its own announcement and still act on a later report from a peer.
+type unreachableAnnouncement struct {
+	Origin string `json:"origin"`
+	URL    string `json:"url"`
+}
+
 // SetUnreachableBroadcast wires how a node this process could not connect to is
-// announced to the other API servers, whose own reports arrive through
-// ApplyPeerUnreachable.
-func (hc *HealthChecker) SetUnreachableBroadcast(fn func(nodeURL string)) {
+// announced to the other API servers. fn receives the event payload, which
+// ApplyUnreachableAnnouncement decodes on the receiving side.
+func (hc *HealthChecker) SetUnreachableBroadcast(fn func(payload string)) {
 	if hc == nil {
 		return
 	}
@@ -140,24 +146,20 @@ func (hc *HealthChecker) ReportUnreachable(nodeURL string) bool {
 	return hc.markUnreachable(nodeURL, true)
 }
 
-// ApplyPeerUnreachable marks a transcode node another API server could not
-// connect to. This process rechecks it on its own, so a node that answers here
-// is back in selection within one health request.
-//
-// The event bus also delivers this server's own announcements back to it. A
-// report about a node this server marked itself within the recheck window is
-// ignored: its own recheck is the fresher evidence, and taking the echo would
-// pull a node the recheck just restored back out of selection.
-func (hc *HealthChecker) ApplyPeerUnreachable(nodeURL string) {
-	if hc == nil || nodeURL == "" {
+// ApplyUnreachableAnnouncement marks a transcode node another API server could
+// not connect to. This process rechecks it on its own, so a node that answers
+// here is back in selection within one health request. The event bus also
+// delivers this process's own announcements back to it; those are ignored, as
+// the process already marked the node and its recheck is the newer evidence.
+func (hc *HealthChecker) ApplyUnreachableAnnouncement(payload string) {
+	if hc == nil {
 		return
 	}
-	if stored, ok := hc.localMarks.Load(normalizeNodeURL(nodeURL)); ok {
-		if markedAt, ok := stored.(time.Time); ok && time.Since(markedAt) < unreachableRecheckWindow {
-			return
-		}
+	var announcement unreachableAnnouncement
+	if err := json.Unmarshal([]byte(payload), &announcement); err != nil || announcement.URL == "" || announcement.Origin == hc.origin {
+		return
 	}
-	hc.markUnreachable(nodeURL, false)
+	hc.markUnreachable(announcement.URL, false)
 }
 
 func (hc *HealthChecker) markUnreachable(nodeURL string, local bool) bool {
@@ -167,9 +169,6 @@ func (hc *HealthChecker) markUnreachable(nodeURL string, local bool) bool {
 	nodeURL = normalizeNodeURL(nodeURL)
 	if !hc.transcodePool.MarkUnreachable(nodeURL) {
 		return false
-	}
-	if local {
-		hc.localMarks.Store(nodeURL, time.Now())
 	}
 	hc.mu.RLock()
 	ctx, broadcast := hc.ctx, hc.broadcastUnreachable
@@ -185,7 +184,9 @@ func (hc *HealthChecker) markUnreachable(nodeURL string, local bool) bool {
 		"url", nodeURL, "source", source)
 	hc.recheckUnreachable(ctx, nodeURL)
 	if local && broadcast != nil {
-		broadcast(nodeURL)
+		if payload, err := json.Marshal(unreachableAnnouncement{Origin: hc.origin, URL: nodeURL}); err == nil {
+			broadcast(string(payload))
+		}
 	}
 	return true
 }
@@ -228,6 +229,15 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 			}
 			release()
 			hc.transcodePool.ApplyHealth(n.ID, n.URL, true, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
+			// Persisted like a sweep result: the node configuration
+			// reconciliation rebuilds the pool from the stored rows every few
+			// seconds, and a sweep that saw the node down would otherwise
+			// take it back out until the next sweep.
+			if hc.repo != nil {
+				if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, true, activeJobs, egressKbps, lastStats, networkAccess); err != nil && !errors.Is(err, ErrNodeMoved) {
+					slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
+				}
+			}
 			slog.InfoContext(ctx, "stream node answered a recheck after a connection failure", "component", "nodepool",
 				"id", n.ID, "name", n.Name, "url", n.URL)
 			// A node back from a crash may come back with different hardware,

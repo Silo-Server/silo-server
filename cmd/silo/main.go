@@ -1423,13 +1423,13 @@ func main() {
 
 		healthChecker := nodepool.NewHealthChecker(proxyPool, transcodePool, nodeRepo)
 		planner.SetUnreachableHandler(healthChecker.ReportUnreachable)
-		healthChecker.SetUnreachableBroadcast(func(nodeURL string) {
+		healthChecker.SetUnreachableBroadcast(func(payload string) {
 			// Off the request path: the caller is a playback request that has
 			// already lost time to the dead node.
 			go func() {
 				publishCtx, cancel := context.WithTimeout(appCtx, 5*time.Second)
 				defer cancel()
-				if err := eventBus.Publish(publishCtx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodeUnreachable, Payload: nodeURL}); err != nil {
+				if err := eventBus.Publish(publishCtx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodeUnreachable, Payload: payload}); err != nil {
 					slog.Warn("publish unreachable stream node", "error", err)
 				}
 			}()
@@ -1470,7 +1470,7 @@ func main() {
 		// Subscribe to node pool change events for multi-instance reload.
 		_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 			if event.Type == cache.EventNodeUnreachable {
-				healthChecker.ApplyPeerUnreachable(event.Payload)
+				healthChecker.ApplyUnreachableAnnouncement(event.Payload)
 				return
 			}
 			if event.Type == cache.EventNodePoolChanged {

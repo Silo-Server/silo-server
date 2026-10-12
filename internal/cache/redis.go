@@ -69,9 +69,10 @@ const (
 	EventPluginsChanged = "plugins_changed"
 )
 
-// EventNodeUnreachable is published on ChannelAdmin with the URL of a transcode
-// node an API server could not connect to, so the other API servers stop
-// selecting it before their next health sweep.
+// EventNodeUnreachable is published on ChannelAdmin when an API server could
+// not connect to a transcode node, so the other API servers stop selecting it
+// before their next health sweep. The payload is JSON naming the node URL and
+// the announcing process.
 const EventNodeUnreachable = "node_unreachable"
 
 // EventAuthProvidersChanged is published on ChannelAdmin after an auth

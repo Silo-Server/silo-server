@@ -56,8 +56,10 @@ health result for the node, or the node leaving the pool, clears its entry.
 A mark must not keep a healthy node out for a whole sweep interval. The health
 checker rechecks a marked node right away, then up to twice more five seconds
 apart. The first successful recheck or sweep puts it back, so a node that
-answers loses milliseconds of selection to one transient error. A node that
-fails every recheck stays out until a sweep finds it answering.
+answers loses milliseconds of selection to one transient error. A successful
+recheck is stored like a sweep result, so the reconciliation cannot restore an
+older failed sweep over it. A node that fails every recheck stays out until a
+sweep finds it answering.
 
 After a failed start, or a Jellyfin-compatible start whose first manifest fetch
 fails, the start paths send the node a stop request in case it started the job.
@@ -76,9 +78,9 @@ and rechecks it from there. It does not publish the event again. A node that one
 API server cannot reach but another can is marked on the second only until its
 own recheck answers.
 
-The bus delivers an API server's own announcement back to it. An API server
-ignores a report about a node it marked itself during the recheck window
-(15 seconds), because its own recheck is newer evidence.
+The event payload names the announcing process. The bus delivers an API server's
+own announcement back to it, and the server ignores it: it already marked the node,
+and its recheck is the newer evidence. A peer's report is always applied.
 
 ## Known gaps
 

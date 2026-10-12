@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/google/uuid"
 )
 
 // healthResponse is the JSON response from a node's /health endpoint.
@@ -256,7 +257,9 @@ type HealthChecker struct {
 	ctx context.Context
 	// broadcastUnreachable tells other API servers about a transcode node this
 	// one could not connect to. Guarded by mu.
-	broadcastUnreachable func(nodeURL string)
+	broadcastUnreachable func(payload string)
+	// origin identifies this process in its unreachable-node announcements.
+	origin string
 	// recheckInterval separates the rechecks of a node marked unreachable;
 	// tests shorten it.
 	recheckInterval time.Duration
@@ -265,10 +268,6 @@ type HealthChecker struct {
 	// one node share a single recheck.
 	rechecks        sync.WaitGroup
 	recheckInFlight sync.Map
-	// localMarks holds, by node URL, when this process last marked a node
-	// unreachable on its own evidence; ApplyPeerUnreachable reads it to drop
-	// the event bus's echo of this process's own announcement.
-	localMarks sync.Map
 }
 
 // NewHealthChecker creates a health checker for the given pools.
@@ -279,6 +278,7 @@ func NewHealthChecker(proxyPool *ProxyPool, transcodePool *TranscodePool, repo *
 		repo:            repo,
 		interval:        30 * time.Second,
 		recheckInterval: unreachableRecheckInterval,
+		origin:          uuid.NewString(),
 	}
 }
 

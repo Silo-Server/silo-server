@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -120,6 +121,16 @@ type unreachableFixture struct {
 	planner    *Planner
 	pool       *TranscodePool
 	broadcasts atomic.Int32
+	announced  atomic.Value // last broadcast payload
+}
+
+func peerAnnouncement(t *testing.T, nodeURL string) string {
+	t.Helper()
+	payload, err := json.Marshal(unreachableAnnouncement{Origin: "another-api-server", URL: nodeURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(payload)
 }
 
 func newUnreachableFixture(t *testing.T, nodeURL string) *unreachableFixture {
@@ -129,7 +140,10 @@ func newUnreachableFixture(t *testing.T, nodeURL string) *unreachableFixture {
 	f := &unreachableFixture{pool: pool, planner: NewPlanner(NewProxyPool(), pool)}
 	f.checker = NewHealthChecker(NewProxyPool(), pool, nil)
 	f.checker.recheckInterval = 10 * time.Millisecond
-	f.checker.SetUnreachableBroadcast(func(string) { f.broadcasts.Add(1) })
+	f.checker.SetUnreachableBroadcast(func(payload string) {
+		f.broadcasts.Add(1)
+		f.announced.Store(payload)
+	})
 	f.planner.SetUnreachableHandler(f.checker.ReportUnreachable)
 	return f
 }
@@ -186,7 +200,7 @@ func TestPeerUnreachableReportIsRecheckedAndNotRebroadcast(t *testing.T) {
 	nodeURL, _ := flakyHealthNode(t, 0)
 	f := newUnreachableFixture(t, nodeURL)
 
-	f.checker.ApplyPeerUnreachable(nodeURL + "/")
+	f.checker.ApplyUnreachableAnnouncement(peerAnnouncement(t, nodeURL+"/"))
 	f.checker.rechecks.Wait()
 
 	if !f.planner.TranscodeNodeHealthy(nodeURL) {
@@ -241,7 +255,8 @@ func TestOwnAnnouncementEchoDoesNotUndoARecheck(t *testing.T) {
 
 	f.planner.MarkTranscodeNodeUnreachable(nodeURL)
 	f.checker.rechecks.Wait()
-	f.checker.ApplyPeerUnreachable(nodeURL)
+	own, _ := f.announced.Load().(string)
+	f.checker.ApplyUnreachableAnnouncement(own)
 	f.checker.rechecks.Wait()
 
 	if !f.planner.TranscodeNodeHealthy(nodeURL) {
@@ -249,6 +264,13 @@ func TestOwnAnnouncementEchoDoesNotUndoARecheck(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("health requests = %d, want only the first recheck", got)
+	}
+
+	// A peer's report after that recovery is new evidence, not the echo.
+	f.checker.ApplyUnreachableAnnouncement(peerAnnouncement(t, nodeURL))
+	f.checker.rechecks.Wait()
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("health requests = %d, want a recheck for the peer's report", got)
 	}
 }
 
@@ -314,5 +336,37 @@ func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
 	pool.SetNodes(row())
 	if !planner.TranscodeNodeHealthy("http://node:8080") {
 		t.Fatal("the mark outlived the node leaving the pool")
+	}
+}
+
+// A recheck that finds the node answering is persisted, like a sweep result:
+// the node configuration reconciliation rebuilds the pool from the stored row,
+// and a sweep that saw the node down would otherwise take it back out.
+func TestRecheckPersistsARecoveredNode(t *testing.T) {
+	db := newNodeTestPool(t)
+	ctx := context.Background()
+	repo := NewRepository(db)
+	nodeURL, _ := flakyHealthNode(t, 0)
+	node, err := repo.Create(ctx, CreateNodeInput{Name: fmt.Sprintf("recheck-test-%d", time.Now().UnixNano()), Type: NodeTypeTranscode, URL: nodeURL})
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Delete(ctx, node.ID) })
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, false, 0, 0, nil, nil); err != nil {
+		t.Fatalf("record failed sweep: %v", err)
+	}
+
+	pool := NewTranscodePool()
+	pool.SetNodes([]*Node{{ID: node.ID, URL: node.URL, Type: NodeTypeTranscode, Enabled: true, Healthy: true}})
+	checker := NewHealthChecker(NewProxyPool(), pool, repo)
+	checker.ReportUnreachable(nodeURL)
+	checker.rechecks.Wait()
+
+	stored, err := repo.GetByID(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("reload node: %v", err)
+	}
+	if !stored.Healthy {
+		t.Fatal("the recheck's healthy result was not persisted")
 	}
 }
