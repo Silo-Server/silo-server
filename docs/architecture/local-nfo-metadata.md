@@ -517,10 +517,12 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   of the sidecar files the local provider applied. The provider reports those
   files itself (`LocalSidecarProvider`, `internal/metadata/nfo/sidecars.go`)
   with the same lookups as `GetMetadata`/`GetImages`/`GetSeasons`/`GetEpisodes`,
-  so lookup rules live in one place. Item rows also store a digest of every
-  sidecar-type file in the item's folders (its files' directories and observed
-  root) and the provider IDs the NFO declared. Rows follow a content ID rename
-  and go with their library.
+  so lookup rules live in one place. A season's files include the show's
+  `tvshow.nfo`, which can name the season and its poster, and an item's
+  include every image slot and backdrop `GetImages` fills. Item rows also
+  store a digest of every sidecar-type file in the item's folders (its files'
+  directories and observed root) and the provider IDs the NFO declared. Rows
+  follow a content ID rename and go with their library.
 - **Equality, not timestamps.** A change is any difference in the applied
   set, a size, or a modification time: an edit, a new higher-precedence file,
   or a removed one. Silo never compares a file's time with when it last saved

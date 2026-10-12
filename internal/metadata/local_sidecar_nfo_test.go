@@ -923,6 +923,51 @@ func TestLocalSidecarCheck_SeasonScanLeavesOtherSeasonsForTheFullScan(t *testing
 	}
 }
 
+func TestLocalSidecarCheck_NewBannerAndDiscArtApply(t *testing.T) {
+	f := newMovieFixture(t, "100")
+	f.scan(t)
+
+	writeNewerFile(t, filepath.Join(f.dir, "banner.jpg"), "banner-v1")
+	writeNewerFile(t, filepath.Join(f.dir, "disc.png"), "disc-v1")
+	if n := f.scan(t); n != 1 {
+		t.Fatalf("check after adding banner and disc art re-applied %d items, want 1", n)
+	}
+	item := f.item(t)
+	if !strings.HasPrefix(item.BannerSourcePath, "file://"+filepath.Join(f.dir, "banner.jpg")+"?v=") {
+		t.Fatalf("banner source = %q, want the new local banner", item.BannerSourcePath)
+	}
+	if !strings.HasPrefix(item.DiscSourcePath, "file://"+filepath.Join(f.dir, "disc.png")+"?v=") {
+		t.Fatalf("disc source = %q, want the new local disc art", item.DiscSourcePath)
+	}
+	if n := f.scan(t); n != 0 {
+		t.Fatalf("rescan re-applied %d items, want 0", n)
+	}
+}
+
+func TestLocalSidecarCheck_ShowNFOSeasonNameApplies(t *testing.T) {
+	x, seriesID, root, _ := newSeriesFixture(t)
+	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
+	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2) }
+	// Season 2 has no season.nfo, so the show's <namedseason> names it.
+	if err := os.Remove(filepath.Join(season2, "season.nfo")); err != nil {
+		t.Fatalf("remove season.nfo: %v", err)
+	}
+	fullScan()
+
+	writeNewerFile(t, filepath.Join(root, "tvshow.nfo"),
+		`<tvshow><title>P90X</title><plot>90-day home fitness program.</plot><namedseason number="2">Course B: Doubles</namedseason></tvshow>`)
+	if n := fullScan(); n != 1 {
+		t.Fatalf("tvshow.nfo edit re-applied %d items, want the series", n)
+	}
+	seasons := x.Seasons(seriesID)
+	if got := seasons[len(seasons)-1]; got.SeasonNumber != 2 || got.Title != "Course B: Doubles" {
+		t.Fatalf("season %d title = %q, want the show NFO's name for season 2", got.SeasonNumber, got.Title)
+	}
+	if got := seasons[0].Title; got != "Course A: Classic" {
+		t.Fatalf("season 1 title = %q, want its season.nfo's kept", got)
+	}
+}
+
 func TestLocalSidecarCheck_ChildEditAppliedByAnotherCheckIsNotAppliedAgain(t *testing.T) {
 	x, seriesID, root, _ := newSeriesFixture(t)
 	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
