@@ -272,6 +272,22 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		if job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server"); err != nil || job != nil {
 			t.Fatalf("discovering claim = %+v, %v; want none while the failure backs off", job, err)
 		}
+
+		// A deferral for missing storage that followed the failure does not
+		// keep the discovering server out.
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET last_error = $2
+			WHERE target_type = 'item' AND target_content_id = $1 AND image_type = 'poster'
+		`, seriesID, localImageStorageUnavailable+": /media/Show"); err != nil {
+			t.Fatalf("defer job: %v", err)
+		}
+		job, err := repo.claimQueuedLocalJob(ctx, inputs[0], "discovering-server")
+		if err != nil || job == nil {
+			t.Fatalf("discovering claim = %+v, %v; want the storage-deferred job", job, err)
+		}
+		if err := repo.RequeueClaimed(ctx, []int64{job.ID}, "discovering-server"); err != nil {
+			t.Fatalf("requeue: %v", err)
+		}
 		if _, err := pool.Exec(ctx, `
 			UPDATE metadata_image_cache_jobs SET attempt_count = 0, next_attempt_at = NOW(), last_error = ''
 			WHERE target_type = 'item' AND target_content_id = $1 AND image_type = 'poster'
