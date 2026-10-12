@@ -100,6 +100,9 @@ func (p *Planner) SetUnreachableHandler(fn func(nodeURL string) bool) {
 func (p *TranscodePool) MarkUnreachable(url string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Every entry is checked: two rows can name one endpoint, with and
+	// without a trailing slash.
+	marked := false
 	for i, n := range p.nodes {
 		if n == nil || !sameNodeURL(n.URL, url) {
 			continue
@@ -109,14 +112,14 @@ func (p *TranscodePool) MarkUnreachable(url string) bool {
 		}
 		p.unreachable[n.URL] = struct{}{}
 		if !n.Healthy {
-			return false
+			continue
 		}
 		clone := *n
 		clone.Healthy = false
 		p.nodes[i] = &clone
-		return true
+		marked = true
 	}
-	return false
+	return marked
 }
 
 // unreachableAnnouncement is the payload of an unreachable-node event. Origin
@@ -221,6 +224,13 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 			}
 			n := hc.transcodePool.FindByURL(nodeURL)
 			if n == nil || n.Healthy {
+				// A mark that landed after that read found the slot still
+				// held and started nothing, so look once more after letting
+				// the slot go.
+				release()
+				if latest := hc.transcodePool.FindByURL(nodeURL); latest != nil && !latest.Healthy {
+					hc.recheckUnreachable(ctx, nodeURL)
+				}
 				return
 			}
 			healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess := CheckNode(ctx, n)

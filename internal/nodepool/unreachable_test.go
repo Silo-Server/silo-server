@@ -370,3 +370,35 @@ func TestRecheckPersistsARecoveredNode(t *testing.T) {
 		t.Fatal("the recheck's healthy result was not persisted")
 	}
 }
+
+func TestMarkUnreachableCoversEveryEntryForTheEndpoint(t *testing.T) {
+	pool := NewTranscodePool()
+	pool.SetNodes([]*Node{
+		{ID: 1, URL: "http://worker:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
+		{ID: 2, URL: "http://worker:8080/", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
+	})
+	if !pool.MarkUnreachable("http://worker:8080") {
+		t.Fatal("mark did not flip a healthy node")
+	}
+	for _, n := range pool.Nodes() {
+		if n.Healthy {
+			t.Fatalf("node %d at the same endpoint is still healthy", n.ID)
+		}
+	}
+}
+
+func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
+	row := func() []*Node {
+		return []*Node{{ID: 4, URL: "http://worker:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true}}
+	}
+	pool := NewTranscodePool()
+	pool.SetNodes(row())
+	pool.MarkUnreachable("http://worker:8080")
+
+	// A late result for a node that used to have this URL under another id.
+	pool.ApplyHealth(3, "http://worker:8080", true, 0, 0, "", nil, nil, time.Now())
+	pool.SetNodes(row())
+	if pool.FindByURL("http://worker:8080").Healthy {
+		t.Fatal("a result about another node cleared the mark")
+	}
+}

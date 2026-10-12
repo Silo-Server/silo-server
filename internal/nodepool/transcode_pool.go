@@ -108,8 +108,16 @@ func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, act
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
-	if healthy {
-		delete(p.unreachable, normalizeNodeURL(checkedURL))
+	if !healthy {
+		return
+	}
+	// Cleared only by a result about the node now at that URL: a late result
+	// for a removed or repointed node says nothing about its replacement.
+	for _, n := range p.nodes {
+		if n != nil && n.ID == id && sameNodeURL(n.URL, checkedURL) {
+			delete(p.unreachable, normalizeNodeURL(checkedURL))
+			return
+		}
 	}
 }
 
