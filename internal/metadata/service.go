@@ -1139,9 +1139,8 @@ func buildSeriesChildLocalContext(seriesRootPaths []string, filePaths []string, 
 
 // seriesChildLocalContextForContent builds the season/episode sidecar context
 // from a series' persisted media files (refresh paths, where no scan hints
-// are available).
-func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context, contentID string, folderID int) (seriesChildLocalContext, error) {
-	localCtx := s.localProviderContextForContent(ctx, contentID, folderID)
+// are available), given the series' local provider context.
+func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context, contentID string, folderID int, localCtx localProviderContext) (seriesChildLocalContext, error) {
 	roots, err := s.configuredNamingRootsForContent(ctx, contentID, folderID)
 	if err != nil {
 		return seriesChildLocalContext{}, err
@@ -4141,11 +4140,14 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			s.syncSeriesEpisodeStateOrDefer(syncCtx, seriesID)
 		}
 	}()
-	childCtx, err := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
+	// Listing the series' files once serves both the sidecar context and the
+	// local identity check.
+	localCtx := s.localProviderContextForContent(ctx, seriesID, folderID)
+	childCtx, err := s.seriesChildLocalContextForContent(ctx, seriesID, folderID, localCtx)
 	if err != nil {
 		return err
 	}
-	skipLocal, err := s.seriesChildSkipsLocal(ctx, series, folderID)
+	skipLocal, err := s.seriesChildSkipsLocal(ctx, series, folderID, localCtx)
 	if err != nil {
 		return err
 	}

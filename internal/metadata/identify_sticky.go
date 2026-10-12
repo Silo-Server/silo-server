@@ -156,7 +156,7 @@ func localIDsContradict(declared, stored map[string]string) bool {
 // must leave the local provider out: the series' own local files name a
 // different show than the series' stored identity, which such a refresh never
 // changes.
-func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *models.MediaItem, folderID int) (bool, error) {
+func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *models.MediaItem, folderID int, local localProviderContext) (bool, error) {
 	chain, err := s.resolveChainCached(ctx, folderID, "series")
 	if err != nil {
 		return false, fmt.Errorf("resolve series provider chain: %w", err)
@@ -164,7 +164,6 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 	if !slices.ContainsFunc(chain, func(p Provider) bool { _, ok := p.(IdentityHintProvider); return ok }) {
 		return false, nil
 	}
-	local := s.localProviderContextForContent(ctx, series.ContentID, folderID)
 	// Only the conflict check reads these hints; it drops dead IDs itself.
 	hints := collectLocalIdentityHints(ctx, chain, SearchQuery{
 		Title:                     series.Title,
