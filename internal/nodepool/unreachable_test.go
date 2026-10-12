@@ -402,3 +402,21 @@ func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
 		t.Fatal("a result about another node cleared the mark")
 	}
 }
+
+func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
+	nodeURL, _ := flakyHealthNode(t, 0)
+	pool := NewTranscodePool()
+	pool.SetNodes([]*Node{
+		{ID: 1, URL: nodeURL, Type: NodeTypeTranscode, Enabled: true, Healthy: true},
+		{ID: 2, URL: nodeURL + "/", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
+	})
+	checker := NewHealthChecker(NewProxyPool(), pool, nil)
+	checker.ReportUnreachable(nodeURL)
+	checker.rechecks.Wait()
+
+	for _, n := range pool.Nodes() {
+		if !n.Healthy {
+			t.Fatalf("node %d at the rechecked endpoint is still unhealthy", n.ID)
+		}
+	}
+}

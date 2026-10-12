@@ -8,6 +8,8 @@ import (
 	"net"
 	"syscall"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // A transcode node that dies between health sweeps keeps winning selection
@@ -238,24 +240,35 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 				continue
 			}
 			release()
-			hc.transcodePool.ApplyHealth(n.ID, n.URL, true, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
-			// Persisted like a sweep result: the node configuration
-			// reconciliation rebuilds the pool from the stored rows every few
-			// seconds, and a sweep that saw the node down would otherwise
-			// take it back out until the next sweep.
-			if hc.repo != nil {
-				if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, true, activeJobs, egressKbps, lastStats, networkAccess); err != nil && !errors.Is(err, ErrNodeMoved) {
-					slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
+			// Every entry for the endpoint was marked, so every one comes back;
+			// two rows can name it with and without a trailing slash.
+			for _, entry := range hc.transcodePool.Nodes() {
+				if entry != nil && sameNodeURL(entry.URL, nodeURL) {
+					hc.applyRecheckedHealth(ctx, entry, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess)
 				}
-			}
-			slog.InfoContext(ctx, "stream node answered a recheck after a connection failure", "component", "nodepool",
-				"id", n.ID, "name", n.Name, "url", n.URL)
-			// A node back from a crash may come back with different hardware,
-			// which the sweep would otherwise only notice on its next pass.
-			if capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
-				hc.startCapabilityRefresh(ctx, n, hc.transcodePool.ApplyCapabilities)
 			}
 			return
 		}
 	})
+}
+
+// applyRecheckedHealth publishes a successful recheck for one pool entry.
+func (hc *HealthChecker) applyRecheckedHealth(ctx context.Context, n *Node, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) {
+	hc.transcodePool.ApplyHealth(n.ID, n.URL, true, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
+	// Persisted like a sweep result: the node configuration reconciliation
+	// rebuilds the pool from the stored rows every few seconds, and a sweep
+	// that saw the node down would otherwise take it back out until the next
+	// sweep.
+	if hc.repo != nil {
+		if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, true, activeJobs, egressKbps, lastStats, networkAccess); err != nil && !errors.Is(err, ErrNodeMoved) {
+			slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
+		}
+	}
+	slog.InfoContext(ctx, "stream node answered a recheck after a connection failure", "component", "nodepool",
+		"id", n.ID, "name", n.Name, "url", n.URL)
+	// A node back from a crash may come back with different hardware, which
+	// the sweep would otherwise only notice on its next pass.
+	if capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
+		hc.startCapabilityRefresh(ctx, n, hc.transcodePool.ApplyCapabilities)
+	}
 }
