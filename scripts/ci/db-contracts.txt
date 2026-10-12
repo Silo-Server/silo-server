@@ -212,8 +212,10 @@
 
 # Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
 # and Down, slot write-back, backdrop row identity and GC queueing, and the
-# folder-delete reference check over the new columns.
+# folder-delete reference check over the new columns, and Jellyfin
+# recommendations listing every backdrop.
 ./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
 ./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
 ./internal/catalog TestItemBackdropRepositoryDB
 ./internal/catalog TestFilterUnreferencedImageDirsPostgres
+./internal/jellycompat TestRecommendationsListEveryBackdropDB
