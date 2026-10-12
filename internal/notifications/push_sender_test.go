@@ -416,6 +416,7 @@ func TestPushSenderRetriesAnAttemptWithTheTargetChoiceTheRelayRecorded(t *testin
 	}
 
 	// Without a target of its own the server has no other choice to offer.
+	// send keeps such an attempt retryable when only the identity lookup failed.
 	recorded["attempt-3"] = true
 	result := send("attempt-3", pushRelayTarget{})
 	if result.OK || result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != "idempotency_key_reuse" || len(requests) != 1 {
@@ -953,5 +954,33 @@ func TestPushSenderKeepsCredentialRegisteredWhileParking(t *testing.T) {
 	}
 	if store.values[SettingPushRelayAPIKey] != "admin.capability" || store.values[SettingPushRelayReregister] == "true" {
 		t.Fatalf("stored state = %#v, want the administrator's credential kept", store.values)
+	}
+}
+
+func TestPushSenderRetriesLaterWhenAFailedIdentityLookupMismatchesTheRecordedAttempt(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":{"code":"idempotency_key_reuse","message":"Idempotency-Key was reused with a different payload"}}`))
+	}))
+	defer server.Close()
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
+		SettingPushRelayURL:    server.URL,
+		SettingPushRelayAPIKey: "relay-key",
+	}))
+	sender.client = server.Client()
+	sender.developmentRelayURL = server.URL
+	device := &PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
+	send := func() pushSendResult {
+		return sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, device, strings.Repeat("a", 64))
+	}
+
+	sender.serverID = func(context.Context) (string, error) { return "", errors.New("settings store down") }
+	if result := send(); result.HTTPStatus != http.StatusServiceUnavailable || result.UpstreamReason != "server_identity_unavailable" || !retryableHTTPStatus(result.HTTPStatus) {
+		t.Fatalf("identity lookup failed: result = %+v, want a retryable server_identity_unavailable", result)
+	}
+
+	sender.serverID = nil
+	if result := send(); result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != "idempotency_key_reuse" {
+		t.Fatalf("no identity configured: result = %+v, want the relay's 422", result)
 	}
 }

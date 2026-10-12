@@ -286,19 +286,24 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	target := s.relayTarget(ctx, device)
+	target, identityKnown := s.relayTarget(ctx, device)
 	result = s.sendWithCapability(ctx, attempt, device, token, target, credential.RelayURL, credential.APIKey)
-	if result.HTTPStatus != http.StatusUnauthorized {
-		return result
-	}
-	recovered, err := s.recoverRelayCredential(ctx, credential, result.UpstreamReason)
-	if err != nil {
-		if result.UpstreamReason == relayCodeDeploymentDisabled {
-			return result
+	if result.HTTPStatus == http.StatusUnauthorized {
+		recovered, err := s.recoverRelayCredential(ctx, credential, result.UpstreamReason)
+		if err != nil {
+			if result.UpstreamReason == relayCodeDeploymentDisabled {
+				return result
+			}
+			return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 		}
-		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
+		result = s.sendWithCapability(ctx, attempt, device, token, target, recovered.RelayURL, recovered.APIKey)
 	}
-	return s.sendWithCapability(ctx, attempt, device, token, target, recovered.RelayURL, recovered.APIKey)
+	if !identityKnown && relayRecordedOtherTarget(result) {
+		// The relay may have recorded this attempt with the target the failed
+		// identity lookup could not name, so a later retry can still match it.
+		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: "server identity unavailable", UpstreamReason: "server_identity_unavailable"}
+	}
+	return result
 }
 
 // relayTarget names this deployment and the device's profile. A delivery's
@@ -307,22 +312,23 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 // character rule: the relay answers an empty or oversized one with 400
 // invalid_field, which would fail every push. Without a target the push still
 // goes out and the device falls back to its active server and profile, as it
-// does for an older server.
-func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) pushRelayTarget {
+// does for an older server. identityKnown is false only when the identity
+// lookup failed, so a later send may name a target this one could not.
+func (s *pushSender) relayTarget(ctx context.Context, device *PushDevice) (target pushRelayTarget, identityKnown bool) {
 	if s.serverID == nil {
-		return pushRelayTarget{}
+		return pushRelayTarget{}, true
 	}
 	serverID, err := s.serverID(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.WarnContext(ctx, "push sent without its server identity", "error", err)
 		}
-		return pushRelayTarget{}
+		return pushRelayTarget{}, false
 	}
 	if !relayTargetID(serverID) || !relayTargetID(device.ProfileID) {
-		return pushRelayTarget{}
+		return pushRelayTarget{}, true
 	}
-	return pushRelayTarget{ServerID: serverID, ProfileID: device.ProfileID}
+	return pushRelayTarget{ServerID: serverID, ProfileID: device.ProfileID}, true
 }
 
 // relayTargetID applies the relay's opaque-ID length rule in bytes, which is

@@ -176,7 +176,9 @@ hour. The fields are part of the relay's idempotency hash, and a retry can
 differ from the attempt's first send (an earlier server version, another
 replica, or the hour ending). The relay answers such a retry with 422
 `idempotency_key_reuse`, and the sender resends it once with the other choice,
-which the relay replays or resumes.
+which the relay replays or resumes. When the identity lookup failed, so the
+sender has no other choice to offer, that 422 is retried later instead of
+failing the push.
 Only an administrator's clear or a relay `deployment_disabled` response parks
 delivery behind the re-registration marker; either one stores an empty
 credential. An older server stored the rejected key along with the marker. That
