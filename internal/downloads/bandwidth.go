@@ -57,7 +57,9 @@ func NewBandwidthManager(serverBPS, userBPS int64) *BandwidthManager {
 
 // SetSharedBudget uses cluster-wide byte buckets in Redis. Rates come from the
 // authoritative settings, refreshed at most every bandwidthRatesTTL and seeded
-// from the manager's current limits. Without Redis the manager keeps its
+// from the manager's current limits. The client must honor context deadlines
+// (cache.NewDeadlineRedisClientForRole) so a stalled Sentinel cannot outlast
+// a budget call's timeout. Without Redis the manager keeps its
 // in-process limiters, which is exact for a single API process.
 func (bm *BandwidthManager) SetSharedBudget(client *redis.Client, rates func(context.Context) (int64, int64, error)) {
 	if client == nil {

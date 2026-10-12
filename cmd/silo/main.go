@@ -1373,6 +1373,18 @@ func main() {
 	} else if apiRedisClient != nil {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
+	// Download bandwidth accounting bounds each budget call with a deadline,
+	// which only a deadline-enabled client honors through Sentinel discovery.
+	var downloadBandwidthRedis *redis.Client
+	if apiRedisClient != nil {
+		var bandwidthRedisErr error
+		downloadBandwidthRedis, bandwidthRedisErr = cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if bandwidthRedisErr != nil {
+			slog.Warn("redis client init failed; download bandwidth limits stay per API process", "error", bandwidthRedisErr)
+		} else if downloadBandwidthRedis != nil {
+			defer func() { _ = cache.CloseRedisClient(downloadBandwidthRedis) }()
+		}
+	}
 
 	// One TMDB client serves every feature in this process, so they share its
 	// response caches and spend one budget of tmdb.RequestsPerSecond: with
@@ -1434,6 +1446,7 @@ func main() {
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
 		TMDB:                         tmdbClient,
+		DownloadBandwidthRedis:       downloadBandwidthRedis,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
