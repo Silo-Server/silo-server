@@ -32,9 +32,6 @@ func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.A
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return nil, nil
 }
-func (noopMediaStore) GetMediaFileByID(context.Context, int) (*models.MediaFile, error) {
-	return nil, nil
-}
 func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
 }

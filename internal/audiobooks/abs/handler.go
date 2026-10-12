@@ -52,10 +52,6 @@ type MediaStore interface {
 	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
 	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
-	// GetMediaFileByID fetches a single media file by its integer PK.
-	// Used by the ABS file-streaming handler when a caller supplies a
-	// raw file ID instead of an ino.
-	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
 	// SearchAudiobooks does a fuzzy title/author/narrator match for the ABS
@@ -198,6 +194,10 @@ var (
 	ErrTokenProfileUnverified = errors.New("token no longer valid for its profile")
 )
 
+// ErrOwnerUnavailable: the stored owner of a capability such as a public RSS
+// feed no longer exists, is disabled, or has lost its profile.
+var ErrOwnerUnavailable = errors.New("owner unavailable")
+
 // ProfileCredentialValidator validates a (username, password) pair against
 // silo's auth backend, including the selected profile's PIN.
 type ProfileCredentialValidator interface {
@@ -217,6 +217,10 @@ type ProfileVerifier interface {
 // effective catalog access filter used by silo's native API.
 type AccessResolver interface {
 	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
+	// ResolveABSOwnerAccess resolves a stored owner that is not the caller,
+	// such as a public feed's owner. It returns ErrOwnerUnavailable when the
+	// owner's account is missing or disabled or its profile is gone.
+	ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
 }
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
