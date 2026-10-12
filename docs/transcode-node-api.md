@@ -28,8 +28,12 @@ stored in the node registry or returned in responses. Configuration-only
 The worker validates encrypted customer settings and effective Redis access,
 then saves an immutable binding containing the connection credentials and node
 identity. The directory must be private (0700), the file is 0600, and publication
-is atomic and never overwrites a prior binding. Failed validation leaves the
-token usable. Successful binding retires admission and starts the existing worker
+is atomic and never overwrites a prior binding. Failed validation, including
+missing Redis required by transcode mode, leaves the token usable. A
+post-publication directory-sync failure retains the winner and lets the matching
+handoff retry durability confirmation; competing bindings are refused. Saved
+restarts confirm directory durability before starting. Successful binding retires
+admission and starts the existing worker
 runtime. The provider encoding ceiling remains in operator bootstrap and cannot
 be supplied in the binding payload or changed by customer settings.
 

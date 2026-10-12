@@ -123,6 +123,77 @@ func TestReconciledWorkerCeilingUsesLiveEncoders(t *testing.T) {
 	}
 }
 
+func TestReportedEncodingCeilingPreservesDrainState(t *testing.T) {
+	node := transcodeNode(1, "http://tc-1", nil, 0)
+	node.MaxJobs = intPtr(20)
+	f := newFixture(nil, []*Node{node})
+	f.transcodes.ApplyHealthReport(node.ID, node.URL, HealthReport{
+		Healthy: true, DrainState: DrainStateDraining,
+		LastStats: []byte(`{"encoding_capacity":{"max_jobs":4,"active_jobs":0}}`),
+	}, time.Now())
+	got := f.transcodes.Nodes()[0]
+	if got.DrainState != DrainStateDraining || got.MaxJobs == nil || *got.MaxJobs != 4 {
+		t.Fatalf("draining capacity report lost drain state or ceiling: %+v", got)
+	}
+	if f.planner.PlanSession("new-encode", "", true, 0).TranscodeNode != nil {
+		t.Fatal("available encoding capacity admitted work onto a draining node")
+	}
+}
+
+func TestRepositoryEncodingCeilingPreservesDrainState(t *testing.T) {
+	repo := newLastStatsTestPool(t)
+	ctx := context.Background()
+	node := createLastStatsNode(t, repo)
+	if _, err := repo.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: intPtr(20)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateHealthReport(ctx, node.ID, node.URL, HealthReport{
+		Healthy: true, DrainState: DrainStateDraining,
+		LastStats: []byte(`{"encoding_capacity":{"max_jobs":4,"active_jobs":0}}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetByID(ctx, node.ID)
+	if err != nil || stored == nil {
+		t.Fatal("cannot read draining capacity report", err)
+	}
+	if stored.DrainState != DrainStateDraining || stored.MaxJobs == nil || *stored.MaxJobs != 4 {
+		t.Fatalf("persisting capacity lost drain state or ceiling: %+v", stored)
+	}
+}
+
+func TestFiniteWorkerCeilingKeepsCurrentDrainingSession(t *testing.T) {
+	for _, withProxy := range []bool{false, true} {
+		name := "local egress"
+		var proxies []*Node
+		if withProxy {
+			name = "proxy egress"
+			proxies = []*Node{proxyNode(1, "http://proxy", nil)}
+		}
+		t.Run(name, func(t *testing.T) {
+			node := drainingNode(2, "http://tc-draining/", 1)
+			f := newFixture(proxies, []*Node{node})
+			f.transcodes.ApplyHealthReport(node.ID, node.URL, HealthReport{
+				Healthy: true, DrainState: DrainStateDraining, ActiveJobs: 1,
+				LastStats: []byte(`{"encoding_capacity":{"max_jobs":1,"active_jobs":1}}`),
+			}, time.Now())
+			plan := f.planner.PlanSession("existing", node.URL, true, 0)
+			if plan.TranscodeNode == nil || !sameNodeURL(plan.TranscodeNode.URL, node.URL) {
+				t.Fatalf("provider ceiling evicted existing draining session: %+v", plan.TranscodeNode)
+			}
+			if plan := f.planner.PlanSession("fresh", "", true, 0); plan.TranscodeNode != nil {
+				t.Fatal("full draining node admitted a new session")
+			}
+			f.transcodes.ApplyHealthReport(node.ID, node.URL, HealthReport{
+				Healthy: true, DrainState: DrainStateDrained,
+			}, time.Now())
+			if plan := f.planner.PlanSession("existing", node.URL, true, 0); plan.TranscodeNode != nil {
+				t.Fatal("drained node retained a session")
+			}
+		})
+	}
+}
+
 func TestRepositoryHealthReconcilesWorkerCeilingAndRevision(t *testing.T) {
 	repo := newLastStatsTestPool(t)
 	ctx := context.Background()

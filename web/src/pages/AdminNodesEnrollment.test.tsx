@@ -11,6 +11,7 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useDeleteNode: () => ({ mutate: vi.fn(), isPending: false }),
   useCheckNodeHealth: () => ({ mutate: vi.fn(), isPending: false }),
   useReprobeNode: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetNodeDrain: () => ({ mutate: vi.fn(), isPending: false }),
   useToggleNode: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/queries/admin/settings", () => ({ useAdminServerSettings: () => ({ data: {} }) }));
