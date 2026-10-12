@@ -174,7 +174,7 @@ export function usePrefetchCatalogSeason(libraryId?: number) {
   );
 }
 
-/** Warms an episode's detail query when the user shows intent to open it. */
+/** Warms an item's detail query when the user shows intent to open it. */
 export function usePrefetchCatalogItemDetail(libraryId?: number) {
   const queryClient = useQueryClient();
   return useCallback(

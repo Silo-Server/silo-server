@@ -21,6 +21,7 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import { prefersReducedData } from "@/lib/saveData";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 
 /** App version reported to the server for diagnostics. */
@@ -192,7 +193,6 @@ export function buildDeliveriesV3(
  * every reader tolerates `undefined`.
  */
 interface NetworkInformationLike {
-  saveData?: boolean;
   downlink?: number;
   type?: string;
 }
@@ -209,7 +209,7 @@ function networkInformation(): NetworkInformationLike | undefined {
  * that and let the server treat the absence as "unknown, assume unmetered".
  */
 export function detectMeteredV3(): boolean {
-  return networkInformation()?.saveData === true;
+  return prefersReducedData();
 }
 
 /**

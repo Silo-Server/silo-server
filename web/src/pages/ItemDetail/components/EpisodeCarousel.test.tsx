@@ -130,14 +130,14 @@ describe("EpisodeCarousel", () => {
 
       const card = screen.getAllByRole("link", { name: /Pilot/ })[0]!.closest("div.group\\/card")!;
 
-      fireEvent.mouseEnter(card);
-      act(() => vi.advanceTimersByTime(100));
-      fireEvent.mouseLeave(card);
+      fireEvent.pointerEnter(card, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(60));
+      fireEvent.pointerLeave(card, { pointerType: "mouse" });
       act(() => vi.advanceTimersByTime(200));
       expect(prefetchEpisodeDetail).not.toHaveBeenCalled();
 
-      fireEvent.mouseEnter(card);
-      act(() => vi.advanceTimersByTime(140));
+      fireEvent.pointerEnter(card, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(100));
       expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
     } finally {
       vi.useRealTimers();

@@ -2,7 +2,18 @@ import ItemCard from "@/components/ItemCard";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+const prefetchItemDetail = vi.hoisted(() => vi.fn());
+const prefetchLibraryIds = vi.hoisted(() => [] as (number | undefined)[]);
+
+vi.mock("@/hooks/queries/catalogRead", () => ({
+  usePrefetchCatalogItemDetail: (libraryId?: number) => {
+    prefetchLibraryIds.push(libraryId);
+    return prefetchItemDetail;
+  },
+}));
 
 vi.mock("@/components/MediaItemMenu", () => ({
   default: () => null,
@@ -329,5 +340,31 @@ describe("ItemCard poster loading", () => {
 
     fireEvent.error(poster);
     expect(screen.queryByRole("img", { name: "The Last of Us" })).toBeNull();
+  });
+});
+
+describe("ItemCard detail prefetch", () => {
+  it("warms the detail the poster opens, in its library, after a hover dwell", () => {
+    vi.useFakeTimers();
+    try {
+      prefetchItemDetail.mockClear();
+      prefetchLibraryIds.length = 0;
+      render(
+        <MemoryRouter>
+          <ItemCard item={{ ...baseItem, content_id: "movie-1", type: "movie" }} libraryId={7} />
+        </MemoryRouter>,
+      );
+      const card = screen
+        .getAllByRole("link", { name: "The Last of Us" })[0]!
+        .closest(".media-card")!;
+
+      fireEvent.pointerEnter(card, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(100));
+
+      expect(prefetchItemDetail).toHaveBeenCalledExactlyOnceWith("movie-1");
+      expect(prefetchLibraryIds.at(-1)).toBe(7);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

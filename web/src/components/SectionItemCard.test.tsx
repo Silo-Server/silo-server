@@ -1,8 +1,20 @@
 import type { ReactNode } from "react";
+import { act } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import SectionItemCard from "./SectionItemCard";
+
+const prefetchItemDetail = vi.hoisted(() => vi.fn());
+const prefetchLibraryIds = vi.hoisted(() => [] as (number | undefined)[]);
+
+vi.mock("@/hooks/queries/catalogRead", () => ({
+  usePrefetchCatalogItemDetail: (libraryId?: number) => {
+    prefetchLibraryIds.push(libraryId);
+    return prefetchItemDetail;
+  },
+}));
 
 vi.mock("@/components/ViewTransitionLink", () => ({
   default: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
@@ -144,5 +156,42 @@ describe("SectionItemCard", () => {
     expect(markup).toContain("Wed, Apr 8");
     expect(markup).toContain("8:00 PM");
     expect(markup).not.toContain('data-watched-indicator="icon-only"');
+  });
+
+  it("warms the detail the poster opens, in its library, after a hover dwell", () => {
+    vi.useFakeTimers();
+    try {
+      prefetchItemDetail.mockClear();
+      prefetchLibraryIds.length = 0;
+      render(
+        <SectionItemCard
+          libraryId={3}
+          item={{
+            content_id: "movie-2",
+            type: "movie",
+            title: "Arrival",
+            year: 2016,
+            genres: [],
+            status: "matched",
+            rating_imdb: null,
+            overview: "",
+            poster_url: "",
+            poster_thumbhash: "",
+            backdrop_url: "",
+            backdrop_thumbhash: "",
+            logo_url: "",
+          }}
+        />,
+      );
+      const card = screen.getAllByRole("link")[0]!.closest(".media-card")!;
+
+      fireEvent.pointerEnter(card, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(100));
+
+      expect(prefetchItemDetail).toHaveBeenCalledExactlyOnceWith("movie-2");
+      expect(prefetchLibraryIds.at(-1)).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
