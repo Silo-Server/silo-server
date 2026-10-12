@@ -629,6 +629,75 @@ func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	}
 }
 
+// An item left on its stand-in by a refresh that cannot judge the sidecar
+// keeps its local source: its artwork is locked, or the local provider did
+// not answer and no other artwork was offered.
+func TestItemLeftOnItsStandInKeepsPendingLocalSource(t *testing.T) {
+	const (
+		contentID    = "movie:tmdb:7"
+		standIn      = "https://img.example/stand-in.jpg"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	for _, tc := range []struct {
+		name     string
+		locked   bool
+		searched bool
+		images   []RemoteImage
+	}{
+		{name: "artwork locked", locked: true, searched: true,
+			images: []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}}},
+		{name: "local art not searched, nothing offered"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The sidecar is gone from a mounted folder, so only the lock or
+			// the missing search keeps it.
+			dir := filepath.Join(t.TempDir(), "Film")
+			mkdirAll(t, dir)
+			writeTestBytes(t, filepath.Join(dir, "Film.mkv"))
+			localSource := "file://" + filepath.Join(dir, "poster.jpg") + "?v=12-1"
+			h := newTestHarness()
+			enqueuer := &recordingImageCacheJobEnqueuer{}
+			h.service.SetImageCacheJobEnqueuer(enqueuer)
+			ctx := context.Background()
+			if tc.searched {
+				ctx = withLocalArtworkSearched(ctx, localArtworkItem)
+			}
+			existing := &models.MediaItem{
+				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+				PosterPath: standIn, PosterSourcePath: localSource,
+				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+			}
+			if tc.locked {
+				existing.LockedFields = []int{int(FieldImages)}
+			}
+			if err := h.itemRepo.Upsert(ctx, existing); err != nil {
+				t.Fatalf("upsert existing item: %v", err)
+			}
+			providerRepo := newFakeProviderIDRepo()
+			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+			h.service.providerIDRepo = providerRepo
+
+			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
+				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+				tc.images, nil, nil, "movie"); err != nil {
+				t.Fatalf("mergeAndPersist: %v", err)
+			}
+			got, err := h.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got.PosterPath != standIn || got.PosterSourcePath != localSource {
+				t.Fatalf("poster = path %q source %q, want the stand-in and the local source kept", got.PosterPath, got.PosterSourcePath)
+			}
+			for _, job := range enqueuer.inputs {
+				if job.ImageType == ImageCacheImagePoster && job.SourcePath != localSource {
+					t.Fatalf("queued %q over the pending local poster", job.SourcePath)
+				}
+			}
+		})
+	}
+}
+
 // Seasons and episodes keep a pending local source and its stand-in the same
 // way, also when the refresh offers no artwork at all. A slot with no stand-in
 // yet takes the remote artwork this refresh chose as one.

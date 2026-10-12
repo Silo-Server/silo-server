@@ -464,7 +464,9 @@ sits in the chain.
   with local metadata off for that level, during an Identify, in a run that
   leaves local metadata out because the NFO names another title (see
   Identity above), or when the local provider's call failed, cached local art
-  is stored artwork like any other and no library folder is probed.
+  is stored artwork like any other and no library folder is probed. A slot
+  such a refresh, or one with locked artwork, leaves on its remote stand-in
+  keeps its local source, as a slot left on its cached copy does.
 - Banner, thumb, clear art, disc art and the backdrops after the primary come
   only from sidecars today, so the rule above has no provider art to fall back
   to. When a refresh searched the item level and did not return a slot's

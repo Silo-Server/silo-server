@@ -176,15 +176,24 @@ func (r *localArtworkRetention) providerPath(imageType ImageType, incoming, exis
 // keepUnconfirmedLocalItemArtwork puts the stored local source back in each
 // item artwork slot that applyBestImages moved from local art to a remote
 // image, when keep holds. prepareItemImagesForQueue then routes it into the
-// source column and keeps the slot's served path. retention is the item
-// level's (localArtworkItem).
+// source column and keeps the slot's served path. A slot left on its remote
+// stand-in by a refresh that cannot judge the sidecar (artwork locked, or
+// local art not searched at this level) keeps its local source too, as a slot
+// left on its cached copy does. retention is the item level's
+// (localArtworkItem).
 func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, existing *models.MediaItem) {
 	if item == nil || existing == nil {
 		return
 	}
+	locked := artworkLocked(existing)
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
-		*field.path = retention.providerPath(field.imageType, *field.path, *stored[i].source)
+		storedPath, storedSource := *stored[i].path, *stored[i].source
+		if (locked || !retention.searched) && *field.path == storedPath && isLocalArtworkStandIn(storedPath, storedSource) {
+			*field.path = storedSource
+			continue
+		}
+		*field.path = retention.providerPath(field.imageType, *field.path, storedSource)
 	}
 }
 
