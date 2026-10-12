@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -48,7 +49,7 @@ func nodeDrainTimeout(value string) time.Duration {
 	if value == "" {
 		return defaultNodeDrainTimeout
 	}
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 && seconds <= math.MaxInt64/int(time.Second) {
 		return time.Duration(seconds) * time.Second
 	}
 	if timeout, err := time.ParseDuration(value); err == nil && timeout >= 0 {

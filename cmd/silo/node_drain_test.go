@@ -20,6 +20,7 @@ func TestNodeDrainTimeout(t *testing.T) {
 		{"45m", 45 * time.Minute},
 		{" 2h ", 2 * time.Hour},
 		{"-5m", defaultNodeDrainTimeout},
+		{"99999999999", defaultNodeDrainTimeout}, // more seconds than a Duration holds
 		{"soon", defaultNodeDrainTimeout},
 	} {
 		if got := nodeDrainTimeout(test.value); got != test.want {
