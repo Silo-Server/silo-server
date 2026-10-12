@@ -98,10 +98,12 @@ search-by-title fails. Conflict policy by mode:
 - manual Identify: the user's choice wins; the NFO provider is skipped for the
   whole operation. The choice is sticky: every Identify (including the one a
   split runs for its target) sets `media_items.identity_chosen_at` in the
-  transaction that writes the identity it chose, and also in any move that
-  commits before that write: the re-anchor to the choice's anchor, or a merge
-  onto the item that already owns the chosen provider IDs. Renames and merges
-  carry it along, and a later manual refresh whose NFO names a different
+  transaction that writes the identity it chose, and also in a merge that
+  commits before that write onto the item already holding the chosen IDs (the
+  row at the choice's anchor, or the owner of its provider IDs). The mark
+  always commits with the chosen IDs: a re-anchor rename keeps the old IDs
+  until the identity write, so it leaves the mark to that write. Renames and
+  merges carry the mark along, and a later refresh whose NFO names a different
   identity keeps the chosen one. Running Identify again is how an admin
   changes it.
 
