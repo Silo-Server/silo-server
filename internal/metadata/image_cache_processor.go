@@ -995,11 +995,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	digest := sha256.Sum256(data)
 	discriminator := hex.EncodeToString(digest[:4])
 	if job.TargetType == ImageCacheTargetItemBackdrop {
-		// An item's backdrops share one key folder per file. The row ID keeps
-		// each backdrop's key apart from the primary's and the other rows', so
-		// the stale-prefix cleanup below never deletes art that another
-		// backdrop of the item now shows.
-		discriminator += "-" + job.TargetContentID
+		// An item's backdrops share its key folder, and two sidecars can hold
+		// the same bytes. A hash of the sidecar's own path keeps each file's
+		// key apart from the primary's and every other file's, so the
+		// stale-prefix cleanup below never deletes art another backdrop shows,
+		// even after rows shift. A backdrop that moves to another row keeps
+		// its key.
+		pathDigest := sha256.Sum256([]byte(localPath))
+		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
 	}
 	result, err := byteCacher.CacheImageBytes(ctx, data, CacheImageRequest{
 		SourceURL:        job.SourcePath,

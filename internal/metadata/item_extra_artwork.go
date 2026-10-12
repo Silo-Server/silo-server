@@ -2,7 +2,11 @@ package metadata
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -17,6 +21,10 @@ import (
 // MaxItemBackdrops caps the backdrops an item keeps, the primary included.
 // Jellyfin reads at most 20 numbered local backdrops per family.
 const MaxItemBackdrops = 20
+
+// ExtraFanartFolder is the folder beside the media that holds any number of
+// extra backdrops (Kodi). Jellyfin's backdrops folder holds theme videos.
+const ExtraFanartFolder = "extrafanart"
 
 type metadataItemBackdropRepo interface {
 	ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]models.ItemBackdrop, error)
@@ -88,41 +96,24 @@ func hasImageOfType(images []RemoteImage, imageType ImageType) bool {
 // planExtraBackdrops decides the item's backdrops after the primary: the local
 // backdrops discovery listed, in its display order, other than the one the
 // item shows as its primary. applyBestImages makes the first one the primary
-// unless locked artwork keeps another. A row keeps its cached copy while it
-// shows the same source.
+// unless locked artwork keeps another. A stored backdrop the refresh did not
+// find again follows them while its sidecar is not confirmed gone, so a folder
+// that is briefly unreadable, such as an extrafanart folder on a flaky share,
+// keeps its backdrops. A row keeps its cached copy while it shows the same
+// source.
 func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem, existing []models.ItemBackdrop, images []RemoteImage) []models.ItemBackdrop {
 	if artworkLocked(item) && len(existing) > 0 {
 		return existing
 	}
 	var sources []string
-	discovered := false
 	seen := map[string]bool{strings.TrimSpace(item.BackdropSourcePath): true}
 	for _, img := range images {
 		url := strings.TrimSpace(img.URL)
-		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) {
+		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) || seen[url] {
 			continue
 		}
-		discovered = true
-		if !seen[url] {
-			seen[url] = true
-			sources = append(sources, url)
-		}
-	}
-	if !discovered {
-		// The search returned no backdrop, or there was none. As for the
-		// single slots, a searched refresh drops a row once its sidecar's
-		// folder answers; otherwise the rows stay.
-		kept := make([]models.ItemBackdrop, 0, len(existing))
-		for _, b := range existing {
-			if retention.searched && isLocalImageSourcePath(b.SourcePath) && retention.sidecarGone(b.SourcePath) {
-				continue
-			}
-			kept = append(kept, models.ItemBackdrop{Path: b.Path, SourcePath: b.SourcePath, Thumbhash: b.Thumbhash})
-		}
-		return kept
-	}
-	if len(sources) > MaxItemBackdrops-1 {
-		sources = sources[:MaxItemBackdrops-1]
+		seen[url] = true
+		sources = append(sources, url)
 	}
 	cached := make(map[string]models.ItemBackdrop, len(existing))
 	for _, b := range existing {
@@ -130,7 +121,7 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 			cached[b.SourcePath] = b
 		}
 	}
-	planned := make([]models.ItemBackdrop, 0, len(sources))
+	planned := make([]models.ItemBackdrop, 0, len(sources)+len(existing))
 	for _, source := range sources {
 		b := models.ItemBackdrop{SourcePath: source}
 		if prev, ok := cached[source]; ok {
@@ -138,7 +129,39 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 		}
 		planned = append(planned, b)
 	}
+	for _, b := range existing {
+		if seen[b.SourcePath] {
+			continue
+		}
+		if retention.searched && isLocalImageSourcePath(b.SourcePath) && retention.extraBackdropGone(b.SourcePath) {
+			continue
+		}
+		seen[b.SourcePath] = true
+		planned = append(planned, models.ItemBackdrop{Path: b.Path, SourcePath: b.SourcePath, Thumbhash: b.Thumbhash})
+	}
+	if len(planned) > MaxItemBackdrops-1 {
+		planned = planned[:MaxItemBackdrops-1]
+	}
 	return planned
+}
+
+// extraBackdropGone is sidecarGone for an extra backdrop. A backdrop from an
+// extrafanart folder is also gone when that folder no longer exists while the
+// folder holding it answers: a removed extrafanart folder reads as unreachable
+// to sidecarGone, which would keep its backdrops forever.
+func (r *localArtworkRetention) extraBackdropGone(source string) bool {
+	if path, ok := localImageSourceFilePath(source); ok && filepath.IsAbs(path) {
+		dir := filepath.Dir(path)
+		if strings.EqualFold(filepath.Base(dir), ExtraFanartFolder) {
+			if !r.folderAnswers(filepath.Dir(dir)) {
+				return false
+			}
+			if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+				return true
+			}
+		}
+	}
+	return r.sidecarGone(source)
 }
 
 func sameItemBackdrops(stored, planned []models.ItemBackdrop) bool {

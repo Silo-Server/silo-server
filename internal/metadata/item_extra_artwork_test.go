@@ -247,7 +247,8 @@ func TestPlanExtraBackdrops(t *testing.T) {
 	t.Run("backdrops after the primary, keeping cached copies of unchanged sources", func(t *testing.T) {
 		existing := []models.ItemBackdrop{
 			{ID: 1, Ordinal: 1, Path: "local/movies/movie-1/aa-1/backdrop/original.r.webp", SourcePath: "file:///m/fanart-2.jpg", Thumbhash: "t2"},
-			{ID: 2, Ordinal: 2, Path: "", SourcePath: "file:///m/gone.jpg"},
+			// Its folder answers and the file is missing, so it goes.
+			{ID: 2, Ordinal: 2, Path: "", SourcePath: localSource(filepath.Join(writeSidecars(t, t.TempDir(), "other.jpg"), "gone.jpg"))},
 		}
 		got := planExtraBackdrops(itemRetention(searched), item, existing, []RemoteImage{
 			{ProviderID: "tmdb", URL: "https://img.example/b.jpg", Type: ImageBackdrop, Rating: 9},
@@ -274,6 +275,47 @@ func TestPlanExtraBackdrops(t *testing.T) {
 		got := planExtraBackdrops(itemRetention(searched), item, existing, []RemoteImage{{URL: "https://img.example/b.jpg", Type: ImageBackdrop, Rating: 2}})
 		want := []models.ItemBackdrop{{Path: "local/c", SourcePath: existing[2].SourcePath}}
 		if !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("a stored backdrop the search did not return stays while its folder does not answer", func(t *testing.T) {
+		root := writeSidecars(t, t.TempDir(), "fanart.jpg", "fanart-1.jpg")
+		unreadable := filepath.Join(t.TempDir(), "share", "extrafanart", "x.jpg")
+		stored := []models.ItemBackdrop{
+			{ID: 1, Ordinal: 1, Path: "local/a", SourcePath: localSource(filepath.Join(root, "fanart-1.jpg")), Thumbhash: "t1"},
+			{ID: 2, Ordinal: 2, Path: "local/x", SourcePath: localSource(unreadable)},
+			{ID: 3, Ordinal: 3, Path: "local/gone", SourcePath: localSource(filepath.Join(root, "fanart-2.jpg"))},
+		}
+		primary := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: localSource(filepath.Join(root, "fanart.jpg"))}
+		got := planExtraBackdrops(itemRetention(searched), primary, stored, []RemoteImage{
+			backdrop(primary.BackdropSourcePath), backdrop(stored[0].SourcePath),
+		})
+		want := []models.ItemBackdrop{
+			{Path: "local/a", SourcePath: stored[0].SourcePath, Thumbhash: "t1"},
+			{Path: "local/x", SourcePath: stored[1].SourcePath},
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("a removed extrafanart folder drops its backdrops", func(t *testing.T) {
+		root := writeSidecars(t, t.TempDir(), "fanart.jpg", "movie.mkv")
+		stored := []models.ItemBackdrop{{ID: 1, Ordinal: 1, Path: "local/x", SourcePath: localSource(filepath.Join(root, "ExtraFanart", "x.jpg"))}}
+		primary := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: localSource(filepath.Join(root, "fanart.jpg"))}
+		if got := planExtraBackdrops(itemRetention(searched), primary, stored, []RemoteImage{backdrop(primary.BackdropSourcePath)}); len(got) != 0 {
+			t.Fatalf("planned = %+v, want none", got)
+		}
+		// While the extrafanart folder exists, a missing file inside it is
+		// gone as before, and a present one the search returned stays.
+		extra := filepath.Join(root, "ExtraFanart")
+		if err := os.Mkdir(extra, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeSidecars(t, extra, "y.jpg")
+		kept := localSource(filepath.Join(extra, "y.jpg"))
+		got := planExtraBackdrops(itemRetention(searched), primary, append(stored, models.ItemBackdrop{ID: 2, Ordinal: 2, Path: "local/y", SourcePath: kept}),
+			[]RemoteImage{backdrop(primary.BackdropSourcePath), backdrop(kept)})
+		if want := []models.ItemBackdrop{{Path: "local/y", SourcePath: kept}}; !slices.Equal(got, want) {
 			t.Fatalf("planned = %+v, want %+v", got, want)
 		}
 	})

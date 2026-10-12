@@ -23,9 +23,6 @@ var numberedBackdropFamilies = [][]string{
 const (
 	maxNumberedBackdrop = 20
 	maxBackdropGap      = 3
-	// extraFanartFolder holds any number of extra backdrops (Kodi). Jellyfin's
-	// backdrops/ folder holds theme videos and is not read.
-	extraFanartFolder = "extrafanart"
 )
 
 // findBackdrops returns the item's backdrop sources in display order, at most
@@ -86,9 +83,9 @@ func (f *sidecarFinder) findBackdrops(contentType string, searchDirs, mediaFiles
 // extraFanart returns the usable images in dir's extrafanart folder, sorted by
 // name ignoring case.
 func (f *sidecarFinder) extraFanart(dir string) []string {
-	folders := []string{extraFanartFolder}
+	folders := []string{metadata.ExtraFanartFolder}
 	if listing := f.listing(dir); listing != nil {
-		folders = listing[extraFanartFolder]
+		folders = listing[metadata.ExtraFanartFolder]
 	}
 	var sources []string
 	for _, folder := range folders {
