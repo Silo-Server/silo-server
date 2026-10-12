@@ -325,6 +325,14 @@ const TerminalSourceUnreadableV3 = "source_unreadable"
 // TerminalSourceUnreadableV3.
 const TerminalSourceUnreadableMessageV3 = "The source file could not be read; it appears to be empty or damaged."
 
+// Planner messages for TerminalAudioConversionUnsupportedV3 when the selected
+// audio track's codec has no FFmpeg decoder (see AudioTrackDecodable), with
+// and without another track the viewer could choose instead.
+const (
+	TerminalAudioTrackUndecodableMessageV3 = "The selected audio track uses a codec the server cannot decode. Choose another audio track."
+	TerminalNoDecodableAudioMessageV3      = "None of this file's audio tracks use a codec the server can decode."
+)
+
 // TerminalBitratePolicyUnavailableV3 reports that no route fits the
 // administrator's local or remote per-stream bitrate limit for this version.
 const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"

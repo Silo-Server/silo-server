@@ -363,6 +363,7 @@ export const v2Operations = {
   "GET /api/v2/history-imports/runs": "listHistoryImportRuns",
   "GET /api/v2/history-imports/runs/{id}": "getHistoryImportRun",
   "GET /api/v2/history-imports/sources": "listHistoryImportSources",
+  "GET /api/v2/home/capabilities": "getHomeCapabilities",
   "GET /api/v2/home/layout": "getHomeLayout",
   "GET /api/v2/home/sections": "listHomeSections",
   "GET /api/v2/home/sections/{id}/items": "getHomeSectionItems",

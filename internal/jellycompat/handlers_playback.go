@@ -2540,6 +2540,12 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	audioSupported := !channelsRequireEncode && profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := !bitrateRequiresEncode && profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	enableTranscoding := boolDefault(req.EnableTranscoding, true)
+	// FFmpeg can neither decode nor MP4-copy an audio track the probe could
+	// not name, and direct-play matching would judge it by another track's
+	// codec, so no route carries an explicit choice of one.
+	if compatAudioStreamUndecodable(version, selectedAudioIndex) {
+		supportsDirectPlay, enableDirectStream, enableTranscoding = false, false, false
+	}
 	targetAudioChannels := 2
 	if req.MaxAudioChannels == 1 {
 		targetAudioChannels = 1
@@ -2931,13 +2937,7 @@ func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 		value := len(version.VideoTracks) + *effective
 		return &value
 	}
-	for index, track := range version.AudioTracks {
-		if track.Default {
-			value := len(version.VideoTracks) + index
-			return &value
-		}
-	}
-	value := len(version.VideoTracks)
+	value := len(version.VideoTracks) + playback.SelectAudioTrack(version.AudioTracks, "", nil)
 	return &value
 }
 
@@ -3053,6 +3053,16 @@ func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfil
 		return &idx
 	}
 	return defaultIdx
+}
+
+// compatAudioStreamUndecodable reports whether streamIndex names an audio
+// track FFmpeg cannot decode (playback.AudioTrackDecodable).
+func compatAudioStreamUndecodable(version catalog.FileVersion, streamIndex *int) bool {
+	if streamIndex == nil {
+		return false
+	}
+	index := *streamIndex - len(version.VideoTracks)
+	return index >= 0 && index < len(version.AudioTracks) && !playback.AudioTrackDecodable(version.AudioTracks, index, version.CodecAudio)
 }
 
 func effectiveCompatAudioStreamIndex(source PlaybackMediaSource) *int {

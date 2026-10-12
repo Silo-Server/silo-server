@@ -23,6 +23,9 @@
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 
+# Same-day episodes sorted by air date keep series title and season/episode order on every query path.
+./internal/catalog TestQueryEpisodeAirDateTiesPostgres
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB

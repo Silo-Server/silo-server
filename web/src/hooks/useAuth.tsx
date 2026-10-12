@@ -29,6 +29,7 @@ import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hook
 import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import { authProviderQueryOptions } from "@/hooks/queries/authProviders";
+import { homeLayoutQueryOptions } from "@/hooks/queries/sections";
 import {
   clearStoredImpersonationAdminSession,
   loadStoredImpersonationAdminSession,
@@ -93,6 +94,17 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+
+/**
+ * Start loading Home as soon as the session token is back, alongside the
+ * account read instead of after it. Home's requests only need the token and
+ * the stored profile, and on HTTP/1.1 a request that starts early also gets a
+ * connection ahead of the shell's own startup reads.
+ */
+function prefetchStartupHome() {
+  if (window.location.pathname !== "/" || !storage.get(storage.KEYS.PROFILE_ID)) return;
+  void queryClient.prefetchQuery(homeLayoutQueryOptions(queryClient));
+}
 
 export function getBootstrapProfile(profiles: Profile[]): Profile | null {
   if (profiles.length !== 1) {
@@ -590,7 +602,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Installing the restored token starts the session the rest of
             // the restore answers for. The refresh single-flight already
             // discards an exchange that another sign-in overtook.
-            if (restored) session = captureSessionIdentity();
+            if (restored) {
+              session = captureSessionIdentity();
+              prefetchStartupHome();
+            }
             if (!restored && lastRefreshFailureWasTransient()) {
               providerOutage = lastRefreshFailureWasProviderOutage();
               return "unavailable";

@@ -207,7 +207,7 @@ constant:
 | Field | Omitted | Present |
 | --- | --- | --- |
 | `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary). It is required when `progress_persistence` is `client` | Exactly that position. `0` means *start over* |
-| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable` |
+| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override. Only tracks FFmpeg can decode are candidates while the file has one, so a track ffprobe names no codec for (AVS3 audio, for example) is passed over | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable`. A track FFmpeg cannot decode ends in the non-retryable `audio_conversion_unsupported` terminal |
 
 `progress_persistence` separates the live session clock from durable resume
 ownership. Omission (or `server`) means session progress may update the item's
@@ -1253,7 +1253,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+`subtitle_conversion_unsupported`. `audio_conversion_unsupported` is not
+retryable when the selected audio track has no codec FFmpeg can name, and so
+no decoder: the planner refuses it before any route is tried, and choosing
+another track is the remedy. `source_metadata_incomplete` is retryable:
 the file has not been probed yet or lacks a field a route needs.
 `source_unreadable` is not: ffprobe rejected the effective file (empty,
 corrupt, truncated) and it carries no stream metadata. The scanner and the

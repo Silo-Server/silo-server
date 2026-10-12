@@ -130,6 +130,23 @@ func TestParseEpisodeNFO_LegacyRatingAndNoNumbers(t *testing.T) {
 	}
 }
 
+func TestParseEpisodeNFO_LegacyRatingIgnoredBesideRatingsBlock(t *testing.T) {
+	t.Parallel()
+
+	p, err := parseNFOData([]byte(`<episodedetails><title>Core</title>` +
+		`<ratings><rating name="tmdb" max="10" default="true"><value>8.1</value></rating></ratings>` +
+		`<rating>8.1</rating></episodedetails>`))
+	if err != nil {
+		t.Fatalf("parseNFOData: %v", err)
+	}
+	if p.RatingIMDB != 0 {
+		t.Errorf("RatingIMDB = %v, want 0 (bare rating repeats the tmdb default)", p.RatingIMDB)
+	}
+	if p.RatingTMDB != 8.1 {
+		t.Errorf("RatingTMDB = %v, want 8.1", p.RatingTMDB)
+	}
+}
+
 // Multi-<episodedetails> documents (multi-episode files) are out of scope in
 // v1: the first block wins and the parser flags the document so the provider
 // can warn.
