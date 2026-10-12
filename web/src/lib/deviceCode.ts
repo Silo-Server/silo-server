@@ -37,3 +37,11 @@ export function displayDeviceCode(value: string) {
 export function spokenDeviceCode(value: string) {
   return compactDeviceCode(value).split("").join(" ");
 }
+
+/** What to tell a person whose account has tried too many Quick Connect codes. */
+export function tooManyCodesMessage(retryAfterSeconds: number | null) {
+  const minutes = retryAfterSeconds ? Math.max(1, Math.ceil(retryAfterSeconds / 60)) : null;
+  return minutes
+    ? `You've tried too many codes. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`
+    : "You've tried too many codes. Try again later.";
+}

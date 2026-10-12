@@ -459,3 +459,23 @@ it("keeps a Quick Connect request pending when the PIN is wrong", async () => {
   await screen.findByText("That PIN isn't right.");
   expect(recorded.calls).toEqual([]);
 });
+
+it("says when an account has tried too many Quick Connect codes", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      new V2ProblemError(
+        "getDeviceLogin",
+        {
+          type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
+          title: "Rate limited",
+          status: 429,
+          detail: "Too many Quick Connect codes tried. Try again later.",
+          instance: "urn:silo:request:1",
+        } as never,
+        900,
+      ),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("You've tried too many codes. Try again in 15 minutes.");
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});

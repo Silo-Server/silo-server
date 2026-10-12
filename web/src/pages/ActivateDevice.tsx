@@ -19,13 +19,14 @@ import {
   formatDeviceCode,
   isCompleteDeviceCode,
   spokenDeviceCode,
+  tooManyCodesMessage,
 } from "@/lib/deviceCode";
 import { QuickConnectApproval } from "@/components/auth/QuickConnectApproval";
 import { Smartphone } from "lucide-react";
 
 type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
 
-type LoadError = "not_found" | "failed";
+type LoadError = "not_found" | "failed" | "rate_limited";
 
 // After approving, the page watches the request until it settles: the TV
 // collects its session, or the request is denied, canceled or expires. The
@@ -63,6 +64,7 @@ function ActivateDeviceRequest() {
   const [codeInput, setCodeInput] = useState(formatDeviceCode(searchParams.get("code") ?? ""));
   const [details, setDetails] = useState<DeviceLoginDetails | null>(null);
   const [loadError, setLoadError] = useState<LoadError | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -111,9 +113,10 @@ function ActivateDeviceRequest() {
           return;
         }
         setDetails(null);
-        setLoadError(
-          error instanceof V2ProblemError && error.status === 404 ? "not_found" : "failed",
-        );
+        const status = error instanceof V2ProblemError ? error.status : 0;
+        // A Quick Connect code spends the account's code budget.
+        setRetryAfter(error instanceof V2ProblemError ? error.retryAfterSeconds : null);
+        setLoadError(status === 404 ? "not_found" : status === 429 ? "rate_limited" : "failed");
       }
     },
     [code, token, needsAccount, lookupAccount],
@@ -342,7 +345,9 @@ function ActivateDeviceRequest() {
               <p className="text-sm" role="alert">
                 {loadError === "not_found"
                   ? "We couldn't find that code. Check the code on your TV."
-                  : "Couldn't look up this code. Try again."}
+                  : loadError === "rate_limited"
+                    ? tooManyCodesMessage(retryAfter)
+                    : "Couldn't look up this code. Try again."}
               </p>
               {loadError === "failed" ? (
                 <Button type="button" className="w-full" onClick={() => void loadDetails()}>

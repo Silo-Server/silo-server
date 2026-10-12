@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
+import { tooManyCodesMessage } from "@/lib/deviceCode";
 
 interface QuickConnectApprovalProps {
   /** The six-digit code being approved. */
@@ -78,7 +79,7 @@ export function QuickConnectApproval({
       onApproved(selected.name);
     } catch (err) {
       if (err instanceof V2ProblemError && err.status === 429) {
-        setError("Too many tries. Wait a few minutes and try again.");
+        setError(tooManyCodesMessage(err.retryAfterSeconds));
       } else if (err instanceof V2ProblemError && [404, 409, 410].includes(err.status)) {
         onMoved();
       } else if (err instanceof V2ProblemError && err.problemType === "permission_denied") {

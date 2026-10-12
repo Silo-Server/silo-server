@@ -6,6 +6,7 @@ import {
   formatDeviceCode,
   isCompleteDeviceCode,
   spokenDeviceCode,
+  tooManyCodesMessage,
 } from "./deviceCode";
 
 describe("device codes", () => {
@@ -26,6 +27,12 @@ describe("device codes", () => {
   it("shows a Quick Connect code ungrouped, as the Jellyfin app does", () => {
     expect(displayDeviceCode("482177")).toBe("482177");
     expect(displayDeviceCode("4821-7730")).toBe("4821 7730");
+  });
+
+  it("says how long a spent Quick Connect code budget lasts", () => {
+    expect(tooManyCodesMessage(900)).toBe("You've tried too many codes. Try again in 15 minutes.");
+    expect(tooManyCodesMessage(30)).toBe("You've tried too many codes. Try again in 1 minute.");
+    expect(tooManyCodesMessage(null)).toBe("You've tried too many codes. Try again later.");
   });
 
   it("spells the code one character at a time", () => {
