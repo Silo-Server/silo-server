@@ -45,8 +45,16 @@ func (f *fakeQuickConnect) ApproveQuickConnectAsSession(_ context.Context, code,
 	return f.approveErr
 }
 
-func (f *fakeQuickConnect) CollectQuickConnect(context.Context, string) (*auth.DeviceLoginPollResult, error) {
-	return f.collect, f.collectErr
+func (f *fakeQuickConnect) CollectQuickConnect(ctx context.Context, _ string, persist auth.QuickConnectPersist) (*auth.DeviceLoginPollResult, error) {
+	if f.collectErr != nil {
+		return nil, f.collectErr
+	}
+	if f.collect != nil && f.collect.TokenPair != nil && persist != nil {
+		if err := persist(ctx, nil, f.collect); err != nil {
+			return nil, err
+		}
+	}
+	return f.collect, nil
 }
 
 // profileStore serves GetProfile from a fixed list.
@@ -229,7 +237,8 @@ func TestQuickConnectAuthorizeApprovesAsTheSession(t *testing.T) {
 
 // TestAuthenticateWithQuickConnectMintsProfileSession: an approved secret
 // buys a compat session bound to the approved profile, answered like
-// AuthenticateByName; a secret that is not approved is 404.
+// AuthenticateByName, and the same session again while the request lives; a
+// secret that is not approved is 404.
 func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	service := &fakeQuickConnect{collect: &auth.DeviceLoginPollResult{
 		Status:      auth.DeviceLoginStatusApproved,
@@ -247,12 +256,27 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.AccessToken != "compat-token" || out.User.Name != "alice#Kids" || out.User.ID != PseudoUserID(7, "kids").String() {
+	token := quickConnectSessionToken("SECRET")
+	if out.AccessToken != token || out.User.Name != "alice#Kids" || out.User.ID != PseudoUserID(7, "kids").String() {
 		t.Fatalf("response = %+v", out)
 	}
-	session, ok := store.Get("compat-token")
+	session, ok := store.Get(token)
 	if !ok || session.ProfileID != "kids" || session.StreamAppUserID != 7 || session.StreamAppRefreshToken != "native-refresh" {
 		t.Fatalf("stored session = %+v, %v", session, ok)
+	}
+
+	// The app lost the answer and asks again: the request is collected, so
+	// the same session comes back, as Jellyfin answers a collected secret.
+	service.collect = &auth.DeviceLoginPollResult{Status: auth.DeviceLoginStatusConsumed}
+	rec = serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{"Secret":"SECRET"}`, nil)
+	var again authenticateByNameResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &again); rec.Code != http.StatusOK || err != nil || again.AccessToken != token {
+		t.Fatalf("second exchange = %d %s", rec.Code, rec.Body.String())
+	}
+	// Once the app signs out, the collected secret buys nothing.
+	store.Delete(token)
+	if rec := serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{"Secret":"SECRET"}`, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("exchange after sign-out = %d", rec.Code)
 	}
 
 	service.collect = &auth.DeviceLoginPollResult{Status: auth.DeviceLoginStatusPending}

@@ -180,7 +180,11 @@ except these:
   own profile. `approve` refuses a Quick Connect request with 409.
 - **Collection:** only `/Users/AuthenticateWithQuickConnect` collects it, into a
   compat session for the approved profile; the native poll answers 404 for its
-  secret, because a native session could pick any profile. An account that
+  secret, because a native session could pick any profile. The compat session
+  is written in the transaction that consumes the request, under a token
+  derived one-way from the secret: a failed write leaves the request approved,
+  and asking again with the secret while the request lives returns the same
+  session without minting another login session. An account that
   must replace a temporary password is refused, as in Jellyfin password
   sign-in, and the approval is withdrawn so the app stops polling.
 - **Not temporary:** the session lasts like any sign-in.

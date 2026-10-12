@@ -2,11 +2,15 @@ package jellycompat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -34,7 +38,7 @@ var (
 // login session of the approving account and names the approved profile
 // (auth.DeviceLoginService.CollectQuickConnect).
 type quickConnectCollector interface {
-	CollectQuickConnect(ctx context.Context, secret string) (*auth.DeviceLoginPollResult, error)
+	CollectQuickConnect(ctx context.Context, secret string, persist auth.QuickConnectPersist) (*auth.DeviceLoginPollResult, error)
 }
 
 // LoginResolver performs username#profile login resolution against Silo.
@@ -155,17 +159,37 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
-	return r.putSession(combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	session := r.newSession(r.tokenGenerator(), combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	if err := r.sessions.Put(session); err != nil {
+		return nil, err
+	}
+	return &session, nil
 }
 
 // ResolveQuickConnect exchanges an approved Quick Connect secret for a compat
 // session bound to the profile the approver chose. The approver already
-// verified that profile, so no PIN is asked here.
+// verified that profile, so no PIN is asked here. The session is stored in
+// the transaction that consumes the request, under a token derived from the
+// secret, so asking again while the request lives returns the same session,
+// as Jellyfin answers a collected secret until it expires. An app that lost
+// the first answer can still sign in, and no second login session is minted.
 func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) (*Session, error) {
 	if r.quickConnect == nil {
 		return nil, ErrQuickConnectNotAuthorized
 	}
-	result, err := r.quickConnect.CollectQuickConnect(ctx, secret)
+	token := quickConnectSessionToken(secret)
+	var session *Session
+	result, err := r.quickConnect.CollectQuickConnect(ctx, secret, func(ctx context.Context, tx pgx.Tx, result *auth.DeviceLoginPollResult) error {
+		// Collection loaded the approved profile under the request's lock.
+		stored, err := r.sessions.PutTx(ctx, tx, r.newSession(token,
+			quickConnectUsername(result.User.Username, result.ProfileName),
+			result.User, result.TokenPair, result.ProfileID, result.ProfileName))
+		if err != nil {
+			return err
+		}
+		session = &stored
+		return nil
+	})
 	if errors.Is(err, auth.ErrDeviceLoginNotFound) {
 		return nil, ErrQuickConnectNotAuthorized
 	}
@@ -175,12 +199,28 @@ func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) 
 	if err != nil {
 		return nil, mapAuthError(err)
 	}
-	if result.TokenPair == nil || result.User == nil {
-		// Pending, denied, withdrawn, expired or already collected.
+	if session != nil {
+		return session, nil
+	}
+	if result.Status != auth.DeviceLoginStatusConsumed {
+		// Pending, denied, withdrawn or expired.
 		return nil, ErrQuickConnectNotAuthorized
 	}
-	// Collection loaded the approved profile under the request's lock.
-	return r.putSession(quickConnectUsername(result.User.Username, result.ProfileName), result.User, result.TokenPair, result.ProfileID, result.ProfileName)
+	existing, err := r.sessions.Lookup(ctx, token)
+	if errors.Is(err, ErrSessionNotFound) {
+		// The app signed out since.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	return existing, err
+}
+
+// quickConnectSessionToken is the compat token of the session a Quick
+// Connect secret buys. It is derived one-way from the secret, so only the
+// app holding the secret can compute it, and the stored token says nothing
+// about the secret.
+func quickConnectSessionToken(secret string) string {
+	sum := sha256.Sum256([]byte("silo-quick-connect-session:" + strings.TrimSpace(secret)))
+	return hex.EncodeToString(sum[:16])
 }
 
 // quickConnectUsername is the name a Quick Connect session reports: the
@@ -193,12 +233,12 @@ func quickConnectUsername(account, profile string) string {
 	return account + "#" + profile
 }
 
-// putSession stores a compat session for the account's token pair, bound to
+// newSession builds a compat session for the account's token pair, bound to
 // one profile.
-func (r *LoginResolver) putSession(username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) (*Session, error) {
+func (r *LoginResolver) newSession(token, username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) Session {
 	now := r.now()
-	session := Session{
-		Token:                 r.tokenGenerator(),
+	return Session{
+		Token:                 token,
 		Username:              username,
 		AccountUsername:       user.Username,
 		ProfileID:             profileID,
@@ -210,10 +250,6 @@ func (r *LoginResolver) putSession(username string, user *models.User, tokenPair
 		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
 		CreatedAt:             now,
 	}
-	if err := r.sessions.Put(session); err != nil {
-		return nil, err
-	}
-	return &session, nil
 }
 
 // splitPasswordPIN splits "password#pin" at the last '#'.

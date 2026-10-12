@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -122,7 +124,7 @@ func TestQuickConnectApproveAndCollectDB(t *testing.T) {
 		t.Fatalf("status after approval = %q", got)
 	}
 
-	result, err := svc.CollectQuickConnect(ctx, start.Secret)
+	result, err := svc.CollectQuickConnect(ctx, start.Secret, nil)
 	if err != nil || result.TokenPair == nil || result.User == nil || result.User.ID != userID ||
 		result.ProfileID != profileID || result.ProfileName != "Kids" || result.Temporary {
 		t.Fatalf("collect = %+v, %v", result, err)
@@ -139,7 +141,7 @@ func TestQuickConnectApproveAndCollectDB(t *testing.T) {
 	if got := quickConnectStatus(t, svc, start.Secret); got != DeviceLoginStatusConsumed {
 		t.Fatalf("status after collection = %q", got)
 	}
-	again, err := svc.CollectQuickConnect(ctx, start.Secret)
+	again, err := svc.CollectQuickConnect(ctx, start.Secret, nil)
 	if err != nil || again.Status != DeviceLoginStatusConsumed || again.TokenPair != nil {
 		t.Fatalf("second collect = %+v, %v", again, err)
 	}
@@ -211,7 +213,7 @@ func TestQuickConnectDenyAndExpiryDB(t *testing.T) {
 	if got := quickConnectStatus(t, svc, denied.Secret); got != DeviceLoginStatusDenied {
 		t.Fatalf("status after deny = %q", got)
 	}
-	result, err := svc.CollectQuickConnect(ctx, denied.Secret)
+	result, err := svc.CollectQuickConnect(ctx, denied.Secret, nil)
 	if err != nil || result.Status != DeviceLoginStatusDenied || result.TokenPair != nil {
 		t.Fatalf("collect denied = %+v, %v", result, err)
 	}
@@ -254,7 +256,7 @@ func TestQuickConnectAcrossNodesDB(t *testing.T) {
 	if err := second.ApproveForProfile(ctx, DeviceLoginLookupInput{UserCode: start.Code, AccountID: userID}, userID, profileID); err != nil {
 		t.Fatal(err)
 	}
-	result, err := first.CollectQuickConnect(ctx, start.Secret)
+	result, err := first.CollectQuickConnect(ctx, start.Secret, nil)
 	if err != nil || result.TokenPair == nil || result.ProfileID != profileID {
 		t.Fatalf("collect on the first node = %+v, %v", result, err)
 	}
@@ -370,10 +372,54 @@ func TestQuickConnectRefusesTemporaryPasswordDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE users SET password_change_required = TRUE WHERE id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CollectQuickConnect(ctx, start.Secret); !errors.Is(err, ErrPasswordChangeRequired) {
+	if _, err := svc.CollectQuickConnect(ctx, start.Secret, nil); !errors.Is(err, ErrPasswordChangeRequired) {
 		t.Fatalf("collect = %v, want ErrPasswordChangeRequired", err)
 	}
 	if got := quickConnectStatus(t, svc, start.Secret); got != DeviceLoginStatusDenied {
 		t.Fatalf("status after refused collection = %q, want denied", got)
+	}
+}
+
+// TestQuickConnectCollectsOnlyWithItsSessionDB: when storing the app's
+// session fails, the request is not consumed and no login session is left
+// behind, so the app can collect again.
+func TestQuickConnectCollectsOnlyWithItsSessionDB(t *testing.T) {
+	svc, pool, userID, profileID, name := quickConnectTestService(t)
+	ctx := t.Context()
+	start, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("persist")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ApproveForProfile(ctx, DeviceLoginLookupInput{UserCode: start.Code, AccountID: userID}, userID, profileID); err != nil {
+		t.Fatal(err)
+	}
+	countSessions := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE user_id = $1`, userID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := countSessions()
+	failed := errors.New("compat store down")
+	if _, err := svc.CollectQuickConnect(ctx, start.Secret, func(context.Context, pgx.Tx, *DeviceLoginPollResult) error {
+		return failed
+	}); !errors.Is(err, failed) {
+		t.Fatalf("collect with a failing store = %v", err)
+	}
+	if got := quickConnectStatus(t, svc, start.Secret); got != DeviceLoginStatusApproved || countSessions() != before {
+		t.Fatalf("after a failed store: status %q, %d sessions (was %d)", got, countSessions(), before)
+	}
+	var stored *DeviceLoginPollResult
+	result, err := svc.CollectQuickConnect(ctx, start.Secret, func(_ context.Context, tx pgx.Tx, r *DeviceLoginPollResult) error {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE user_id = $1`, userID).Scan(&n); err != nil || n != before+1 {
+			return fmt.Errorf("the transaction does not hold the new login session (%d): %w", n, err)
+		}
+		stored = r
+		return nil
+	})
+	if err != nil || result.TokenPair == nil || stored != result {
+		t.Fatalf("collect = %+v, %v", result, err)
 	}
 }

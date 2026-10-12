@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -74,13 +75,7 @@ func newSessionStore(ttl time.Duration, now func() time.Time, repo sessionPersis
 
 // Put stores or replaces a compat session.
 func (s *SessionStore) Put(session Session) error {
-	if session.CreatedAt.IsZero() {
-		session.CreatedAt = s.now()
-	}
-	if session.ExpiresAt.IsZero() {
-		session.ExpiresAt = session.CreatedAt.Add(s.ttl)
-	}
-
+	session = s.withLifetime(session)
 	if s.repo != nil {
 		if err := s.repo.Upsert(context.Background(), session); err != nil {
 			return err
@@ -91,6 +86,41 @@ func (s *SessionStore) Put(session Session) error {
 	defer s.mu.Unlock()
 	s.sessions[session.Token] = session
 	return nil
+}
+
+// PutTx stores a compat session in tx, so it exists exactly when tx
+// commits. A persistent store writes it in tx and loads it on its first
+// lookup; a memory-only store, which has no database, keeps it at once. It
+// returns the session as stored.
+func (s *SessionStore) PutTx(ctx context.Context, tx pgx.Tx, session Session) (Session, error) {
+	session = s.withLifetime(session)
+	if s.repo != nil {
+		txRepo, ok := s.repo.(txSessionPersistence)
+		if !ok {
+			return session, errors.New("compat session store cannot write in a transaction")
+		}
+		return session, txRepo.UpsertTx(ctx, tx, session)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[session.Token] = session
+	return session, nil
+}
+
+// txSessionPersistence is a sessionPersistence that can write inside a
+// caller's transaction (SessionRepository).
+type txSessionPersistence interface {
+	UpsertTx(ctx context.Context, tx pgx.Tx, session Session) error
+}
+
+func (s *SessionStore) withLifetime(session Session) Session {
+	if session.CreatedAt.IsZero() {
+		session.CreatedAt = s.now()
+	}
+	if session.ExpiresAt.IsZero() {
+		session.ExpiresAt = session.CreatedAt.Add(s.ttl)
+	}
+	return session
 }
 
 // Get returns a compat session when it exists and is not expired.

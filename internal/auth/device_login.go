@@ -479,12 +479,19 @@ func (s *DeviceLoginService) QuickConnectState(ctx context.Context, secret strin
 	}, nil
 }
 
+// QuickConnectPersist stores what collecting a Quick Connect request gives
+// the Jellyfin app, in tx, the transaction that consumes the request. The
+// request is consumed only if it succeeds, so a failed write leaves the
+// request approved for the app to collect again.
+type QuickConnectPersist func(ctx context.Context, tx pgx.Tx, result *DeviceLoginPollResult) error
+
 // CollectQuickConnect exchanges an approved Quick Connect request's secret
 // for a login session of the approving account, once, as a device poll
-// does. The result names the approved profile. A request in any other state
-// answers with its status and no tokens.
-func (s *DeviceLoginService) CollectQuickConnect(ctx context.Context, secret string) (*DeviceLoginPollResult, error) {
-	return s.poll(ctx, secret, true)
+// does, and runs persist before the request is consumed. The result names
+// the approved profile. A request in any other state answers with its
+// status and no tokens.
+func (s *DeviceLoginService) CollectQuickConnect(ctx context.Context, secret string, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
+	return s.poll(ctx, secret, true, persist)
 }
 
 func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookupInput) (*DeviceLoginInfo, error) {
@@ -869,14 +876,14 @@ func deviceLoginPollState(record *deviceLoginRecord) (*DeviceLoginPollResult, er
 }
 
 func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*DeviceLoginPollResult, error) {
-	return s.poll(ctx, deviceCode, false)
+	return s.poll(ctx, deviceCode, false, nil)
 }
 
 // poll advances a request for the device holding its device code. A Jellyfin
 // Quick Connect request is collected only through CollectQuickConnect and
 // every other request only through Poll: a Quick Connect approval grants one
 // profile to a Jellyfin app, not a native session that could pick any.
-func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickConnect bool) (*DeviceLoginPollResult, error) {
+func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickConnect bool, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
 	// The approver is immutable once assigned. Read it before taking the
 	// device lock so collection and revocation both lock user -> device;
 	// inserting a session while holding only the device row would invert
@@ -1025,11 +1032,7 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		return nil, fmt.Errorf("consume device login: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit device login poll: %w", err)
-	}
-
-	return &DeviceLoginPollResult{
+	result := &DeviceLoginPollResult{
 		Status:           "approved",
 		PollAfter:        int(deviceLoginPollInterval.Seconds()),
 		TokenPair:        pair,
@@ -1039,7 +1042,17 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		ProfileToken:     profileToken,
 		Temporary:        record.Temporary,
 		SessionExpiresAt: sessionExpiresAt,
-	}, nil
+	}
+	if persist != nil {
+		if err := persist(ctx, tx, result); err != nil {
+			return nil, fmt.Errorf("store quick connect session: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit device login poll: %w", err)
+	}
+	return result, nil
 }
 
 func (s *DeviceLoginService) generateTokenPair(claims Claims) (*TokenPair, error) {
