@@ -52,6 +52,7 @@ func TestParseItemsQuery_EnableImageTypesRepeated(t *testing.T) {
 		{"repeated and comma separated", "EnableImageTypes=Primary,Logo&EnableImageTypes=Backdrop", map[string]bool{"primary": true, "logo": true, "backdrop": true}},
 		{"absent", "Limit=1", nil},
 		{"empty", "EnableImageTypes=", nil},
+		{"only separators", "EnableImageTypes=,%20&EnableImageTypes=", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,5 +69,8 @@ func TestParseItemsQuery_EnableImageTypesRepeated(t *testing.T) {
 	applyItemsResponseOptions(items, parseItemsQuery(httptest.NewRequest(http.MethodGet, "/Items?imageTypeLimit=1&enableImageTypes=Thumb&enableImageTypes=Backdrop", nil), codec))
 	if len(items[0].BackdropImageTags) != 1 {
 		t.Fatalf("BackdropImageTags = %q, want the backdrop kept", items[0].BackdropImageTags)
+	}
+	if _, ok := items[0].ImageTags["Primary"]; ok {
+		t.Fatalf("ImageTags = %v, want Primary stripped", items[0].ImageTags)
 	}
 }

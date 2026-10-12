@@ -103,9 +103,10 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		}
 	}
 	// Jellyfin Web repeats the parameter once per type, so every value counts.
-	if raw := q.Values("EnableImageTypes"); strings.Join(raw, "") != "" {
+	// A list with no types means every type, as in Jellyfin.
+	if kinds := splitCommaValues(q.Values("EnableImageTypes")); len(kinds) > 0 {
 		result.enableImageTypes = map[string]bool{}
-		for _, kind := range splitCommaValues(raw) {
+		for _, kind := range kinds {
 			result.enableImageTypes[strings.ToLower(kind)] = true
 		}
 	}
