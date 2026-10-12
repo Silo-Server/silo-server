@@ -59,11 +59,14 @@ apart. The first successful recheck or sweep puts it back, so a node that
 answers loses milliseconds of selection to one transient error. A node that
 fails every recheck stays out until a sweep finds it answering.
 
-A start that could not reach the node, a failed name lookup included, left
-nothing there to stop, so the start paths skip the stop request they otherwise
-send after a failed start. The same goes for a Jellyfin-compatible start whose
-first manifest fetch cannot reach the node. That request would only wait on the
-dead host before the next candidate is tried.
+After a failed start, or a Jellyfin-compatible start whose first manifest fetch
+fails, the start paths send the node a stop request in case it started the job.
+When the node could not be reached, that includes a failed name lookup, the stop
+runs in the background instead, so the next candidate is tried at once and a node
+that answers again by then still drops the job.
+
+Name lookups are the one difference between the two rules: a failed lookup counts
+as unreachable for the stop, but never marks the node.
 
 ## Other API servers
 

@@ -269,6 +269,18 @@ func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL strin
 	}
 }
 
+// StopRemoteTranscodeAfterFailure stops a remote job after a call to its node
+// failed. When the node could not be reached, the stop runs in the background:
+// waiting on an unreachable host would hold up the next candidate, and a node
+// that answers again by then still drops a job it may have started.
+func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeNodeURL string, err error) {
+	if nodepool.IsConnectFailure(err) {
+		go m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+		return
+	}
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+}
+
 // CancelRemoteTranscode synchronously confirms that a remote process no longer
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
