@@ -444,6 +444,9 @@ sign in to Silo first: Jellyfin clients cannot run the password change it requir
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
 
+A sign-in request body over 64 KiB answers `400` `BadRequest` before the password
+check, whether or not rate limiting is enabled.
+
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
 apply to the returned list. Current native play state is included when locally
@@ -517,8 +520,13 @@ trusted-proxy resolution and ingress-token stripping, as on the native API.
 
 A limited request answers 429 with `Retry-After` and the `X-RateLimit-*`
 headers, in the listener's error envelope:
-`{"Error":"TooManyRequests","Message":"..."}`. With rate limiting disabled the
-listener applies no request limit. Profile PIN attempts keep their separate
+`{"Error":"TooManyRequests","Message":"..."}`.
+
+A limited `POST /Users/AuthenticateByName` answers 403 instead, with the same
+headers and envelope. Jellyfin refuses a locked-out account with 403, and Jellyfin
+Web shows a 403 sign-in failure as "not authorized at this time" but reports any
+status other than 401 or 403 as an unreachable server. With rate limiting disabled
+the listener applies no request limit. Profile PIN attempts keep their separate
 per-profile budget (see [auth-api.md](auth-api.md)).
 
 ## Scope and deployment

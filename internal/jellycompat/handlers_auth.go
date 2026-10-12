@@ -140,10 +140,14 @@ func (h *AuthHandler) HandlePublicUsers(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, []any{})
 }
 
+// maxAuthenticateByNameBody caps the sign-in request body, which holds only a
+// username and password.
+const maxAuthenticateByNameBody = 64 << 10
+
 // HandleAuthenticateByName serves POST /Users/AuthenticateByName.
 func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
 	var req authenticateByNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthenticateByNameBody)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
 		return
 	}
