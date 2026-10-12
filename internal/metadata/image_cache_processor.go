@@ -181,8 +181,8 @@ type ImageCacheProcessor struct {
 	libraryRoots  LibraryRootResolver
 	prefixDeleter ImagePrefixDeleter
 	localCopies   localArtworkCopies
-	// workBudget bounds artwork jobs across the drain and discovery copies
-	// (SetWorkerBudget).
+	// workBudget bounds artwork jobs across drains, manual refreshes and
+	// discovery copies (SetWorkerBudget).
 	workBudget imageWorkBudget
 
 	// enabled mirrors metadata.cache_images. It governs remote artwork only:
@@ -411,9 +411,7 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			return err
 		}
 		if len(jobs) > 0 {
-			// An interactive refresh keeps its own workers rather than queue
-			// behind the drain for the shared budget.
-			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, nil)
+			stats := p.processClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency)
 			// Failures are collected rather than returned: the remaining
 			// artwork still gets cached, and a failed job carries its own
 			// backoff so it is not reclaimed by the loop below. A deferred
@@ -468,15 +466,10 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	return nil
 }
 
-// processClaimedJobs runs a drain's claimed page within the process's artwork
-// budget, which it shares with discovery copies (see imageWorkBudget).
+// processClaimedJobs processes claimed jobs with up to concurrency at once,
+// each also holding a slot of the process's artwork budget, which drains,
+// manual refreshes and discovery copies share (see imageWorkBudget).
 func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int) ImageCacheRunStats {
-	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, &p.workBudget)
-}
-
-// runClaimedJobs processes claimed jobs with up to concurrency at once, each
-// also holding a slot of budget when one is given.
-func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, budget *imageWorkBudget) ImageCacheRunStats {
 	stats := ImageCacheRunStats{Claimed: len(jobs)}
 	if len(jobs) == 0 {
 		return stats
@@ -494,6 +487,12 @@ func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID strin
 			unstarted = append(unstarted, rem.ID)
 		}
 	}
+	// A job waiting for a worker or the shared budget must start early enough
+	// to finish inside its lease; past that, another server could recover it
+	// as abandoned and run it twice. Jobs not started by then go back to the
+	// queue.
+	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart(jobs))
+	defer cancelStart()
 loop:
 	for i, job := range jobs {
 		// Disabling caching mid-run stops remote jobs from starting; local
@@ -508,11 +507,16 @@ loop:
 		// lease expires.
 		select {
 		case sem <- struct{}{}:
-		case <-ctx.Done():
+		case <-startCtx.Done():
 			leaveFrom(i)
 			break loop
 		}
-		release, err := budget.acquire(ctx)
+		release, err := p.workBudget.acquire(startCtx)
+		// A free slot can still be taken after the deadline passed.
+		if err == nil && startCtx.Err() != nil {
+			release()
+			err = startCtx.Err()
+		}
 		if err != nil {
 			<-sem
 			leaveFrom(i)
@@ -1278,4 +1282,17 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 	default:
 		return ImagePoster, fmt.Errorf("unknown metadata image cache image type %q", value)
 	}
+}
+
+// latestImageCacheJobStart is the latest time a job of a claimed page can
+// start and still finish, within ImageCacheJobTimeout, before the lease
+// stamped at claim time runs out.
+func latestImageCacheJobStart(jobs []*models.MetadataImageCacheJob) time.Time {
+	claimedAt := time.Now()
+	for _, job := range jobs {
+		if job != nil && job.LockedAt != nil && job.LockedAt.Before(claimedAt) {
+			claimedAt = *job.LockedAt
+		}
+	}
+	return claimedAt.Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
 }

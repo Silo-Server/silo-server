@@ -387,10 +387,11 @@ Caching and refresh:
   behind a 10-minute discovery hold that other drains respect and copies them
   on two background workers per process, claiming each job by slot. That claim
   ignores the hold but not the backoff of an attempt that failed. The copies
-  share one per-process budget with the queue drain, sized from
-  `metadata.image_workers` and its memory cap. Refreshes never wait for a
-  copy, and a manual refresh claims its own held discoveries without making
-  them due for other servers. A slot that does not fit the in-memory backlog
+  share one per-process budget with the queue drain and manual refreshes,
+  sized from `metadata.image_workers` and its memory cap; a claimed job that
+  cannot start in time to finish inside its lease goes back to the queue.
+  Refreshes never wait for a copy, and a manual refresh claims its own held
+  discoveries without making them due for other servers. A slot that does not fit the in-memory backlog
   waits out the hold, after which any drain copies it.
 - The queue keeps local jobs for retries, and any server may claim one. The
   processor confines each read to the owning library's `media_folders` roots:

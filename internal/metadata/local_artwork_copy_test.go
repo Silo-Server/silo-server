@@ -320,28 +320,56 @@ func TestImageCacheProcessorWaitsForWorkerBudget(t *testing.T) {
 	}
 }
 
-// A manual refresh keeps its own workers: it does not wait for the artwork
-// budget the drain and discovery copies share.
-func TestCacheTargetArtworkDoesNotWaitForTheSharedBudget(t *testing.T) {
+// A manual refresh's jobs hold slots of the artwork budget the drain and
+// discovery copies share, so metadata.image_workers bounds them too.
+func TestCacheTargetArtworkHoldsWorkerBudget(t *testing.T) {
 	root := t.TempDir()
 	job := localArtworkJob("file://" + writeLocalPoster(t, root))
 	jobs := &targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{{job}}}
-	p := NewImageCacheProcessorWithTargets(jobs, &fakeByteImageCacher{}, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	cacher := &gatedByteImageCacher{entered: make(chan struct{}), proceed: make(chan struct{})}
+	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 	p.SetWorkerBudget(1)
-	release, err := p.workBudget.acquire(context.Background())
-	if err != nil {
-		t.Fatalf("take the only slot: %v", err)
-	}
-	defer release()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := p.CacheTargetArtwork(ctx, "movie-1"); err != nil {
+	done := make(chan error)
+	go func() { done <- p.CacheTargetArtwork(context.Background(), "movie-1") }()
+	<-cacher.entered
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.workBudget.acquire(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("budget while the refresh's job runs: acquire = %v, want the only slot held", err)
+	}
+	close(cacher.proceed)
+	if err := <-done; err != nil {
 		t.Fatalf("CacheTargetArtwork: %v", err)
 	}
-	if jobs.succeededID != job.ID {
-		t.Fatalf("succeeded = %d, want the refreshed job copied while the budget is taken", jobs.succeededID)
+}
+
+// Claimed jobs that can no longer start in time to finish inside their lease
+// go back to the queue instead of waiting for a worker or the budget, so no
+// other server recovers them as abandoned while they wait.
+func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
+	root := t.TempDir()
+	source := "file://" + writeLocalPoster(t, root)
+	claimedAt := time.Now().Add(-ImageCacheLeaseDuration)
+	var claimed []*models.MetadataImageCacheJob
+	for i := int64(1); i <= 3; i++ {
+		job := localArtworkJob(source)
+		job.ID = i
+		job.LockedAt = &claimedAt
+		claimed = append(claimed, job)
+	}
+	jobs := &fakeLocalImageCacheJobs{}
+	cacher := &fakeByteImageCacher{}
+	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
+
+	stats := p.processClaimedJobs(context.Background(), "w1", claimed, 3)
+	if len(cacher.byteReqs) != 0 || stats.Succeeded != 0 {
+		t.Fatalf("copies = %d, stats = %+v; want none past the start deadline", len(cacher.byteReqs), stats)
+	}
+	if len(jobs.requeuedIDs) != 3 {
+		t.Fatalf("requeued = %v, want the whole page back in the queue", jobs.requeuedIDs)
 	}
 }
 
