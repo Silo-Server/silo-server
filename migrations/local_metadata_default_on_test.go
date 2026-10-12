@@ -16,14 +16,14 @@ import (
 func TestLocalMetadataDefaultOnMigrationPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
-CREATE TABLE plugin_installations (id integer PRIMARY KEY, plugin_id text NOT NULL, kind text NOT NULL);
-CREATE TABLE plugin_capabilities (plugin_installation_id integer NOT NULL, capability_type text NOT NULL, capability_id text NOT NULL, metadata jsonb NOT NULL);
+CREATE TABLE plugin_installations (id bigint PRIMARY KEY, plugin_id text NOT NULL, kind text NOT NULL);
+CREATE TABLE plugin_capabilities (plugin_installation_id bigint NOT NULL, capability_type text NOT NULL, capability_id text NOT NULL, metadata jsonb NOT NULL);
 CREATE TABLE library_provider_chains (
-    media_folder_id integer NOT NULL, plugin_installation_id integer NOT NULL, capability_id text NOT NULL,
+    media_folder_id integer NOT NULL, plugin_installation_id bigint NOT NULL, capability_id text NOT NULL,
     capability_type text NOT NULL DEFAULT 'metadata_provider.v1', content_level text NOT NULL,
     priority integer NOT NULL, enabled boolean NOT NULL,
     PRIMARY KEY (media_folder_id, plugin_installation_id, capability_id, content_level));
-INSERT INTO plugin_installations VALUES (1, 'silo.builtin', 'builtin'), (2, 'silo.tmdb', 'plugin'), (3, 'silo.tvdb', 'plugin');
+INSERT INTO plugin_installations VALUES (1, 'silo.builtin', 'builtin'), (2, 'silo.tmdb', 'plugin'), (3, 'silo.tvdb', 'plugin'), (3000000000, 'silo.big', 'plugin');
 INSERT INTO plugin_capabilities VALUES
     (1, 'metadata_provider.v1', 'nfo', '{"display_name":"NFO Files","default_priority":{"movie":1,"series":1,"season":1,"episode":1},"default_enabled":false}'),
     (2, 'metadata_provider.v1', 'tmdb', '{"metadata":{"default_priority":{"movie":1}}}');
@@ -32,10 +32,12 @@ INSERT INTO plugin_capabilities VALUES
 -- 12: a library created after NFO existed, NFO first but disabled.
 -- 13: an admin turned NFO on, still last.
 -- 15: two remote providers, NFO off and last.
+-- 19: an installation ID above the integer range.
 -- 16, 17, 18: legacy unlevelled chains, NFO on (16) and off (17, 18), not yet
 --             copied to per-level rows; 18 has two remote providers.
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
     (18, 2, 'tmdb', '', 0, true), (18, 3, 'tvdb', '', 1, true), (18, 1, 'nfo', '', 2, false),
+    (19, 3000000000, 'big', 'movie', 0, true), (19, 1, 'nfo', 'movie', 1, false),
     (16, 2, 'tmdb', '', 0, true), (16, 1, 'nfo', '', 1, true),
     (17, 2, 'tmdb', '', 0, true), (17, 1, 'nfo', '', 1, false),
     (15, 2, 'tmdb', 'movie', 0, true), (15, 3, 'tvdb', 'movie', 1, true), (15, 1, 'nfo', 'movie', 2, false),
@@ -90,6 +92,7 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		{16, "nfo", 0, true}, {16, "tmdb", 1, true},
 		{17, "nfo", 0, true}, {17, "tmdb", 1, true},
 		{18, "nfo", 0, true}, {18, "tmdb", 1, true}, {18, "tvdb", 2, true},
+		{19, "nfo", 0, true}, {19, "big", 1, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
@@ -130,6 +133,7 @@ UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id
 		// NFO row goes behind them, not ahead on its installation ID.
 		{18, "tmdb", 0, true}, {18, "tvdb", 1, true}, {18, "nfo", 2, false},
 		{18, "tvdb", 0, true}, {18, "tmdb", 1, true}, {18, "nfo", 2, false},
+		{19, "big", 0, true}, {19, "nfo", 1, false},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)

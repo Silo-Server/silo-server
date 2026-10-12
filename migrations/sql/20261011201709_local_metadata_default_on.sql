@@ -17,7 +17,7 @@
 -- had NFO on, without undoing edits made after the upgrade.
 CREATE TABLE local_metadata_default_on_chain_backup (
     media_folder_id integer NOT NULL,
-    plugin_installation_id integer NOT NULL,
+    plugin_installation_id bigint NOT NULL,
     capability_id text NOT NULL,
     content_level text NOT NULL,
     priority integer NOT NULL,
