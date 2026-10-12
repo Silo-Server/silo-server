@@ -479,3 +479,52 @@ it("says when an account has tried too many Quick Connect codes", async () => {
   await screen.findByText("You've tried too many codes. Try again in 15 minutes.");
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
 });
+
+it("declines a Quick Connect request without looking it up again", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This sign-in was declined.");
+  expect(recorded.calls.map((c) => c.op)).toEqual(["POST /api/v2/auth/device/deny"]);
+  expect(recorded.lookups()).toBe(1);
+});
+
+it("explains that an admin viewing as someone can't look up a Quick Connect code", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      new V2ProblemError("getDeviceLogin", {
+        type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+        title: "Permission denied",
+        status: 403,
+        detail: "Only the account's own signed-in session can look up a Quick Connect code.",
+        instance: "urn:silo:request:1",
+      } as never),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText(/Stop viewing as laura to approve a TV/);
+});
+
+it("says a PIN lockout is about the profile, not the codes", async () => {
+  profiles.list = [{ id: "p-kids", name: "Kids", has_pin: true }];
+  profiles.verify.mockRejectedValue(
+    new V2ProblemError(
+      "verifyProfilePIN",
+      {
+        type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
+        title: "Rate limited",
+        status: 429,
+        detail: "Too many incorrect PINs.",
+        instance: "urn:silo:request:1",
+      } as never,
+      300,
+    ),
+  );
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("Too many incorrect PINs. Try again in 5 minutes.");
+  expect(recorded.calls).toEqual([]);
+});

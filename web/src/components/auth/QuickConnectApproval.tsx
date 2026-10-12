@@ -60,7 +60,18 @@ export function QuickConnectApproval({
     try {
       let profileToken = unlockedToken;
       if (needsPin) {
-        const verified = await verifyProfilePIN(selected.id, pin);
+        const verified = await verifyProfilePIN(selected.id, pin).catch((err: unknown) => {
+          // A PIN lockout is the profile's own limit, not the code budget.
+          if (err instanceof V2ProblemError && err.status === 429) {
+            const minutes = Math.max(1, Math.ceil((err.retryAfterSeconds ?? 60) / 60));
+            setError(
+              `Too many incorrect PINs. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+            );
+            return null;
+          }
+          throw err;
+        });
+        if (!verified) return;
         if (!verified.valid || !verified.profile_token) {
           setError("That PIN isn't right.");
           return;

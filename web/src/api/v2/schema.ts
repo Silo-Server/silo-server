@@ -5698,7 +5698,7 @@ export interface paths {
     };
     /**
      * Describe a pairing request to the person approving it.
-     * @description A six-digit Jellyfin Quick Connect code is found only for a signed-in login session: send its bearer token. Each such lookup also spends the account's Quick Connect code budget.
+     * @description A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget.
      */
     get: operations["getDeviceLogin"];
     put?: never;
@@ -83645,6 +83645,24 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

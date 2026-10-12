@@ -124,7 +124,7 @@ func TestQuickConnectApproveAndCollectDB(t *testing.T) {
 
 	result, err := svc.CollectQuickConnect(ctx, start.Secret)
 	if err != nil || result.TokenPair == nil || result.User == nil || result.User.ID != userID ||
-		result.ProfileID != profileID || result.Temporary {
+		result.ProfileID != profileID || result.ProfileName != "Kids" || result.Temporary {
 		t.Fatalf("collect = %+v, %v", result, err)
 	}
 	claims, err := svc.jwt.ValidateToken(result.TokenPair.AccessToken)
@@ -310,5 +310,70 @@ func TestQuickConnectApproveAsSessionDB(t *testing.T) {
 	}
 	if err := svc.ApproveQuickConnectAsSession(ctx, revoked.Code, token, profileID); !errors.Is(err, ErrSessionRevoked) {
 		t.Fatalf("approve from a revoked session = %v, want ErrSessionRevoked", err)
+	}
+}
+
+// TestQuickConnectFreesExpiredCodesDB: an expired Quick Connect request gives
+// its code back at once, while a live one still makes a start draw again.
+func TestQuickConnectFreesExpiredCodesDB(t *testing.T) {
+	svc, pool, _, _, name := quickConnectTestService(t)
+	ctx := t.Context()
+	first, err := randomQuickConnectSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := randomQuickConnectSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets := []string{first}
+	svc.newQuickConnectSecret = func() (string, error) {
+		next := secrets[0]
+		if len(secrets) > 1 {
+			secrets = secrets[1:]
+		}
+		return next, nil
+	}
+
+	old, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("old")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE device_login_requests SET expires_at = NOW() - INTERVAL '1 second' WHERE device_name = $1`, name("old")); err != nil {
+		t.Fatal(err)
+	}
+	reused, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("reused")})
+	if err != nil || reused.Code != old.Code {
+		t.Fatalf("start over an expired code = %+v, %v; want code %s", reused, err, old.Code)
+	}
+
+	secrets = []string{first, second}
+	fresh, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("fresh")})
+	if err != nil || fresh.Code == reused.Code || fresh.Code != QuickConnectCode(second) {
+		t.Fatalf("start over a live code = %+v, %v; want the second secret's code", fresh, err)
+	}
+}
+
+// TestQuickConnectRefusesTemporaryPasswordDB: an account that must replace a
+// temporary password cannot collect, and its approval is withdrawn so the
+// app stops polling.
+func TestQuickConnectRefusesTemporaryPasswordDB(t *testing.T) {
+	svc, pool, userID, profileID, name := quickConnectTestService(t)
+	ctx := t.Context()
+	start, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("temp-password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ApproveForProfile(ctx, DeviceLoginLookupInput{UserCode: start.Code, AccountID: userID}, userID, profileID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET password_change_required = TRUE WHERE id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CollectQuickConnect(ctx, start.Secret); !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Fatalf("collect = %v, want ErrPasswordChangeRequired", err)
+	}
+	if got := quickConnectStatus(t, svc, start.Secret); got != DeviceLoginStatusDenied {
+		t.Fatalf("status after refused collection = %q, want denied", got)
 	}
 }

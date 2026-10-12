@@ -595,7 +595,13 @@ func stripSlashesExceptWeb(next http.Handler) http.Handler {
 // approving a code spends device_lookup, like the native operations that do
 // the same.
 func registerQuickConnectRoutes(r chi.Router, deps Dependencies, authHandler *AuthHandler) {
-	handler := NewQuickConnectHandler(deps.DeviceLogin)
+	// Quick Connect is on only when an approved request can also be
+	// exchanged for a session.
+	var service QuickConnectService
+	if _, ok := deps.LoginResolver.(quickConnectLogin); ok {
+		service = deps.DeviceLogin
+	}
+	handler := NewQuickConnectHandler(service)
 	limited := func(bucket string, h http.HandlerFunc) http.Handler {
 		if deps.RateLimitMW == nil {
 			return h

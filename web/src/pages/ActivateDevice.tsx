@@ -26,7 +26,7 @@ import { Smartphone } from "lucide-react";
 
 type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
 
-type LoadError = "not_found" | "failed" | "rate_limited";
+type LoadError = "not_found" | "failed" | "rate_limited" | "impersonating";
 
 // After approving, the page watches the request until it settles: the TV
 // collects its session, or the request is denied, canceled or expires. The
@@ -116,7 +116,15 @@ function ActivateDeviceRequest() {
         const status = error instanceof V2ProblemError ? error.status : 0;
         // A Quick Connect code spends the account's code budget.
         setRetryAfter(error instanceof V2ProblemError ? error.retryAfterSeconds : null);
-        setLoadError(status === 404 ? "not_found" : status === 429 ? "rate_limited" : "failed");
+        setLoadError(
+          status === 404
+            ? "not_found"
+            : status === 429
+              ? "rate_limited"
+              : status === 403
+                ? "impersonating"
+                : "failed",
+        );
       }
     },
     [code, token, needsAccount, lookupAccount],
@@ -168,11 +176,16 @@ function ActivateDeviceRequest() {
         setApprovedHere(true);
       } else {
         await v2("POST /api/v2/auth/device/deny", { body });
+        if (isQuickConnect) {
+          setDetails((current) => (current ? { ...current, status: "denied" } : current));
+        }
       }
     } catch (error) {
       // A conflict or gone means the request moved on; the reload shows why.
       const moved = error instanceof V2ProblemError && [404, 409, 410].includes(error.status);
-      if (
+      if (error instanceof V2ProblemError && error.status === 429) {
+        setActionError(tooManyCodesMessage(error.retryAfterSeconds));
+      } else if (
         error instanceof V2ProblemError &&
         error.status === 403 &&
         error.problemType === "permission_denied"
@@ -188,7 +201,11 @@ function ActivateDeviceRequest() {
         );
       }
     } finally {
-      await loadDetails(true);
+      // Every Quick Connect lookup spends the account's code budget, so a
+      // decision on one is not followed by a reload.
+      if (!isQuickConnect) {
+        await loadDetails(true);
+      }
       setActing(false);
       setFocusResult(true);
     }
@@ -254,31 +271,24 @@ function ActivateDeviceRequest() {
     .join(" · ");
 
   let resultMessage = "";
-  switch (isQuickConnect ? details?.status : undefined) {
+  switch (details?.status) {
     case "approved":
-      resultMessage =
-        approvedHere && approvedProfile
+      if (isQuickConnect) {
+        resultMessage = approvedProfile
           ? `Done. ${deviceName} is signing in as ${approvedProfile}.`
           : "This device was approved and is finishing sign-in.";
+      } else {
+        resultMessage = approvedHere
+          ? "Done. Your TV is signing in."
+          : "This TV was approved and is finishing sign-in.";
+      }
       break;
     case "consumed":
-      resultMessage = "That device is signed in.";
-      break;
-    case "denied":
-      resultMessage = "This sign-in was declined.";
-      break;
-    case "expired":
-      resultMessage = "This code expired. Start Quick Connect again in the app.";
-      break;
-  }
-  switch (isQuickConnect ? undefined : details?.status) {
-    case "approved":
-      resultMessage = approvedHere
-        ? "Done. Your TV is signing in."
-        : "This TV was approved and is finishing sign-in.";
-      break;
-    case "consumed":
-      resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
+      if (isQuickConnect) {
+        resultMessage = "That device is signed in.";
+      } else {
+        resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
+      }
       break;
     case "denied":
       resultMessage = "This sign-in was declined.";
@@ -287,7 +297,9 @@ function ActivateDeviceRequest() {
       resultMessage = "This TV stopped waiting. Start again on the TV.";
       break;
     case "expired":
-      resultMessage = "This code expired. Your TV is showing a new one; scan it again.";
+      resultMessage = isQuickConnect
+        ? "This code expired. Start Quick Connect again in the app."
+        : "This code expired. Your TV is showing a new one; scan it again.";
       break;
   }
 
@@ -347,7 +359,9 @@ function ActivateDeviceRequest() {
                   ? "We couldn't find that code. Check the code on your TV."
                   : loadError === "rate_limited"
                     ? tooManyCodesMessage(retryAfter)
-                    : "Couldn't look up this code. Try again."}
+                    : loadError === "impersonating"
+                      ? impersonationText
+                      : "Couldn't look up this code. Try again."}
               </p>
               {loadError === "failed" ? (
                 <Button type="button" className="w-full" onClick={() => void loadDetails()}>

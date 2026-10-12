@@ -35,11 +35,13 @@ func ProfilePINKey(userID int, profileID string) string {
 }
 
 // QuickConnectCodePolicy bounds how many six-digit Jellyfin Quick Connect
-// codes one account may try: ten lookups or decisions, then fifteen minutes
-// locked. The window is at least a request's fifteen-minute life, so an
-// account gets a handful of guesses at any one code. The device sign-in
-// service keys it per account (auth.DeviceLoginService).
-var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
+// codes one account may try: twenty lookups or decisions, then fifteen
+// minutes locked. Approving one device takes two (the lookup and the
+// decision), so a household can set up several in a sitting, while the
+// window, at least a request's fifteen-minute life, leaves an account a few
+// dozen guesses at any one code. The device sign-in service keys it per
+// account (auth.DeviceLoginService).
+var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 20, Window: 15 * time.Minute}
 
 // AttemptLimiter counts attempts at a secret per key under an AttemptPolicy.
 // The Redis backend shares the count across every node of a cluster; the

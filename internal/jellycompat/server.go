@@ -72,9 +72,9 @@ type Dependencies struct {
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	// RateLimitMW is the native API's request limiter, shared so
-	// AuthenticateByName spends the same per-client "login" budget as native
-	// sign-in. Nil (rate limiting disabled) leaves sign-in unlimited, as on
+	// RateLimitMW is the native API's request limiter, shared so Jellyfin
+	// sign-in routes spend the same per-client budgets as their native
+	// counterparts. Nil (rate limiting disabled) leaves them unlimited, as on
 	// the native API.
 	RateLimitMW   *ratelimit.Middleware
 	Authenticator *Authenticator

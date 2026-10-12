@@ -201,10 +201,13 @@ type DeviceLoginPollResult struct {
 	Opened bool
 	// ExpiresAt is the pending request's current expiry, which approver
 	// lookups can move later than the start answer said. Zero otherwise.
-	ExpiresAt        time.Time
-	TokenPair        *TokenPair
-	User             *models.User
-	ProfileID        string
+	ExpiresAt time.Time
+	TokenPair *TokenPair
+	User      *models.User
+	ProfileID string
+	// ProfileName names the bound profile of a remote-playback or Quick
+	// Connect request.
+	ProfileName      string
 	ProfileToken     string
 	Temporary        bool
 	SessionExpiresAt time.Time
@@ -363,6 +366,17 @@ func (s *DeviceLoginService) createWithFreshCodes(
 		record.ExpiresAt = now.Add(ttl)
 		record.CreatedAt = now
 		record.UpdatedAt = now
+		if record.ClientPurpose == DeviceLoginPurposeQuickConnect {
+			// Six digits are few, so an expired Quick Connect request gives
+			// its code back at once instead of holding it until retention
+			// deletes the row a day later.
+			if _, err := s.pool.Exec(ctx, `
+				DELETE FROM device_login_requests
+				WHERE user_code_hash = $1 AND client_purpose = $2 AND expires_at <= NOW()
+			`, record.UserCodeHash, DeviceLoginPurposeQuickConnect); err != nil {
+				return codes, record, fmt.Errorf("free expired quick connect code: %w", err)
+			}
+		}
 		err = s.create(ctx, record)
 		if err == nil {
 			return codes, record, nil
@@ -909,11 +923,20 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 	}
 	if quickConnect && user.PasswordChangeRequired {
 		// As for Jellyfin password sign-in: the app cannot run the password
-		// change a temporary password requires.
+		// change a temporary password requires. The approval is withdrawn so
+		// the app stops polling instead of retrying until the code expires.
+		if _, err := tx.Exec(ctx, `
+			UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
+			WHERE id = $1`, record.ID, DeviceLoginStatusDenied); err != nil {
+			return nil, fmt.Errorf("withdraw quick connect approval: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit quick connect withdrawal: %w", err)
+		}
 		return nil, ErrPasswordChangeRequired
 	}
 
-	profileID := ""
+	profileID, profileName := "", ""
 	var profile *userstore.Profile
 	switch record.ClientPurpose {
 	case DeviceLoginPurposeRemote, DeviceLoginPurposeQuickConnect:
@@ -926,6 +949,7 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		if err != nil {
 			return nil, err
 		}
+		profileName = profile.Name
 	}
 
 	now := time.Now().UTC()
@@ -1011,6 +1035,7 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		TokenPair:        pair,
 		User:             user,
 		ProfileID:        profileID,
+		ProfileName:      profileName,
 		ProfileToken:     profileToken,
 		Temporary:        record.Temporary,
 		SessionExpiresAt: sessionExpiresAt,
@@ -1074,7 +1099,7 @@ func (s *DeviceLoginService) findByLookup(ctx context.Context, input DeviceLogin
 	if code == "" {
 		return nil, "", ErrDeviceLoginNotFound
 	}
-	if len(code) == quickConnectCodeLength {
+	if IsQuickConnectCode(code) {
 		// Six digits are few enough to guess, so a Quick Connect code is
 		// looked up only for a signed-in account, and every attempt counts
 		// against that account as well as the caller's address.
@@ -1368,6 +1393,12 @@ func randomUserCode() (string, error) {
 		return "", err
 	}
 	return formatUserCode(code), nil
+}
+
+// IsQuickConnectCode reports whether a typed code has the length of a Quick
+// Connect code, ignoring spaces and dashes.
+func IsQuickConnectCode(code string) bool {
+	return len(normalizeUserCode(code)) == quickConnectCodeLength
 }
 
 // QuickConnectCode is the six-digit code of the Quick Connect request whose

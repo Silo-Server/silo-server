@@ -179,18 +179,8 @@ func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) 
 		// Pending, denied, withdrawn, expired or already collected.
 		return nil, ErrQuickConnectNotAuthorized
 	}
-	store, err := r.storeProvider.ForUser(ctx, result.User.ID)
-	if err != nil {
-		return nil, fmt.Errorf("open user store: %w", err)
-	}
-	profile, err := store.GetProfile(ctx, result.ProfileID)
-	if err != nil {
-		return nil, fmt.Errorf("load profile: %w", err)
-	}
-	if profile == nil {
-		return nil, ErrProfileNotFound
-	}
-	return r.putSession(quickConnectUsername(result.User.Username, profile.Name), result.User, result.TokenPair, profile.ID, profile.Name)
+	// Collection loaded the approved profile under the request's lock.
+	return r.putSession(quickConnectUsername(result.User.Username, result.ProfileName), result.User, result.TokenPair, result.ProfileID, result.ProfileName)
 }
 
 // quickConnectUsername is the name a Quick Connect session reports: the

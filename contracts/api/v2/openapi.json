@@ -126769,7 +126769,7 @@
     },
     "/api/v2/auth/device": {
       "get": {
-        "description": "A six-digit Jellyfin Quick Connect code is found only for a signed-in login session: send its bearer token. Each such lookup also spends the account's Quick Connect code budget.",
+        "description": "A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget.",
         "operationId": "getDeviceLogin",
         "parameters": [
           {
@@ -126819,6 +126819,26 @@
               }
             },
             "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {

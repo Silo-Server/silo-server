@@ -204,16 +204,20 @@ func TestGetDeviceLogin(t *testing.T) {
 	}
 }
 
-// TestQuickConnectLookupNeedsSession: a six-digit Quick Connect code is found
-// only when the lookup carries a signed-in session's token, which the public
-// lookup reads without requiring; a missing, expired or API-key credential
-// reads as unknown rather than refused. Decisions pass the deciding account,
-// and the request is approved for a profile through approve-handoff.
+// TestQuickConnectLookupNeedsSession: a six-digit Quick Connect code is looked
+// up only for the account's own signed-in session, which the public lookup
+// reads without requiring: a missing, expired or API-key credential is 401 for
+// every six-digit code, so a client refreshes instead of reading the code as
+// unknown, and an impersonation session is 403. Decisions pass the deciding
+// account, and the request is approved for a profile through approve-handoff.
 func TestQuickConnectLookupNeedsSession(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
 	for _, hdr := range []map[string]string{nil, bearer(expiredToken), bearer(apiKeyToken)} {
-		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code=482177", "", hdr), TypeNotFound)
+		for _, code := range []string{"482177", "999999"} {
+			requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code="+code, "", hdr), TypeAuthenticationRequired)
+		}
 	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code=482177", "", bearer(impersonatedToken)), TypePermissionDenied)
 	rec := do(t, h, http.MethodGet, "/api/v2/auth/device?code=482177", "", bearer(memberToken))
 	if rec.Code != 200 || !contains(rec.Body.String(), `"client_purpose":"jellyfin_quick_connect"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())

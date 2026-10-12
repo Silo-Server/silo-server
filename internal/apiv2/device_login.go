@@ -42,7 +42,8 @@ import (
 // Jellyfin Quick Connect requests (client_purpose jellyfin_quick_connect)
 // are opened by Jellyfin apps on the Jellyfin-compatible API and carry
 // six-digit codes. Those codes are found only for a signed-in login session,
-// which the public lookup reads when a bearer token is sent, and every
+// which the public lookup reads when a bearer token is sent (401 without a
+// valid one, 403 from an impersonation session), and every
 // lookup or decision with one also spends the account's Quick Connect code
 // budget (429 rate_limited once spent). They are approved for a profile
 // through approve-handoff; approve answers 409 conflict.
@@ -229,8 +230,8 @@ func registerDeviceLogin(reg *Registry) {
 	// 409 and on an expired one 410 (device_login_expired).
 	lookup := humaOp(http.MethodGet, Prefix+"/auth/device", "getDeviceLogin", "device-login",
 		"Describe a pairing request to the person approving it.")
-	lookup.Description = "A six-digit Jellyfin Quick Connect code is found only for a signed-in login session: send its bearer token. Each such lookup also spends the account's Quick Connect code budget."
-	lookup.Errors = []int{http.StatusNotFound, http.StatusTooManyRequests}
+	lookup.Description = "A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget."
+	lookup.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests}
 	lookup.Metadata = map[string]any{metaAttachSession: true}
 	Register(reg, Operation{
 		Operation: lookup,
@@ -376,8 +377,19 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 			WithErrors(ProblemError{Location: "query.code", Code: codeRequired, Detail: "Either token or code is required."})
 	}
 	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
-	if claims := claimsFrom(ctx); claims.IsOwnLoginSession() {
+	claims := claimsFrom(ctx)
+	if claims.IsOwnLoginSession() {
 		input.AccountID = claims.UserID
+	}
+	// A Quick Connect code is looked up only for the account's own session.
+	// Without one the answer is the same for every six-digit code, so it says
+	// nothing about which exist, and a client holding an expired token learns
+	// to refresh it instead of reading the code as unknown.
+	if in.Token == "" && auth.IsQuickConnectCode(in.Code) && input.AccountID == 0 {
+		if claims != nil {
+			return nil, NewProblem(TypePermissionDenied, "Only the account's own signed-in session can look up a Quick Connect code.")
+		}
+		return nil, NewProblem(TypeAuthenticationRequired, "Sign in to look up a Quick Connect code.")
 	}
 	info, err := reg.deps.Devices.LookupDeviceLogin(ctx, input)
 	if err != nil {

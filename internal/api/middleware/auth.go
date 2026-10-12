@@ -215,6 +215,7 @@ func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 				uid := claims.UserID
 				lc.UserID = &uid
+				lc.ImpersonatorUserID = claims.ImpersonatorUserID
 				lc.SessionID = claims.SessionID
 			}
 			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))

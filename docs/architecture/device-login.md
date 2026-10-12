@@ -168,7 +168,9 @@ except these:
   ungrouped. It is derived one-way from the request's secret
   (`auth.QuickConnectCode`) instead of being drawn beside it, because Jellyfin
   apps redraw the code from every `Connect` poll while the server stores codes
-  only as hashes. A clash with a stored code draws a fresh secret.
+  only as hashes. A clash with a live code draws a fresh secret; an expired
+  Quick Connect request gives its code back at once instead of holding it until
+  retention deletes the row.
 - **Secret:** the device code, in Jellyfin's form: 32 random bytes as 64
   uppercase hex digits.
 - **Profile:** a Jellyfin session belongs to one profile, so the approval names
@@ -180,7 +182,7 @@ except these:
   compat session for the approved profile; the native poll answers 404 for its
   secret, because a native session could pick any profile. An account that
   must replace a temporary password is refused, as in Jellyfin password
-  sign-in.
+  sign-in, and the approval is withdrawn so the app stops polling.
 - **Not temporary:** the session lasts like any sign-in.
 - **No device cancel:** Jellyfin has no route for an app to withdraw its
   request; an abandoned code expires. Approvers can still decline it.
@@ -188,25 +190,36 @@ except these:
 Six digits are 100 times fewer than eight, so a Quick Connect code is found
 only for a signed-in account:
 
-- An anonymous lookup of a six-digit code answers not found, whether or not
-  the request exists. `getDeviceLogin` stays public; it reads a bearer token
-  when one is sent (`AttachSession`) and uses it only when it belongs to an
-  active login session. The frozen v1 routes never pass an account, so they
-  never see a Quick Connect request.
+- `getDeviceLogin` stays public; it reads a bearer token when one is sent
+  (`AttachSession`) and uses it only when it belongs to an active login
+  session. Without one, a six-digit lookup answers 401, and from an
+  impersonation session 403, whether or not the request exists; a client
+  holding an expired token refreshes it instead of reading the code as
+  unknown. The frozen v1 routes never pass an account, so a six-digit code is
+  unknown to them.
 - Every lookup or decision with a six-digit code by an account spends one
-  attempt of that account's budget, `ratelimit.QuickConnectCodePolicy`: ten
+  attempt of that account's budget, `ratelimit.QuickConnectCodePolicy`: 20
   attempts, then 15 minutes locked, answered 429 `rate_limited` with
-  `Retry-After`. Every attempt counts, a hit included, and nothing resets the
-  count, so an account cannot reset it by looking up a request it opened
-  itself. The budget lives in Redis when the server has Redis, shared by every
-  node and by the native routes and Jellyfin's `Authorize`, and in process
-  memory otherwise.
+  `Retry-After`. Approving one device takes two. Every attempt counts, a hit
+  included, and nothing resets the count, so an account cannot reset it by
+  looking up a request it opened itself. The budget lives in Redis when the
+  server has Redis, shared by every node and by the native routes and
+  Jellyfin's `Authorize`, and in process memory otherwise. Like the profile PIN
+  limit, it fails open while Redis cannot answer, leaving the per-address
+  budget.
 - The per-address `device_lookup` budget still applies on top.
 
-An account therefore gets at most about 20 guesses at a code over its
+An account therefore gets at most about 40 guesses at a code over its
 30-minute cap, against 9 x 10^5 codes. Eight-digit codes are not counted
-against the account. The approval page does not watch a Quick Connect request
-after approving it, since each lookup would spend the budget.
+against the account. The approval page neither watches a Quick Connect request
+nor reloads it after a decision, since each lookup would spend the budget.
+
+Starting a request needs no account, so the per-address `device_start` budget
+is what bounds how many live requests one address holds. Many addresses can
+still fill a noticeable share of the six-digit space for as long as their
+requests live; a mistyped code is then more likely to land on someone else's
+request. The approval card names the device, its app and the address it came
+from so the approver can tell.
 
 ## Clusters
 

@@ -231,10 +231,11 @@ func TestQuickConnectAuthorizeApprovesAsTheSession(t *testing.T) {
 // AuthenticateByName; a secret that is not approved is 404.
 func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	service := &fakeQuickConnect{collect: &auth.DeviceLoginPollResult{
-		Status:    auth.DeviceLoginStatusApproved,
-		TokenPair: &auth.TokenPair{AccessToken: "native-access", RefreshToken: "native-refresh", ExpiresIn: 3600},
-		User:      &models.User{ID: 7, Username: "alice"},
-		ProfileID: "kids",
+		Status:      auth.DeviceLoginStatusApproved,
+		TokenPair:   &auth.TokenPair{AccessToken: "native-access", RefreshToken: "native-refresh", ExpiresIn: 3600},
+		User:        &models.User{ID: 7, Username: "alice"},
+		ProfileID:   "kids",
+		ProfileName: "Kids",
 	}}
 	router, store := quickConnectRouter(t, service)
 	rec := serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{"Secret":"SECRET"}`, map[string]string{"Content-Type": "application/json"})
