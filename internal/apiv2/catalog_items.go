@@ -586,11 +586,13 @@ const (
 	opListCatalogItems     = "listCatalogItems"
 	opQueryCatalogItems    = "queryCatalogItems"
 	locationQueryImageSize = "query.image_size"
+	locationQueryGroups    = "query.groups"
 	opListAudiobookGroups  = "listAudiobookGroups"
 )
 
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
+	registerCatalogLetters(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
@@ -946,19 +948,13 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		decoder := json.NewDecoder(strings.NewReader(in.Groups))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&groups); err != nil || !json.Valid([]byte(in.Groups)) {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
 		}
-		for _, g := range groups {
-			rules := make([]catalogpkg.QueryRule, 0, len(g.Rules))
-			for _, rule := range g.Rules {
-				rules = append(rules, catalogpkg.QueryRule{Field: rule.Field, Op: rule.Op, Value: rule.Value})
-			}
-			req.Query.Groups = append(req.Query.Groups, catalogpkg.QueryGroup{Match: g.Match, Rules: rules})
-		}
+		req.Query.Groups = append(req.Query.Groups, catalogQueryGroups(groups)...)
 		canonical, _ := json.Marshal(groups)
 		values.Set("groups", string(canonical))
 		if err := req.ValidateQueryDefinition(); err != nil {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: err.Error()})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
 		}
 	}
 	operationID := in.operationID

@@ -594,6 +594,66 @@ immutable. Fallback may select PostgreSQL before the first page, but a continuat
 never switches providers. Expiry or Redis eviction returns `invalid_cursor`;
 Redis failure returns `dependency_unavailable`. Restarting performs a new search.
 
+### Letter index
+
+`POST /api/v2/catalog/letters` (`queryCatalogLetters`) backs an alphabetical jump
+bar over a query-source browse in title order. It takes the browse's
+`library_id`, `type`, `match`, and rule `groups`, as `queryCatalogItems` does,
+and an `order` of `asc` (default) or `desc`. It answers the letters that have
+titles, in list order, and the runs of consecutive titles under one letter:
+
+```json
+{
+  "total": 1240,
+  "letters": [
+    { "letter": "#", "count": 14, "position": 0 },
+    { "letter": "A", "count": 96, "position": 14 }
+  ],
+  "runs": [
+    { "letter": "#", "position": 0 },
+    { "letter": "A", "position": 14 }
+  ]
+}
+```
+
+A title files under the first character of its title sort key, the same key
+`name_prefix` matches: the sort title, or the title when no sort title is set.
+"The Hobbit" with sort title "Hobbit, The" files under H. Accented Latin
+initials fold to their base letter ("Élite" under E). Digits, symbols, and
+other scripts file under `#`. A letter missing from the list has no titles.
+The folding is the index's own: `name_prefix` still matches the characters
+as written, so `name_prefix=e` leaves out "Élite", and `#` has no
+`name_prefix` equivalent.
+
+`position` is the zero-based index of the letter's first title in
+`queryCatalogItems` with the same scope and rules, `sort: "title"`, the same
+`order`, and no `query_limit`. Send it as `seek` to load that window. The index
+counts the catalog as it is when the request runs; it takes no `cursor`, so it
+is not fenced to a window cursor's snapshot. Titles added between the two reads,
+such as during a scan, shift later positions and `total` by that many, and the
+next refresh of both reads agrees again. Positions number the rows of the
+same ordering the pager uses, so they hold under any database collation; when
+the collation interleaves a letter's titles with another's (an accented or
+punctuated title sorted among plain ones), `count` still covers every title
+under the letter and `position` is the first one. `total` is the exact count of
+the result at that moment, so a client can size a virtualized list without
+`skip_total=false`.
+
+`runs` covers the whole result in list order: each run starts at its
+`position` and ends where the next starts, or at `total`. Use it, not
+`letters`, to tell which letter a list position is under, such as to mark the
+current letter while the viewer scrolls. A letter has more than one run when
+the collation sorts some of its titles apart: under `C`, accented initials sort
+after Z, and most collations put non-Latin scripts, which file under `#`, after
+the Latin letters. The number of runs grows with that interleaving, not with
+the result.
+
+The letter index sorts the whole result to number it, so its cost grows with
+the result like an exact count; it has the same 10-second deadline as a window
+seek. It covers the query source only and takes no search text or
+`name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
+the operation is available.
+
 ## History ordering
 
 History defaults to chronological watch-event order. Explicit `date_viewed`

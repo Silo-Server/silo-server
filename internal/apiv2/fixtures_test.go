@@ -1755,6 +1755,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, loginSessionFixtureCases()...)
 	cases = append(cases, adminDownloadStorageFixtureCases()...)
 	cases = append(cases, homeLayoutItemsFixtureCases()...)
+	cases = append(cases, catalogLettersFixtureCases()...)
 	return append(cases, pushRegistrationReceiptFixtureCases()...)
 }
 

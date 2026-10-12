@@ -377,6 +377,19 @@ export function useCatalogWindow(
     return { maxLoadedEnd, highestPageHasMore };
   }, [limit, pageResults]);
 
+  // The furthest any page of this browse and snapshot has loaded. Pages
+  // scrolled out of the window drop out of `pageResults`, but the titles they
+  // returned still exist; a new snapshot starts over.
+  const loadedEndKey = `${estimateKey}|${snapshot ?? ""}`;
+  const [loadedEndMark, setLoadedEndMark] = useState({ key: loadedEndKey, end: 0 });
+  const loadedEnd = Math.max(
+    nonExactPageStats.maxLoadedEnd,
+    loadedEndMark.key === loadedEndKey ? loadedEndMark.end : 0,
+  );
+  if (loadedEndMark.key !== loadedEndKey || loadedEndMark.end < loadedEnd) {
+    setLoadedEndMark({ key: loadedEndKey, end: loadedEnd });
+  }
+
   const initialEstimatedTotalItems = useMemo(() => {
     if (page0Result.data?.total_exact !== false) {
       return page0Result.data?.total ?? 0;
@@ -440,6 +453,11 @@ export function useCatalogWindow(
     data: {
       title,
       totalItems,
+      // Items known to exist: the exact total when the source reports one,
+      // else the end of the furthest page loaded. Unlike `totalItems`, never
+      // the scroll runway estimated past it.
+      knownItems:
+        page0Result.data?.total_exact !== false ? (page0Result.data?.total ?? 0) : loadedEnd,
       pages,
       // Collection sources report the order they actually resolved in, after
       // the viewer's saved override and the collection's configured default.
@@ -484,6 +502,49 @@ export function useLibraryHasItems(libraryId: number, options: { enabled?: boole
     select: (page: CatalogPage) => page.items.length > 0,
     enabled: (options.enabled ?? true) && Number.isSafeInteger(libraryId) && libraryId > 0,
     staleTime: 60 * 1000,
+  });
+}
+
+/** The letter index of a title-ordered browse; see `queryCatalogLetters`. */
+export type CatalogLetters = V2Result<"POST /api/v2/catalog/letters">;
+export type CatalogLetter = CatalogLetters["letters"][number];
+export type CatalogLetterRun = CatalogLetters["runs"][number];
+
+export async function fetchCatalogLetters(
+  state: CatalogSearchState,
+  options?: Pick<RequestInit, "signal">,
+): Promise<CatalogLetters> {
+  const scope = catalogScopeQuery(state);
+  const order = buildCatalogApiSearchParams(state).get("order");
+  return v2("POST /api/v2/catalog/letters", {
+    body: {
+      library_id: scope.library_id,
+      type: scope.type,
+      match: state.query_definition.match,
+      groups: state.query_definition.groups,
+      order: order === "desc" ? "desc" : "asc",
+    },
+    signal: options?.signal ?? undefined,
+  });
+}
+
+/**
+ * The letter index of a title-ordered query-source browse: how many titles
+ * file under each letter and the list position of each letter's first title,
+ * for an alphabetical jump bar. Keyed like the browse it indexes, so a filter
+ * or order change asks again and a library refresh invalidates both.
+ */
+export function useCatalogLetters(state: CatalogSearchState, options: { enabled?: boolean } = {}) {
+  const scope = catalogScopeQuery(state);
+  return useQuery({
+    queryKey: catalogKeys.letters({
+      library_id: scope.library_id ? Number(scope.library_id) : undefined,
+      type: scope.type,
+      query_fingerprint: catalogQueryFingerprint(state),
+    }),
+    queryFn: ({ signal }) => fetchCatalogLetters(state, { signal }),
+    enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
+    staleTime: 10 * 60 * 1000,
   });
 }
 

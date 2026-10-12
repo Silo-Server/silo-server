@@ -205,6 +205,9 @@ type previewPagePlan struct {
 	maxResults            int
 	limitArgIdx           int
 	deferEpisodeHydration bool
+	// titleKey is the scope's title sort key, which title order sorts by and
+	// the letter index files items under. It binds no arguments.
+	titleKey string
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -520,6 +523,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		titleKey:        builder.normalizedTitleExpr(),
 		// Keep non-episode relations, sort joins, history CTEs and source-ordered
 		// plans on their existing paths. Only the built-in episode relation
 		// guarantees the unique IDs and simple, deterministic title sort required

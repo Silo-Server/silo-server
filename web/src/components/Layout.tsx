@@ -400,6 +400,7 @@ export default function Layout({ children }: LayoutProps) {
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
+          data-sticky-header
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
