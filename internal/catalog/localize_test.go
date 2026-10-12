@@ -212,4 +212,21 @@ func TestApplyItemLocalizationKeepsNFONamedArtwork(t *testing.T) {
 	if got.PosterPath != item.PosterPath || got.PosterSourcePath != item.PosterSourcePath {
 		t.Errorf("localized poster replaced the NFO's: path %q source %q", got.PosterPath, got.PosterSourcePath)
 	}
+
+	season := &models.Season{
+		ContentID:        "s2",
+		PosterPath:       "nfo/series/c1/poster/2/original.webp",
+		PosterSourcePath: "nfo+https://img.example.org/season02.jpg",
+	}
+	seasonLoc := &models.SeasonLocalization{PosterPath: "provider.jpg", PosterSourcePath: "tvdb://fr.jpg"}
+	if got := applySeasonLocalization(season, seasonLoc, false); got.PosterPath != season.PosterPath || got.PosterSourcePath != season.PosterSourcePath {
+		t.Errorf("localized season poster replaced the NFO's: %+v", got)
+	}
+
+	// Until the copy lands, the slot serves earlier provider art, which the
+	// localized poster still replaces.
+	item.PosterPath = "tmdb/movies/1/poster/original.webp"
+	if got := applyItemLocalization(item, loc); got.PosterPath != "posters/fr.jpg" {
+		t.Errorf("uncached NFO poster: path %q, want the localized poster", got.PosterPath)
+	}
 }
