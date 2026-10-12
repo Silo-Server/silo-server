@@ -130,7 +130,7 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 		}
 		stored[f] = b
 		storedOrder = append(storedOrder, f)
-		if discovered[f] == "" && (!retention.searched || !retention.sidecarGone(b.SourcePath)) {
+		if discovered[f] == "" && (!retention.searched || !retention.backdropSidecarGone(b.SourcePath)) {
 			keep[f] = true
 		}
 	}

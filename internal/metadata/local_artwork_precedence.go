@@ -121,14 +121,18 @@ func (r *localArtworkRetention) atLevel(level localArtworkLevel) *localArtworkRe
 	return &other
 }
 
-// keep reports whether a slot serving a cached copy of a local sidecar should
-// ignore the remote incoming path this refresh chose.
-func (r *localArtworkRetention) keep(incoming, existingPath, existingSource string) bool {
+// keep reports whether a slot of imageType serving a cached copy of a local
+// sidecar should ignore the remote incoming path this refresh chose.
+func (r *localArtworkRetention) keep(imageType ImageType, incoming, existingPath, existingSource string) bool {
+	gone := r.sidecarGone
+	if imageType == ImageBackdrop {
+		gone = r.backdropSidecarGone
+	}
 	if !r.searched ||
 		!artworkkey.IsLocal(existingPath) ||
 		!isLocalImageSourcePath(existingSource) ||
 		!isRemoteImageSourcePath(incoming) ||
-		r.sidecarGone(existingSource) {
+		gone(existingSource) {
 		return false
 	}
 	slog.DebugContext(r.ctx, "metadata: keeping cached local artwork the refresh did not rediscover", "component", "metadata",
@@ -136,10 +140,11 @@ func (r *localArtworkRetention) keep(incoming, existingPath, existingSource stri
 	return true
 }
 
-// providerPath returns the path a season or episode slot should treat as the
-// provider's choice: the stored local source when keep holds, else incoming.
-func (r *localArtworkRetention) providerPath(incoming, existingPath, existingSource string) string {
-	if r.keep(incoming, existingPath, existingSource) {
+// providerPath returns the path a season or episode slot of imageType should
+// treat as the provider's choice: the stored local source when keep holds,
+// else incoming.
+func (r *localArtworkRetention) providerPath(imageType ImageType, incoming, existingPath, existingSource string) string {
+	if r.keep(imageType, incoming, existingPath, existingSource) {
 		return existingSource
 	}
 	return incoming
@@ -155,7 +160,7 @@ func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, exi
 	}
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
-		if retention.keep(*field.path, *stored[i].path, *stored[i].source) {
+		if retention.keep(field.imageType, *field.path, *stored[i].path, *stored[i].source) {
 			*field.path = *stored[i].path
 		}
 	}
@@ -169,20 +174,28 @@ func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, exi
 // artwork is off). An unmounted share leaves the folder missing or its mount
 // point empty, and an unreadable or unresponsive folder proves nothing, so in
 // those cases the local copy stays. The folder is probed through rootcheck,
-// with its timeout, before the file itself is looked up. A sidecar in an
-// extrafanart folder is judged by extraFanartSidecarGone instead.
+// with its timeout, before the file itself is looked up.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true
 	}
-	if strings.EqualFold(filepath.Base(filepath.Dir(path)), ExtraFanartFolder) {
-		return r.extraFanartSidecarGone(path)
-	}
 	if !r.folderAnswers(filepath.Dir(path)) {
 		return false
 	}
 	return sidecarFileGone(path)
+}
+
+// backdropSidecarGone is sidecarGone for a backdrop. Only backdrops come from
+// an extrafanart folder beside the item, so only a backdrop there is judged by
+// extraFanartSidecarGone; any other slot keeps the plain rule even when its
+// folder, a library mount point for instance, happens to be named extrafanart.
+func (r *localArtworkRetention) backdropSidecarGone(source string) bool {
+	path, ok := localImageSourceFilePath(source)
+	if ok && filepath.IsAbs(path) && strings.EqualFold(filepath.Base(filepath.Dir(path)), ExtraFanartFolder) {
+		return r.extraFanartSidecarGone(path)
+	}
+	return r.sidecarGone(source)
 }
 
 // extraFanartSidecarGone is sidecarGone for an image in an extrafanart folder,

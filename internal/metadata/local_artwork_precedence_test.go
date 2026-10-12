@@ -458,7 +458,7 @@ func TestCachedLocalArtworkNotKeptWithoutLocalSearch(t *testing.T) {
 		t.Fatalf("poster source = %q, want the remote poster when the refresh did not search local art", got.PosterSourcePath)
 	}
 	retention := newLocalArtworkRetention(ctx, contentID, localArtworkItem)
-	if retention.keep(remotePoster, cachedPoster, unmounted) || len(retention.probes) != 0 {
+	if retention.keep(ImagePoster, remotePoster, cachedPoster, unmounted) || len(retention.probes) != 0 {
 		t.Fatalf("an unmarked refresh kept local art or probed a folder (%d probes)", len(retention.probes))
 	}
 }

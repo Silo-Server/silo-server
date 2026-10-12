@@ -5331,7 +5331,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				seasonArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
+				seasonArtwork.providerPath(ImagePoster, season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5726,7 +5726,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					episodeArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
+					episodeArtwork.providerPath(ImageStill, ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,

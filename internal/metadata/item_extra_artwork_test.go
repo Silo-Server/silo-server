@@ -419,11 +419,11 @@ func TestPrimaryBackdropFromRemovedExtraFanartIsNotKept(t *testing.T) {
 	root := writeSidecars(t, t.TempDir(), "movie.mkv")
 	const remote = "https://image.tmdb.org/t/p/original/b.jpg"
 	const cached = "local/movies/movie-1/aa/backdrop/original.r.webp"
-	if itemRetention(searched).keep(remote, cached, localSource(filepath.Join(root, "extrafanart", "x.jpg"))) {
+	if itemRetention(searched).keep(ImageBackdrop, remote, cached, localSource(filepath.Join(root, "extrafanart", "x.jpg"))) {
 		t.Fatal("kept a primary backdrop whose extrafanart folder is gone")
 	}
 	unmounted := localSource(filepath.Join(root, "missing-share", "extrafanart", "x.jpg"))
-	if !itemRetention(searched).keep(remote, cached, unmounted) {
+	if !itemRetention(searched).keep(ImageBackdrop, remote, cached, unmounted) {
 		t.Fatal("dropped a primary backdrop while its item folder is unreachable")
 	}
 	// An extrafanart folder that links to storage which is down is
@@ -432,8 +432,24 @@ func TestPrimaryBackdropFromRemovedExtraFanartIsNotKept(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(root, "ExtraFanart")); err != nil {
 		t.Fatal(err)
 	}
-	if !itemRetention(searched).keep(remote, cached, localSource(filepath.Join(root, "ExtraFanart", "x.jpg"))) {
+	if !itemRetention(searched).keep(ImageBackdrop, remote, cached, localSource(filepath.Join(root, "ExtraFanart", "x.jpg"))) {
 		t.Fatal("dropped a primary backdrop while its extrafanart link's target is unreachable")
+	}
+}
+
+// Only backdrops come from extrafanart folders. A poster in a folder that
+// happens to be named extrafanart, such as an empty mount point, keeps the
+// plain rule and stays while that folder is empty.
+func TestPosterInFolderNamedExtraFanartKeepsPlainRule(t *testing.T) {
+	searched := withLocalArtworkSearched(context.Background(), localArtworkItem)
+	mount := filepath.Join(t.TempDir(), "extrafanart")
+	if err := os.Mkdir(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const remote = "https://image.tmdb.org/t/p/original/p.jpg"
+	const cached = "local/movies/movie-1/aa/poster/original.r.webp"
+	if !itemRetention(searched).keep(ImagePoster, remote, cached, localSource(filepath.Join(mount, "Movie (2008)-poster.jpg"))) {
+		t.Fatal("dropped a poster while its folder, named extrafanart, is an empty mount point")
 	}
 }
 
