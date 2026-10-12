@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,37 @@ func TestSetupAccessFor(t *testing.T) {
 	}
 	if SetupAccessFor(lan, nil, "").Local {
 		t.Error("a missing request counted as local")
+	}
+}
+
+// Behind a trusted proxy that rewrites Host and sends X-Forwarded-Host, the
+// Origin check compares against the host the browser addressed.
+func TestSetupAccessForBehindHostRewritingProxy(t *testing.T) {
+	_, proxies, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mw := clientip.Middleware(clientip.NewResolver([]*net.IPNet{proxies}))
+	for _, tc := range []struct {
+		origin string
+		local  bool
+	}{
+		{"http://silo.lan:8090", true},
+		{"https://attacker.example", false},
+	} {
+		var got SetupAccess
+		h := mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = SetupAccessFor(r.Context(), r, "")
+		}))
+		r := httptest.NewRequest(http.MethodPost, "http://10.0.0.2:8080/api/v1/auth/setup", nil)
+		r.RemoteAddr = "10.0.0.1:41000"
+		r.Header.Set("X-Forwarded-For", "192.168.1.20")
+		r.Header.Set("X-Forwarded-Host", "silo.lan:8090")
+		r.Header.Set("Origin", tc.origin)
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got.Local != tc.local {
+			t.Errorf("Origin %s: local = %v, want %v", tc.origin, got.Local, tc.local)
+		}
 	}
 }
 

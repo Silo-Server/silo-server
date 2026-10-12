@@ -76,7 +76,8 @@ creates it as the administrator. Only these callers may do it:
   private, loopback, or link-local, and the request did not arrive through a network-access
   provider. This is the `internal/streamlocation` classification playback uses, through
   `auth.SetupTokenRequired`. A browser request that another site started (`Sec-Fetch-Site`,
-  or an `Origin` that does not match `Host`, checked with `http.CrossOriginProtection`)
+  or an `Origin` that does not match the host the client addressed, which a trusted proxy
+  may send as `X-Forwarded-Host`; checked with `http.CrossOriginProtection`)
   never counts as local, so a web page cannot use a browser on the local network to set the
   server up (`auth.SetupAccessFor`).
 - Any other client that presents a setup token as the body member `setup_token`.

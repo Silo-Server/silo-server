@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
@@ -43,12 +44,21 @@ var setupCrossOrigin = http.NewCrossOriginProtection()
 
 // SetupAccessFor decides how the setup request r qualifies. ctx carries the
 // resolved client address. A browser request that another site started
-// (Sec-Fetch-Site, or an Origin that does not match Host) never counts as
-// local, so a page cannot use a browser on the local network to set the
-// server up; neither does a missing request.
+// (Sec-Fetch-Site, or an Origin that does not match the host the client
+// addressed) never counts as local, so a page cannot use a browser on the
+// local network to set the server up; neither does a missing request.
 func SetupAccessFor(ctx context.Context, r *http.Request, token string) SetupAccess {
-	local := r != nil && !SetupTokenRequired(ctx) && setupCrossOrigin.Check(r) == nil
-	return SetupAccess{Local: local, Token: token}
+	if r == nil || SetupTokenRequired(ctx) {
+		return SetupAccess{Token: token}
+	}
+	// Behind a trusted proxy that rewrites Host, the client's host is in
+	// X-Forwarded-Host; compare Origin with that one.
+	checked := r
+	if host := clientip.RequestHost(r); host != r.Host {
+		checked = r.WithContext(r.Context())
+		checked.Host = host
+	}
+	return SetupAccess{Local: setupCrossOrigin.Check(checked) == nil, Token: token}
 }
 
 // SetupAccess is how a caller qualifies for first-run setup.
