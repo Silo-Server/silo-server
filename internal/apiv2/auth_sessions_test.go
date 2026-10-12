@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
 
 func TestListAuthProviders(t *testing.T) {
@@ -169,6 +171,30 @@ func TestSetupServer(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.Sessions = &fakeSessionService{setupDone: true}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/setup", body, nil), TypeConflict)
+}
+
+func TestSetupServerSetupToken(t *testing.T) {
+	sessions := &fakeSessionService{}
+	deps := pilotDeps(nil, nil)
+	deps.Sessions = sessions
+	h := newTestHandler(t, deps)
+	body := `{"username":"admin","email":"admin@example.test","password":"password","setup_token":"QK3V7XN2M4PLR6TYW5HBJ8CDFA"}`
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/setup", body, nil); rec.Code != 201 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if sessions.lastSetup.SetupToken != "QK3V7XN2M4PLR6TYW5HBJ8CDFA" {
+		t.Fatalf("setup token passed = %q", sessions.lastSetup.SetupToken)
+	}
+	for _, tc := range []struct {
+		code string
+		want ProblemType
+	}{
+		{"setup_token_required", TypeSetupTokenRequired},
+		{"setup_token_invalid", TypeSetupTokenInvalid},
+	} {
+		sessions.err = &handlers.APIError{Status: http.StatusForbidden, Code: tc.code, Message: "refused"}
+		requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/setup", body, nil), tc.want)
+	}
 }
 
 func TestSignup(t *testing.T) {

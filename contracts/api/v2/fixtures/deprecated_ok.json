@@ -1,4 +1,5 @@
 {
   "needs_setup": false,
-  "wizard_completed": false
+  "wizard_completed": false,
+  "setup_token_required": false
 }

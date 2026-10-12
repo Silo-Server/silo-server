@@ -726,30 +726,46 @@ func derefSlice(value *[]int) []int {
 // caller releases it with its transaction.
 const InitialSetupAdvisoryLock int64 = 0x53494C4F53455455 // "SILOSETU"
 
+// lockEmptyInitialSetup takes the setup advisory lock in tx and then checks
+// that no account exists, answering ErrSetupAlreadyComplete when one does.
+func lockEmptyInitialSetup(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", InitialSetupAdvisoryLock); err != nil {
+		return fmt.Errorf("acquiring initial setup lock: %w", err)
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM users)").Scan(&exists); err != nil {
+		return fmt.Errorf("checking for accounts: %w", err)
+	}
+	if exists {
+		return ErrSetupAlreadyComplete
+	}
+	return nil
+}
+
 // ClaimInitialSetup runs provision inside the database-wide first-setup
 // boundary: one transaction that holds the setup advisory lock, re-checks that
-// no account exists after acquiring it, and commits only when provision
-// succeeds. A caller that finds an account already committed by the winner
-// gets ErrSetupAlreadyComplete with no rows written. The lock, not the
-// process, fences competing replicas.
-func (r *UserRepository) ClaimInitialSetup(ctx context.Context, provision func(tx pgx.Tx) error) error {
+// no account exists after acquiring it, checks access (a local caller or a
+// live setup token), and commits only when provision succeeds. A caller that
+// finds an account already committed by the winner gets
+// ErrSetupAlreadyComplete with no rows written. The commit deletes every setup
+// token. The lock, not the process, fences competing replicas.
+func (r *UserRepository) ClaimInitialSetup(ctx context.Context, access SetupAccess, provision func(tx pgx.Tx) error) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning initial setup: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", InitialSetupAdvisoryLock); err != nil {
-		return fmt.Errorf("acquiring initial setup lock: %w", err)
+	if err := lockEmptyInitialSetup(ctx, tx); err != nil {
+		return err
 	}
-	var count int
-	if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return fmt.Errorf("counting users: %w", err)
-	}
-	if count > 0 {
-		return ErrSetupAlreadyComplete
+	if err := checkSetupAccess(ctx, tx, access); err != nil {
+		return err
 	}
 	if err := provision(tx); err != nil {
 		return err
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM setup_tokens"); err != nil {
+		return fmt.Errorf("deleting setup tokens: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing initial setup: %w", err)

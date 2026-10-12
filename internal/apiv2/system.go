@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 )
 
@@ -59,11 +60,19 @@ type SetupStatus struct {
 	// WizardCompleted is additive: older clients that only read needs_setup
 	// keep working, and a server without a settings store reports false.
 	WizardCompleted bool `json:"wizard_completed" doc:"True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards" example:"true"`
+	// SetupTokenRequired is additive: a client that never sends a token
+	// still sets up from the local network as before.
+	SetupTokenRequired bool `json:"setup_token_required" doc:"True while needs_setup is true and this client is not on the server's local network: setupServer then needs the setup token the server printed to its log" example:"false"`
 }
+
+// setupStatusCacheControl: setup_token_required depends on the caller's
+// network, so no cache may reuse a getSetupStatus answer.
+const setupStatusCacheControl = "no-store"
 
 // SetupStatusOutput is the getSetupStatus response.
 type SetupStatusOutput struct {
-	Body SetupStatus
+	CacheControl string `header:"Cache-Control"`
+	Body         SetupStatus
 }
 
 func registerSystem(reg *Registry) {
@@ -89,7 +98,7 @@ func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupSta
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	status := SetupStatus{NeedsSetup: needsSetup}
+	status := SetupStatus{NeedsSetup: needsSetup, SetupTokenRequired: needsSetup && auth.SetupTokenRequired(ctx)}
 	// The marker only matters once an account exists; a fresh install has
 	// nothing to complete yet. A settings read failure degrades to "not
 	// completed" rather than failing public discovery.
@@ -98,7 +107,7 @@ func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupSta
 			status.WizardCompleted = completed
 		}
 	}
-	return &SetupStatusOutput{Body: status}, nil
+	return &SetupStatusOutput{CacheControl: setupStatusCacheControl, Body: status}, nil
 }
 
 func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {

@@ -29364,6 +29364,11 @@ export interface components {
        */
       password: string;
       /**
+       * @description The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required, that is when the client is not on the server's local network
+       * @example QK3V7XN2M4PLR6TYW5HBJ8CDFA
+       */
+      setup_token?: string;
+      /**
        * @description Login name of the administrator
        * @example admin
        */
@@ -29375,6 +29380,11 @@ export interface components {
        * @example false
        */
       needs_setup: boolean;
+      /**
+       * @description True while needs_setup is true and this client is not on the server's local network: setupServer then needs the setup token the server printed to its log
+       * @example false
+       */
+      setup_token_required: boolean;
       /**
        * @description True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards
        * @example true
@@ -86212,6 +86222,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Not Acceptable */
       406: {
         headers: {
@@ -130832,6 +130851,7 @@ export interface operations {
       /** @description OK */
       200: {
         headers: {
+          "Cache-Control"?: string;
           [name: string]: unknown;
         };
         content: {

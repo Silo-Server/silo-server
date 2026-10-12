@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -332,7 +333,7 @@ func requireOwner(t *testing.T, r *UserRepository, id int) {
 func TestInitialSetupClaimsOwnerPostgres(t *testing.T) {
 	r := adminAccountsDB(t)
 	s := &Service{jwt: NewJWTService("owner-test-secret-0000000000000000000000", time.Minute, time.Hour), sessions: NewSessionRepository(r.pool), users: r, accounts: NewAccountProvisioner(r, nil)}
-	_, created, err := s.SetupInitialUser(t.Context(), "owner", "owner@example.test", "initial-password", false, "", "test", "127.0.0.1")
+	_, created, err := s.SetupInitialUser(clientip.SetContext(t.Context(), "127.0.0.1"), "owner", "owner@example.test", "initial-password", false, "", "test", "127.0.0.1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

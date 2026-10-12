@@ -44134,6 +44134,14 @@
             "minLength": 8,
             "type": "string"
           },
+          "setup_token": {
+            "description": "The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required, that is when the client is not on the server's local network",
+            "examples": [
+              "QK3V7XN2M4PLR6TYW5HBJ8CDFA"
+            ],
+            "maxLength": 128,
+            "type": "string"
+          },
           "username": {
             "description": "Login name of the administrator",
             "examples": [
@@ -44161,6 +44169,13 @@
             ],
             "type": "boolean"
           },
+          "setup_token_required": {
+            "description": "True while needs_setup is true and this client is not on the server's local network: setupServer then needs the setup token the server printed to its log",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "wizard_completed": {
             "description": "True once the first-run setup wizard has been finished; the web client refuses to reopen it afterwards",
             "examples": [
@@ -44171,7 +44186,8 @@
         },
         "required": [
           "needs_setup",
-          "wizard_completed"
+          "wizard_completed",
+          "setup_token_required"
         ],
         "type": "object"
       },
@@ -130180,6 +130196,16 @@
             },
             "description": "Bad Request"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -199859,7 +199885,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {

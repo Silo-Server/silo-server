@@ -93,6 +93,7 @@ type setupRequest struct {
 	Password             string `json:"password"`
 	CreateDefaultProfile bool   `json:"create_default_profile"`
 	DefaultProfileName   string `json:"default_profile_name,omitempty"`
+	SetupToken           string `json:"setup_token,omitempty"`
 }
 
 // setupStatusResponse represents the JSON body of a GET /auth/setup request.
@@ -382,6 +383,7 @@ func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		Password:             req.Password,
 		CreateDefaultProfile: req.CreateDefaultProfile,
 		DefaultProfileName:   req.DefaultProfileName,
+		SetupToken:           req.SetupToken,
 		DeviceName:           r.UserAgent(),
 		IP:                   clientip.FromContext(r.Context()),
 	})

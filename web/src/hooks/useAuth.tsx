@@ -50,6 +50,8 @@ interface AuthState {
   setupRequired: boolean;
   /** The first-run wizard was finished on this server; /setup must not reopen. */
   setupCompleted: boolean;
+  /** Setup needs the token from the server log: this browser is not on the server's local network. */
+  setupTokenRequired: boolean;
   /** Re-reads the public setup status, e.g. after the wizard records completion. */
   refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
@@ -76,7 +78,12 @@ interface AuthState {
   /** Re-reads the signed-in account, e.g. after an admin changed its permissions. */
   refreshAccount: () => Promise<void>;
   completeLogin: (data: LoginResponse) => void;
-  setupInitialUser: (username: string, email: string, password: string) => Promise<void>;
+  setupInitialUser: (
+    username: string,
+    email: string,
+    password: string,
+    setupToken?: string,
+  ) => Promise<void>;
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
   beginImpersonation: (data: LoginResponse, returnPath: string) => void;
   endImpersonation: () => Promise<void>;
@@ -296,6 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
   const [setupCompleted, setSetupCompleted] = useState(false);
+  const [setupTokenRequired, setSetupTokenRequired] = useState(false);
   // Public discovery is fetched explicitly at boot and when a sign-in surface
   // needs it. Clearing account caches must not start another public read.
   const providerQuery = useQuery({ ...authProviderQueryOptions(), enabled: false }, queryClient);
@@ -458,6 +466,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const status = await v2("GET /api/v2/system/setup");
       setSetupRequired(status.needs_setup);
       setSetupCompleted(status.wizard_completed === true);
+      setSetupTokenRequired(status.setup_token_required === true);
     } catch {
       // Keep the last known status; the next app load re-reads it.
     }
@@ -573,9 +582,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (status.status === "fulfilled") {
           setSetupRequired(status.value.needs_setup);
           setSetupCompleted(status.value.wizard_completed === true);
+          setSetupTokenRequired(status.value.setup_token_required === true);
         } else {
           setSetupRequired(false);
           setSetupCompleted(false);
+          setSetupTokenRequired(false);
         }
       } finally {
         if (!cancelled) {
@@ -771,9 +782,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshAccount]);
 
   const setupInitialUser = useCallback(
-    async (username: string, email: string, password: string) => {
+    async (username: string, email: string, password: string, setupToken?: string) => {
       const tokens = await v2("POST /api/v2/auth/setup", {
-        body: { username, email, password, create_default_profile: true },
+        body: {
+          username,
+          email,
+          password,
+          create_default_profile: true,
+          ...(setupToken ? { setup_token: setupToken } : {}),
+        },
       });
       const session = sessionFromTokenPair(tokens);
       // The default profile is created with the account. Select it in the
@@ -809,6 +826,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setupLoading,
         setupRequired,
         setupCompleted,
+        setupTokenRequired,
         refreshSetupStatus,
         providers,
         refreshSignInProviders,

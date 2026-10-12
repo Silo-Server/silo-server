@@ -167,12 +167,14 @@ func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userI
 }
 
 // RegistrationInput is a first-run setup or invited signup as the transport
-// received it. InviteCode is only read by Signup.
+// received it. InviteCode is only read by Signup, SetupToken only by
+// SetupInitialUser.
 type RegistrationInput struct {
 	Username             string
 	Email                string
 	Password             string
 	InviteCode           string
+	SetupToken           string
 	CreateDefaultProfile bool
 	DefaultProfileName   string
 	DeviceName           string
@@ -190,10 +192,15 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 	if err := validateRegistrationPassword(in.Password); err != nil {
 		return TokenPairView{}, err
 	}
-	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP)
+	pair, user, err := h.service.SetupInitialUser(ctx, in.Username, in.Email, in.Password, in.CreateDefaultProfile, in.DefaultProfileName, in.DeviceName, in.IP, in.SetupToken)
 	if err != nil {
-		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
+		switch {
+		case errors.Is(err, auth.ErrSetupAlreadyComplete):
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
+		case errors.Is(err, auth.ErrSetupTokenRequired):
+			return TokenPairView{}, apiError(http.StatusForbidden, "setup_token_required", "Setting up this server from outside its local network needs the setup token from the server log")
+		case errors.Is(err, auth.ErrSetupTokenInvalid):
+			return TokenPairView{}, apiError(http.StatusForbidden, "setup_token_invalid", "The setup token does not match the one in the server log")
 		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}

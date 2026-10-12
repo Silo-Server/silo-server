@@ -20,6 +20,7 @@ interface WizardContextValue {
   user: ReturnType<typeof useAuth>["user"];
   profile: ReturnType<typeof useAuth>["profile"];
   setupInitialUser: ReturnType<typeof useAuth>["setupInitialUser"];
+  setupTokenRequired: boolean;
   refreshSetupStatus: ReturnType<typeof useAuth>["refreshSetupStatus"];
   selectProfile: ReturnType<typeof useAuth>["selectProfile"];
 
@@ -79,8 +80,15 @@ function shouldRetrySetupQuery(failureCount: number, error: unknown) {
 }
 
 export function WizardProvider({ children }: { children: ReactNode }) {
-  const { user, profile, setupRequired, setupInitialUser, selectProfile, refreshSetupStatus } =
-    useAuth();
+  const {
+    user,
+    profile,
+    setupRequired,
+    setupTokenRequired,
+    setupInitialUser,
+    selectProfile,
+    refreshSetupStatus,
+  } = useAuth();
   const isAdmin = user?.role === "admin";
 
   const [stepDone, setStepDone] = useState<Record<SkippableStep, boolean>>(() => {
@@ -154,6 +162,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         setupInitialUser,
+        setupTokenRequired,
         refreshSetupStatus,
         selectProfile,
         profiles: profilesQuery.data ?? [],

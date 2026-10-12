@@ -779,14 +779,17 @@ func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
 // The emptiness check, account, optional profile, and login session share one
 // transaction under the database-wide setup lock (UserRepository.ClaimInitialSetup),
 // so competing callers on any replica see exactly one winner; every other
-// caller gets ErrSetupAlreadyComplete. The session and token pair match what
-// Login would issue for the new account.
+// caller gets ErrSetupAlreadyComplete. A caller outside the local network
+// must present a live setup token (ErrSetupTokenRequired,
+// ErrSetupTokenInvalid). The session and token pair match what Login would
+// issue for the new account.
 func (s *Service) SetupInitialUser(
 	ctx context.Context,
 	username, email, password string,
 	createDefaultProfile bool,
 	defaultProfileName string,
 	deviceName, ip string,
+	setupToken string,
 ) (*TokenPair, *models.User, error) {
 	if err := ValidateNewPassword(password); err != nil {
 		return nil, nil, err
@@ -796,7 +799,7 @@ func (s *Service) SetupInitialUser(
 		user *models.User
 		pair *TokenPair
 	)
-	err := s.users.ClaimInitialSetup(ctx, func(tx pgx.Tx) error {
+	err := s.users.ClaimInitialSetup(ctx, SetupAccess{Local: !SetupTokenRequired(ctx), Token: setupToken}, func(tx pgx.Tx) error {
 		created, err := s.accounts.CreateInitialAccountInTransaction(ctx, tx, CreateAccountInput{
 			User: models.CreateUserInput{
 				Username: username,

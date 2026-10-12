@@ -108,7 +108,7 @@ func TestRegistrationRejectsPasswordBeforeDependencies(t *testing.T) {
 	s := &Service{}
 	for _, password := range []string{"short", strings.Repeat("界", 25)} {
 		want := ValidateNewPassword(password)
-		if _, _, err := s.SetupInitialUser(t.Context(), "user", "user@example.test", password, true, "Home", "", ""); !errors.Is(err, want) {
+		if _, _, err := s.SetupInitialUser(t.Context(), "user", "user@example.test", password, true, "Home", "", "", ""); !errors.Is(err, want) {
 			t.Fatalf("setup error = %v, want %v", err, want)
 		}
 		if _, _, err := s.Signup(t.Context(), "user", "user@example.test", password, "invite", true, "Home", "", ""); !errors.Is(err, want) {

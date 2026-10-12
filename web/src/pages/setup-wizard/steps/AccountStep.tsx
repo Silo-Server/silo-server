@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { V2ProblemError } from "@/api/v2/request";
 import { createProfile } from "@/hooks/queries/profiles";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
@@ -33,6 +34,7 @@ export function AccountStep() {
     retryProfiles,
     selectProfile,
     setupInitialUser,
+    setupTokenRequired,
     setSummary,
   } = useWizardContext();
   const [username, setUsername] = useState("");
@@ -42,6 +44,11 @@ export function AccountStep() {
   const [submitting, setSubmitting] = useState(false);
   const [mismatch, setMismatch] = useState(false);
   const [emailInvalid, setEmailInvalid] = useState(false);
+  const [setupToken, setSetupToken] = useState("");
+  // The server refused setup without a token (or with a wrong one) even if
+  // the status read said none was needed, e.g. the network path changed.
+  const [tokenRefused, setTokenRefused] = useState<"required" | "invalid" | null>(null);
+  const showToken = setupTokenRequired || tokenRefused !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -53,11 +60,18 @@ export function AccountStep() {
 
     setSubmitting(true);
     try {
-      await setupInitialUser(username, email, password);
+      await setupInitialUser(username, email, password, showToken ? setupToken.trim() : undefined);
       setSummary("account", username);
       // Stay busy: this step unmounts as soon as the account exists.
     } catch (err) {
       setSubmitting(false);
+      if (
+        err instanceof V2ProblemError &&
+        (err.problemType === "setup_token_required" || err.problemType === "setup_token_invalid")
+      ) {
+        setTokenRefused(err.problemType === "setup_token_invalid" ? "invalid" : "required");
+        return;
+      }
       toast.error(err instanceof Error ? err.message : "Failed to create admin account");
     }
   }
@@ -101,13 +115,45 @@ export function AccountStep() {
     >
       <div className="setup-section setup-section-padded">
         <div className="grid gap-4 sm:grid-cols-2">
+          {showToken ? (
+            <div className="sm:col-span-2">
+              <Field id="setup-token" label="Setup token">
+                <Input
+                  id="setup-token"
+                  value={setupToken}
+                  onChange={(e) => {
+                    setSetupToken(e.target.value);
+                    if (tokenRefused === "invalid") setTokenRefused("required");
+                  }}
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoFocus
+                  aria-invalid={tokenRefused === "invalid" || undefined}
+                  aria-describedby="setup-token-help"
+                  required
+                />
+                <p
+                  id="setup-token-help"
+                  className={
+                    tokenRefused === "invalid"
+                      ? "text-destructive text-xs"
+                      : "text-muted-foreground text-xs"
+                  }
+                >
+                  {tokenRefused === "invalid"
+                    ? "That token doesn't match. Copy it again from the server's console log; it changes every time the server starts."
+                    : "This browser isn't on the server's local network. Copy the setup token from the server's console log, where it is printed at startup."}
+                </p>
+              </Field>
+            </div>
+          ) : null}
           <Field id="setup-username" label="Username">
             <Input
               id="setup-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
-              autoFocus
+              autoFocus={!showToken}
               required
             />
           </Field>

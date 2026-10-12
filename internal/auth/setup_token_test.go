@@ -1,0 +1,116 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
+)
+
+func TestSetupTokenRequired(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		ctx      context.Context
+		required bool
+	}{
+		{"no address", t.Context(), true},
+		{"lan", clientip.SetContext(t.Context(), "192.168.1.20"), false},
+		{"loopback", clientip.SetContext(t.Context(), "::1"), false},
+		{"internet", clientip.SetContext(t.Context(), "203.0.113.9"), true},
+		{"carrier-grade nat", clientip.SetContext(t.Context(), "100.64.1.2"), true},
+		{"network access provider", netaccess.WithPath(clientip.SetContext(t.Context(), "10.0.0.5"), netaccess.Path{Provider: "tailscale"}), true},
+	} {
+		if got := SetupTokenRequired(tc.ctx); got != tc.required {
+			t.Errorf("%s: SetupTokenRequired = %v, want %v", tc.name, got, tc.required)
+		}
+	}
+}
+
+func setupTokenCount(t *testing.T, r *UserRepository) int {
+	t.Helper()
+	var n int
+	if err := r.pool.QueryRow(t.Context(), "SELECT count(*) FROM setup_tokens").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// claimWith runs ClaimInitialSetup with a provision that creates one account,
+// so a successful claim leaves setup complete.
+func claimWith(t *testing.T, r *UserRepository, access SetupAccess) error {
+	t.Helper()
+	return r.ClaimInitialSetup(t.Context(), access, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO users (username, email, password_hash, role) VALUES ('owner', 'owner@example.test', 'x', 'admin')`)
+		return err
+	})
+}
+
+func TestSetupTokenGatePostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+
+	// Two processes booting on an empty server each get their own token, and
+	// either one is accepted.
+	first, err := r.IssueSetupToken(t.Context())
+	if err != nil || len(first) != 26 {
+		t.Fatalf("first token = %q, %v", first, err)
+	}
+	second, err := r.IssueSetupToken(t.Context())
+	if err != nil || second == "" || second == first {
+		t.Fatalf("second token = %q, %v", second, err)
+	}
+	if n := setupTokenCount(t, r); n != 2 {
+		t.Fatalf("stored tokens = %d, want 2", n)
+	}
+
+	if err := claimWith(t, r, SetupAccess{}); !errors.Is(err, ErrSetupTokenRequired) {
+		t.Fatalf("remote without token = %v, want ErrSetupTokenRequired", err)
+	}
+	if err := claimWith(t, r, SetupAccess{Token: "AAAAAAAAAAAAAAAAAAAAAAAAAA"}); !errors.Is(err, ErrSetupTokenInvalid) {
+		t.Fatalf("remote with wrong token = %v, want ErrSetupTokenInvalid", err)
+	}
+	// A process that shuts down takes its token with it.
+	if err := r.RevokeSetupToken(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := claimWith(t, r, SetupAccess{Token: first}); !errors.Is(err, ErrSetupTokenInvalid) {
+		t.Fatalf("revoked token = %v, want ErrSetupTokenInvalid", err)
+	}
+	if needs, err := r.Count(t.Context()); err != nil || needs != 0 {
+		t.Fatalf("refused claims created accounts: %d, %v", needs, err)
+	}
+
+	// Pasted with stray whitespace and in lower case, the live token works,
+	// and setup consumes every stored token.
+	if err := claimWith(t, r, SetupAccess{Token: "  " + strings.ToLower(second) + "\n"}); err != nil {
+		t.Fatalf("claim with live token: %v", err)
+	}
+	if n := setupTokenCount(t, r); n != 0 {
+		t.Fatalf("tokens left after setup = %d", n)
+	}
+	if err := claimWith(t, r, SetupAccess{Token: second}); !errors.Is(err, ErrSetupAlreadyComplete) {
+		t.Fatalf("second claim = %v, want ErrSetupAlreadyComplete", err)
+	}
+	// A process that boots after setup issues nothing.
+	if token, err := r.IssueSetupToken(t.Context()); err != nil || token != "" {
+		t.Fatalf("token after setup = %q, %v", token, err)
+	}
+}
+
+func TestSetupTokenGateLocalPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	if _, err := r.IssueSetupToken(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// A local client needs no token, and its setup still clears the tokens.
+	if err := claimWith(t, r, SetupAccess{Local: true}); err != nil {
+		t.Fatalf("local claim: %v", err)
+	}
+	if n := setupTokenCount(t, r); n != 0 {
+		t.Fatalf("tokens left after local setup = %d", n)
+	}
+}

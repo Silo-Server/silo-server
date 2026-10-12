@@ -1176,6 +1176,8 @@ type fakeSessionService struct {
 	ended     []string
 	revoked   []string
 	setupDone bool
+	// lastSetup is the input the most recent SetupInitialUser received.
+	lastSetup handlers.RegistrationInput
 	signupOn  bool
 	err       error
 	// localLoginOff leaves the local provider out of discovery, as the
@@ -1346,6 +1348,7 @@ func (f *fakeSessionService) RevokeSession(_ context.Context, sessionID string, 
 }
 
 func (f *fakeSessionService) SetupInitialUser(_ context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error) {
+	f.lastSetup = in
 	if f.err != nil {
 		return handlers.TokenPairView{}, f.err
 	}

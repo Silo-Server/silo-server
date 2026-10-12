@@ -67,6 +67,40 @@ existing native authentication requests use the same session validity checks.
 Jellyfin-compatible sessions live in their own store and are not listed here; only
 account-wide revocation ends them.
 
+## First-run setup
+
+Until the first account exists, `POST /auth/setup` (`setupServer`; v1 `POST /api/v1/auth/setup`)
+creates it as the administrator. Only these callers may do it:
+
+- A client on the server's local network: the address `internal/clientip` resolves is
+  private, loopback, or link-local, and the request did not arrive through a network-access
+  provider. This is the `internal/streamlocation` classification playback uses, through
+  `auth.SetupTokenRequired`.
+- Any other client that presents a setup token as the body member `setup_token`.
+
+Every API process that starts while no account exists prints a fresh setup token on its
+console (stderr). The token is not written through `slog`, so it does not reach the
+operational log table or OTel. The process stores only the token's SHA-256 in `setup_tokens`,
+so any replica can check a token another replica printed. A graceful shutdown deletes that
+process's row; a process that exits without a graceful shutdown leaves its token valid
+until setup completes. The setup transaction holds the setup advisory lock, compares the presented
+token with every stored hash in constant time, and deletes every row when it commits, so a
+token works at most once and none outlives setup. Matching ignores surrounding whitespace and
+letter case.
+
+A refused caller gets 403 `setup_token_required` (no token) or 403 `setup_token_invalid`
+(no live token matches). v1 answers the same codes in its error body. A completed setup
+still answers 409 `conflict` (v1: 401 `setup_complete`) whatever the caller sent.
+
+`GET /system/setup` (`getSetupStatus`) reports `setup_token_required: true` while
+`needs_setup` is true and the calling client is not local, so a client asks for the token
+only when it needs one. The answer depends on the caller, so it is sent with
+`Cache-Control: no-store`. v1 `GET /api/v1/auth/setup` is unchanged.
+
+The local-network rule trusts the resolved client address. A load balancer or port
+forward that replaces the source address with a private one and adds no forwarding
+header makes every client look local.
+
 ## Account passwords
 
 A password belongs to a login account, not to an individual household profile. Every profile on an

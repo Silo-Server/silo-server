@@ -203,7 +203,11 @@ describe("AuthProvider", () => {
     v2Mock.mockImplementation((key: string) => {
       if (key === "GET /api/v2/system/setup") {
         return Promise.resolve(
-          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
+          v2Fixture<"GET /api/v2/system/setup">({
+            needs_setup: false,
+            wizard_completed: false,
+            setup_token_required: false,
+          }),
         );
       }
       if (key === "GET /api/v2/auth/providers") {
@@ -219,7 +223,11 @@ describe("AuthProvider", () => {
     v2Mock.mockImplementation((key: string) => {
       if (key === "GET /api/v2/system/setup") {
         return Promise.resolve(
-          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
+          v2Fixture<"GET /api/v2/system/setup">({
+            needs_setup: false,
+            wizard_completed: false,
+            setup_token_required: false,
+          }),
         );
       }
       if (key === "GET /api/v2/auth/providers") {

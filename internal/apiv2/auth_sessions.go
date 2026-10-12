@@ -145,6 +145,7 @@ type SetupServerInput struct {
 		Password             string `json:"password" minLength:"8" maxLength:"72" doc:"Account password; at least 8 characters and at most 72 UTF-8 bytes" example:"correct horse battery staple"`
 		CreateDefaultProfile bool   `json:"create_default_profile,omitempty" doc:"Also create the household's first profile" example:"true"`
 		DefaultProfileName   string `json:"default_profile_name,omitempty" maxLength:"128" doc:"Name of that profile; the username when empty" example:"Alice"`
+		SetupToken           string `json:"setup_token,omitempty" maxLength:"128" doc:"The setup token the server printed to its log at startup. Required when getSetupStatus reports setup_token_required, that is when the client is not on the server's local network" example:"QK3V7XN2M4PLR6TYW5HBJ8CDFA"`
 	}
 }
 
@@ -216,8 +217,10 @@ func registerAuthSessions(reg *Registry) {
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
 	setup.DefaultStatus = http.StatusCreated
-	// Setup already completed is 409 conflict (v1: 401 setup_complete).
-	setup.Errors = []int{http.StatusConflict}
+	// Setup already completed is 409 conflict (v1: 401 setup_complete). A
+	// client outside the local network without a matching setup token is
+	// 403 setup_token_required or setup_token_invalid.
+	setup.Errors = []int{http.StatusForbidden, http.StatusConflict}
 	Register(reg, Operation{Operation: setup, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: setupDomain}, reg.setupServer)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/signup", "getSignupStatus", "auth",
@@ -409,11 +412,20 @@ func (reg *Registry) setupServer(ctx context.Context, in *SetupServerInput) (*To
 	if p := invalidEmailProblem(in.Body.Email); p != nil {
 		return nil, p
 	}
-	view, err := reg.deps.Sessions.SetupInitialUser(withClientDevice(ctx), reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
+	registration := reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName)
+	registration.SetupToken = in.Body.SetupToken
+	view, err := reg.deps.Sessions.SetupInitialUser(withClientDevice(ctx), registration)
 	if err != nil {
 		var apiErr *handlers.APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "setup_complete" {
-			return nil, NewProblem(TypeConflict, apiErr.Message+".")
+		if errors.As(err, &apiErr) {
+			switch apiErr.Code {
+			case "setup_complete":
+				return nil, NewProblem(TypeConflict, apiErr.Message+".")
+			case TypeSetupTokenRequired.ID:
+				return nil, NewProblem(TypeSetupTokenRequired, apiErr.Message+".")
+			case TypeSetupTokenInvalid.ID:
+				return nil, NewProblem(TypeSetupTokenInvalid, apiErr.Message+".")
+			}
 		}
 		return nil, registrationProblem(err)
 	}

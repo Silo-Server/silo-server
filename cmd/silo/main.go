@@ -3518,6 +3518,13 @@ func main() {
 		slog.Info("background workers started")
 	}
 
+	// Step 9b: While no account exists, print a setup token for clients
+	// outside the local network; graceful shutdown revokes it.
+	var setupToken string
+	if (mode == "integrated" || mode == "api") && deps.DB != nil {
+		setupToken = issueSetupToken(ctx, auth.NewUserRepository(deps.DB), os.Stderr)
+	}
+
 	// Step 10: Create and start the HTTP server.
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
@@ -3799,6 +3806,16 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
+	// Revoke this process's setup token first, on its own deadline, so a
+	// slow drain below cannot leave it valid.
+	if setupToken != "" {
+		revokeCtx, revokeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := auth.NewUserRepository(deps.DB).RevokeSetupToken(revokeCtx, setupToken); err != nil {
+			slog.Error("setup token revoke error", "error", err)
+		}
+		revokeCancel()
+	}
+
 	// Let the LAN advertiser withdraw the service (appCtx is already
 	// canceled) so clients drop it now rather than when its records expire.
 	if lanDiscoveryDone != nil {
@@ -3875,6 +3892,26 @@ func main() {
 	_ = adminJobRunner
 
 	slog.Info("server stopped")
+}
+
+// issueSetupToken stores this process's setup token while the server has no
+// account and prints it to stderr, the console log. It bypasses slog on
+// purpose: the redacting handler would mask it, and the database and OTel log
+// sinks must not keep it. A failure leaves setup open only to the local
+// network.
+func issueSetupToken(ctx context.Context, users *auth.UserRepository, console io.Writer) string {
+	token, err := users.IssueSetupToken(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "could not issue a setup token; first-run setup is open only to the local network", "error", err)
+		return ""
+	}
+	if token != "" {
+		slog.WarnContext(ctx, "this server has no administrator yet; the setup token for setting it up from outside the local network is printed on the console")
+		if _, err := fmt.Fprintf(console, "\n  Silo setup token: %s\n  Enter it in the setup wizard to set up this server from outside its local network.\n  It changes every time the server starts.\n\n", token); err != nil {
+			slog.ErrorContext(ctx, "could not print the setup token; first-run setup is open only to the local network until the server restarts", "error", err)
+		}
+	}
+	return token
 }
 
 // waitForShutdownWork waits for registered cleanup tasks within the process's
