@@ -403,7 +403,6 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 	poll := immediateImageCacheMinPoll
 	deadline := time.Now().Add(idleTimeout)
 	failed := 0
-	deferred := 0
 	pending := false
 	for {
 		// Re-read each round: once caching is turned off, remote jobs must not
@@ -422,9 +421,9 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 			// Failures are collected rather than returned: the remaining
 			// artwork still gets cached, and a failed job carries its own
 			// backoff so it is not reclaimed by the loop below. A deferred
-			// job waits for a server that can see its library root.
+			// job waits for a server that can see its library root; the
+			// check after the loop finds it.
 			failed += stats.Failed
-			deferred += stats.Deferred
 			// A page that went back to the queue unstarted (no worker or
 			// budget slot in time) leaves the rest to the background drain
 			// rather than claiming it again.
@@ -459,9 +458,9 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 		}
 		poll = min(2*poll, immediateImageCacheMaxPoll)
 	}
-	// Another worker may also have left a target job for a server with its
-	// storage mounted while this call waited on it.
-	pending = pending || deferred > 0
+	// A target job left for a server with its storage mounted, by this call
+	// or another worker, keeps the artwork pending while it still waits; one
+	// such a server has copied since does not.
 	if !pending {
 		waiting, err := store.targetHasDeferredLocalJobs(ctx, targetContentID)
 		if err != nil {

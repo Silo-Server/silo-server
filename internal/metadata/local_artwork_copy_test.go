@@ -101,16 +101,20 @@ func TestCacheTargetArtworkHandlesLocalOnlyWithCachingOff(t *testing.T) {
 	}
 }
 
-// deferringImageCacheJobs records deferrals.
+// deferringImageCacheJobs records deferrals. A deferred job waits in the
+// queue, as targetHasDeferredLocalJobs then reports, unless copiedElsewhere
+// says a server with the storage mounted has copied it since.
 type deferringImageCacheJobs struct {
 	targetImageCacheJobs
-	deferredID   int64
-	deferredText string
+	deferredID      int64
+	deferredText    string
+	copiedElsewhere bool
 }
 
 func (f *deferringImageCacheJobs) DeferClaimed(_ context.Context, id int64, _ string, errText string, _, _ time.Duration) error {
 	f.deferredID = id
 	f.deferredText = errText
+	f.deferredElsewhere = !f.copiedElsewhere
 	return nil
 }
 
@@ -132,6 +136,25 @@ func TestCacheTargetArtworkReportsDeferredLocalArtworkPending(t *testing.T) {
 	}
 	if jobs.deferredID != job.ID || jobs.failedID != 0 {
 		t.Fatalf("deferred=%d failed=%d (%q), want the job deferred, not failed", jobs.deferredID, jobs.failedID, jobs.failedText)
+	}
+}
+
+// A job this refresh deferred for missing storage, then copied by a server
+// with the mount before the refresh ended, leaves nothing pending.
+func TestCacheTargetArtworkNotPendingOnceADeferredJobIsCopied(t *testing.T) {
+	missingRoot := filepath.Join(t.TempDir(), "unmounted")
+	job := localArtworkJob("file://" + filepath.Join(missingRoot, "Film", "poster.jpg"))
+	jobs := &deferringImageCacheJobs{copiedElsewhere: true, targetImageCacheJobs: targetImageCacheJobs{
+		targetClaims: [][]*models.MetadataImageCacheJob{{job}},
+	}}
+	p := NewImageCacheProcessorWithTargets(jobs, &fakeByteImageCacher{}, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{missingRoot}})
+
+	if err := p.CacheTargetArtwork(context.Background(), "movie-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork error = %v, want done once the deferred job was copied", err)
+	}
+	if jobs.deferredID != job.ID {
+		t.Fatalf("deferred = %d, want the job deferred by this refresh", jobs.deferredID)
 	}
 }
 
