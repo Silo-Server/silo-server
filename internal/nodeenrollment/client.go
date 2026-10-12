@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 )
 
 var (
@@ -33,10 +35,13 @@ type Input struct {
 // Client supplies credentials from server bootstrap, never from the browser.
 // HTTP supports trusted internal networks; HTTPS retains certificate verification.
 type Client struct {
-	Bootstrap    Binding
-	JWTSecret    string
-	HTTPClient   *http.Client
-	ReadyTimeout time.Duration
+	Bootstrap Binding
+	JWTSecret string
+	// CurrentJWTSecret overrides JWTSecret, including when it returns an empty
+	// key. Core clients use the live config watcher for every receipt attempt.
+	CurrentJWTSecret func() string
+	HTTPClient       *http.Client
+	ReadyTimeout     time.Duration
 }
 
 func (c *Client) target(raw string) (string, error) {
@@ -69,7 +74,13 @@ func (c *Client) receipt(ctx context.Context, client *http.Client, base string) 
 	if err != nil {
 		return Receipt{}, false, ErrInvalidTarget
 	}
-	request.Header.Set("Authorization", "Bearer "+c.JWTSecret)
+	key := c.JWTSecret
+	if c.CurrentJWTSecret != nil {
+		key = c.CurrentJWTSecret()
+	}
+	if err := nodeauth.Sign(request, base, key); err != nil {
+		return Receipt{}, false, ErrRejected
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return Receipt{}, false, ErrStartupPending

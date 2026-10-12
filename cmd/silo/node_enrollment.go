@@ -17,13 +17,19 @@ import (
 
 // nodeEnrollmentClient exposes host-owned bootstrap secrets to the admin
 // enrollment flow only when the core operator explicitly permits handoff.
-func nodeEnrollmentClient(bc *config.BootstrapConfig, cfg *config.Config) *nodeenrollment.Client {
+func nodeEnrollmentClient(bc *config.BootstrapConfig, getConfig func() *config.Config) *nodeenrollment.Client {
 	if !bc.EnrollmentEnabled {
 		return nil
 	}
 	return &nodeenrollment.Client{
 		Bootstrap: nodeenrollment.Binding{DatabaseURL: bc.DatabaseURL, RedisURL: bc.RedisURL, SecretKey: string(bc.SecretKey)},
-		JWTSecret: cfg.Auth.JWTSecret,
+		CurrentJWTSecret: func() string {
+			cfg := getConfig()
+			if cfg == nil {
+				return ""
+			}
+			return cfg.Auth.JWTSecret
+		},
 	}
 }
 

@@ -7,12 +7,16 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 )
 
@@ -30,14 +34,14 @@ func TestCoreEnrollmentRequiresOperatorOptIn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client := nodeEnrollmentClient(bc, cfg)
+			client := nodeEnrollmentClient(bc, func() *config.Config { return cfg })
 			if value != "true" {
 				if client != nil {
 					t.Fatal("application admin can access host secrets without operator opt-in")
 				}
 				return
 			}
-			if client == nil || client.Bootstrap.DatabaseURL != bc.DatabaseURL || client.Bootstrap.RedisURL != bc.RedisURL || client.Bootstrap.SecretKey != string(bc.SecretKey) || client.JWTSecret != cfg.Auth.JWTSecret {
+			if client == nil || client.Bootstrap.DatabaseURL != bc.DatabaseURL || client.Bootstrap.RedisURL != bc.RedisURL || client.Bootstrap.SecretKey != string(bc.SecretKey) || client.CurrentJWTSecret == nil || client.CurrentJWTSecret() != cfg.Auth.JWTSecret {
 				t.Fatal("opted-in core cannot hand off customer configuration")
 			}
 		})
@@ -154,5 +158,91 @@ func TestUnboundBindingConflictDoesNotConsumeToken(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCoreEnrollmentUsesCurrentJWTSecret(t *testing.T) {
+	bc := &config.BootstrapConfig{EnrollmentEnabled: true, SecretKey: []byte(strings.Repeat("s", 48))}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "startup-jwt-secret"
+	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	watcher.SetConfigForTest(cfg)
+	client := nodeEnrollmentClient(bc, watcher.Config)
+	replacement := *cfg
+	replacement.Auth.JWTSecret = "rotated-jwt-secret"
+	watcher.SetConfigForTest(&replacement)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := nodeauth.Verify(r, watcher.Config().Auth.JWTSecret); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(nodeenrollment.Receipt{BindingID: nodeenrollment.Identity(string(bc.SecretKey))})
+	}))
+	defer server.Close()
+	if _, err := client.Enroll(t.Context(), server.URL, "node", nodeenrollment.Input{}); err != nil {
+		t.Fatalf("enrollment after JWT key reload failed: %v", err)
+	}
+}
+
+func TestCoreEnrollmentReadinessRetryUsesCurrentJWTSecret(t *testing.T) {
+	bc := &config.BootstrapConfig{EnrollmentEnabled: true, DatabaseURL: "postgres://customer.invalid/silo", SecretKey: []byte(strings.Repeat("s", 48))}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "startup-jwt-secret"
+	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	watcher.SetConfigForTest(cfg)
+	client := nodeEnrollmentClient(bc, watcher.Config)
+	client.ReadyTimeout = 2 * time.Second
+	var receipts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("p", 48) {
+				t.Error("provider token changed")
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if err := nodeauth.Verify(r, watcher.Config().Auth.JWTSecret); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch receipts.Add(1) {
+		case 1:
+			http.NotFound(w, r)
+		case 2:
+			replacement := *watcher.Config()
+			replacement.Auth.JWTSecret = "rotated-during-readiness-jwt-secret"
+			watcher.SetConfigForTest(&replacement)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			_ = json.NewEncoder(w).Encode(nodeenrollment.Receipt{BindingID: nodeenrollment.Identity(string(bc.SecretKey))})
+		}
+	}))
+	defer server.Close()
+	if _, err := client.Enroll(t.Context(), server.URL, "node", nodeenrollment.Input{Token: strings.Repeat("p", 48)}); err != nil {
+		t.Fatalf("readiness retry after JWT key reload failed: %v", err)
+	}
+	if receipts.Load() != 3 {
+		t.Fatalf("receipt attempts = %d, want 3", receipts.Load())
+	}
+}
+
+func TestCoreEnrollmentMissingCurrentConfigFailsAuthentication(t *testing.T) {
+	for _, cfg := range []*config.Config{nil, {}} {
+		watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+		startup := &config.Config{}
+		startup.Auth.JWTSecret = "startup-jwt-secret"
+		watcher.SetConfigForTest(startup)
+		client := nodeEnrollmentClient(&config.BootstrapConfig{EnrollmentEnabled: true}, watcher.Config)
+		watcher.SetConfigForTest(cfg)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if nodeauth.Verify(r, startup.Auth.JWTSecret) == nil {
+				t.Error("missing current config used the startup key")
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		if _, err := client.Enroll(t.Context(), server.URL, "node", nodeenrollment.Input{}); !errors.Is(err, nodeenrollment.ErrOtherCustomer) {
+			t.Fatalf("missing current config = %v, want authentication refusal", err)
+		}
+		server.Close()
 	}
 }

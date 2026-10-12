@@ -1313,7 +1313,7 @@ func main() {
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
-		NodeEnrollment:               nodeEnrollmentClient(bc, cfg),
+		NodeEnrollment:               nodeEnrollmentClient(bc, configWatcher.Config),
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,

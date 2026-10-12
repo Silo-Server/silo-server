@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -1582,7 +1583,7 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	})
 }
 
-// requireBearer is middleware that checks for Authorization: Bearer {secret}.
+// requireBearer verifies signed worker requests and legacy bearer credentials.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1591,8 +1592,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.Auth.JWTSecret {
+		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

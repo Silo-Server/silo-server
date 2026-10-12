@@ -46,14 +46,25 @@ admission and starts the existing worker
 runtime. The provider encoding ceiling remains in operator bootstrap and cannot
 be supplied in the binding payload or changed by customer settings.
 
-The bound worker exposes bearer-authenticated `GET /api/v1/node/enrollment` with
+The bound worker exposes authenticated `GET /api/v1/node/enrollment` with
 `binding_id` (an HMAC of a fixed protocol label under the shared encryption key)
-and `encoding_capacity`. The core requires that receipt under the customer's
-worker bearer before registering the node, and clamps initial `max_jobs` to a
-positive provider ceiling. Exact retries recover lost replies, startup delays and
+and `encoding_capacity`. The core signs each receipt request through
+`internal/nodeauth` using the current config watcher's `auth.jwt_secret`, including
+readiness retries after a reload. Receipt requests carry a derived-key HMAC,
+never the raw JWT signing key. The worker verifies against its current settings
+and retains legacy bearer verification for existing callers. The signature covers
+the worker path after any registered URL prefix is stripped by a reverse proxy.
+The core requires both authenticated proof and the matching binding identity
+before registering the node, and clamps initial `max_jobs` to a positive provider
+ceiling. Exact retries recover lost replies, startup delays and
 failed registry writes through the same authenticated receipt and natural URL
 registration. A 503 can follow a saved binding; retry the same enrollment request.
 A worker bound to another customer returns a conflict without another handoff.
+
+Receipt enrollment requires a worker with signed-request verification; older
+bearer-only workers refuse it. Upgrade the worker before using enrollment. The
+core has no raw-key fallback, and configuration-only registration remains
+available.
 
 Restarts load the private saved binding before opening the normal worker
 listener. Reassignment requires a provider reset while the worker is stopped,

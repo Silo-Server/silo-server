@@ -302,6 +302,25 @@ deadlines and stream accounting remain unchanged; a later read failure can
 truncate committed bytes without a new status. No transfer receipt, worker
 reconstruction or new native route is introduced.
 
+## Authentication
+
+Protected transcode worker routes use `internal/nodeauth.Verify`. They accept
+`Silo-Node-HMAC-SHA256` requests and legacy `Bearer <auth.jwt_secret>` credentials
+for existing callers. Authentication failures retain their plain-text 401 shape;
+an unavailable config retains 503. Routes and their authorization class do not
+change.
+
+Enrollment receipt requests use `internal/nodeauth.Sign` with the live config
+watcher's JWT secret on every attempt, including readiness retries. The signing
+key is derived with HKDF under the fixed `silo/node-request-auth/v1` label. A MAC
+covers the method, worker-relative escaped path, raw query, Unix timestamp, and
+SHA-256 body hash; the worker allows 30 seconds of clock skew. A registered URL
+prefix is omitted from the signed path because the reverse proxy strips it before
+forwarding. Receipt requests never carry the raw JWT key, and enrollment never
+follows redirects. The one-time enrollment POST still uses the provider token.
+Other existing worker senders retain their bearer behavior until the separate
+sender conversion.
+
 ## Remaining progressive and HLS delivery chain
 
 Proxy token remux routes keep the legacy and audio-v2 suffixes distinct. The

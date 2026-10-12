@@ -6,9 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -37,7 +39,7 @@ func TestEnrollAdminNodeClampsCapacityAndRecoversRegistration(t *testing.T) {
 			var requests int
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
-				if r.Method != http.MethodGet || r.URL.Path != nodeenrollment.ReceiptPath || r.Header.Get("Authorization") != "Bearer test-jwt" {
+				if r.Method != http.MethodGet || r.URL.Path != nodeenrollment.ReceiptPath || !strings.HasPrefix(r.Header.Get("Authorization"), nodeauth.Scheme+" ") || nodeauth.Verify(r, "test-jwt") != nil {
 					t.Error("unexpected enrollment retry")
 					w.WriteHeader(401)
 					return
