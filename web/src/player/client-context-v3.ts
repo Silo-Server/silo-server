@@ -21,6 +21,7 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import { networkInformation, prefersReducedData } from "@/lib/networkInformation";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 
 /** App version reported to the server for diagnostics. */
@@ -187,29 +188,13 @@ export function buildDeliveriesV3(
 }
 
 /**
- * The slice of the Network Information API we use. It is not in the DOM lib
- * and is absent in Safari and Firefox, so everything here is best effort and
- * every reader tolerates `undefined`.
- */
-interface NetworkInformationLike {
-  saveData?: boolean;
-  downlink?: number;
-  type?: string;
-}
-
-function networkInformation(): NetworkInformationLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
-}
-
-/**
  * Whether the user is on a connection they would rather not spend. Only
  * Data Saver is a real signal in a browser — cellular detection via
  * `connection.type` is unimplemented nearly everywhere — so we report exactly
  * that and let the server treat the absence as "unknown, assume unmetered".
  */
 export function detectMeteredV3(): boolean {
-  return networkInformation()?.saveData === true;
+  return prefersReducedData();
 }
 
 /**

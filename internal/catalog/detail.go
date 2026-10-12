@@ -4188,12 +4188,13 @@ func (s *DetailService) prepareFiles(ctx context.Context, files []*models.MediaF
 		return files
 	}
 
+	ensure := s.probeEnsurer != nil && !isSpeculativeRead(ctx)
 	prepared := make([]*models.MediaFile, 0, len(files))
 	for _, file := range files {
 		if file == nil {
 			continue
 		}
-		if s.probeEnsurer != nil {
+		if ensure {
 			var ensured *models.MediaFile
 			var err error
 			if withCopySafety {

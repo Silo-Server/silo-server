@@ -149,6 +149,12 @@ type CatalogItemDeviceInput struct {
 	CatalogItemInput
 }
 
+// CatalogItemReadInput names one item to read as its detail page.
+type CatalogItemReadInput struct {
+	CatalogItemDeviceInput
+	Prefetch bool `query:"prefetch" default:"false" doc:"Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh, repair file probe data, or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first."`
+}
+
 // CatalogSeriesInput names one series.
 type CatalogSeriesInput struct {
 	ID        string `path:"id" doc:"Series content id" example:"series:severance"`
@@ -609,7 +615,7 @@ func registerCatalogItems(reg *Registry) {
 		return reg.queryCatalogItems(ctx, cursors, in)
 	})
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}", "getCatalogItem", "catalog",
-		"The detail page of one item, with the viewer's state.")), reg.getCatalogItem)
+		"The detail page of one item, with the viewer's state; viewing queues a metadata refresh when one is due and promotes a matching watchlist entry, unless the read is a prefetch.")), reg.getCatalogItem)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/episodes", "listCatalogItemEpisodes", "catalog",
 		"The episodes of a season item.")), reg.listCatalogItemEpisodes)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/items/{id}/manga-files", "listCatalogItemMangaFiles", "catalog",
@@ -1169,7 +1175,7 @@ func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in
 	return output, err
 }
 
-func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceInput) (*CatalogItemDetailOutput, error) {
+func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemReadInput) (*CatalogItemDetailOutput, error) {
 	svc, p := reg.catalogItems()
 	if p != nil {
 		return nil, p
@@ -1178,7 +1184,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if p != nil {
 		return nil, p
 	}
-	detail, err := svc.ItemDetail(ctx, viewer, in.ID)
+	detail, err := svc.ItemDetail(ctx, viewer, in.ID, in.Prefetch)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

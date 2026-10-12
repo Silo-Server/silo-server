@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { hashKey, type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
 
 import type {
   EpisodesResponse,
@@ -18,8 +18,10 @@ import {
 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 import { catalogKeys } from "./keys";
+import { fetchPeopleSearchCapabilities } from "./personSearch";
 
 type ReadOptions = Pick<RequestInit, "signal"> | undefined;
+type ItemDetailReadOptions = (Pick<RequestInit, "signal"> & { prefetch?: boolean }) | undefined;
 
 function signalOf(options: ReadOptions): AbortSignal | undefined {
   return options?.signal ?? undefined;
@@ -29,14 +31,19 @@ function libraryQuery(libraryId?: number): { library_id?: string } {
   return libraryId ? { library_id: String(libraryId) } : {};
 }
 
+/**
+ * Reads one item's detail. A plain read counts as opening the title: the
+ * server can queue a metadata refresh and promote a watchlist entry.
+ * `prefetch` marks a speculative cache warm-up that must do neither.
+ */
 export async function fetchCatalogItemDetail(
   id: string,
   libraryId?: number,
-  options?: ReadOptions,
+  options?: ItemDetailReadOptions,
 ): Promise<ItemDetail> {
   const detail = await v2("GET /api/v2/catalog/items/{id}", {
     path: { id },
-    query: libraryQuery(libraryId),
+    query: { ...libraryQuery(libraryId), ...(options?.prefetch ? { prefetch: true } : {}) },
     signal: signalOf(options),
   });
   return catalogItemDetailFromV2(detail);
@@ -115,6 +122,35 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
   });
 }
 
+// Item detail queries a prefetch filled, by query hash. The item page reads
+// such a detail again as a view, so the server sees the title opened. Keyed by
+// query rather than by detail object, since cache patches and structural
+// sharing replace or keep objects independently of how the data was read.
+const pendingItemDetailViews = new Set<string>();
+
+/**
+ * The item page's detail query. A detail a prefetch cached renders at once,
+ * and the page then reads it again as a view in the background. The pending
+ * view is consumed once that read finishes, so a failing view read is not
+ * retried in a loop; a read that was cancelled (the page closed, or a write
+ * cancelled it) left nothing new in the cache, so the view stays pending.
+ */
+export function useCatalogItemDetailView(id: string | undefined, libraryId?: number) {
+  const query = useCatalogItemDetail(id, libraryId);
+  const { data, dataUpdatedAt, isFetching, refetch } = query;
+  useEffect(() => {
+    if (!id || !data || isFetching) return;
+    const pendingView = hashKey(catalogKeys.itemDetail(id, libraryId));
+    if (!pendingItemDetailViews.delete(pendingView)) return;
+    void refetch().then((result) => {
+      if (!result.isError && result.dataUpdatedAt === dataUpdatedAt) {
+        pendingItemDetailViews.add(pendingView);
+      }
+    });
+  }, [id, libraryId, data, dataUpdatedAt, isFetching, refetch]);
+  return query;
+}
+
 export function useCatalogItemVersions(id: string | undefined) {
   return useQuery({
     queryKey: catalogKeys.itemVersions(id!),
@@ -161,10 +197,7 @@ export function usePrefetchCatalogSeason(libraryId?: number) {
   const queryClient = useQueryClient();
   return useCallback(
     (seasonId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(seasonId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(seasonId, libraryId, { signal }),
-      });
+      void prefetchCatalogItemDetail(queryClient, seasonId, libraryId);
       void queryClient.prefetchQuery({
         queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
         queryFn: ({ signal }) => fetchCatalogItemEpisodes(seasonId, libraryId, { signal }),
@@ -174,18 +207,67 @@ export function usePrefetchCatalogSeason(libraryId?: number) {
   );
 }
 
-/** Warms an episode's detail query when the user shows intent to open it. */
+/**
+ * Warms an item's detail query when the user shows intent to open it. The
+ * read is marked as a prefetch so it has no server side effects; a server that
+ * does not advertise `item_detail_prefetch` would reject the marker, so
+ * nothing is prefetched from it.
+ */
 export function usePrefetchCatalogItemDetail(libraryId?: number) {
   const queryClient = useQueryClient();
   return useCallback(
     (itemId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(itemId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(itemId, libraryId, { signal }),
-      });
+      void prefetchCatalogItemDetail(queryClient, itemId, libraryId);
     },
     [queryClient, libraryId],
   );
+}
+
+// A write that overlaps a prefetch read (a favorite or watchlist quick action
+// on the hovered card) can leave the read holding the state from before it.
+// Such a read is not cached as fresh.
+function writeOverlaps(queryClient: QueryClient, since: number) {
+  return queryClient
+    .getMutationCache()
+    .getAll()
+    .some((mutation) => mutation.state.status === "pending" || mutation.state.submittedAt >= since);
+}
+
+class DiscardedItemDetailPrefetch extends Error {}
+
+async function prefetchCatalogItemDetail(
+  queryClient: QueryClient,
+  itemId: string,
+  libraryId?: number,
+) {
+  const capabilities = await fetchPeopleSearchCapabilities(queryClient).catch(() => null);
+  if (!capabilities?.item_detail_prefetch || queryClient.isMutating() > 0) return;
+  const queryKey = catalogKeys.itemDetail(itemId, libraryId);
+  await queryClient.prefetchQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const startedAt = Date.now();
+      const detail = await fetchCatalogItemDetail(itemId, libraryId, { signal, prefetch: true });
+      if (!writeOverlaps(queryClient, startedAt)) {
+        pendingItemDetailViews.add(hashKey(queryKey));
+        return detail;
+      }
+      // A page that opened while the read was in flight is waiting on it, so
+      // it gets an ordinary read (a view) in place of the discarded one.
+      if (queryClient.getQueryCache().find({ queryKey, exact: true })?.getObserversCount()) {
+        return fetchCatalogItemDetail(itemId, libraryId, { signal });
+      }
+      throw new DiscardedItemDetailPrefetch();
+    },
+    retry: false,
+  });
+  // Leave no error behind for a page that opens later; it reads afresh.
+  queryClient.removeQueries({
+    queryKey,
+    exact: true,
+    predicate: (query) =>
+      query.state.error instanceof DiscardedItemDetailPrefetch && query.getObserversCount() === 0,
+  });
 }
 
 export function useCatalogSeriesSeasons(seriesId: string | undefined, libraryId?: number) {

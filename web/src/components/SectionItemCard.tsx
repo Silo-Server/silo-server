@@ -20,6 +20,7 @@ import {
 import type { SectionItem } from "@/api/types";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
+import { useItemDetailPrefetchIntent } from "@/hooks/useItemDetailPrefetchIntent";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 
 interface SectionItemCardProps {
@@ -44,19 +45,22 @@ export default memo(function SectionItemCard({
   const airDateLabel = upcomingEvent ? formatUpcomingDate(upcomingEvent.air_date) : "";
   const airTimeLabel = upcomingEvent ? formatUpcomingTime(upcomingEvent.air_time) : null;
   const episodeLabels = !upcomingEvent ? buildEpisodeCardLabels(item) : null;
-  const headingHref =
-    item.type === "episode" && item.series_id
-      ? buildItemHref({ contentId: item.series_id, libraryId })
-      : itemHref;
+  const headingContentId =
+    item.type === "episode" && item.series_id ? item.series_id : item.content_id;
+  const headingHref = buildItemHref({ contentId: headingContentId, libraryId });
   const { cardPresentation } = useUICustomization();
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
+  // The poster and the caption title can open different items (an episode
+  // and its series), so each warms the item it opens.
+  const posterPrefetch = useItemDetailPrefetchIntent(item.content_id, libraryId);
+  const headingPrefetch = useItemDetailPrefetchIntent(headingContentId, libraryId);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
   return (
     <div ref={cardRef} className="media-card media-card-longpress group/card">
-      <div className="group/media relative">
+      <div className="group/media relative" {...posterPrefetch}>
         <ViewTransitionLink
           to={itemHref}
           aria-label={displayTitle}
@@ -116,7 +120,11 @@ export default memo(function SectionItemCard({
       </div>
       {showCaption ? (
         <div className={MEDIA_CARD_CAPTION_CLASS}>
-          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+          <ViewTransitionLink
+            to={headingHref}
+            className={MEDIA_CARD_TITLE_CLASS}
+            {...headingPrefetch}
+          >
             {displayTitle}
           </ViewTransitionLink>
           {showMetadata && upcomingEvent ? (

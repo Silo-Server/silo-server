@@ -6496,7 +6496,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The detail page of one item, with the viewer's state. */
+    /** The detail page of one item, with the viewer's state; viewing queues a metadata refresh when one is due and promotes a matching watchlist entry, unless the read is a prefetch. */
     get: operations["getCatalogItem"];
     put?: never;
     post?: never;
@@ -20754,6 +20754,8 @@ export interface components {
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
       facet_value_search?: boolean;
+      /** @description getCatalogItem accepts prefetch=true for speculative reads that do not queue a metadata refresh, repair file probe data, or promote a watchlist entry */
+      item_detail_prefetch?: boolean;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -88760,6 +88762,8 @@ export interface operations {
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh, repair file probe data, or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first. */
+        prefetch?: boolean;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */

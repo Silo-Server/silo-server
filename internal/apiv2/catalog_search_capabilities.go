@@ -13,6 +13,7 @@ type CatalogSearchCapabilities struct {
 	PeopleMediaScope      bool   `json:"people_media_scope,omitzero" doc:"People search accepts media_scope and filters credits by viewer access"`
 	FacetValueSearch      bool   `json:"facet_value_search,omitzero" doc:"searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q"`
 	PersonPrefetch        bool   `json:"person_prefetch,omitzero" doc:"Person reads accept prefetch=true for speculative reads that do not queue a provider refresh"`
+	ItemDetailPrefetch    bool   `json:"item_detail_prefetch,omitzero" doc:"getCatalogItem accepts prefetch=true for speculative reads that do not queue a metadata refresh, repair file probe data, or promote a watchlist entry"`
 	VideoWithEpisodes     bool   `json:"video_with_episodes_scope,omitzero" doc:"listCatalogItems and queryCatalogItems accept type=video_with_episodes on the query source (text search over movies, series, and episodes), and listPeople accepts it as media_scope"`
 	ExtendedQueryRules    bool   `json:"extended_query_rules,omitzero" doc:"Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
@@ -47,6 +48,7 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 				Capability: Capability{State: StateAvailable}, Provider: result.Provider,
 				PeopleMediaScope:   reg.deps.People != nil && reg.deps.CatalogAccess != nil,
 				PersonPrefetch:     reg.deps.People != nil,
+				ItemDetailPrefetch: reg.deps.CatalogItems != nil,
 				FacetValueSearch:   true,
 				VideoWithEpisodes:  true,
 				ExtendedQueryRules: true,

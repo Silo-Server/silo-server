@@ -120,3 +120,22 @@ func TestPrepareFilesWithoutEnsurerPassesFilesThrough(t *testing.T) {
 		t.Fatalf("preparePlaybackFiles() returned %d files, want 2 (nil entries dropped)", got)
 	}
 }
+
+// A speculative read warms a client cache for a title the viewer may never
+// open, so it must not start probe repair, which reads the media file and
+// persists the result.
+func TestPrepareBrowseFilesSkipsProbeRepairOnSpeculativeRead(t *testing.T) {
+	ensurer := &recordingProbeEnsurer{}
+	svc := &DetailService{probeEnsurer: ensurer}
+	files := []*models.MediaFile{h264File(1, nil), nil, h264File(2, nil)}
+
+	prepared := svc.prepareBrowseFiles(WithSpeculativeRead(context.Background()), files)
+	if len(prepared) != 2 || len(ensurer.probeCalls) != 0 {
+		t.Fatalf("speculative read: %d files, probe calls %v; want 2 files and no probes", len(prepared), ensurer.probeCalls)
+	}
+
+	svc.prepareBrowseFiles(context.Background(), files)
+	if len(ensurer.probeCalls) != 2 {
+		t.Fatalf("view read probe calls = %v, want both files", ensurer.probeCalls)
+	}
+}

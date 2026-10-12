@@ -1,7 +1,7 @@
 import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
-import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useCatalogItemDetailView } from "@/hooks/queries/catalogRead";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
@@ -162,7 +162,7 @@ export default function ItemDetail() {
     isFetching,
     error: itemError,
     refetch,
-  } = useCatalogItemDetail(id, libraryId);
+  } = useCatalogItemDetailView(id, libraryId);
   const itemNotFound = isNotFoundProblem(itemError);
   // A 404 outranks cached detail. A refetch that finds the item gone, or out
   // of the viewer's reach, leaves the old item in the cache, and that page

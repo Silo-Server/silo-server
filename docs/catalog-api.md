@@ -343,6 +343,25 @@ header they resolve the profile's preferences alone. Clients that set
 device overrides should send the header so the detail page matches what playback
 picks.
 
+## Item detail prefetch
+
+Reading `getCatalogItem` counts as opening the title. When the item's metadata is
+incomplete or stale, the server queues a background refresh; when a file lacks
+probe data, it probes the file and stores the result; and for a movie or series it
+promotes a matching external watchlist entry onto the profile's library watchlist
+before reporting `user_state.in_watchlist`.
+
+Clients that warm a cache speculatively, such as web prefetching a poster card the
+pointer rests on, pass `prefetch=true`. A prefetch returns the same detail but
+does none of these: file facts stay as last probed, and `in_watchlist` reflects the
+watchlist as it stands. When the user actually opens the title, read it again
+without `prefetch`; the web client renders the prefetched detail at once and sends
+that read in the background.
+
+`GET /api/v2/catalog/search/capabilities` advertises `item_detail_prefetch: true`
+when the server accepts the parameter. Check it first: `/api/v2` rejects unknown
+query parameters, so an older server answers a prefetch read with `422`.
+
 ## Episode files
 
 Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
