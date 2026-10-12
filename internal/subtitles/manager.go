@@ -215,6 +215,11 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
 	}
+	// Providers bound their own reads; this check keeps any provider from
+	// storing a subtitle larger than an upload may be.
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("download from %s: %w: %d bytes, limit %d", req.ProviderName, ErrSubtitleTooLarge, len(data), MaxUploadSize)
+	}
 
 	return m.StoreSubtitle(ctx, StoreSubtitleRequest{
 		MediaFileID:     req.MediaFileID,
