@@ -319,13 +319,15 @@ to resolve viewer access is still `500`. The proxy's header-authenticated `/stre
 too. The Jellyfin surface keeps its session and answers `503` when its session check or
 its stream and HLS authorization cannot read the session from the database, when a due
 token refresh cannot reach the database, and when that refresh meets an unreachable
-sign-in provider under the `fail_closed` outage policy.
+sign-in provider under the `fail_closed` outage policy. Its `/socket` answers a new
+connection `503` the same way, and keeps an open socket open when a periodic re-check
+cannot run.
 
 Routes that check credentials outside the shared auth gate, refresh, the proxy media grant
-and the Jellyfin session and stream checks may still treat a failed lookup as no session and
+and the Jellyfin session, stream and socket checks may still treat a failed lookup as no session and
 answer 401 or refuse the request. Examples are plugin content routes, theme-song grants,
-Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), the
-Jellyfin websocket, and the v2 socket-ticket check used by the events, playback-control,
+Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), and
+the v2 socket-ticket check used by the events, playback-control,
 watch-together and admin-logs sockets (a watch-together re-check that fails closes the
 room). None of them is a token refresh, so a client that signs out only on a refresh 401
 stays signed in and retries.
