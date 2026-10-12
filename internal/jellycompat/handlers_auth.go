@@ -227,6 +227,7 @@ func (h *AuthHandler) HandleAuthenticateWithQuickConnect(w http.ResponseWriter, 
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, authenticateByNameResponse{
 		AccessToken: session.Token,
 		ServerID:    h.cfg().JellyfinCompat.ServerID,

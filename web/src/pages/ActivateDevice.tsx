@@ -167,6 +167,9 @@ function ActivateDeviceRequest() {
   async function handleDecision(action: "approve" | "deny") {
     setActing(true);
     setActionError(null);
+    // Every Quick Connect lookup spends the account's code budget, so a
+    // decision on one is followed by a reload only when the request moved on.
+    let reload = !isQuickConnect;
     try {
       const body = token ? { token } : { code };
       if (action === "approve") {
@@ -183,6 +186,7 @@ function ActivateDeviceRequest() {
     } catch (error) {
       // A conflict or gone means the request moved on; the reload shows why.
       const moved = error instanceof V2ProblemError && [404, 409, 410].includes(error.status);
+      reload ||= moved;
       if (error instanceof V2ProblemError && error.status === 429) {
         setActionError(tooManyCodesMessage(error.retryAfterSeconds));
       } else if (
@@ -201,9 +205,7 @@ function ActivateDeviceRequest() {
         );
       }
     } finally {
-      // Every Quick Connect lookup spends the account's code budget, so a
-      // decision on one is not followed by a reload.
-      if (!isQuickConnect) {
+      if (reload) {
         await loadDetails(true);
       }
       setActing(false);

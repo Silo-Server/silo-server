@@ -528,3 +528,30 @@ it("says a PIN lockout is about the profile, not the codes", async () => {
   await screen.findByText("Too many incorrect PINs. Try again in 5 minutes.");
   expect(recorded.calls).toEqual([]);
 });
+
+it("reloads a Quick Connect request that moved on before it was declined", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount++;
+      return Promise.resolve(
+        lookupCount === 1 ? quickConnect : { ...quickConnect, status: "expired" },
+      );
+    }
+    return Promise.reject(
+      new V2ProblemError("denyDeviceLogin", {
+        type: "https://siloserver.org/docs/api/v2/problems/device_login_expired",
+        title: "Expired",
+        status: 410,
+        detail: "Device login request has expired.",
+        instance: "urn:silo:request:1",
+      } as never),
+    );
+  }) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This code expired. Start Quick Connect again in the app.");
+  expect(lookupCount).toBe(2);
+});

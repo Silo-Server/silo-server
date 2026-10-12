@@ -140,8 +140,8 @@ func TestQuickConnectInitiateReadsAuthorizationHeader(t *testing.T) {
 		service := &fakeQuickConnect{}
 		router, _ := quickConnectRouter(t, service)
 		rec := serveQuickConnect(router, method, "/QuickConnect/Initiate", "", map[string]string{"X-Emby-Authorization": quickConnectAuthHeader})
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s Initiate = %d %s", method, rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s Initiate = %d %s, Cache-Control %q", method, rec.Code, rec.Body.String(), rec.Header().Get("Cache-Control"))
 		}
 		if service.started.DeviceName != "Living room" || service.started.AppName != "Jellyfin Web" {
 			t.Fatalf("%s started with %+v", method, service.started)
@@ -249,7 +249,7 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	}}
 	router, store := quickConnectRouter(t, service)
 	rec := serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{"Secret":"SECRET"}`, map[string]string{"Content-Type": "application/json"})
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("AuthenticateWithQuickConnect = %d %s", rec.Code, rec.Body.String())
 	}
 	var out authenticateByNameResponse

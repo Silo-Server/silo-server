@@ -83,6 +83,9 @@ func (h *QuickConnectHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "ServerError", "Could not start Quick Connect")
 		return
 	}
+	// The answer carries the secret that collects the session; GET included,
+	// no cache may keep it.
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, quickConnectResult{
 		Secret:     start.Secret,
 		Code:       start.Code,
@@ -127,6 +130,7 @@ func (h *QuickConnectHandler) HandleConnect(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "NotFound", "Unknown secret")
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, quickConnectResult{
 		Authenticated: authenticated,
 		Secret:        secret,
