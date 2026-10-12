@@ -188,6 +188,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
 	playbackHandler.PlaySync = deps.SubtitlePlaySync
+	playbackHandler.AudioPreferences = deps.AudioPreferences
+	playbackHandler.SubtitlePreferences = deps.SubtitlePreferences
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs

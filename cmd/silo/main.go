@@ -3589,6 +3589,16 @@ func main() {
 			if eventsHub != nil {
 				compatDeps.UserStateEvents = eventsHub
 			}
+			if userStoreProvider != nil {
+				// Tracks Jellyfin clients play are saved through the same writes
+				// as PUT /api/v2/audio-prefs and /api/v2/subtitle-prefs.
+				compatAudioPrefs := handlers.NewAudioPrefHandler(userStoreProvider)
+				compatAudioPrefs.EventsHub = eventsHub
+				compatSubtitlePrefs := handlers.NewSubtitlePrefHandler(userStoreProvider)
+				compatSubtitlePrefs.EventsHub = eventsHub
+				compatDeps.AudioPreferences = compatAudioPrefs
+				compatDeps.SubtitlePreferences = compatSubtitlePrefs
+			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
 			if deps.CollectionService != nil {
