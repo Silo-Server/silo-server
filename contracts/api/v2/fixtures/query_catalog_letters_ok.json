@@ -1,0 +1,15 @@
+{
+  "total": 5,
+  "letters": [
+    {
+      "letter": "#",
+      "count": 2,
+      "position": 0
+    },
+    {
+      "letter": "H",
+      "count": 3,
+      "position": 2
+    }
+  ]
+}

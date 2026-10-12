@@ -29,8 +29,8 @@ interface SharedItemGridProps {
   emptyState?: ReactNode;
   /** Imperative access for jumping to a position, such as a letter bar. */
   gridRef?: Ref<ItemGridHandle>;
-  /** The index of the first item in the top row the viewer can see. */
-  onFirstVisibleIndexChange?: (index: number) => void;
+  /** The first and last item index of the top row the viewer can see. */
+  onTopRowChange?: (firstIndex: number, lastIndex: number) => void;
 }
 
 export interface ItemGridHandle {
@@ -39,14 +39,22 @@ export interface ItemGridHandle {
 }
 
 /**
- * Height of the sticky page header covering the top of the viewport, if one
- * is showing (the mobile header). Marked with `data-sticky-header`.
+ * How much of the top of the viewport sticky page headers cover once stuck:
+ * the mobile top bar, or the library header on wide screens. Headers opt in
+ * with `data-sticky-header`; one that is hidden or scrolls with the page at
+ * the current width covers nothing.
  */
 function stickyHeaderInset(): number {
-  const header = document.querySelector<HTMLElement>("[data-sticky-header]");
-  if (!header) return 0;
-  const { bottom, height } = header.getBoundingClientRect();
-  return height > 0 && bottom > 0 ? bottom : 0;
+  let inset = 0;
+  for (const header of document.querySelectorAll<HTMLElement>("[data-sticky-header]")) {
+    const style = getComputedStyle(header);
+    const height = header.getBoundingClientRect().height;
+    if ((style.position !== "sticky" && style.position !== "fixed") || height === 0) continue;
+    const stuckTop =
+      (Number.parseFloat(style.top) || 0) + (Number.parseFloat(style.marginTop) || 0);
+    inset = Math.max(inset, stuckTop + height);
+  }
+  return inset;
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {
@@ -82,7 +90,7 @@ export default function ItemGrid(props: ItemGridProps) {
     onToggleSelect,
     emptyState,
     gridRef,
-    onFirstVisibleIndexChange,
+    onTopRowChange,
   } = props;
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
@@ -163,12 +171,28 @@ export default function ItemGrid(props: ItemGridProps) {
     [columnCount, rowHeight, virtualizer],
   );
 
+  // Sticky headers only change height at layout breakpoints, so measure them
+  // on resize rather than on every scroll frame.
+  const headerInsetRef = useRef(0);
+  useEffect(() => {
+    if (!onTopRowChange) return;
+    const measure = () => {
+      headerInsetRef.current = stickyHeaderInset();
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [onTopRowChange]);
+
   const scrollOffset = virtualizer.scrollOffset ?? 0;
   useEffect(() => {
-    if (!onFirstVisibleIndexChange) return;
-    const row = Math.floor((scrollOffset + stickyHeaderInset() - scrollMargin) / rowHeight);
-    onFirstVisibleIndexChange(Math.max(0, row) * columnCount);
-  }, [onFirstVisibleIndexChange, scrollOffset, scrollMargin, rowHeight, columnCount]);
+    if (!onTopRowChange) return;
+    const row = Math.max(
+      0,
+      Math.floor((scrollOffset + headerInsetRef.current - scrollMargin) / rowHeight),
+    );
+    onTopRowChange(row * columnCount, (row + 1) * columnCount - 1);
+  }, [onTopRowChange, scrollOffset, scrollMargin, rowHeight, columnCount]);
 
   const showsItems = !loading && totalItems > 0;
   // Static grids rebuild `pages` each render; key on the data behind it.

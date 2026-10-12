@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import LetterBar from "./LetterBar";
-import { letterAtIndex } from "./letterBar";
+import { letterAtIndex } from "./letterIndex";
 
 const letters = [
   { letter: "#", count: 2, position: 0 },
@@ -83,5 +83,17 @@ describe("LetterBar", () => {
     fireEvent.keyDown(button("C"), { key: "b" });
     expect(document.activeElement).toBe(button("C"));
     expect(tabbable()).toEqual([button("C")]);
+  });
+
+  it("leaves Space to activate the focused letter", () => {
+    render(<LetterBar letters={letters} activeLetter="A" onJump={() => {}} />);
+    const a = screen.getByRole("button", { name: "A, 5 titles" });
+    a.focus();
+
+    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    a.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(a);
   });
 });

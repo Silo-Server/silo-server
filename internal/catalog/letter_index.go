@@ -20,10 +20,11 @@ type LetterBucket struct {
 }
 
 // letterFoldFrom and letterFoldTo fold accented Latin initials to their base
-// letter, so "Élite" files under E rather than #.
+// letter, so "Élite" files under E rather than #. Capitals are listed too:
+// under a C ctype the title key's LOWER() leaves non-ASCII letters as they are.
 const (
-	letterFoldFrom = "àáâãäåāăąçćĉċčďđèéêëēĕėęěĝğġģĥħìíîïĩīĭįıĵķĺļľŀłñńņňòóôõöøōŏőŕŗřśŝşšţťŧùúûüũūŭůűųŵýÿŷźżž"
-	letterFoldTo   = "aaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzz"
+	letterFoldFrom = "àáâãäåāăąçćĉċčďđèéêëēĕėęěĝğġģĥħìíîïĩīĭįıĵķĺļľŀłñńņňòóôõöøōŏőŕŗřśŝşšţťŧùúûüũūŭůűųŵýÿŷźżžÀÁÂÃÄÅĀĂĄÇĆĈĊČĎĐÈÉÊËĒĔĖĘĚĜĞĠĢĤĦÌÍÎÏĨĪĬĮĴĶĹĻĽĿŁÑŃŅŇÒÓÔÕÖØŌŎŐŔŖŘŚŜŞŠŢŤŦÙÚÛÜŨŪŬŮŰŲŴÝŸŶŹŻŽ"
+	letterFoldTo   = "aaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzaaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzz"
 )
 
 // letterBucketSQL files a lowercased title key under its initial: A to Z after

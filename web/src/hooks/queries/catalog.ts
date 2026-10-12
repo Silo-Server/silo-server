@@ -487,15 +487,9 @@ export function useLibraryHasItems(libraryId: number, options: { enabled?: boole
   });
 }
 
-/** One letter of a title-ordered browse; see `queryCatalogLetters`. */
-export type CatalogLetter = V2Result<"POST /api/v2/catalog/letters">["letters"][number];
-
-export interface CatalogLetters {
-  /** Every title in the result: the exact total the counts add up to. */
-  total: number;
-  /** Letters with at least one title, in list order. */
-  letters: CatalogLetter[];
-}
+/** The letter index of a title-ordered browse; see `queryCatalogLetters`. */
+export type CatalogLetters = V2Result<"POST /api/v2/catalog/letters">;
+export type CatalogLetter = CatalogLetters["letters"][number];
 
 export async function fetchCatalogLetters(
   state: CatalogSearchState,

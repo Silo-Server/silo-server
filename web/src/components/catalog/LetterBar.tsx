@@ -1,9 +1,9 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import type { CatalogLetter } from "@/hooks/queries/catalog";
 import { cn } from "@/lib/utils";
 
-import { LETTER_BAR_LETTERS, spokenLetter, titleCount } from "./letterBar";
+import { LETTER_BAR_LETTERS, spokenLetter, titleCount } from "./letterIndex";
 
 export interface LetterBarProps {
   /** Letters with titles, from the letter index. Letters missing here are greyed out. */
@@ -20,8 +20,14 @@ export interface LetterBarProps {
  * touchscreen, sliding a finger along the bar jumps as it passes each letter.
  */
 export default function LetterBar({ letters, activeLetter, onJump }: LetterBarProps) {
-  const byLetter = new Map(letters.map((letter) => [letter.letter, letter]));
-  const enabled = LETTER_BAR_LETTERS.filter((letter) => byLetter.has(letter));
+  const byLetter = useMemo(
+    () => new Map(letters.map((letter) => [letter.letter, letter])),
+    [letters],
+  );
+  const enabled = useMemo(
+    () => LETTER_BAR_LETTERS.filter((letter) => byLetter.has(letter)),
+    [byLetter],
+  );
   const [focused, setFocused] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
   const [scrubbing, setScrubbing] = useState<string>();
@@ -67,7 +73,9 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
         next = enabled[enabled.length - 1];
         break;
       default: {
-        if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return;
+        // Space activates the focused letter like Enter; other printable
+        // keys move to their letter, with digits and symbols on #.
+        if (!/^\S$/u.test(event.key) || event.metaKey || event.ctrlKey || event.altKey) return;
         const typed = /[a-z]/i.test(event.key) ? event.key.toUpperCase() : "#";
         if (!byLetter.has(typed)) return;
         next = typed;
@@ -112,8 +120,10 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       onPointerUp={endScrub}
       onPointerCancel={endScrub}
       className={cn(
-        "surface-panel fixed top-1/2 right-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:right-2",
-        "h-[min(42rem,calc(100dvh-11rem))]",
+        "surface-panel fixed right-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:right-2",
+        // Centered a little low and short of the viewport, so it clears the
+        // page tabs at the top and the scroll-to-top button at the bottom.
+        "top-[calc(50%+2rem)] h-[min(42rem,calc(100dvh-14rem))]",
       )}
     >
       {LETTER_BAR_LETTERS.map((letter) => {
@@ -131,11 +141,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             tabIndex={letter === tabStop ? 0 : -1}
             aria-disabled={entry ? undefined : true}
             aria-current={isActive ? "true" : undefined}
-            aria-label={
-              entry
-                ? `${spokenLetter(letter)}, ${titleCount(entry.count)}`
-                : `${spokenLetter(letter)}, no titles`
-            }
+            aria-label={`${spokenLetter(letter)}, ${entry ? titleCount(entry.count) : "no titles"}`}
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}
             className={cn(

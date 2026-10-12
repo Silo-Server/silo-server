@@ -617,15 +617,23 @@ A title files under the first character of its title sort key, the same key
 "The Hobbit" with sort title "Hobbit, The" files under H. Accented Latin
 initials fold to their base letter ("Élite" under E). Digits, symbols, and
 other scripts file under `#`. A letter missing from the list has no titles.
+The folding is the index's own: `name_prefix` still matches the characters
+as written, so `name_prefix=e` leaves out "Élite", and `#` has no
+`name_prefix` equivalent.
 
 `position` is the zero-based index of the letter's first title in
-`queryCatalogItems` with the same scope and rules, `sort: "title"`, and the same
-`order`. Send it as `seek` to load that window. Positions number the rows of the
+`queryCatalogItems` with the same scope and rules, `sort: "title"`, the same
+`order`, and no `query_limit`. Send it as `seek` to load that window. The index
+counts the catalog as it is when the request runs; it takes no `cursor`, so it
+is not fenced to a window cursor's snapshot. Titles added between the two reads,
+such as during a scan, shift later positions and `total` by that many, and the
+next refresh of both reads agrees again. Positions number the rows of the
 same ordering the pager uses, so they hold under any database collation; when
 the collation interleaves a letter's titles with another's (an accented or
 punctuated title sorted among plain ones), `count` still covers every title
 under the letter and `position` is the first one. `total` is the exact count of
-the result, so a client can size a virtualized list without `skip_total=false`.
+the result at that moment, so a client can size a virtualized list without
+`skip_total=false`.
 
 The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window

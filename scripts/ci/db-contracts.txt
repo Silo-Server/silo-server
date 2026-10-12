@@ -195,3 +195,8 @@
 ./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
 ./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
+
+# The A–Z letter index files titles by sort title and reports each letter's
+# first position exactly where the cursor pager and a seek list it.
+./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
+./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres

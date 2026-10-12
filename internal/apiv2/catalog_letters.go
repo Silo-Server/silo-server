@@ -13,7 +13,13 @@ import (
 // each letter starts, so a client can seek straight to it in the list
 // queryCatalogItems pages.
 
-const opQueryCatalogLetters = "queryCatalogLetters"
+const (
+	opQueryCatalogLetters = "queryCatalogLetters"
+	// lettersSortTitle and lettersOrderDesc spell the title order the letter
+	// index always counts in, in the browse grammar.
+	lettersSortTitle = "title"
+	lettersOrderDesc = "desc"
+)
 
 // CatalogLettersInput is the queryCatalogLetters request.
 type CatalogLettersInput struct {
@@ -96,9 +102,9 @@ func (q CatalogLettersQuery) catalogRequest() (catalogpkg.CatalogRequest, *Probl
 }
 
 func (q CatalogLettersQuery) parse() (catalogpkg.CatalogRequest, *Problem) {
-	sort := "title"
-	if q.Order == "desc" {
-		sort = "-title"
+	sort := lettersSortTitle
+	if q.Order == lettersOrderDesc {
+		sort = "-" + lettersSortTitle
 	}
 	browse := CatalogBrowseInput{Source: string(catalogpkg.CatalogSourceQuery), LibraryID: q.LibraryID, Type: q.Type, Match: q.Match, Sort: sort}
 	values, p := browse.catalogValues()
@@ -112,7 +118,7 @@ func (q CatalogLettersQuery) parse() (catalogpkg.CatalogRequest, *Problem) {
 	req.Query.Groups = catalogQueryGroups(q.Groups)
 	if err := req.ValidateQueryDefinition(); err != nil {
 		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "Invalid structured filters.").
-			WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: err.Error()})
+			WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
 	}
 	return req, nil
 }

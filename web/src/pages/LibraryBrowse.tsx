@@ -4,7 +4,7 @@ import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
 import AudiobookGroupsView from "@/components/audiobooks/AudiobookGroupsView";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import LetterBar from "@/components/catalog/LetterBar";
-import { letterAtIndex } from "@/components/catalog/letterBar";
+import { letterAtIndex } from "@/components/catalog/letterIndex";
 import ItemGrid, { type ItemGridHandle } from "@/components/ItemGrid";
 import LibraryEmptyState from "@/components/LibraryEmptyState";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
@@ -208,13 +208,37 @@ export default function LibraryBrowse({
   // position and the exact total, so the grid can size itself to the whole
   // result and a jump lands on the letter's first title without loading the
   // titles before it.
-  const titleOrdered = !isGroupedAxis && scopedQueryDefinition.sort.field === "title";
+  // A capped result (query_limit) has no index: the letters count the whole
+  // library.
+  const titleOrdered =
+    !isGroupedAxis &&
+    scopedQueryDefinition.sort.field === "title" &&
+    scopedQueryDefinition.limit === undefined;
   const lettersQuery = useCatalogLetters(state, { enabled: titleOrdered });
   const letterIndex = titleOrdered && totalItems > 0 ? lettersQuery.data : undefined;
   const showLetterBar = letterIndex !== undefined && letterIndex.total > 0;
-  const gridTotalItems = showLetterBar ? letterIndex.total : totalItems;
+  // The index and the pages are separate reads, so a scan between them can
+  // leave either one a few titles behind. The larger total never hides a title
+  // the pages return.
+  const gridTotalItems = showLetterBar ? Math.max(letterIndex.total, totalItems) : totalItems;
   const gridRef = useRef<ItemGridHandle>(null);
-  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
+  // The last title in the top row: a jump scrolls the letter's first title
+  // into that row, often after titles of the letter before it.
+  const [topRowEnd, setTopRowEnd] = useState(0);
+  const handleTopRowChange = useCallback((_first: number, last: number) => setTopRowEnd(last), []);
+  // A letter near the end can't scroll to the top of the viewport, so the top
+  // row still belongs to an earlier letter. Keep the chosen letter current
+  // until the viewer scrolls by hand.
+  const [jumpedLetter, setJumpedLetter] = useState<string>();
+  useEffect(() => {
+    if (!jumpedLetter) return;
+    const release = () => setJumpedLetter(undefined);
+    const events = ["wheel", "touchmove", "keydown"] as const;
+    for (const type of events) window.addEventListener(type, release, { passive: true });
+    return () => {
+      for (const type of events) window.removeEventListener(type, release);
+    };
+  }, [jumpedLetter]);
   // An empty result only says the current view matched nothing. Ask whether
   // the library holds anything at all before calling it empty, so an
   // over-filtered view keeps pointing at its filters.
@@ -357,7 +381,7 @@ export default function LibraryBrowse({
             libraryId={libraryId}
             loading={isLoading}
             onVisibleRangeChange={handleVisibleRangeChange}
-            onFirstVisibleIndexChange={showLetterBar ? setFirstVisibleIndex : undefined}
+            onTopRowChange={showLetterBar ? handleTopRowChange : undefined}
             sortField={scopedQueryDefinition.sort.field}
             emptyState={emptyState}
           />
@@ -366,8 +390,11 @@ export default function LibraryBrowse({
       {showLetterBar && !browseFailed ? (
         <LetterBar
           letters={letterIndex.letters}
-          activeLetter={letterAtIndex(letterIndex.letters, firstVisibleIndex)}
-          onJump={(letter) => gridRef.current?.scrollToItem(letter.position)}
+          activeLetter={jumpedLetter ?? letterAtIndex(letterIndex.letters, topRowEnd)}
+          onJump={(letter) => {
+            setJumpedLetter(letter.letter);
+            gridRef.current?.scrollToItem(letter.position);
+          }}
         />
       ) : null}
       <ScrollToTopButton />
