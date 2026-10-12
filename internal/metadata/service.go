@@ -1500,7 +1500,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if len(req.durableProviderIDs) > 0 {
 			// A stored item keeps its durable identity; local metadata for
 			// another title is left out (identify_sticky.go).
-			skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, canonicalIdentityProviderIDs(req.durableProviderIDs))
+			skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, canonicalIdentityProviderIDs(req.durableProviderIDs), req.recordedStaleProviderIDs)
 			if err != nil {
 				return nil, err
 			}
@@ -1772,7 +1772,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// out (identify_sticky.go).
 		stored := storedItemIdentity(existing, req.durableProviderIDs)
 		localHints := collectLocalIdentityHints(ctx, itemChain, searchQuery)
-		skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, stored)
+		skipLocalProvider, err = s.localIdentityConflict(ctx, req.Mode, req.ContentID, localHints, stored, req.recordedStaleProviderIDs)
 		if err != nil {
 			return nil, err
 		}

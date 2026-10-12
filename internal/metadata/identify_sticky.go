@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,8 +24,10 @@ import (
 // a corrected NFO, unless an admin chose the stored identity with Identify.
 // Identify marks the item in the transaction that writes the identity it
 // chose, and in any move or merge that commits before that write; renames and
-// merges carry the mark along, and the choice outranks the file: any declared IDs that do not confirm the stored identity count as a
-// conflict, because the refresh would otherwise re-match on them.
+// merges carry the mark along. The choice outranks the file in every mode: any
+// declared IDs that do not confirm the stored identity count as a conflict.
+// A stored ID already recorded as dead (404) is no identity to keep, so the
+// file may name its replacement.
 
 // metadataIdentityChoiceRepo records and reads an admin's Identify choice. It
 // is asserted on itemRepo; *catalog.ItemRepository satisfies it.
@@ -69,10 +73,9 @@ func (s *MetadataService) recordIdentityChoice(ctx context.Context, contentID st
 	return nil
 }
 
-// localIdentityConflict reports whether a pipeline run in mode must leave the
-// local provider out because the IDs its files declare name a different
-// title than the identity the run keeps, and logs the conflict.
-func (s *MetadataService) localIdentityConflict(ctx context.Context, mode RefreshMode, contentID string, local []localIdentityHint, stored map[string]string) (bool, error) {
+// declaredLocalIDs returns the identity IDs the local files declare, the first
+// provider's winning for each key.
+func declaredLocalIDs(local []localIdentityHint) map[string]string {
 	declared := make(map[string]string, len(trustedSearchIDKeys))
 	for _, hint := range local {
 		for key, value := range canonicalIdentityProviderIDs(hint.ids) {
@@ -81,31 +84,42 @@ func (s *MetadataService) localIdentityConflict(ctx context.Context, mode Refres
 			}
 		}
 	}
+	return declared
+}
+
+// localIdentityConflict reports whether a pipeline run in mode must leave the
+// local provider out because the IDs its files declare name a different
+// title than the identity the run keeps, and logs the conflict. Stored IDs in
+// stale (recorded 404s) are left out of the identity.
+func (s *MetadataService) localIdentityConflict(ctx context.Context, mode RefreshMode, contentID string, local []localIdentityHint, stored map[string]string, stale providerIDValueSet) (bool, error) {
+	declared := declaredLocalIDs(local)
 	if len(declared) == 0 {
 		return false, nil
 	}
+	stored = maps.Clone(stored)
+	suppressProviderIDValues(stored, stale)
+	if !identityChoiceCorrects(declared, stored) {
+		// The file confirms or extends the stored identity.
+		return false, nil
+	}
+	// Outside a manual refresh a same-key contradiction is enough; otherwise
+	// only an Identify choice keeps the stored identity.
 	keptBy := "match"
-	if mode == ModeManualRefresh {
-		chosen, err := s.identityChosenOver(ctx, contentID, declared, stored)
+	if mode == ModeManualRefresh || !localIDsContradict(declared, stored) {
+		chosen, err := s.identityChosen(ctx, contentID)
 		if err != nil || !chosen {
 			return false, err
 		}
 		keptBy = "identify"
-	} else if !localIDsContradict(declared, stored) {
-		return false, nil
 	}
 	slog.WarnContext(ctx, "metadata: local metadata names a different title than the item's identity; keeping the identity and skipping local metadata", "component", "metadata",
 		"content_id", contentID, "kept_by", keptBy, "stored_ids", stored, "local_ids", declared)
 	return true, nil
 }
 
-// identityChosenOver reports whether a manual refresh keeps the stored
-// identity over declared IDs that do not confirm it: an admin chose it with
+// identityChosen reports whether an admin chose the item's identity with
 // Identify.
-func (s *MetadataService) identityChosenOver(ctx context.Context, contentID string, declared, stored map[string]string) (bool, error) {
-	if !identityChoiceCorrects(declared, stored) {
-		return false, nil
-	}
+func (s *MetadataService) identityChosen(ctx context.Context, contentID string) (bool, error) {
 	repo, ok := s.itemRepo.(metadataIdentityChoiceRepo)
 	if !ok {
 		return false, nil
@@ -137,6 +151,9 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 	if err != nil {
 		return false, fmt.Errorf("resolve series provider chain: %w", err)
 	}
+	if !slices.ContainsFunc(chain, func(p Provider) bool { _, ok := p.(IdentityHintProvider); return ok }) {
+		return false, nil
+	}
 	local := s.localProviderContextForContent(ctx, series.ContentID, folderID)
 	hints := collectLocalIdentityHints(ctx, chain, SearchQuery{
 		Title:                     series.Title,
@@ -148,12 +165,16 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 		AllGroupFilePaths:         local.allGroupFilePaths,
 		PrimarySidecarSearchPaths: local.primarySidecarSearchPaths,
 	})
-	if len(hints) == 0 {
+	if len(declaredLocalIDs(hints)) == 0 {
 		return false, nil
 	}
 	durable, err := s.loadDurableProviderIDs(ctx, series.ContentID)
 	if err != nil {
 		return false, err
 	}
-	return s.localIdentityConflict(ctx, ModeScheduledRefresh, series.ContentID, hints, storedItemIdentity(series, durable))
+	stale, err := s.loadRecordedStaleProviderIDs(ctx, series.ContentID)
+	if err != nil {
+		return false, err
+	}
+	return s.localIdentityConflict(ctx, ModeScheduledRefresh, series.ContentID, hints, storedItemIdentity(series, durable), stale)
 }
