@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -274,9 +273,10 @@ func TestImageWorkBudgetBoundsConcurrentJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
-	waitCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := budget.acquire(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+	// With the slot taken, an acquire on a done context fails at once.
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := budget.acquire(done); !errors.Is(err, context.Canceled) {
 		t.Fatalf("second acquire with the slot taken = %v, want it to wait", err)
 	}
 	release()
@@ -287,44 +287,36 @@ func TestImageWorkBudgetBoundsConcurrentJobs(t *testing.T) {
 	second()
 }
 
-// countingByteImageCacher records how many byte caches run at once.
-type countingByteImageCacher struct {
-	fakeImageCacher
-	mu         sync.Mutex
-	running    int
-	maxRunning int
-}
-
-func (c *countingByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req CacheImageRequest) (*CacheImageResult, error) {
-	c.mu.Lock()
-	c.running++
-	c.maxRunning = max(c.maxRunning, c.running)
-	c.mu.Unlock()
-	time.Sleep(20 * time.Millisecond)
-	c.mu.Lock()
-	c.running--
-	c.mu.Unlock()
-	return &CacheImageResult{BasePath: "local/movies/" + req.ContentID + "/poster", Ext: ".webp"}, nil
-}
-
-// A drain asking for more concurrency than the process budget still runs
-// within the budget.
-func TestImageCacheProcessorHonorsWorkerBudget(t *testing.T) {
+// A drain whose budget is taken starts no job, and hands its whole claimed
+// page back to the queue when it is canceled while waiting.
+func TestImageCacheProcessorWaitsForWorkerBudget(t *testing.T) {
 	root := t.TempDir()
 	source := "file://" + writeLocalPoster(t, root)
 	var claimed []*models.MetadataImageCacheJob
-	for i := int64(1); i <= 4; i++ {
+	for i := int64(1); i <= 3; i++ {
 		job := localArtworkJob(source)
 		job.ID = i
 		claimed = append(claimed, job)
 	}
-	cacher := &countingByteImageCacher{}
-	p := NewImageCacheProcessorWithTargets(&fakeLocalImageCacheJobs{}, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	jobs := &fakeLocalImageCacheJobs{}
+	cacher := &fakeByteImageCacher{}
+	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 	p.SetWorkerBudget(1)
-	p.processClaimedJobs(context.Background(), "w1", claimed, 4)
-	if cacher.maxRunning != 1 {
-		t.Fatalf("concurrent jobs = %d, want 1 within the budget", cacher.maxRunning)
+	release, err := p.workBudget.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("take the only slot: %v", err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stats := p.processClaimedJobs(ctx, "w1", claimed, 3)
+	if len(cacher.byteReqs) != 0 || stats.Succeeded != 0 {
+		t.Fatalf("copies = %d, stats = %+v; want none while the budget is taken", len(cacher.byteReqs), stats)
+	}
+	if len(jobs.requeuedIDs) != 3 {
+		t.Fatalf("requeued = %v, want the whole page back in the queue", jobs.requeuedIDs)
 	}
 }
 
@@ -350,5 +342,47 @@ func TestCacheTargetArtworkDoesNotWaitForTheSharedBudget(t *testing.T) {
 	}
 	if jobs.succeededID != job.ID {
 		t.Fatalf("succeeded = %d, want the refreshed job copied while the budget is taken", jobs.succeededID)
+	}
+}
+
+// gatedByteImageCacher signals each copy as it starts and holds it until the
+// test lets it finish.
+type gatedByteImageCacher struct {
+	fakeImageCacher
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func (c *gatedByteImageCacher) CacheImageBytes(_ context.Context, _ []byte, req CacheImageRequest) (*CacheImageResult, error) {
+	c.entered <- struct{}{}
+	<-c.proceed
+	return &CacheImageResult{BasePath: "local/movies/" + req.ContentID + "/poster", Ext: ".webp"}, nil
+}
+
+// A drain job holds a slot of the process's artwork budget while it runs.
+func TestImageCacheProcessorJobsHoldWorkerBudget(t *testing.T) {
+	root := t.TempDir()
+	source := "file://" + writeLocalPoster(t, root)
+	first, second := localArtworkJob(source), localArtworkJob(source)
+	second.ID = first.ID + 1
+	cacher := &gatedByteImageCacher{entered: make(chan struct{}), proceed: make(chan struct{})}
+	p := NewImageCacheProcessorWithTargets(&fakeLocalImageCacheJobs{}, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
+	p.SetWorkerBudget(1)
+
+	done := make(chan ImageCacheRunStats)
+	go func() {
+		done <- p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{first, second}, 2)
+	}()
+	<-cacher.entered
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.workBudget.acquire(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("budget while a job runs: acquire = %v, want the only slot held", err)
+	}
+	close(cacher.proceed)
+	<-cacher.entered
+	if stats := <-done; stats.Succeeded != 2 {
+		t.Fatalf("stats = %+v, want both jobs copied", stats)
 	}
 }
