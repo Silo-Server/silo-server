@@ -54,17 +54,17 @@ func carryItemOnlyArtwork(item, existing *models.MediaItem) {
 	}
 }
 
-// settleItemOnlyArtwork runs after applyBestImages. When the refresh searched
-// the item level for sidecars (withLocalArtworkSearched), a banner, thumb,
-// clear art or disc slot that holds a local sidecar the search did not return
-// is cleared once the sidecar's folder answers (sidecarGone), and kept while it
-// does not. A refresh that did not search leaves the slots as stored. Then the
-// thumbhash follows the path, as for the poster and backdrop.
-func settleItemOnlyArtwork(ctx context.Context, item, existing *models.MediaItem, images []RemoteImage) {
+// settleItemOnlyArtwork runs after applyBestImages with the item level's
+// retention. When the refresh searched the item level for sidecars
+// (withLocalArtworkSearched), a banner, thumb, clear art or disc slot that
+// holds a local sidecar the search did not return is cleared once the
+// sidecar's folder answers (sidecarGone), and kept while it does not. A
+// refresh that did not search leaves the slots as stored. Then the thumbhash
+// follows the path, as for the poster and backdrop.
+func settleItemOnlyArtwork(retention *localArtworkRetention, item, existing *models.MediaItem, images []RemoteImage) {
 	if item == nil {
 		return
 	}
-	retention := newLocalArtworkRetention(ctx, item.ContentID, localArtworkItem)
 	if retention.searched && !artworkLocked(item) {
 		for _, field := range itemOnlyArtworkFields(item) {
 			if hasImageOfType(images, field.imageType) || !isLocalImageSourcePath(*field.source) || !retention.sidecarGone(*field.source) {
@@ -94,29 +94,33 @@ func hasImageOfType(images []RemoteImage, imageType ImageType) bool {
 	return false
 }
 
-// planExtraBackdrops decides the item's backdrops after the primary. Local
-// discovery lists backdrops in display order and applyBestImages made the
-// first one the primary, so the rest follow it. A row keeps its cached copy
-// while it shows the same source.
-func planExtraBackdrops(ctx context.Context, item *models.MediaItem, existing []models.ItemBackdrop, images []RemoteImage) []models.ItemBackdrop {
+// planExtraBackdrops decides the item's backdrops after the primary: the local
+// backdrops discovery listed, in its display order, other than the one the
+// item shows as its primary. applyBestImages makes the first one the primary
+// unless locked artwork keeps another. A row keeps its cached copy while it
+// shows the same source.
+func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem, existing []models.ItemBackdrop, images []RemoteImage) []models.ItemBackdrop {
 	if artworkLocked(item) && len(existing) > 0 {
 		return existing
 	}
 	var sources []string
-	seen := make(map[string]bool)
+	discovered := false
+	seen := map[string]bool{strings.TrimSpace(item.BackdropSourcePath): true}
 	for _, img := range images {
 		url := strings.TrimSpace(img.URL)
-		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) || seen[url] {
+		if img.Type != ImageBackdrop || !isLocalImageSourcePath(url) {
 			continue
 		}
-		seen[url] = true
-		sources = append(sources, url)
+		discovered = true
+		if !seen[url] {
+			seen[url] = true
+			sources = append(sources, url)
+		}
 	}
-	if len(sources) == 0 {
+	if !discovered {
 		// The search returned no backdrop, or there was none. As for the
 		// single slots, a searched refresh drops a row once its sidecar's
 		// folder answers; otherwise the rows stay.
-		retention := newLocalArtworkRetention(ctx, item.ContentID, localArtworkItem)
 		kept := make([]models.ItemBackdrop, 0, len(existing))
 		for _, b := range existing {
 			if retention.searched && isLocalImageSourcePath(b.SourcePath) && retention.sidecarGone(b.SourcePath) {
@@ -126,7 +130,6 @@ func planExtraBackdrops(ctx context.Context, item *models.MediaItem, existing []
 		}
 		return kept
 	}
-	sources = sources[1:]
 	if len(sources) > MaxItemBackdrops-1 {
 		sources = sources[:MaxItemBackdrops-1]
 	}
@@ -165,7 +168,7 @@ func sameItemBackdrops(stored, planned []models.ItemBackdrop) bool {
 // syncItemExtraBackdrops stores the item's backdrops after the primary and
 // queues a cache job for each, as enqueueItemImages does for the slots on the
 // item row. It runs after the item is persisted, because the rows reference it.
-func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
+func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention *localArtworkRetention, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
 	if s == nil || s.itemBackdropRepo == nil || item == nil || item.ContentID == "" {
 		return
 	}
@@ -176,7 +179,7 @@ func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, item *mode
 		return
 	}
 	rows := stored[item.ContentID]
-	if planned := planExtraBackdrops(ctx, item, rows, images); !sameItemBackdrops(rows, planned) {
+	if planned := planExtraBackdrops(retention, item, rows, images); !sameItemBackdrops(rows, planned) {
 		rows, err = s.itemBackdropRepo.Replace(ctx, item.ContentID, planned)
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: storing item backdrops failed", "component", "metadata",

@@ -2821,11 +2821,14 @@ func (s *MetadataService) mergeAndPersist(
 		keepStoredArtwork(item, existingItem)
 	}
 
-	// Apply best images.
+	// Apply best images. One retention serves the item level, so a library
+	// folder that does not answer is probed once per refresh.
+	var localArt *localArtworkRetention
 	if handleArtwork {
+		localArt = newLocalArtworkRetention(ctx, contentID, localArtworkItem)
 		applyBestImages(item, images, mergeMode, req.Language)
-		settleItemOnlyArtwork(ctx, item, existingItem, images)
-		keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
+		settleItemOnlyArtwork(localArt, item, existingItem, images)
+		keepUnconfirmedLocalItemArtwork(localArt, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -2878,7 +2881,7 @@ func (s *MetadataService) mergeAndPersist(
 	providerDedupReleased = true
 	if handleArtwork {
 		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
-		s.syncItemExtraBackdrops(ctx, item, accumulator.ProviderIDs, images)
+		s.syncItemExtraBackdrops(ctx, localArt, item, accumulator.ProviderIDs, images)
 	}
 
 	if !isCanonicalWrite && s.itemLocalizationRepo != nil {

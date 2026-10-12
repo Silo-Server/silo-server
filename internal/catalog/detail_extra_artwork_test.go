@@ -59,20 +59,22 @@ func TestPresignExtraArtworkUsesEachTypesLadder(t *testing.T) {
 	}
 }
 
-func TestAttachBackdropURLsListsThePrimaryFirst(t *testing.T) {
-	s := &DetailService{imageResolver: echoImageResolver{}, backdropRepo: fakeBackdropLister{
+func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
+	lister := fakeBackdropLister{
 		"movie-1": {
 			{Ordinal: 1, Path: "local/movies/movie-1/aa-1/backdrop/original.r1.webp"},
 			{Ordinal: 2, Path: ""}, // still waiting for the image cache
 			{Ordinal: 3, Path: "local/movies/movie-1/cc-3/backdrop/original.r3.webp"},
 		},
 		"series-1": {{Ordinal: 1, Path: "local/series/series-1/dd-4/backdrop/original.r4.webp"}},
-	}}
+	}
+	resolver := &countingResolver{}
+	s := &DetailService{imageResolver: resolver, backdropRepo: lister}
 	movie := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary"}
 	series := &ItemDetail{ContentID: "series-1", Type: "series"}
 	bare := &ItemDetail{ContentID: "movie-2", Type: "movie"}
 	episode := &ItemDetail{ContentID: "movie-1", Type: "episode", BackdropURL: "https://cdn.example/series-backdrop"}
-	s.attachBackdropURLs(context.Background(), []*ItemDetail{movie, series, bare, episode, nil}, "")
+	s.attachExtraBackdrops(context.Background(), []*ItemDetail{movie, series, bare, episode, nil}, "", true)
 
 	if want := []string{
 		"https://cdn.example/primary",
@@ -81,10 +83,31 @@ func TestAttachBackdropURLsListsThePrimaryFirst(t *testing.T) {
 	}; !slices.Equal(movie.BackdropURLs, want) {
 		t.Fatalf("movie backdrop URLs = %q, want %q", movie.BackdropURLs, want)
 	}
+	if want := []string{"local/movies/movie-1/aa-1/backdrop/original.r1.webp", "local/movies/movie-1/cc-3/backdrop/original.r3.webp"}; !slices.Equal(movie.ExtraBackdropPaths, want) {
+		t.Fatalf("movie extra backdrop paths = %q, want %q", movie.ExtraBackdropPaths, want)
+	}
 	if want := []string{"https://cdn.example/local/series/series-1/dd-4/backdrop/w1920.r4.webp"}; !slices.Equal(series.BackdropURLs, want) {
 		t.Fatalf("series backdrop URLs = %q, want %q", series.BackdropURLs, want)
 	}
-	if bare.BackdropURLs != nil || episode.BackdropURLs != nil {
-		t.Fatalf("bare=%q episode=%q, want none", bare.BackdropURLs, episode.BackdropURLs)
+	if bare.BackdropURLs != nil || episode.BackdropURLs != nil || episode.ExtraBackdropPaths != nil {
+		t.Fatalf("bare=%q episode=%q/%q, want none", bare.BackdropURLs, episode.BackdropURLs, episode.ExtraBackdropPaths)
 	}
+
+	// A batch read carries the paths without presigning anything.
+	batch := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary"}
+	resolver.calls = 0
+	s.attachExtraBackdrops(context.Background(), []*ItemDetail{batch}, "", false)
+	if resolver.calls != 0 || batch.BackdropURLs != nil || len(batch.ExtraBackdropPaths) != 2 {
+		t.Fatalf("batch: %d presigns, URLs %q, paths %q", resolver.calls, batch.BackdropURLs, batch.ExtraBackdropPaths)
+	}
+}
+
+type countingResolver struct {
+	echoImageResolver
+	calls int
+}
+
+func (r *countingResolver) ResolveImageURL(ctx context.Context, path, variant string) string {
+	r.calls++
+	return r.echoImageResolver.ResolveImageURL(ctx, path, variant)
 }

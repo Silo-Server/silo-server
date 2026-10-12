@@ -15,6 +15,8 @@ type itemBackdropLister interface {
 // presignExtraArtwork fills a movie or series detail's banner, thumb, clear
 // art and disc art.
 func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDetail, item *models.MediaItem, size string) {
+	detail.BannerPath, detail.ThumbPath = item.BannerPath, item.ThumbPath
+	detail.ClearArtPath, detail.DiscPath = item.ClearArtPath, item.DiscPath
 	detail.BannerURL = s.PresignImageURL(ctx, item.BannerPath, artworkkey.ImageBanner, size)
 	detail.ThumbURL = s.PresignImageURL(ctx, item.ThumbPath, artworkkey.ImageThumb, size)
 	detail.ClearArtURL = s.PresignImageURL(ctx, item.ClearArtPath, artworkkey.ImageClearArt, size)
@@ -27,11 +29,13 @@ func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDet
 	}
 }
 
-// attachBackdropURLs lists every backdrop of each movie or series detail in
-// display order, the primary (BackdropURL) first, with one query for all of
-// them. A backdrop still waiting for the image cache has no URL yet and is
-// left out.
-func (s *DetailService) attachBackdropURLs(ctx context.Context, details []*ItemDetail, size string) {
+// attachExtraBackdrops gives each movie or series detail the cached paths of
+// its backdrops after the primary, with one query for all of them. With
+// presign it also lists every backdrop URL in display order, the primary
+// (BackdropURL) first; batch reads skip that, since only single-item detail
+// returns the URLs. A backdrop still waiting for the image cache has no path
+// yet and is left out.
+func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*ItemDetail, size string, presign bool) {
 	ids := make([]string, 0, len(details))
 	for _, detail := range details {
 		if hasItemBackdrops(detail) {
@@ -49,11 +53,15 @@ func (s *DetailService) attachBackdropURLs(ctx context.Context, details []*ItemD
 		if !hasItemBackdrops(detail) {
 			continue
 		}
+		detail.ExtraBackdropPaths = extras[detail.ContentID]
+		if !presign {
+			continue
+		}
 		var urls []string
 		if detail.BackdropURL != "" {
 			urls = append(urls, detail.BackdropURL)
 		}
-		for _, path := range extras[detail.ContentID] {
+		for _, path := range detail.ExtraBackdropPaths {
 			if url := s.PresignImageURL(ctx, path, artworkkey.ImageBackdrop, size); url != "" {
 				urls = append(urls, url)
 			}

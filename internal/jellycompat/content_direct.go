@@ -1481,6 +1481,12 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		Crew:             d.Crew,
 		Videos:           d.Videos,
 		Extras:           d.Extras,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         d.BannerPath,
+		ThumbPath:          d.ThumbPath,
+		ClearArtPath:       d.ClearArtPath,
+		DiscPath:           d.DiscPath,
+		ExtraBackdropPaths: d.ExtraBackdropPaths,
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}

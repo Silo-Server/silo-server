@@ -265,11 +265,6 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		BackdropThumbhash: item.BackdropThumbhash,
 		LogoURL:           item.LogoURL,
 		LogoPath:          item.LogoPath,
-		BannerURL:         item.BannerURL,
-		ThumbURL:          item.ThumbURL,
-		ClearArtURL:       item.ClearArtURL,
-		DiscURL:           item.DiscURL,
-		ExtraBackdropURLs: detailExtraBackdropURLs(item),
 		UpdatedAt:         item.UpdatedAt,
 		SeasonCount:       item.SeasonCount,
 		SeriesID:          item.SeriesID,
@@ -283,6 +278,12 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		TmdbID:            item.TmdbID,
 		TvdbID:            item.TvdbID,
 		UserData:          item.UserData,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         item.BannerPath,
+		ThumbPath:          item.ThumbPath,
+		ClearArtPath:       item.ClearArtPath,
+		DiscPath:           item.DiscPath,
+		ExtraBackdropPaths: item.ExtraBackdropPaths,
 	}, isFavorite, progress, allDetailFields)
 
 	if wantField("people") {
@@ -999,24 +1000,25 @@ func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[
 // applyExtraImageTags advertises a movie's or series' banner, thumb, clear art
 // (Jellyfin's Art) and disc art in ImageTags, and its backdrops after the
 // primary in BackdropImageTags, so BackdropImageTags[i] names
-// /Items/{id}/Images/Backdrop/{i}. Jellyfin clients fall back to the backdrop
-// for a thumb they are not offered.
+// /Items/{id}/Images/Backdrop/{i}. The tags are seeded by cached path, so they
+// change with the image, not with each presigned URL. Jellyfin clients fall
+// back to the backdrop for a thumb they are not offered.
 func (m *mapper) applyExtraImageTags(dto *baseItemDTO, item upstreamListItem) {
 	if item.Type != "movie" && item.Type != "series" {
 		return
 	}
-	for _, art := range []struct{ imageType, path, url string }{
-		{compatImageBanner, item.BannerPath, item.BannerURL},
-		{compatImageThumb, item.ThumbPath, item.ThumbURL},
-		{compatImageArt, item.ClearArtPath, item.ClearArtURL},
-		{compatImageDisc, item.DiscPath, item.DiscURL},
+	for _, art := range []struct{ imageType, path string }{
+		{compatImageBanner, item.BannerPath},
+		{compatImageThumb, item.ThumbPath},
+		{compatImageArt, item.ClearArtPath},
+		{compatImageDisc, item.DiscPath},
 	} {
-		if art.path == "" && art.url == "" {
+		if art.path == "" {
 			continue
 		}
 		dto.ImageTags[art.imageType] = m.imageTagSigner.Tag(
 			imageTagSeed(item.ContentID, art.imageType, compatCardImageSize, art.path, "", item.UpdatedAt),
-			art.url,
+			"",
 		)
 	}
 	// Without a primary there is no Backdrop/0, so the extra indexes would
@@ -1030,16 +1032,4 @@ func (m *mapper) applyExtraImageTags(dto *baseItemDTO, item upstreamListItem) {
 			"",
 		))
 	}
-	for _, url := range item.ExtraBackdropURLs {
-		dto.BackdropImageTags = append(dto.BackdropImageTags, m.imageTagSigner.Tag("", url))
-	}
-}
-
-// detailExtraBackdropURLs returns a detail's backdrop URLs after the primary.
-// BackdropURLs starts with the primary only when there is one.
-func detailExtraBackdropURLs(item upstreamItemDetail) []string {
-	if item.BackdropURL == "" || len(item.BackdropURLs) < 2 {
-		return nil
-	}
-	return item.BackdropURLs[1:]
 }

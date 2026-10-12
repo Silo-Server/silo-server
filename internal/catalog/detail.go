@@ -246,14 +246,20 @@ type ItemDetail struct {
 	// Banner, thumb, clear art and disc art, and every backdrop in display
 	// order with the primary first, for movies and series. Kept out of this
 	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
-	// detail.
-	BannerURL       string   `json:"-"`
-	BannerThumbhash string   `json:"-"`
-	ThumbURL        string   `json:"-"`
-	ThumbThumbhash  string   `json:"-"`
-	ClearArtURL     string   `json:"-"`
-	DiscURL         string   `json:"-"`
-	BackdropURLs    []string `json:"-"`
+	// detail. BackdropURLs is filled only on single-item detail; the cached
+	// paths seed the Jellyfin-compatible image tags.
+	BannerURL          string   `json:"-"`
+	BannerThumbhash    string   `json:"-"`
+	ThumbURL           string   `json:"-"`
+	ThumbThumbhash     string   `json:"-"`
+	ClearArtURL        string   `json:"-"`
+	DiscURL            string   `json:"-"`
+	BackdropURLs       []string `json:"-"`
+	BannerPath         string   `json:"-"`
+	ThumbPath          string   `json:"-"`
+	ClearArtPath       string   `json:"-"`
+	DiscPath           string   `json:"-"`
+	ExtraBackdropPaths []string `json:"-"`
 
 	// Literary work linkage. Present for linked ebook/audiobook items.
 	WorkID      string              `json:"work_id,omitempty"`
@@ -1526,7 +1532,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err != nil {
 			return nil, err
 		}
-		s.attachBackdropURLs(ctx, []*ItemDetail{detail}, string(filter.ImageSize))
+		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, string(filter.ImageSize), true)
 		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
@@ -2038,7 +2044,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 		result[id] = detail
 	}
-	s.attachBackdropURLs(ctx, slices.Collect(maps.Values(result)), string(filter.ImageSize))
+	s.attachExtraBackdrops(ctx, slices.Collect(maps.Values(result)), string(filter.ImageSize), false)
 	return result, nil
 }
 

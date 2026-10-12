@@ -147,12 +147,11 @@ func (r *localArtworkRetention) providerPath(incoming, existingPath, existingSou
 // keepUnconfirmedLocalItemArtwork restores the cached path of each item
 // artwork slot that applyBestImages moved from cached local art to a remote
 // image, when keep holds. prepareItemImagesForQueue then keeps the stored
-// local source.
-func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models.MediaItem) {
+// local source. retention is the item level's (localArtworkItem).
+func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, existing *models.MediaItem) {
 	if item == nil || existing == nil {
 		return
 	}
-	retention := newLocalArtworkRetention(ctx, existing.ContentID, localArtworkItem)
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
 		if retention.keep(*field.path, *stored[i].path, *stored[i].source) {

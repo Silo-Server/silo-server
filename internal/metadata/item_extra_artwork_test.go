@@ -51,6 +51,11 @@ func (f *fakeItemBackdropRepo) Replace(_ context.Context, contentID string, back
 	return slices.Clone(rows), nil
 }
 
+// itemRetention is the item level's retention for a refresh run under ctx.
+func itemRetention(ctx context.Context) *localArtworkRetention {
+	return newLocalArtworkRetention(ctx, "movie-1", localArtworkItem)
+}
+
 func localSource(path string) string {
 	return "file://" + path + "?v=10-1"
 }
@@ -161,27 +166,27 @@ func TestSettleItemOnlyArtwork(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
 		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
 		item := rebuilt(existing)
-		settleItemOnlyArtwork(searched, item, existing, []RemoteImage{{URL: localSource(filepath.Join(dir, "poster.jpg")), Type: ImagePoster}})
+		settleItemOnlyArtwork(itemRetention(searched), item, existing, []RemoteImage{{URL: localSource(filepath.Join(dir, "poster.jpg")), Type: ImagePoster}})
 		cleared(t, item)
 	})
 	t.Run("a searched refresh clears a sidecar it passed over", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "banner.jpg")
 		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
 		item := rebuilt(existing)
-		settleItemOnlyArtwork(searched, item, existing, nil)
+		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
 		cleared(t, item)
 	})
 	t.Run("a searched refresh keeps the slot while the folder does not answer", func(t *testing.T) {
 		existing := stored(localSource(filepath.Join(t.TempDir(), "unmounted", "banner.jpg")))
 		item := rebuilt(existing)
-		settleItemOnlyArtwork(searched, item, existing, nil)
+		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
 		kept(t, item, existing)
 	})
 	t.Run("a refresh that did not search keeps the slot", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
 		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
 		item := rebuilt(existing)
-		settleItemOnlyArtwork(context.Background(), item, existing, []RemoteImage{{URL: "https://img.example/p.jpg", Type: ImagePoster, Rating: 5}})
+		settleItemOnlyArtwork(itemRetention(context.Background()), item, existing, []RemoteImage{{URL: "https://img.example/p.jpg", Type: ImagePoster, Rating: 5}})
 		kept(t, item, existing)
 	})
 	t.Run("locked artwork keeps the slot", func(t *testing.T) {
@@ -189,7 +194,7 @@ func TestSettleItemOnlyArtwork(t *testing.T) {
 		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
 		existing.LockedFields = []int{int(FieldImages)}
 		item := rebuilt(existing)
-		settleItemOnlyArtwork(searched, item, existing, nil)
+		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
 		kept(t, item, existing)
 	})
 	t.Run("a new sidecar drops the old thumbhash", func(t *testing.T) {
@@ -198,7 +203,7 @@ func TestSettleItemOnlyArtwork(t *testing.T) {
 		item := rebuilt(existing)
 		images := []RemoteImage{{URL: localSource(filepath.Join(dir, "banner.jpg")), Type: ImageBanner}}
 		applyBestImages(item, images, MergeFillEmpty, "en")
-		settleItemOnlyArtwork(searched, item, existing, images)
+		settleItemOnlyArtwork(itemRetention(searched), item, existing, images)
 		if item.BannerPath != images[0].URL || item.BannerThumbhash != "" {
 			t.Fatalf("banner = %q/%q, want the new source and no thumbhash yet", item.BannerPath, item.BannerThumbhash)
 		}
@@ -208,7 +213,7 @@ func TestSettleItemOnlyArtwork(t *testing.T) {
 func TestPlanExtraBackdrops(t *testing.T) {
 	ctx := context.Background()
 	searched := withLocalArtworkSearched(ctx, localArtworkItem)
-	item := &models.MediaItem{ContentID: "movie-1"}
+	item := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: "file:///m/fanart.jpg"}
 	backdrop := func(url string) RemoteImage { return RemoteImage{ProviderID: "nfo", URL: url, Type: ImageBackdrop} }
 
 	t.Run("backdrops after the primary, keeping cached copies of unchanged sources", func(t *testing.T) {
@@ -216,7 +221,7 @@ func TestPlanExtraBackdrops(t *testing.T) {
 			{ID: 1, Ordinal: 1, Path: "local/movies/movie-1/aa-1/backdrop/original.r.webp", SourcePath: "file:///m/fanart-2.jpg", Thumbhash: "t2"},
 			{ID: 2, Ordinal: 2, Path: "", SourcePath: "file:///m/gone.jpg"},
 		}
-		got := planExtraBackdrops(searched, item, existing, []RemoteImage{
+		got := planExtraBackdrops(itemRetention(searched), item, existing, []RemoteImage{
 			{ProviderID: "tmdb", URL: "https://img.example/b.jpg", Type: ImageBackdrop, Rating: 9},
 			backdrop("file:///m/fanart.jpg"),
 			backdrop("file:///m/fanart-1.jpg"),
@@ -238,22 +243,37 @@ func TestPlanExtraBackdrops(t *testing.T) {
 		{ID: 3, Ordinal: 3, Path: "local/c", SourcePath: localSource(filepath.Join(dir, "unmounted", "x.jpg"))},
 	}
 	t.Run("a searched refresh that found no backdrop drops rows whose folder answers", func(t *testing.T) {
-		got := planExtraBackdrops(searched, item, existing, []RemoteImage{{URL: "https://img.example/b.jpg", Type: ImageBackdrop, Rating: 2}})
+		got := planExtraBackdrops(itemRetention(searched), item, existing, []RemoteImage{{URL: "https://img.example/b.jpg", Type: ImageBackdrop, Rating: 2}})
 		want := []models.ItemBackdrop{{Path: "local/c", SourcePath: existing[2].SourcePath}}
 		if !slices.Equal(got, want) {
 			t.Fatalf("planned = %+v, want %+v", got, want)
 		}
 	})
 	t.Run("a refresh that did not search keeps every row", func(t *testing.T) {
-		got := planExtraBackdrops(ctx, item, existing, nil)
+		got := planExtraBackdrops(itemRetention(ctx), item, existing, nil)
 		if len(got) != len(existing) {
 			t.Fatalf("planned = %+v, want the stored rows", got)
+		}
+	})
+	t.Run("a locked provider primary leaves every local backdrop to follow it", func(t *testing.T) {
+		locked := &models.MediaItem{ContentID: "movie-1", LockedFields: []int{int(FieldImages)}, BackdropSourcePath: "tmdb://backdrop/x.jpg"}
+		got := planExtraBackdrops(itemRetention(searched), locked, nil, []RemoteImage{backdrop("file:///m/fanart.jpg"), backdrop("file:///m/fanart-1.jpg")})
+		want := []models.ItemBackdrop{{SourcePath: "file:///m/fanart.jpg"}, {SourcePath: "file:///m/fanart-1.jpg"}}
+		if !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("a primary that is not the first local backdrop is not repeated", func(t *testing.T) {
+		pinned := &models.MediaItem{ContentID: "movie-1", BackdropSourcePath: "file:///m/fanart-1.jpg"}
+		got := planExtraBackdrops(itemRetention(searched), pinned, nil, []RemoteImage{backdrop("file:///m/fanart.jpg"), backdrop("file:///m/fanart-1.jpg")})
+		if want := []models.ItemBackdrop{{SourcePath: "file:///m/fanart.jpg"}}; !slices.Equal(got, want) {
+			t.Fatalf("planned = %+v, want %+v", got, want)
 		}
 	})
 	t.Run("locked artwork keeps stored rows", func(t *testing.T) {
 		locked := &models.MediaItem{ContentID: "movie-1", LockedFields: []int{int(FieldImages)}}
 		stored := []models.ItemBackdrop{{ID: 1, Ordinal: 1, Path: "local/a", SourcePath: "file:///m/a.jpg"}}
-		got := planExtraBackdrops(searched, locked, stored, []RemoteImage{backdrop("file:///m/fanart.jpg"), backdrop("file:///m/b.jpg")})
+		got := planExtraBackdrops(itemRetention(searched), locked, stored, []RemoteImage{backdrop("file:///m/fanart.jpg"), backdrop("file:///m/b.jpg")})
 		if !slices.Equal(got, stored) {
 			t.Fatalf("planned = %+v, want stored rows", got)
 		}
@@ -263,7 +283,7 @@ func TestPlanExtraBackdrops(t *testing.T) {
 		for i := range MaxItemBackdrops + 5 {
 			images = append(images, backdrop(fmt.Sprintf("file:///m/extrafanart/%02d.jpg", i)))
 		}
-		if got := planExtraBackdrops(searched, item, nil, images); len(got) != MaxItemBackdrops-1 {
+		if got := planExtraBackdrops(itemRetention(searched), item, nil, images); len(got) != MaxItemBackdrops-1 {
 			t.Fatalf("planned %d extra backdrops, want %d", len(got), MaxItemBackdrops-1)
 		}
 	})
@@ -276,14 +296,14 @@ func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
 	service := &MetadataService{itemBackdropRepo: repo}
 	service.SetAutoCacheImages(true)
 	service.SetImageCacheJobEnqueuer(enqueuer)
-	item := &models.MediaItem{ContentID: "movie-1", Type: "movie"}
+	item := &models.MediaItem{ContentID: "movie-1", Type: "movie", BackdropSourcePath: "file:///m/fanart.jpg"}
 	images := []RemoteImage{
 		{ProviderID: "nfo", URL: "file:///m/fanart.jpg", Type: ImageBackdrop},
 		{ProviderID: "nfo", URL: "file:///m/fanart-1.jpg", Type: ImageBackdrop},
 		{ProviderID: "nfo", URL: "file:///m/extrafanart/a.jpg", Type: ImageBackdrop},
 	}
 
-	service.syncItemExtraBackdrops(ctx, item, nil, images)
+	service.syncItemExtraBackdrops(ctx, itemRetention(ctx), item, nil, images)
 	rows := repo.rows["movie-1"]
 	if len(rows) != 2 || rows[0].SourcePath != "file:///m/fanart-1.jpg" || rows[1].SourcePath != "file:///m/extrafanart/a.jpg" {
 		t.Fatalf("stored rows = %+v", rows)
@@ -305,7 +325,7 @@ func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
 	repo.rows["movie-1"][0].Path = "local/movies/movie-1/aa-101/backdrop/original.r.webp"
 	repo.rows["movie-1"][1].Path = "local/movies/movie-1/bb-102/backdrop/original.r.webp"
 	enqueuer.inputs = nil
-	service.syncItemExtraBackdrops(ctx, item, nil, images)
+	service.syncItemExtraBackdrops(ctx, itemRetention(ctx), item, nil, images)
 	if repo.replaces != 1 {
 		t.Fatalf("Replace calls = %d, want 1", repo.replaces)
 	}
