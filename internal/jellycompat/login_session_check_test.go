@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -168,6 +169,35 @@ func serveCompat(h http.Handler, req *http.Request) int {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec.Code
+}
+
+// TestStaticStreamGrantSkipsASignedOutCaller: two clients behind one address
+// negotiated the same source. When the more recently active one is signed
+// out, the other's credential-less static stream is still granted by its own
+// negotiation.
+func TestStaticStreamGrantSkipsASignedOutCaller(t *testing.T) {
+	now := fixedNow()
+	clock := func() time.Time { return now }
+	sessions := NewSessionStore(time.Hour, clock).WithLoginSessions(&loginSessionsFake{live: map[string]bool{"login-kept": true}})
+	for _, s := range []Session{
+		{Token: "kept", StreamAppUserID: 1, LoginSessionID: "login-kept"},
+		{Token: "signed-out", StreamAppUserID: 1, LoginSessionID: "login-signed-out"},
+	} {
+		if err := sessions.Put(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	playback := NewPlaybackSessionStore(time.Hour, clock)
+	for _, grant := range []struct{ id, token string }{{"ps-kept", "kept"}, {"ps-signed-out", "signed-out"}} {
+		playback.PutNegotiated(PlaybackSession{ID: grant.id, CompatToken: grant.token, ClientIP: "192.0.2.1", ClientPeer: "192.0.2.1",
+			RouteItemID: "item123", MediaSources: []PlaybackMediaSource{{ID: "src9"}}})
+		now = now.Add(time.Minute) // the signed-out client negotiated last
+	}
+	var reached bool
+	router := clientip.Middleware(clientip.NewResolver(nil))(directPlayRouter(t, sessions, playback, nil, &reached))
+	if status := serveCompat(router, compatRequest("/Videos/item123/stream?static=true&mediaSourceId=src9", "")); status != http.StatusOK || !reached {
+		t.Fatalf("status = %d reached = %v, want the kept client's grant to serve it", status, reached)
+	}
 }
 
 // TestCompatStoreChecksLoginSessionsByDefault: the server's session store
