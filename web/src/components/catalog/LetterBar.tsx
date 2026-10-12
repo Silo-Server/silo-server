@@ -124,6 +124,9 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
         // Centered a little low and short of the viewport, so it clears the
         // page tabs at the top and the scroll-to-top button at the bottom.
         "top-[calc(50%+2rem)] h-[min(42rem,calc(100dvh-14rem))]",
+        // A short viewport (a phone on its side) can't fit 27 readable rows,
+        // so the letters wrap into two columns of 14 in the same order.
+        "[@media(max-height:599px)]:top-[calc(50%+0.5rem)] [@media(max-height:599px)]:grid [@media(max-height:599px)]:h-[calc(100dvh-9rem)] [@media(max-height:599px)]:grid-flow-col [@media(max-height:599px)]:grid-rows-[repeat(14,minmax(0,1fr))] [@media(max-height:599px)]:rounded-2xl [@media(max-height:599px)]:px-1",
       )}
     >
       {LETTER_BAR_LETTERS.map((letter) => {

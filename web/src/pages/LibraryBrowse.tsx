@@ -228,16 +228,18 @@ export default function LibraryBrowse({
   const handleTopRowChange = useCallback((_first: number, last: number) => setTopRowEnd(last), []);
   // A letter near the end can't scroll to the top of the viewport, so the top
   // row still belongs to an earlier letter. Keep the chosen letter current
-  // until the viewer scrolls by hand.
+  // while the page stays scrolled to the bottom; any scroll away from it, by
+  // hand or by the scroll-to-top button, hands back to the top row.
   const [jumpedLetter, setJumpedLetter] = useState<string>();
   useEffect(() => {
     if (!jumpedLetter) return;
-    const release = () => setJumpedLetter(undefined);
-    const events = ["wheel", "touchmove", "keydown"] as const;
-    for (const type of events) window.addEventListener(type, release, { passive: true });
-    return () => {
-      for (const type of events) window.removeEventListener(type, release);
+    const releaseUnlessAtBottom = () => {
+      const bottomGap =
+        document.documentElement.scrollHeight - (window.scrollY + window.innerHeight);
+      if (bottomGap > 2) setJumpedLetter(undefined);
     };
+    window.addEventListener("scroll", releaseUnlessAtBottom, { passive: true });
+    return () => window.removeEventListener("scroll", releaseUnlessAtBottom);
   }, [jumpedLetter]);
   // An empty result only says the current view matched nothing. Ask whether
   // the library holds anything at all before calling it empty, so an
@@ -372,7 +374,9 @@ export default function LibraryBrowse({
           retrying={retrying}
         />
       ) : (
-        <div className={showLetterBar ? "pr-6 sm:pr-9" : undefined}>
+        <div
+          className={showLetterBar ? "pr-6 sm:pr-9 [@media(max-height:599px)]:pr-14" : undefined}
+        >
           <ItemGrid
             gridRef={gridRef}
             totalItems={gridTotalItems}
