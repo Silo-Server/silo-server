@@ -543,8 +543,9 @@ source, or a local file in the same folder). A provider's photo, even one
 still waiting for its copy, stays. It queues a person image-cache job whose `series_id` is the
 title, so the processor confines a local read to that title's library roots;
 a title's interactive artwork refresh leaves those person jobs out of its
-scope. A person refresh keeps a cached NFO photo over a provider's. Like all
-local artwork, these need `metadata.cache_images`.
+scope. A person refresh keeps a cached NFO photo over a provider's. Like other
+local artwork, a sidecar photo is copied whatever `metadata.cache_images` says;
+a photo URL an NFO names is used only while the setting is on.
 
 ## Series depth and mixed libraries
 
