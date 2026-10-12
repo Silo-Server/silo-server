@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -451,4 +452,24 @@ func TestImageWorkBudgetLowersForWaitingCallers(t *testing.T) {
 	release := <-waiting
 	full("the waiting caller took the only slot")
 	release()
+}
+
+// A folder that exists but denies listing shows the storage is mounted, so a
+// file under it is the file's failure, not a missing mount.
+func TestUnreadableFolderCountsAsMountedStorage(t *testing.T) {
+	root := t.TempDir()
+	locked := filepath.Join(root, "Film")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any folder")
+	}
+	if !nearestExistingFolderListsEntries(context.Background(), locked, []string{root}) {
+		t.Fatal("unreadable folder read as missing storage, want mounted")
+	}
+	if nearestExistingFolderListsEntries(context.Background(), filepath.Join(root, "Gone"), []string{filepath.Join(root, "Gone")}) {
+		t.Fatal("missing root read as mounted storage")
+	}
 }

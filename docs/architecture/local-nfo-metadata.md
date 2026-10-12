@@ -400,11 +400,11 @@ Caching and refresh:
   while an intermediate directory symlink escaping a root is rejected). When
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
-  folder, searching no higher than the library root: unless it answers and
-  lists entries, the storage is not mounted on this server (an empty or
-  missing mount point, also for a share nested inside a present root, or a
-  folder that cannot be read or does not answer in time). A folder removed
-  under mounted storage is therefore a stable failure, not a deferral. A
+  folder, searching no higher than the library root: unless it lists entries
+  or exists but denies listing, the storage is not mounted on this server (an
+  empty or missing mount point, also for a share nested inside a present
+  root, or a folder that fails to read or does not answer in time). A folder
+  removed under mounted storage is therefore a stable failure, not a deferral. A
   deferred job goes back to the queue without counting an attempt, for a
   server that has the mount: after 10 minutes, or an hour when it was last
   deferred for the same reason, so storage no server mounts any more stays

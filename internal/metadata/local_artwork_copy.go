@@ -157,8 +157,9 @@ func (p *ImageCacheProcessor) waitLocalArtworkCopies() {
 // higher than the library roots holding the file: unless that folder answers
 // and lists entries, the storage is not mounted on this server. An unmounted
 // share leaves its mount point empty or missing, also when it sits inside a
-// library root that is present, and a folder that cannot be read or does not
-// answer in time proves nothing. The job goes back to the queue without
+// library root that is present, and a folder that does not answer in time or
+// fails to read proves nothing. A folder that exists but denies listing shows
+// the storage is there. The job goes back to the queue without
 // counting an attempt, for a server that has the mount. When the folder lists
 // entries, the storage is there and the failure is about the file (or a
 // folder removed under it), which the caller records as usual.
@@ -192,15 +193,19 @@ func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, j
 }
 
 // nearestExistingFolderListsEntries walks up from dir to the first folder that
-// exists, going no higher than roots, and reports whether it answers and lists
-// entries.
+// exists, going no higher than roots, and reports whether it shows the storage
+// is mounted: it lists entries, or it exists but cannot be listed.
 func nearestExistingFolderListsEntries(ctx context.Context, dir string, roots []string) bool {
 	for {
 		probe := rootcheck.ProbeWithTimeout(ctx, dir, rootcheck.DefaultProbeTimeout)
-		if probe.Reachable {
+		switch {
+		case probe.Reachable:
 			return !probe.Empty
-		}
-		if probe.ErrorCode != rootcheck.ErrCodeNotFound || slices.Contains(roots, dir) {
+		// A folder that exists but cannot be listed, or is not a folder,
+		// shows the storage is there; the failure is the file's.
+		case probe.ErrorCode == rootcheck.ErrCodePermissionDenied || probe.ErrorCode == rootcheck.ErrCodeNotDirectory:
+			return true
+		case probe.ErrorCode != rootcheck.ErrCodeNotFound || slices.Contains(roots, dir):
 			return false
 		}
 		parent := filepath.Dir(dir)
