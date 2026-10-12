@@ -49,7 +49,11 @@ explicitly and refuses an empty one, because `parseArtworkObjectKey` accepts any
 those prefixes it keeps an object only while a column listed in
 `artworkSweepSurfaces()` (`internal/metadata/artwork_reconcile.go`) references
 it, as the revision GC does, so a new column or table that holds cached artwork
-must be listed there.
+must be listed there. If its source can be a provider URL, it must also be in
+the provider-artwork backfill and repair queries (`imageCacheDiscoverySourceQuery`
+and `enqueueArtworkRepair` in `internal/metadata/image_cache_job_repo.go`):
+reconcile resets a missing copy to that URL and relies on them to cache it
+again.
 Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 `diagnostics/<user id>/<report id>.tar.gz`, so artwork from a provider slugged
 `diagnostics` is never swept.

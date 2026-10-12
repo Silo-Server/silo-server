@@ -784,6 +784,10 @@ func itemArtworkSourceColumn(imageType string) (string, bool) {
 	}
 }
 
+// itemOnlyArtworkImageTypes are the item slots without a localized
+// counterpart, in the order the provider-artwork backfill walks them.
+var itemOnlyArtworkImageTypes = [...]string{ImageCacheImageBanner, ImageCacheImageThumb, ImageCacheImageClearArt, ImageCacheImageDisc}
+
 // itemOnlyArtworkSourceColumn names the source column of the item slots that
 // localizations do not carry.
 func itemOnlyArtworkSourceColumn(imageType string) (string, bool) {
@@ -833,7 +837,7 @@ func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, path
 	return r.enqueueArtworkRepair(ctx, limit, paths)
 }
 
-const imageCacheDiscoverySurfaceCount = 10
+const imageCacheDiscoverySurfaceCount = 14
 const imageCachePosterPathColumn = "poster_path"
 const imageCacheBackdropPathColumn = "backdrop_path"
 const imageCacheLogoPathColumn = "logo_path"
@@ -984,11 +988,7 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 	textArgs := []any{limit, cursor.Key}
 	localizedArgs := []any{limit, cursor.Key, cursor.Subkey}
 
-	switch cursor.Surface {
-	case 0, 1, 2:
-		imageType := imageTypes[cursor.Surface]
-		sourceColumn := sourceColumns[cursor.Surface]
-		pathColumn := pathColumns[cursor.Surface]
+	itemQuery := func(imageType, sourceColumn, pathColumn string) (string, []any) {
 		return fmt.Sprintf(`
 			SELECT '%s'::text AS image_type, 'item'::text AS target_type,
 			       mi.content_id AS target_content_id, ''::text AS target_language,
@@ -1006,6 +1006,11 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) mi
 		`, imageType, sourceColumn, candidate("mi."+sourceColumn, "mi."+pathColumn)), textArgs
+	}
+
+	switch cursor.Surface {
+	case 0, 1, 2:
+		return itemQuery(imageTypes[cursor.Surface], sourceColumns[cursor.Surface], pathColumns[cursor.Surface])
 	case 3, 4, 5:
 		index := cursor.Surface - 3
 		imageType := imageTypes[index]
@@ -1105,6 +1110,12 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) p
 		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
+	case 10, 11, 12, 13:
+		// Banner, thumb, clear art and disc art follow the older surfaces so a
+		// stored cursor keeps pointing at the surface it was on.
+		imageType := itemOnlyArtworkImageTypes[cursor.Surface-10]
+		sourceColumn, _ := itemOnlyArtworkSourceColumn(imageType)
+		return itemQuery(imageType, sourceColumn, strings.TrimSuffix(sourceColumn, "source_path")+"path")
 	default:
 		return `SELECT NULL WHERE false`, []any{limit}
 	}
@@ -1628,6 +1639,31 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
+			UNION ALL
+			-- Banner, thumb, clear art and disc art in one pass over media_items.
+			SELECT
+				slot.image_type,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				slot.source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			CROSS JOIN LATERAL (VALUES
+				('banner'::text, mi.banner_source_path, mi.banner_path),
+				('thumb'::text, mi.thumb_source_path, mi.thumb_path),
+				('clearart'::text, mi.clearart_source_path, mi.clearart_path),
+				('disc'::text, mi.disc_source_path, mi.disc_path)
+			) AS slot(image_type, source_path, path)
+			WHERE slot.source_path LIKE '%://%'
+			  AND lower(slot.source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (slot.path LIKE '%://%' OR slot.path = '')) OR slot.path = ANY($2))
 		),
 		candidates AS (
 			SELECT ac.*
