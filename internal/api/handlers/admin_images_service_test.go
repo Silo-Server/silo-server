@@ -61,7 +61,7 @@ func (f *curationImageService) ApplyItemImage(ctx context.Context, r metadata.Ap
 }
 func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	svc := &curationImageService{fail: true}
-	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil)
+	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil, nil)
 	router := chi.NewRouter()
 	router.Get("/{id}/images", h.HandleGetItemImages)
 	router.Post("/{id}/images/apply", h.HandleApplyItemImage)
@@ -97,7 +97,7 @@ func TestAdminImageSharedPublishesImmutableRevision(t *testing.T) {
 	items := catalog.NewItemRepository(pool)
 	detail := catalog.NewDetailService(items, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil)
 	svc := &curationImageService{stored: stored}
-	h := NewAdminImageHandler(items, nil, nil, nil, svc, nil, detail)
+	h := NewAdminImageHandler(items, nil, nil, nil, svc, nil, detail, nil)
 	out, err := h.ApplyAdminItemImage(t.Context(), id, AdminItemImageRequest{OriginalURL: "source", Type: "poster", ProviderID: "tmdb"})
 	if err != nil || out.StoredPath != stored || out.Revision != "revision" {
 		t.Fatalf("publish %+v %v", out, err)

@@ -363,6 +363,9 @@ type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// ForPicker marks a user-requested artwork gallery. A false value is the
+	// automatic metadata-refresh path.
+	ForPicker bool
 	// SeasonNumber is present only for an exact season artwork gallery. A
 	// pointer distinguishes Specials (0) from an item-level request.
 	SeasonNumber *int

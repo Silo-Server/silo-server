@@ -18,6 +18,32 @@ the top level or inside the SDK's `metadata` envelope; the top level wins.
   provider into the bulk enrichment pass below. Values above 200 are capped at
   200; anything that is not a positive integer opts out.
 
+## External-ID image lookup
+
+A `metadata_provider.v1` capability may declare `image_lookup_provider_ids`
+in its metadata, using the same normalization rules as `lookup_provider_ids`.
+This opts its image callback into lookups when the item has one of those
+external IDs but lacks the provider's own ID. Without this declaration, the
+image callback remains gated on the provider's own ID.
+
+Image lookup is separate from `lookup_provider_ids`, which opts a provider
+into metadata enrichment. A metadata-only lookup declaration does not enable
+image callbacks. The declaration applies to both artwork galleries and the
+image phase of metadata refresh; it does not opt a provider into metadata or
+child lookups. The existing image gallery API contracts remain unchanged.
+
+Galleries include durable provider IDs stored for the item, or for the owning
+series when browsing season artwork. Populated TMDB, TVDB, and IMDb columns
+take precedence over conflicting durable rows; durable rows can fill missing
+canonical IDs and supply custom provider IDs.
+
+For every `GetImages` RPC, the host sends the advisory gRPC metadata header
+`silo-image-request-purpose`. Its value is `gallery` for an artwork picker and
+`automatic` for metadata refresh. Plugins may use it to choose how broadly to
+return artwork; it is not an authorization mechanism. A plugin that does not
+read the header, or receives an absent or unknown value, must retain its
+automatic behavior for compatibility.
+
 ## Error contract for bulk providers
 
 Declaring `bulk_lookup_limit` also promises this: a provider returns an item

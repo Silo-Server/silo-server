@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,11 @@ type ImageEpisodeLookup interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 }
 
+// ImageProviderIDLookup loads durable IDs attached to the owning media item.
+type ImageProviderIDLookup interface {
+	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaItemProviderID, error)
+}
+
 // ImageURLResolver resolves image URLs for display (plugin-prefixed → HTTP).
 type ImageURLResolver interface {
 	ResolveImageURL(ctx context.Context, path string, variant string) string
@@ -56,6 +62,7 @@ type AdminImageHandler struct {
 	imageSvc      ImageService
 	imageResolver ImageURLResolver
 	detailSvc     *catalog.DetailService
+	providerIDs   ImageProviderIDLookup
 	EventsHub     *evt.Hub
 }
 
@@ -68,6 +75,7 @@ func NewAdminImageHandler(
 	imageSvc ImageService,
 	imageResolver ImageURLResolver,
 	detailSvc *catalog.DetailService,
+	providerIDs ImageProviderIDLookup,
 ) *AdminImageHandler {
 	return &AdminImageHandler{
 		items:         items,
@@ -77,6 +85,7 @@ func NewAdminImageHandler(
 		imageSvc:      imageSvc,
 		imageResolver: imageResolver,
 		detailSvc:     detailSvc,
+		providerIDs:   providerIDs,
 	}
 }
 
@@ -221,8 +230,16 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Could not determine library for item")
 	}
 
-	// Build provider IDs map from the parent item.
-	providerIDs := buildProviderIDs(resolved.parentItem)
+	// Seasons and episodes use the owning series' durable provider IDs.
+	var durableIDs []*models.MediaItemProviderID
+	if h.providerIDs != nil {
+		durableIDs, err = h.providerIDs.GetByContentID(ctx, lookupContentID)
+		if err != nil {
+			slog.ErrorContext(ctx, "admin images: load provider IDs failed", "component", "api", "content_id", contentID, "error", err)
+			return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load provider IDs")
+		}
+	}
+	providerIDs := buildProviderIDs(resolved.parentItem, durableIDs)
 
 	// Determine the language preference. Use the parent item's default
 	// metadata language, or fall back to "en".
@@ -448,8 +465,8 @@ func (h *AdminImageHandler) resolveImageFolderID(ctx context.Context, contentID 
 	return folderID, nil
 }
 
-// buildProviderIDs extracts the provider IDs map from a MediaItem.
-func buildProviderIDs(item *models.MediaItem) map[string]string {
+// buildProviderIDs adds durable IDs without overriding populated canonical IDs.
+func buildProviderIDs(item *models.MediaItem, durableIDs []*models.MediaItemProviderID) map[string]string {
 	ids := make(map[string]string)
 	if item.TmdbID != "" {
 		ids["tmdb"] = item.TmdbID
@@ -459,6 +476,22 @@ func buildProviderIDs(item *models.MediaItem) map[string]string {
 	}
 	if item.ImdbID != "" {
 		ids["imdb"] = item.ImdbID
+	}
+	for _, row := range durableIDs {
+		if row == nil {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(row.Provider))
+		providerID := strings.TrimSpace(row.ProviderID)
+		if provider == "" || providerID == "" || strings.TrimSpace(ids[provider]) != "" {
+			continue
+		}
+		// Matching hints and scanner anchors are not plugin identities.
+		switch provider {
+		case "metadb", "_filepath", "oshash", "manga_series":
+			continue
+		}
+		ids[provider] = providerID
 	}
 	return ids
 }

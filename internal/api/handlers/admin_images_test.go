@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,6 +43,20 @@ type imageFolderLookupFake struct {
 	folderID int
 }
 
+type imageProviderIDLookupFake struct {
+	rows       map[string][]*models.MediaItemProviderID
+	err        error
+	contentIDs []string
+}
+
+func (f *imageProviderIDLookupFake) GetByContentID(_ context.Context, contentID string) ([]*models.MediaItemProviderID, error) {
+	f.contentIDs = append(f.contentIDs, contentID)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.rows[contentID], nil
+}
+
 func (f imageFolderLookupFake) GetFolderIDForItem(context.Context, string) (int, error) {
 	return f.folderID, nil
 }
@@ -58,13 +73,15 @@ type seasonImageFetchCall struct {
 }
 
 type imageServiceFake struct {
-	seasonImages []metadata.RemoteImage
-	itemCalls    int
-	seasonCalls  []seasonImageFetchCall
+	seasonImages    []metadata.RemoteImage
+	itemCalls       int
+	itemProviderIDs []map[string]string
+	seasonCalls     []seasonImageFetchCall
 }
 
-func (f *imageServiceFake) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
+func (f *imageServiceFake) FetchItemImages(_ context.Context, providerIDs map[string]string, _ string, _ string, _ int) ([]metadata.RemoteImage, map[string]string, error) {
 	f.itemCalls++
+	f.itemProviderIDs = append(f.itemProviderIDs, providerIDs)
 	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "tmdb://show-poster.jpg", Type: metadata.ImagePoster}}, nil, nil
 }
 
@@ -102,6 +119,9 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 				URL:        "tmdb://requested-season.jpg",
 				Type:       metadata.ImagePoster,
 			}}}
+			providerIDs := &imageProviderIDLookupFake{rows: map[string][]*models.MediaItemProviderID{
+				seriesID: {{ContentID: seriesID, Provider: "custom", ProviderID: "show-42"}},
+			}}
 			handler := NewAdminImageHandler(
 				imageItemLookupFake{seriesID: {
 					ContentID:               seriesID,
@@ -122,6 +142,7 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 				imageSvc,
 				nil,
 				nil,
+				providerIDs,
 			)
 			router := chi.NewRouter()
 			router.Get("/admin/items/{id}/images", handler.HandleGetItemImages)
@@ -144,8 +165,11 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 			if wantLanguage == "" {
 				wantLanguage = "en"
 			}
-			if call.season != tt.seasonNumber || call.folderID != 9 || call.language != wantLanguage || call.providerIDs["tmdb"] != "123" || call.providerIDs["tvdb"] != "456" {
+			if call.season != tt.seasonNumber || call.folderID != 9 || call.language != wantLanguage || call.providerIDs["tmdb"] != "123" || call.providerIDs["tvdb"] != "456" || call.providerIDs["custom"] != "show-42" {
 				t.Fatalf("season fetch call = %#v", call)
+			}
+			if len(providerIDs.contentIDs) != 1 || providerIDs.contentIDs[0] != seriesID {
+				t.Fatalf("provider ID lookup content IDs = %#v", providerIDs.contentIDs)
 			}
 
 			var response getItemImagesResponse
@@ -160,4 +184,86 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleGetItemImagesMergesSavedProviderIDsWithoutOverridingCanonicalIDs(t *testing.T) {
+	const seriesID = "series-1"
+	imageSvc := &imageServiceFake{}
+	providerIDs := &imageProviderIDLookupFake{rows: map[string][]*models.MediaItemProviderID{
+		seriesID: {
+			{ContentID: seriesID, Provider: " custom ", ProviderID: " saved-id "},
+			{ContentID: seriesID, Provider: "TMDB", ProviderID: "wrong-saved-id"},
+			{ContentID: seriesID, Provider: " imdb ", ProviderID: " tt123 "},
+			{ContentID: seriesID, Provider: "mediux", ProviderID: "show-art"},
+			{ContentID: seriesID, Provider: "durable", ProviderID: "fallback"},
+			{ContentID: seriesID, Provider: "metadb", ProviderID: "transient-hint"},
+			{ContentID: seriesID, Provider: "_filepath", ProviderID: "/media/show.mkv"},
+			{ContentID: seriesID, Provider: "oshash", ProviderID: "hash"},
+			{ContentID: seriesID, Provider: "manga_series", ProviderID: "scan-anchor"},
+			nil,
+			{ContentID: seriesID, Provider: " ", ProviderID: "ignored"},
+			{ContentID: seriesID, Provider: "ignored", ProviderID: " "},
+		},
+	}}
+	handler := NewAdminImageHandler(
+		imageItemLookupFake{seriesID: {
+			ContentID: seriesID,
+			Type:      "series",
+			TmdbID:    "123",
+			TvdbID:    "456",
+		}},
+		imageSeasonLookupFake{},
+		imageEpisodeLookupFake{},
+		imageFolderLookupFake{folderID: 9},
+		imageSvc,
+		nil,
+		nil,
+		providerIDs,
+	)
+	router := chi.NewRouter()
+	router.Get("/admin/items/{id}/images", handler.HandleGetItemImages)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/items/"+seriesID+"/images", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if imageSvc.itemCalls != 1 || len(imageSvc.itemProviderIDs) != 1 {
+		t.Fatalf("item calls = %d, provider IDs = %#v", imageSvc.itemCalls, imageSvc.itemProviderIDs)
+	}
+	got := imageSvc.itemProviderIDs[0]
+	want := map[string]string{"tmdb": "123", "tvdb": "456", "imdb": "tt123", "custom": "saved-id", "mediux": "show-art", "durable": "fallback"}
+	if !maps.Equal(got, want) {
+		t.Errorf("provider IDs = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandleGetItemImagesSavedProviderIDLookupFailureStopsBeforeFetch(t *testing.T) {
+	const seriesID = "series-1"
+	imageSvc := &imageServiceFake{}
+	handler := NewAdminImageHandler(
+		imageItemLookupFake{seriesID: {ContentID: seriesID, Type: "series", TmdbID: "123"}},
+		imageSeasonLookupFake{}, imageEpisodeLookupFake{}, imageFolderLookupFake{folderID: 9},
+		imageSvc, nil, nil,
+		&imageProviderIDLookupFake{err: context.DeadlineExceeded},
+	)
+	router := chi.NewRouter()
+	router.Get("/admin/items/{id}/images", handler.HandleGetItemImages)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/items/"+seriesID+"/images", nil))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if imageSvc.itemCalls != 0 || len(imageSvc.seasonCalls) != 0 {
+		t.Fatalf("image fetch ran after durable ID lookup failure: item=%d seasons=%#v", imageSvc.itemCalls, imageSvc.seasonCalls)
+	}
+	if !json.Valid(recorder.Body.Bytes()) || !containsJSONError(recorder.Body.Bytes(), "Failed to load provider IDs") {
+		t.Fatalf("unexpected error response: %s", recorder.Body.String())
+	}
+}
+
+func containsJSONError(body []byte, want string) bool {
+	var response struct {
+		Message string `json:"message"`
+	}
+	return json.Unmarshal(body, &response) == nil && response.Message == want
 }

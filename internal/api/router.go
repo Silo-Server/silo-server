@@ -1670,6 +1670,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			imageSvc,
 			deps.PluginImageResolver,
 			detailSvc,
+			providerIDRepo,
 		)
 		adminImageHandler.EventsHub = deps.EventsHub
 	}

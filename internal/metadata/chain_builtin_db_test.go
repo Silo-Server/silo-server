@@ -321,18 +321,17 @@ func TestSyncBuiltinProviderChains_LegacyMaterializationFixture(t *testing.T) {
 	}
 }
 
-// Both chain paths must carry a capability's lookup_provider_ids into the
-// provider they build, or an enrichment-only plugin is never called: the
-// explicit chain reads it per entry, the chain-less fallback from the enabled
-// capability listing.
-func TestResolveChainWithChecker_CarriesLookupProviderIDs(t *testing.T) {
+// Both chain paths must carry a capability's lookup and image-lookup provider
+// IDs into the provider they build: the explicit chain reads them per entry,
+// and the chain-less fallback reads the enabled capability listing.
+func TestResolveChainWithChecker_CarriesProviderIDDeclarations(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
 
 	installationID := insertTestInstallation(t, pool, "plugin", true)
 	capID := fmt.Sprintf("test-lookup-%d", time.Now().UnixNano())
 	insertTestCapability(t, pool, installationID, capID,
-		`{"display_name":"Lookup Plugin","metadata":{"lookup_provider_ids":["imdb","TMDB"],"default_priority":{"movie":8}}}`)
+		`{"display_name":"Lookup Plugin","metadata":{"lookup_provider_ids":["imdb","TMDB"],"image_lookup_provider_ids":["tmdb","TVDB"],"default_priority":{"movie":8}}}`)
 	chainRepo := NewChainRepository(pool)
 	resolver := stubMetadataResolver{}
 
@@ -352,6 +351,9 @@ func TestResolveChainWithChecker_CarriesLookupProviderIDs(t *testing.T) {
 			}
 			if want := []string{"imdb", "tmdb"}; !reflect.DeepEqual(pp.lookupProviderIDs, want) {
 				t.Fatalf("%s: lookupProviderIDs = %q, want %q", scenario, pp.lookupProviderIDs, want)
+			}
+			if want := []string{"tmdb", "tvdb"}; !reflect.DeepEqual(pp.imageLookupProviderIDs, want) {
+				t.Fatalf("%s: imageLookupProviderIDs = %q, want %q", scenario, pp.imageLookupProviderIDs, want)
 			}
 			if pp.Name() != "Lookup Plugin" {
 				t.Fatalf("%s: display name = %q, want \"Lookup Plugin\"", scenario, pp.Name())

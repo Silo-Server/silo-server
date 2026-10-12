@@ -20,15 +20,17 @@ type seasonImageProvider struct {
 }
 
 type itemImageProvider struct {
-	slug   string
-	images []RemoteImage
+	slug          string
+	images        []RemoteImage
+	imageRequests []ImageRequest
 }
 
 func (p *itemImageProvider) Slug() string       { return p.slug }
 func (p *itemImageProvider) Name() string       { return p.slug }
 func (p *itemImageProvider) ForTypes() []string { return []string{"series"} }
 
-func (p *itemImageProvider) GetImages(context.Context, ImageRequest) ([]RemoteImage, error) {
+func (p *itemImageProvider) GetImages(_ context.Context, req ImageRequest) ([]RemoteImage, error) {
+	p.imageRequests = append(p.imageRequests, req)
 	return p.images, nil
 }
 
@@ -81,7 +83,7 @@ func TestFetchSeasonImagesReturnsFullExactGallery(t *testing.T) {
 	if len(images) != 2 || images[0].URL != "tmdb://season-2-high.jpg" || images[1].URL != "tmdb://season-2-low.jpg" {
 		t.Fatalf("images = %#v, want exact Season 2 gallery sorted by rating", images)
 	}
-	if len(provider.imageRequests) != 1 || provider.imageRequests[0].SeasonNumber == nil || *provider.imageRequests[0].SeasonNumber != 2 {
+	if len(provider.imageRequests) != 1 || !provider.imageRequests[0].ForPicker || provider.imageRequests[0].SeasonNumber == nil || *provider.imageRequests[0].SeasonNumber != 2 {
 		t.Fatalf("image requests = %#v, want exact Season 2", provider.imageRequests)
 	}
 	if len(provider.seasonRequests) != 0 {
@@ -127,7 +129,7 @@ func TestFetchSeasonImagesListsSpecialsBeforeShowFallbacks(t *testing.T) {
 			t.Fatalf("images[%d] = %q, want %q (Specials must precede show fallbacks)", i, images[i].URL, want[i])
 		}
 	}
-	if len(provider.imageRequests) != 2 || provider.imageRequests[0].SeasonNumber == nil || provider.imageRequests[1].SeasonNumber != nil {
+	if len(provider.imageRequests) != 2 || !provider.imageRequests[0].ForPicker || !provider.imageRequests[1].ForPicker || provider.imageRequests[0].SeasonNumber == nil || provider.imageRequests[1].SeasonNumber != nil {
 		t.Fatalf("image requests = %#v, want scoped Specials then unscoped show gallery", provider.imageRequests)
 	}
 }
@@ -241,6 +243,9 @@ func TestFetchItemImagesFiltersClearArtLogos(t *testing.T) {
 	}
 	if len(providerErrors) != 0 {
 		t.Fatalf("provider errors = %v, want none", providerErrors)
+	}
+	if len(tvdb.imageRequests) != 1 || len(tmdb.imageRequests) != 1 || !tvdb.imageRequests[0].ForPicker || !tmdb.imageRequests[0].ForPicker {
+		t.Fatalf("item image requests = tvdb %#v tmdb %#v, want picker requests", tvdb.imageRequests, tmdb.imageRequests)
 	}
 	if len(images) != 5 {
 		t.Fatalf("images = %#v, want all art except the TVDB clear art", images)

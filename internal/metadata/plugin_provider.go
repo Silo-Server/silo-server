@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"google.golang.org/grpc/codes"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -33,6 +34,8 @@ type pluginMetadataClient interface {
 }
 
 type pluginMetadataClientFactory func(ctx context.Context, installationID int, capabilityID string) (pluginMetadataClient, error)
+
+const imageRequestPurposeHeader = "silo-image-request-purpose"
 
 // PluginResolverAdapter wraps a concrete resolver (like *plugins.Service)
 // whose MetadataProviderClient returns *pluginhost.MetadataProviderClient,
@@ -65,6 +68,10 @@ type PluginProvider struct {
 	// look an item up by (lookup_provider_ids). GetMetadata runs when the item
 	// carries any of them, even without an ID of the provider's own.
 	lookupProviderIDs []string
+	// imageLookupProviderIDs are the external provider-ID keys the capability
+	// explicitly permits image lookup by. Unlike lookupProviderIDs, these do
+	// not affect metadata enrichment or child metadata requests.
+	imageLookupProviderIDs []string
 	// declaredRatingSources are the rating sources of its own the capability
 	// declared (rating_sources); GetMetadata keeps them alongside Silo's
 	// built-in sources.
@@ -125,11 +132,14 @@ func NewPluginProviderWithClientFactory(
 // NewPluginProviderFromCapability constructs a PluginProvider directly from
 // plugin capability data, without going through a settings map or registry.
 // lookupProviderIDs is the capability's declared lookup_provider_ids, or nil.
+// imageLookupProviderIDs is its explicitly declared image_lookup_provider_ids,
+// or nil.
 func NewPluginProviderFromCapability(
 	installationID int,
 	capabilityID string,
 	displayName string,
 	lookupProviderIDs []string,
+	imageLookupProviderIDs []string,
 	ratingSources []models.RatingSourceDefinition,
 	resolver pluginMetadataResolver,
 ) (*PluginProvider, error) {
@@ -147,12 +157,13 @@ func NewPluginProviderFromCapability(
 		}
 	}
 	return &PluginProvider{
-		installationID:        installationID,
-		capabilityID:          capabilityID,
-		displayName:           displayName,
-		lookupProviderIDs:     lookupProviderIDs,
-		declaredRatingSources: declared,
-		clientFactory:         resolver.MetadataProviderClient,
+		installationID:         installationID,
+		capabilityID:           capabilityID,
+		displayName:            displayName,
+		lookupProviderIDs:      lookupProviderIDs,
+		imageLookupProviderIDs: imageLookupProviderIDs,
+		declaredRatingSources:  declared,
+		clientFactory:          resolver.MetadataProviderClient,
 	}, nil
 }
 
@@ -322,9 +333,15 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 }
 
 // hasLookupProviderID reports whether ids holds a non-empty value for any of
-// the provider's declared lookup keys.
+// the provider's metadata lookup keys.
 func (p *PluginProvider) hasLookupProviderID(ids map[string]string) bool {
-	for _, key := range p.lookupProviderIDs {
+	return hasProviderID(ids, p.lookupProviderIDs)
+}
+
+// hasProviderID reports whether ids holds a non-empty value for any declared
+// provider-ID key.
+func hasProviderID(ids map[string]string, keys []string) bool {
+	for _, key := range keys {
 		if ids[key] != "" {
 			return true
 		}
@@ -391,7 +408,7 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 
 func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]RemoteImage, error) {
 	providerID := req.ProviderIDs[p.capabilityID]
-	if providerID == "" {
+	if providerID == "" && !hasProviderID(req.ProviderIDs, p.imageLookupProviderIDs) {
 		return nil, nil
 	}
 
@@ -416,7 +433,7 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		pluginRequest.SeasonNumber = &seasonNumber
 	}
 
-	response, err := client.GetImages(ctx, pluginRequest)
+	response, err := client.GetImages(imageRequestPurposeContext(ctx, req.ForPicker), pluginRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +462,22 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		images = append(images, ri)
 	}
 	return images, nil
+}
+
+func imageRequestPurposeContext(ctx context.Context, forPicker bool) context.Context {
+	const (
+		automaticPurpose = "automatic"
+		galleryPurpose   = "gallery"
+	)
+	purpose := automaticPurpose
+	if forPicker {
+		purpose = galleryPurpose
+	}
+
+	metadata, _ := grpcmetadata.FromOutgoingContext(ctx)
+	metadata = metadata.Copy()
+	metadata.Set(imageRequestPurposeHeader, purpose)
+	return grpcmetadata.NewOutgoingContext(ctx, metadata)
 }
 
 func imageMetadataBool(md *structpb.Struct, key string) *bool {
