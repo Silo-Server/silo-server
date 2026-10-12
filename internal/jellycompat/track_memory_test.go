@@ -712,3 +712,37 @@ func TestRememberCompatTracksCallbacksNeverFail(t *testing.T) {
 		}
 	}
 }
+
+// TestRememberCompatTracksRepairsAfterAStopFinishesThePlay covers an older
+// report whose write lands after a newer Stopped report claimed, saved and
+// finished the play: the read-back reads the finished play's final claim and
+// writes it again.
+func TestRememberCompatTracksRepairsAfterAStopFinishesThePlay(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	report := func(index int, stop bool) {
+		current, ok := handler.playbackStore.Get("play-1")
+		if !ok {
+			t.Fatal("play-1 missing")
+		}
+		value := compatIntValue(index)
+		handler.rememberCompatTracks(t.Context(), session, current,
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, stop)
+	}
+	prefs.beforeSubtitleWrite = func() {
+		report(-1, true)
+		finished, ok := handler.playbackStore.Get("play-1")
+		if !ok {
+			t.Fatal("play-1 missing")
+		}
+		finished.Terminal = true
+		handler.playbackStore.Put(*finished)
+	}
+
+	report(trackMemorySDHSubtitle, false)
+
+	last := prefs.subtitles[len(prefs.subtitles)-1]
+	if last.SubtitleMode != profileSubtitleOff {
+		t.Fatalf("last subtitle write = %+v, want the Stopped report's off choice", last)
+	}
+}

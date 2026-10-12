@@ -139,7 +139,7 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 					"series_id", key, "audio_track_index", pref.AudioTrackIndex, "error", err)
 				break
 			}
-			latest, ok := h.latestCompatTrackClaim(playSession.ID, source.ID)
+			latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
 			if !ok || latest.RememberedAudioStreamIndex == nil || *latest.RememberedAudioStreamIndex == index {
 				break
 			}
@@ -153,7 +153,7 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 					"series_id", key, "subtitle_track_index", subtitlePref.SubtitleTrackIndex, "error", err)
 				break
 			}
-			latest, ok := h.latestCompatTrackClaim(playSession.ID, source.ID)
+			latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
 			if !ok || latest.RememberedSubtitleStreamIndex == nil || *latest.RememberedSubtitleStreamIndex == index {
 				break
 			}
@@ -169,14 +169,22 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 // the tracks most recently claimed for it. It reads through Update rather than
 // Get: the durable store can serve Get from a replica's cached copy, while
 // Update ends on the stored row under its lock. That costs one row write per
-// track change.
-func (h *PlaybackHandler) latestCompatTrackClaim(playSessionID, sourceID string) (*PlaybackMediaSource, bool) {
+// track change. Update refuses a play a later Stopped report has finished
+// meanwhile, so that play's final claim is read as a finished play instead.
+func (h *PlaybackHandler) latestCompatTrackClaim(playSession *PlaybackSession, sourceID string) (*PlaybackMediaSource, bool) {
 	var latest *PlaybackMediaSource
-	err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+	err := h.playbackStore.Update(playSession.ID, func(current *PlaybackSession) error {
 		// Never fail, for the reason claimCompatTrackChange gives.
 		latest, _ = compatPlaybackSource(current, sourceID)
 		return nil
 	})
+	if errors.Is(err, ErrSessionNotFound) {
+		finished, ok := h.playbackStore.GetFinalizable(playSession.ID, playSession.CompatToken)
+		if !ok {
+			return nil, false
+		}
+		latest, err = compatPlaybackSource(finished, sourceID)
+	}
 	return latest, err == nil && latest != nil
 }
 
