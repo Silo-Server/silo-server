@@ -217,6 +217,7 @@ type TranscodeSession struct {
 	running              bool
 	restarting           *restartFlight
 	waitErr              error
+	waitCanceled         bool // the owning process context was canceled before exit
 	stderr               *boundedTailBuffer
 	mu                   sync.Mutex
 	done                 chan struct{} // closed when the monitor goroutine finishes
@@ -490,6 +491,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = waitErr
+	s.waitCanceled = ctx.Err() != nil
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
 	close(done)
@@ -3102,7 +3104,7 @@ func (s *TranscodeSession) cleanStaleOutputForRestart(previous, next TranscodeOp
 // recipe-changing restarts clean the manifest and the segments at or after the
 // restart point (see cleanStaleOutputForRestart).
 func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, startSegment int) error {
-	return s.restart(ctx, seekSeconds, startSegment, 0, false)
+	return s.restart(ctx, SegmentRecoveryTarget{SeekSeconds: seekSeconds, StartSegmentNumber: startSegment}, nil)
 }
 
 // RestartWithCopySeekAnchor restarts a copy-video stream with the keyframe
@@ -3114,7 +3116,10 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 	startSegment int,
 	streamOriginSeconds float64,
 ) error {
-	return s.restart(ctx, seekSeconds, startSegment, streamOriginSeconds, true)
+	return s.restart(ctx, SegmentRecoveryTarget{
+		SeekSeconds: seekSeconds, StartSegmentNumber: startSegment,
+		StreamOriginSeconds: streamOriginSeconds, CopySeekAnchorResolved: true,
+	}, nil)
 }
 
 // RestartSegment resolves and applies one missing-segment recovery as a single
@@ -3122,22 +3127,39 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
-	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
-	if err != nil || !ok {
-		return SegmentRecoveryTarget{}, ok, err
+	if !s.IsCopyVideo() {
+		target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
+		if err != nil || !ok {
+			return SegmentRecoveryTarget{}, ok, err
+		}
+		return target, true, s.Restart(ctx, target.SeekSeconds, target.StartSegmentNumber)
 	}
 
-	if target.CopySeekAnchorResolved {
-		err = s.RestartWithCopySeekAnchor(
-			ctx,
-			target.SeekSeconds,
-			target.StartSegmentNumber,
-			target.StreamOriginSeconds,
-		)
-	} else {
-		err = s.Restart(ctx, target.SeekSeconds, target.StartSegmentNumber)
+	// Freeze the manifest mapping before entering the restart flight, which
+	// hides the old generation from segment readers and pruning. An unresolved
+	// request leaves the current encoder running so its manifest can grow.
+	baseSeconds, timeline, err := s.manifestTimelineSnapshot()
+	if errors.Is(err, ErrManifestNotReady) {
+		return SegmentRecoveryTarget{}, false, nil
 	}
-	return target, true, err
+	if err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
+	seekSeconds, ok := segmentStartTime(baseSeconds, timeline, segNum)
+	if !ok {
+		return SegmentRecoveryTarget{}, false, nil
+	}
+	opts := s.Opts()
+	target := SegmentRecoveryTarget{SeekSeconds: seekSeconds, StartSegmentNumber: segNum}
+	err = s.restart(ctx, target, func() (SegmentRecoveryTarget, bool, error) {
+		// The restart owns cancellation and reaping before this capacity-limited
+		// probe. Its anchor is mapped against the frozen playlist, before output
+		// cleanup or replacement FFmpeg can change that playlist.
+		var resolveErr error
+		target, ok, resolveErr = resolveCopySegmentRecoveryTarget(ctx, opts, baseSeconds, timeline, seekSeconds)
+		return target, ok, resolveErr
+	})
+	return target, ok, err
 }
 
 // restartFlight carries the outcome of an in-flight restart so a concurrent
@@ -3155,10 +3177,8 @@ var restartToneMapValidationTimeout = 20 * time.Second
 
 func (s *TranscodeSession) restart(
 	ctx context.Context,
-	seekSeconds float64,
-	startSegment int,
-	streamOriginSeconds float64,
-	copySeekAnchorResolved bool,
+	target SegmentRecoveryTarget,
+	resolveTarget func() (SegmentRecoveryTarget, bool, error),
 ) error {
 	s.mu.Lock()
 	// Single-flight: a second caller arriving while a restart is in
@@ -3203,10 +3223,25 @@ func (s *TranscodeSession) restart(
 	if done != nil {
 		<-done
 	}
+	if resolveTarget != nil {
+		var ok bool
+		var err error
+		target, ok, err = resolveTarget()
+		if err != nil || !ok {
+			s.mu.Lock()
+			flight.err = err
+			s.restarting = nil
+			s.mu.Unlock()
+			close(flight.done)
+			return err
+		}
+	}
+	startSegment := target.StartSegmentNumber
 
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = nil
+	s.waitCanceled = false
 	if s.stderr != nil {
 		s.stderr.Reset()
 	}
@@ -3231,15 +3266,15 @@ func (s *TranscodeSession) restart(
 
 	previousOpts := opts
 
-	opts.SeekSeconds = seekSeconds
+	opts.SeekSeconds = target.SeekSeconds
 	opts.StartSegmentNumber = startSegment
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		// A seek restart describes a new emitted timeline. Never retain the
 		// previous copy seek's keyframe origin when the caller has not resolved
 		// a replacement; falling back to SeekSeconds is conservative and matches
 		// the behavior of recipes created before copy anchors were introduced.
-		opts.StreamOriginSeconds = streamOriginSeconds
-		opts.CopySeekAnchorResolved = copySeekAnchorResolved
+		opts.StreamOriginSeconds = target.StreamOriginSeconds
+		opts.CopySeekAnchorResolved = target.CopySeekAnchorResolved
 	}
 	opts.FastStart = false // seek-restarts use veryfast for better quality
 
@@ -3610,15 +3645,20 @@ func (s *TranscodeSession) SegmentStartTime(segNum int) (float64, bool, error) {
 		return 0, false, err
 	}
 
+	seconds, ok := segmentStartTime(baseSeekSeconds, timeline, segNum)
+	return seconds, ok, nil
+}
+
+func segmentStartTime(baseSeekSeconds float64, timeline manifestTimeline, segNum int) (float64, bool) {
 	currentTime := baseSeekSeconds
 	for _, entry := range timeline.entries {
 		if entry.number == segNum {
-			return currentTime, true, nil
+			return currentTime, true
 		}
 		currentTime += entry.duration
 	}
 
-	return 0, false, nil
+	return 0, false
 }
 
 func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline, error) {
@@ -3674,15 +3714,20 @@ func (s *TranscodeSession) segmentNumberAtSourceTime(sourceSeconds float64) (int
 		return 0, false, err
 	}
 
+	segment, ok := segmentNumberAtSourceTime(baseSeekSeconds, timeline, sourceSeconds)
+	return segment, ok, nil
+}
+
+func segmentNumberAtSourceTime(baseSeekSeconds float64, timeline manifestTimeline, sourceSeconds float64) (int, bool) {
 	currentTime := baseSeekSeconds
 	for _, entry := range timeline.entries {
 		if math.Abs(currentTime-sourceSeconds) <= copySegmentStartMatchTolerance.Seconds() {
-			return entry.number, true, nil
+			return entry.number, true
 		}
 		currentTime += entry.duration
 	}
 
-	return 0, false, nil
+	return 0, false
 }
 
 // SegmentRecoveryTarget describes the FFmpeg seek and HLS numbering for one
@@ -3708,7 +3753,14 @@ func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, seg
 	if !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return target, true, nil
 	}
+	baseSeconds, timeline, err := s.manifestTimelineSnapshot()
+	if err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
+	return resolveCopySegmentRecoveryTarget(ctx, opts, baseSeconds, timeline, seekSeconds)
+}
 
+func resolveCopySegmentRecoveryTarget(ctx context.Context, opts TranscodeOpts, baseSeconds float64, timeline manifestTimeline, seekSeconds float64) (SegmentRecoveryTarget, bool, error) {
 	streamOriginSeconds, _, err := ResolveCopySeekAnchor(
 		ctx,
 		opts.FFmpegPath,
@@ -3719,15 +3771,15 @@ func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, seg
 	if err != nil {
 		return SegmentRecoveryTarget{}, false, err
 	}
-	startSegmentNumber, ok, err := s.segmentNumberAtSourceTime(streamOriginSeconds)
-	if err != nil || !ok {
-		return SegmentRecoveryTarget{}, ok, err
+	startSegmentNumber, ok := segmentNumberAtSourceTime(baseSeconds, timeline, streamOriginSeconds)
+	if !ok {
+		return SegmentRecoveryTarget{}, false, nil
 	}
 
-	target.StreamOriginSeconds = streamOriginSeconds
-	target.StartSegmentNumber = startSegmentNumber
-	target.CopySeekAnchorResolved = true
-	return target, true, nil
+	return SegmentRecoveryTarget{
+		SeekSeconds: seekSeconds, StreamOriginSeconds: streamOriginSeconds,
+		StartSegmentNumber: startSegmentNumber, CopySeekAnchorResolved: true,
+	}, true, nil
 }
 
 // RestartSeekTarget resolves the source-timeline time to restart FFmpeg for

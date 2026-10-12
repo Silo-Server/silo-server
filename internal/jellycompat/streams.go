@@ -2944,7 +2944,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		// The failed remote sequence has narrowed this session to software.
 		// Remove a concurrently started or stale hardware writer before spawning
 		// the replacement in the same output directory.
-		h.tm.CloseTranscodeSessionIf(upstreamSessionID, existing, "")
+		h.tm.CloseTranscodeSessionIfUnderLifecycle(upstreamSessionID, existing, "")
 	}
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 	// A disabled pipeline returns opts unchanged. An enabled one never carries
@@ -2983,7 +2983,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				}
 				return nil, readyErr
 			}
-			h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+			h.tm.CloseTranscodeSessionIfUnderLifecycle(upstreamSessionID, transcodeSession, "")
 			if !fallbackEligible {
 				replaceUnlock()
 				return nil, readyErr
@@ -3001,7 +3001,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			fallbackManifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 			if _, fallbackErr := transcodeSession.WaitForManifest(time.Until(fallbackManifestDeadline)); fallbackErr != nil {
 				cleanupUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
-				h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+				h.tm.CloseTranscodeSessionIfUnderLifecycle(upstreamSessionID, transcodeSession, "")
 				cleanupUnlock()
 				return nil, fallbackErr
 			}
@@ -3060,7 +3060,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
-		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		h.tm.CloseTranscodeSessionIfUnderLifecycle(upstreamSessionID, transcodeSession, "")
 		publishUnlock()
 		return nil, err
 	}
@@ -3117,7 +3117,7 @@ func (h *PlaybackHandler) awaitCompatAutoTranscode(
 			}
 			return nil, nil, readyErr
 		}
-		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		h.tm.CloseTranscodeSessionIfUnderLifecycle(upstreamSessionID, transcodeSession, "")
 		if !advanced {
 			replaceUnlock()
 			return nil, nil, readyErr
