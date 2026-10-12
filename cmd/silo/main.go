@@ -1039,7 +1039,9 @@ func main() {
 		}()
 	}
 
-	eventBus := cache.NewEventBus(cfg.Redis)
+	// The plugin event dispatcher observes what this process publishes, so
+	// each event reaches plugins once however many nodes receive it.
+	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		if event.Type == cache.EventScanComplete {
 			sections.InvalidateResolvedListCache()
@@ -1875,11 +1877,12 @@ func main() {
 		close(pluginAutoUpdateDone)
 	}
 	if pluginService != nil && pluginInstallationStore != nil {
-		dispatcher := plugins.NewEventDispatcherWithTypedResolver(deps.EventBus, deps.EventsHub, pluginInstallationStore, pluginService, 4)
+		dispatcher := plugins.NewEventDispatcherWithTypedResolver(deps.EventBus, deps.EventsHub, pluginInstallationStore, pluginService, plugins.NewEventDeliveryStore(deps.DB), 4)
 		pluginService.SetEventDispatcher(dispatcher)
 		if err := dispatcher.Start(appCtx); err != nil {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
+		eventBus.ObservePublishes(dispatcher.ObservePublish)
 		defer dispatcher.Stop()
 		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
 		// before PublishLifecycleChanges was registered, so this call is the

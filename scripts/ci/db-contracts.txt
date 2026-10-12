@@ -180,6 +180,10 @@
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
+# Plugin event deliveries: a claim takes at most its limit, never shares a row,
+# and only the latest claim records the outcome.
+./internal/plugins TestEventDeliveryOutboxPostgres
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
