@@ -45,6 +45,10 @@ type Session struct {
 	ExpiresAt      time.Time
 }
 
+// signedOutDeleteTimeout bounds deleting the stored row of a compat session
+// whose login session ended, so the request it refuses is not held up.
+const signedOutDeleteTimeout = 2 * time.Second
+
 // loginSessionChecker reports whether a Silo login session is live (not
 // revoked, not expired); *auth.Service implements it. An error means it could
 // not be checked.
@@ -258,7 +262,11 @@ func (s *SessionStore) checkLoginSession(ctx context.Context, session *Session) 
 		return fmt.Errorf("check login session: %w", err)
 	}
 	if !active {
-		s.Delete(session.Token)
+		// A row the bounded delete leaves behind is refused again on its
+		// next lookup.
+		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signedOutDeleteTimeout)
+		defer cancel()
+		s.delete(deleteCtx, session.Token)
 		return ErrSessionNotFound
 	}
 	return nil
@@ -312,10 +320,14 @@ func (s *SessionStore) uncache(token string) {
 
 // Delete removes a compat session.
 func (s *SessionStore) Delete(token string) {
+	s.delete(context.Background(), token)
+}
+
+func (s *SessionStore) delete(ctx context.Context, token string) {
 	s.uncache(token)
 	if s.repo != nil {
-		if err := s.repo.DeleteByToken(context.Background(), token); err != nil && !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		if err := s.repo.DeleteByToken(ctx, token); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			slog.WarnContext(ctx, "jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
 }
