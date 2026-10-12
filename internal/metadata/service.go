@@ -1299,9 +1299,11 @@ func applyProvider404sToAccumulator(accumulator *MetadataResult, provider404s *p
 // move to the anchor its current identity derives. A manual refresh may. So may
 // an Identify whose correction rejected the item's live anchor
 // (anchorRejected): that anchor names a different title, and leaving the item
-// on it would let that title merge into this item when it is scanned in.
-// Scheduled jobs, and an Identify that confirms or extends the match or only
-// replaces a dead anchor, keep the client-visible content_id.
+// on it would let that title merge into this item when it is scanned in. The
+// same holds for an initial match whose NFO ids replaced the folder-tag ids
+// the scanner anchored the skeleton on. Scheduled jobs, and an Identify that
+// confirms or extends the match or only replaces a dead anchor, keep the
+// client-visible content_id.
 func shouldReanchorProviderContentID(
 	contentID string,
 	isNew bool,
@@ -1311,7 +1313,7 @@ func shouldReanchorProviderContentID(
 	if isNew || !contentid.IsProviderAnchored(contentID) {
 		return false
 	}
-	return mode == ModeManualRefresh || (mode == ModeIdentify && anchorRejected)
+	return mode == ModeManualRefresh || ((mode == ModeIdentify || mode == ModeInitialMatch) && anchorRejected)
 }
 
 // identityCorrectionRejectsLiveAnchor reports whether a correction rejected
@@ -1439,6 +1441,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	recordStaleIDs := req.ContentID != ""
 	var matchDecision *MatchDecision
 	var providerMatchErrors []error
+	// nfoReplacedTagIDs holds the folder- and filename-tag ids an NFO's id set
+	// (nfoHintIDs) replaced at initial match; they are rejected once an NFO id
+	// a remote provider returned (nfoVerifiedIDs) survives the lookups.
+	var nfoReplacedTagIDs, nfoHintIDs, nfoVerifiedIDs map[string]string
 	quarantinedProviderIDKeys := make(map[string]struct{})
 	replacedProviderIDKeys := make(map[string]struct{})
 	rejectedIdentityIDs := make(providerIDValueSet)
@@ -1470,6 +1476,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			accumulatedIDs["_filepath"] = req.Hints.FilePath
 		}
 		suppressProviderIDValues(accumulatedIDs, req.recordedStaleProviderIDs)
+		// The folder- and filename-tag ids an NFO's ids may replace.
+		tagIDs := unprotectedTrustedIDs(accumulatedIDs, req.ProviderIDs)
 
 		// Run search providers and choose a decisive normalized winner instead of
 		// letting the first non-empty result win.
@@ -1494,8 +1502,28 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
 		if len(wonHints) > 0 {
+			staleHints := staleLocalHints(ctx, itemChain, searchQuery, req.recordedStaleProviderIDs)
+			restoredKeys := dropStaleHints(wonHints, accumulatedIDs, tagIDs, staleHints)
+			// The NFO's ids replace the tag ids as a set, except a tag id that
+			// came back because the NFO's id for its provider is dead.
+			replaceProtected := protectedKeys
+			if len(restoredKeys) > 0 {
+				replaceProtected = maps.Clone(protectedKeys)
+				for _, key := range restoredKeys {
+					replaceProtected[key] = true
+				}
+			}
+			droppedHintKeys := dropIDsNotRestatedByHints(ctx, wonHints, accumulatedIDs, replaceProtected)
+			if len(wonHints) > 0 {
+				nfoReplacedTagIDs, nfoHintIDs = tagIDs, wonHints
+				if !chainChecksIDs(itemChain) {
+					// Nothing else can look the NFO's ids up, so they stand.
+					nfoVerifiedIDs = maps.Clone(wonHints)
+				}
+			}
 			hintsCopy := *selectionHints
 			overrideHintIDs(&hintsCopy, wonHints)
+			clearHintIDs(&hintsCopy, droppedHintKeys)
 			selectionHints = &hintsCopy
 		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
@@ -1507,6 +1535,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					continue
 				}
 				results, searchErr := sp.Search(ctx, query)
+				if localSidecarDenied(searchErr) {
+					slog.WarnContext(ctx, "metadata: matching without an unreadable local sidecar", "component", "metadata",
+						"provider", p.Slug(), "error", searchErr)
+					continue
+				}
 				if searchErr != nil {
 					if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
 						"title", query.Title,
@@ -1538,11 +1571,34 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					}
 					resultsForQuery = append(resultsForQuery, result)
 				}
+				if _, local := p.(IdentityHintProvider); !local {
+					for _, r := range results {
+						nfoVerifiedIDs = recordVerifiedIDs(nfoVerifiedIDs, r.ProviderIDs, nfoHintIDs)
+					}
+				}
 			}
 			return resultsForQuery
 		}
 
 		allResults := searchProviders(searchQuery)
+		// A dead NFO identity leaves the tag ids alone: when a provider
+		// rejected every id the NFO named, search again with the ids it
+		// replaced, less any the providers just rejected. Clearing the NFO's
+		// ids stops their tag ids from being rejected later. A transient
+		// failure is not a rejection; that match waits instead.
+		if len(nfoReplacedTagIDs) > 0 && !anyProviderIDKept(accumulatedIDs, nfoHintIDs) &&
+			!hasTransientMatchError(providerMatchErrors) {
+			maps.Copy(accumulatedIDs, nfoReplacedTagIDs)
+			suppressProviderIDValues(accumulatedIDs, provider404s.dropped)
+			selectionHints = sanitizedMatchHintProviderIDs(req.Hints)
+			for key := range nfoReplacedTagIDs {
+				if accumulatedIDs[key] == "" {
+					clearHintIDs(selectionHints, []string{key})
+				}
+			}
+			nfoReplacedTagIDs, nfoHintIDs, nfoVerifiedIDs = nil, nil, nil
+			allResults = searchProviders(searchQuery)
+		}
 
 		candidates := NormalizeCandidatesForLanguage(allResults, contentType, searchQuery.Language)
 		slog.DebugContext(ctx, "metadata: search candidates assembled", "component", "metadata",
@@ -1865,6 +1921,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			GroupTitle:                groupTitle,
 			GroupYear:                 groupYear,
 		})
+		if keepStoredValuesOnLocalReadError(req.Mode, err) {
+			return nil, fmt.Errorf("metadata: %s: %w", p.Slug(), err)
+		}
 		if err != nil {
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
 				"content_id", req.ContentID,
@@ -1881,7 +1940,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 			}
-			if req.Mode == ModeInitialMatch {
+			if req.Mode == ModeInitialMatch && !localSidecarDenied(err) {
 				providerMatchErrors = append(providerMatchErrors, err)
 			}
 			continue
@@ -1891,6 +1950,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		if isEnrichmentProvider(p) {
 			enrichedBy = append(enrichedBy, p.Slug())
+		}
+		if !isIdentityHinter {
+			nfoVerifiedIDs = recordVerifiedIDs(nfoVerifiedIDs, result.ProviderIDs, nfoHintIDs)
 		}
 		foldProviderResult(accumulator, result, req.Language, p.Slug(), isIdentityHinter, quarantinedProviderIDKeys)
 		// Bootstrap: feed new IDs to subsequent providers.
@@ -1907,11 +1969,37 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	suppressProviderIDValues(accumulator.ProviderIDs, accumulator.recordedStaleProviderIDs)
 	applyProvider404sToAccumulator(accumulator, provider404s)
 	accumulatedIDs = accumulator.ProviderIDs
+	// Tag ids an NFO replaced are rejected for this run once a remote
+	// provider returned one of the NFO's ids and it survived the lookups, so
+	// persistence drops them from the scanner's tag-anchored skeleton and
+	// moves it to the NFO's anchor (see shouldReanchorProviderContentID). A
+	// dead or unchecked NFO id leaves the tag ids alone.
+	if anyProviderIDKept(accumulatedIDs, nfoVerifiedIDs) {
+		rejectIdentityProviderIDs(rejectedIdentityIDs, accumulatedIDs, nfoReplacedTagIDs)
+	}
 	if len(replacedProviderIDKeys) > 0 {
 		accumulator.replacedProviderIDKeys = maps.Clone(replacedProviderIDKeys)
 	}
 	if len(rejectedIdentityIDs) > 0 {
 		accumulator.rejectedIdentityProviderIDs = rejectedIdentityIDs
+	}
+	// The NFO may name a different title than the search found; retry once it
+	// can be read instead of committing an identity it may contradict. Retry
+	// too when the NFO's ids replaced the tag ids and a transient failure kept
+	// every remote provider from returning one of them; a failure after one
+	// did (an enrichment quota, say) does not hold the match. Later phases add
+	// no match errors, so this is decided before their fetches.
+	localUnreadable := localMetadataTemporarilyUnavailable(providerMatchErrors)
+	nfoIDsUnchecked := len(nfoReplacedTagIDs) > 0 && !anyProviderIDKept(accumulatedIDs, nfoVerifiedIDs) &&
+		hasTransientMatchError(providerMatchErrors)
+	if req.Mode == ModeInitialMatch && (localUnreadable || nfoIDsUnchecked) {
+		upsertStaleProviderIDValues(ctx, s.staleIDRepo, req.ContentID, provider404s.stale)
+		if matchDecision == nil {
+			matchDecision = &MatchDecision{Threshold: automaticMatchAcceptanceFloor}
+		}
+		matchDecision.Outcome = MatchOutcomeProviderTransient
+		matchDecision.localSidecarUnreadable = localUnreadable
+		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
@@ -1992,7 +2080,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				Language:             req.Language,
 				SeriesRootPaths:      childCtx.seriesRootPaths,
 				SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
+				ShowFilePaths:        showFilePaths(childCtx.episodeFilePaths),
 			})
+			if keepStoredValuesOnLocalReadError(req.Mode, err) {
+				return nil, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
+			}
 			if err != nil {
 				// A missing season endpoint is scoped metadata, not proof that the
 				// parent series identity is stale.
@@ -2004,7 +2096,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
-				continue
+				if !errors.Is(err, ErrLocalMetadataUnavailable) {
+					continue
+				}
+				// A fill-empty pass keeps the seasons the local provider could read.
 			}
 			if !s.localArtworkUsable() {
 				dropLocalSeasonArtwork(seasons)
@@ -2037,6 +2132,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				return nil, err
 			}
 			episodeResults := make(map[episodeResultKey]*EpisodeResult)
+			showFiles := showFilePaths(childCtx.episodeFilePaths)
 			for _, seasonNumber := range episodeSeasonNumbers {
 				for _, p := range episodeChain {
 					ep, ok := p.(EpisodeProvider)
@@ -2055,7 +2151,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						Language:         req.Language,
 						SeriesRootPaths:  childCtx.seriesRootPaths,
 						EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
+						ShowFilePaths:    showFiles,
 					})
+					if keepStoredValuesOnLocalReadError(req.Mode, err) {
+						return nil, fmt.Errorf("metadata: %s episodes: %w", p.Slug(), err)
+					}
 					if err != nil {
 						if handleScopedProvider404(p.Slug(), accumulatedIDs, err,
 							"content_id", req.ContentID,
@@ -2065,7 +2165,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						}
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
-						continue
+						if !errors.Is(err, ErrLocalMetadataUnavailable) {
+							continue
+						}
+						// A fill-empty pass keeps the episodes the local provider could read.
 					}
 					if !s.localArtworkUsable() {
 						dropLocalEpisodeArtwork(episodes)
@@ -2225,9 +2328,12 @@ func sameMatchCandidate(left, right MatchCandidate) bool {
 }
 
 func hasTransientMatchError(errs []error) bool {
+	if localMetadataTemporarilyUnavailable(errs) {
+		return true
+	}
 	for _, err := range errs {
-		if err == nil {
-			continue
+		if err == nil || errors.Is(err, ErrLocalMetadataUnavailable) {
+			continue // classified above, not by its message
 		}
 		switch status.Code(err) {
 		case codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Unavailable:
@@ -4216,8 +4322,12 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			ContentType:          "series",
 			Language:             language,
 			SeriesRootPaths:      childCtx.seriesRootPaths,
-			SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
+			SeasonDirectoryPaths: targetSeasonPaths(childCtx.seasonDirectoryPaths, seasonNumber),
+			ShowFilePaths:        showFilePaths(childCtx.episodeFilePaths),
 		})
+		if errors.Is(err, ErrLocalMetadataUnavailable) {
+			return nil, 0, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
+		}
 		if err != nil {
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
@@ -4261,8 +4371,12 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			SeasonNumber:     seasonNumber,
 			Language:         language,
 			SeriesRootPaths:  childCtx.seriesRootPaths,
-			EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
+			EpisodeFilePaths: targetEpisodeFilePaths(childCtx.episodeFilePaths[seasonNumber], episodeNumber),
+			ShowFilePaths:    showFilePaths(childCtx.episodeFilePaths),
 		})
+		if errors.Is(err, ErrLocalMetadataUnavailable) {
+			return nil, 0, fmt.Errorf("metadata: %s episodes: %w", p.Slug(), err)
+		}
 		if err != nil {
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue

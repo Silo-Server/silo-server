@@ -28,11 +28,13 @@ type nfoUniqueID struct {
 }
 
 // nfoActor represents an <actor> element (Kodi/Jellyfin cast entry).
-// <thumb> URLs are intentionally ignored in v1.
+// <thumb> URLs are intentionally ignored in v1. Numeric elements decode as
+// strings throughout and parse with parseNFOInt, so one bad value drops only
+// that field instead of failing the whole file.
 type nfoActor struct {
 	Name  string `xml:"name"`
 	Role  string `xml:"role"`
-	Order *int   `xml:"order"`
+	Order string `xml:"order"`
 }
 
 // nfoNamedRating represents a <rating> entry inside a <ratings> block.
@@ -56,7 +58,7 @@ type nfoCommon struct {
 	Title         string          `xml:"title"`
 	OriginalTitle string          `xml:"originaltitle"`
 	Tagline       string          `xml:"tagline"`
-	Year          int             `xml:"year"`
+	Year          string          `xml:"year"`
 	Plot          string          `xml:"plot"`
 	Runtime       string          `xml:"runtime"`
 	Premiered     string          `xml:"premiered"`
@@ -72,6 +74,7 @@ type nfoCommon struct {
 	Directors     []string        `xml:"director"`
 	Credits       []string        `xml:"credits"`
 	UniqueIDs     []nfoUniqueID   `xml:"uniqueid"`
+	nfoIDElements
 }
 
 // nfoMovie represents the <movie> root element.
@@ -85,18 +88,19 @@ type nfoMovie struct {
 type nfoTVShow struct {
 	XMLName xml.Name `xml:"tvshow"`
 	nfoCommon
-	Aired string `xml:"aired"`
+	Aired        string          `xml:"aired"`
+	EpisodeGuide nfoEpisodeGuide `xml:"episodeguide"`
 }
 
-// nfoEpisode represents the <episodedetails> root element. Season/Episode are
-// pointers so "declared as 0" (specials) is distinguishable from "absent" —
-// declared numbers are advisory and checked against the filename-derived
-// structure by the provider.
+// nfoEpisode represents the <episodedetails> root element. An empty
+// Season/Episode means absent, so "declared as 0" (specials) stays
+// distinguishable — declared numbers are advisory and checked against the
+// filename-derived structure by the provider.
 type nfoEpisode struct {
 	XMLName      xml.Name        `xml:"episodedetails"`
 	Title        string          `xml:"title"`
-	Season       *int            `xml:"season"`
-	Episode      *int            `xml:"episode"`
+	Season       string          `xml:"season"`
+	Episode      string          `xml:"episode"`
 	Plot         string          `xml:"plot"`
 	Aired        string          `xml:"aired"`
 	Runtime      string          `xml:"runtime"`
@@ -106,13 +110,13 @@ type nfoEpisode struct {
 }
 
 // nfoSeason represents the <season> root element (Kodi/Jellyfin season
-// sidecar). SeasonNumber is a pointer for the same absent-vs-zero reason as
+// sidecar). SeasonNumber is a string for the same absent-vs-zero reason as
 // nfoEpisode.
 type nfoSeason struct {
 	XMLName      xml.Name `xml:"season"`
 	Title        string   `xml:"title"`
 	Plot         string   `xml:"plot"`
-	SeasonNumber *int     `xml:"seasonnumber"`
+	SeasonNumber string   `xml:"seasonnumber"`
 }
 
 // parsedNFO holds extracted data from an NFO file. Collections stay nil when
@@ -155,12 +159,23 @@ type parsedNFO struct {
 	// root (multi-episode file). Out of scope in v1: the first block is
 	// parsed and the caller warns.
 	MultiEpisode bool
+	// LinkOnly marks a URL-only NFO: it names the item through provider
+	// links and carries no metadata fields.
+	LinkOnly bool
 }
 
-// parseNFOData parses NFO XML data and returns structured results.
+// parseNFOData parses an NFO file. Besides XML documents it reads the two
+// link forms Kodi and Jellyfin accept: a URL-only file (just a provider link)
+// and a hybrid file (XML followed by a link).
 func parseNFOData(data []byte) (*parsedNFO, error) {
-	// Strip UTF-8 BOM if present.
-	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	data = normalizeNFOText(data)
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("nfo: empty file")
+	}
+	if trimmed[0] != '<' {
+		return parseLinkOnlyNFO(string(trimmed))
+	}
 
 	rootTag, err := detectRootTag(data)
 	if err != nil {
@@ -181,8 +196,22 @@ func parseNFOData(data []byte) (*parsedNFO, error) {
 	}
 }
 
+// parseLinkOnlyNFO reads a URL-only NFO: provider ids and no fields.
+func parseLinkOnlyNFO(text string) (*parsedNFO, error) {
+	links := scanProviderLinks(text)
+	if links.empty() {
+		return nil, fmt.Errorf("nfo: no XML root element or provider link")
+	}
+	p := &parsedNFO{Type: linkOnlyNFOType(links), LinkOnly: true}
+	applyProviderLinks(p, links, p.Type)
+	if len(p.providerIDs()) == 0 {
+		return nil, fmt.Errorf("nfo: provider links name no usable id")
+	}
+	return p, nil
+}
+
 func detectRootTag(data []byte) (string, error) {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder := newNFODecoder(data)
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
@@ -196,29 +225,34 @@ func detectRootTag(data []byte) (string, error) {
 
 func parseMovieNFO(data []byte) (*parsedNFO, error) {
 	var m nfoMovie
-	if err := xmlUnmarshal(data, &m); err != nil {
+	trailing, _, err := decodeNFORoot(data, &m)
+	if err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse movie: %w", err)
 	}
 	p := parsedFromCommon(&m.nfoCommon, typeMovie)
 	p.ReleaseDate = firstDate(m.Premiered, m.ReleaseDate)
 	deriveYear(p, m.Premiered, m.ReleaseDate)
+	applyProviderLinks(p, scanProviderLinks(trailing), typeMovie)
 	return p, nil
 }
 
 func parseTVShowNFO(data []byte) (*parsedNFO, error) {
 	var s nfoTVShow
-	if err := xmlUnmarshal(data, &s); err != nil {
+	trailing, _, err := decodeNFORoot(data, &s)
+	if err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse tvshow: %w", err)
 	}
 	p := parsedFromCommon(&s.nfoCommon, typeSeries)
 	p.FirstAirDate = firstDate(s.Premiered, s.Aired)
 	deriveYear(p, s.Premiered, s.Aired)
+	applyEpisodeGuide(p, s.EpisodeGuide)
+	applyProviderLinks(p, scanProviderLinks(trailing), typeSeries)
 	return p, nil
 }
 
 func parseSeasonNFO(data []byte) (*parsedNFO, error) {
 	var s nfoSeason
-	if err := xmlUnmarshal(data, &s); err != nil {
+	if _, _, err := decodeNFORoot(data, &s); err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse season: %w", err)
 	}
 	p := &parsedNFO{
@@ -226,17 +260,14 @@ func parseSeasonNFO(data []byte) (*parsedNFO, error) {
 		Overview: strings.TrimSpace(s.Plot),
 		Type:     typeSeason,
 	}
-	if s.SeasonNumber != nil {
-		p.Season = *s.SeasonNumber
-		p.SeasonSet = true
-	}
+	p.Season, p.SeasonSet = parseNFOInt(s.SeasonNumber)
 	return p, nil
 }
 
 func parseEpisodeNFO(data []byte) (*parsedNFO, error) {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
 	var e nfoEpisode
-	if err := decoder.Decode(&e); err != nil {
+	_, moreEpisodes, err := decodeNFORoot(data, &e)
+	if err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse episodedetails: %w", err)
 	}
 	p := &parsedNFO{
@@ -244,16 +275,10 @@ func parseEpisodeNFO(data []byte) (*parsedNFO, error) {
 		Overview:     strings.TrimSpace(e.Plot),
 		FirstAirDate: firstDate(e.Aired),
 		Type:         typeEpisode,
-		MultiEpisode: hasMoreEpisodeDetails(decoder),
+		MultiEpisode: moreEpisodes,
 	}
-	if e.Season != nil {
-		p.Season = *e.Season
-		p.SeasonSet = true
-	}
-	if e.Episode != nil {
-		p.Episode = *e.Episode
-		p.EpisodeSet = true
-	}
+	p.Season, p.SeasonSet = parseNFOInt(e.Season)
+	p.Episode, p.EpisodeSet = parseNFOInt(e.Episode)
 	if minutes, err := strconv.Atoi(strings.TrimSpace(e.Runtime)); err == nil && minutes > 0 {
 		p.Runtime = minutes
 	}
@@ -262,28 +287,12 @@ func parseEpisodeNFO(data []byte) (*parsedNFO, error) {
 	return p, nil
 }
 
-// hasMoreEpisodeDetails reports whether the decoder (positioned after the
-// first decoded root) still holds another <episodedetails> element. Kodi
-// multi-episode files concatenate several roots into one .nfo.
-func hasMoreEpisodeDetails(decoder *xml.Decoder) bool {
-	for {
-		tok, err := decoder.Token()
-		if err != nil {
-			return false
-		}
-		if se, ok := tok.(xml.StartElement); ok {
-			return se.Name.Local == "episodedetails"
-		}
-	}
-}
-
 // parsedFromCommon maps the shared <movie>/<tvshow> field set.
 func parsedFromCommon(c *nfoCommon, contentType string) *parsedNFO {
 	p := &parsedNFO{
 		Title:         strings.TrimSpace(c.Title),
 		OriginalTitle: strings.TrimSpace(c.OriginalTitle),
 		Tagline:       strings.TrimSpace(c.Tagline),
-		Year:          c.Year,
 		Overview:      strings.TrimSpace(c.Plot),
 		ContentRating: strings.TrimSpace(c.MPAA),
 		Genres:        cleanStrings(c.Genres),
@@ -292,12 +301,16 @@ func parsedFromCommon(c *nfoCommon, contentType string) *parsedNFO {
 		Keywords:      cleanStrings(c.Tags),
 		Type:          contentType,
 	}
+	if year, ok := parseNFOInt(c.Year); ok && year > 0 {
+		p.Year = year
+	}
 	if minutes, err := strconv.Atoi(strings.TrimSpace(c.Runtime)); err == nil && minutes > 0 {
 		p.Runtime = minutes
 	}
 	applyRatings(p, c)
 	applyPeople(p, c)
 	applyUniqueIDs(p, c.UniqueIDs)
+	applyIDElements(p, &c.nfoIDElements)
 	return p
 }
 
@@ -414,8 +427,8 @@ func applyPeople(p *parsedNFO, c *nfoCommon) {
 			continue
 		}
 		order := i
-		if actor.Order != nil {
-			order = *actor.Order
+		if declared, ok := parseNFOInt(actor.Order); ok {
+			order = declared
 		}
 		people = append(people, models.ItemPerson{
 			Person:    models.Person{Name: name},
@@ -460,23 +473,4 @@ func cleanStrings(values []string) []string {
 		return nil
 	}
 	return out
-}
-
-func xmlUnmarshal(data []byte, v any) error {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
-	return decoder.Decode(v)
-}
-
-func applyUniqueIDs(p *parsedNFO, ids []nfoUniqueID) {
-	for _, uid := range ids {
-		val := strings.TrimSpace(uid.Value)
-		switch strings.ToLower(strings.TrimSpace(uid.Type)) {
-		case "imdb":
-			p.ImdbID = val
-		case "tmdb", "themoviedb":
-			p.TmdbID = val
-		case "tvdb":
-			p.TvdbID = val
-		}
-	}
 }

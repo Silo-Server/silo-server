@@ -102,6 +102,10 @@ type MatchDecision struct {
 	CandidateCount int                      `json:"candidate_count"`
 	Threshold      float64                  `json:"threshold"`
 	TopCandidates  []MatchDecisionCandidate `json:"top_candidates,omitempty"`
+	// localSidecarUnreadable marks a transient outcome caused by a local
+	// sidecar (NFO) the server could not read rather than by a provider, so
+	// the queue's message points at the share instead of a provider outage.
+	localSidecarUnreadable bool
 }
 
 type MatchDecisionCandidate struct {
@@ -457,9 +461,12 @@ type SeasonsRequest struct {
 	// SeriesRootPaths are directories already validated as safe for
 	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
 	// each directory-derived season number to its candidate directories.
-	// Both are empty for purely remote providers, which key off ProviderIDs.
+	// ShowFilePaths lists every cataloged media file of the show; a local
+	// provider reads a season folder only while one of them is still in it.
+	// All are empty for purely remote providers, which key off ProviderIDs.
 	SeriesRootPaths      []string
 	SeasonDirectoryPaths map[int][]string
+	ShowFilePaths        []string
 }
 
 // EpisodesRequest is passed to EpisodeProvider.GetEpisodes().
@@ -470,8 +477,13 @@ type EpisodesRequest struct {
 	// Local sidecar context (additive, internal). SeriesRootPaths as on
 	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
 	// number within SeasonNumber to that episode's media file paths.
+	// ShowFilePaths lists every cataloged media file of the show; a local
+	// provider checks them, with EpisodeFilePaths' files, to tell a deleted
+	// file from a missing share (seasons can share one folder), and reads
+	// sidecars only for EpisodeFilePaths.
 	SeriesRootPaths  []string
 	EpisodeFilePaths map[int][]string
+	ShowFilePaths    []string
 }
 
 // SeasonResult carries season data from a provider.
