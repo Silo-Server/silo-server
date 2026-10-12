@@ -1,4 +1,49 @@
-# Transcode node throttle contract
+# Transcode node capacity and throttle contract
+
+## Operator-owned encoding capacity
+
+Dedicated workers accept `SILO_TRANSCODE_MAX_JOBS` in their startup environment
+or bootstrap `.env` file. Unset or `0` means unlimited, preserving existing
+installations. A positive integer caps all concurrent FFmpeg media processes:
+playback, seek/reconstruction, prepared downloads, audio/subtitle extraction,
+thumbnails, trickplay, analysis, and hardware smoke encodes. Discovery commands
+and ffprobe are excluded. Values outside `0`–`2147483647` fail startup. This setting
+applies only to transcode mode and cannot be changed by database configuration
+reloads. The operator must retain control of the worker's environment/container.
+
+Admission is atomic before process launch. A slot remains occupied until the
+process's owner reaps it, including cancellation and teardown; failed launches
+release immediately. Completed playback encodes release capacity while the
+session and produced segments can remain available. Serving existing output
+does not consume a slot. Restart and fallback attempts must acquire anew and
+cannot exceed the ceiling. Saturated work returns HTTP 503 with a retry signal;
+capacity exhaustion does not establish unsupported hardware or codecs.
+
+Health and authenticated status add `encoding_capacity`, for example:
+
+```json
+{"max_jobs":4,"active_jobs":2,"available_jobs":2}
+```
+
+Unlimited workers report `max_jobs: 0` and `available_jobs: null`. The core keeps
+this report in the node's opaque `last_stats.encoding_capacity` sample and shows
+the operator ceiling and remaining slots read-only in Admin > Nodes. Placement
+honors both this ceiling and the customer limit, including provisional starts
+not yet represented in the latest health sample.
+
+When a healthy worker reports a positive ceiling, the core lowers its stored
+`max_jobs` if that value is higher or unlimited. Customer edits are also clamped
+to the last reported ceiling; lower limits are preserved. Reconciliation uses
+the existing configuration revision/invalidation mechanism, and subsequent
+unchanged reports do not change the revision. URL changes discard the previous
+worker's report. Unlimited workers and older workers reporting no ceiling never
+change an existing configuration. The worker's own admission remains the
+authority even if the core is older, has stale health data or is modified.
+
+These are worker and administration changes. Native Apple/Android clients need
+no new fields or UI; Jellyfin playback uses the same admitted worker processes.
+
+## Playback throttling
 
 The API server resolves `enable_transcode_throttle` and
 `transcode_throttle_seconds` before starting remote HLS playback. The

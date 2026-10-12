@@ -564,6 +564,16 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 	var maxJobs, maxBandwidth *int
 	if input.MaxJobs != nil {
 		maxJobs = normalizeCap(input.MaxJobs)
+		current, err := r.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		// A URL change refers to a different worker whose ceiling is not known.
+		if input.URL == nil || sameNodeURL(current.URL, *input.URL) {
+			current.MaxJobs = maxJobs
+			clampEncodingCap(current)
+			maxJobs = current.MaxJobs
+		}
 	}
 	if input.MaxBandwidthKbps != nil {
 		maxBandwidth = normalizeCap(input.MaxBandwidthKbps)
@@ -682,11 +692,16 @@ func (r *Repository) updateHealth(ctx context.Context, id int, checkedURL string
 	if err != nil {
 		return fmt.Errorf("update node health: %w", err)
 	}
+	ceiling := 0
+	if capacity := reportedEncodingCapacity(&Node{LastStats: lastStats}); healthy && capacity != nil {
+		ceiling = capacity.MaxJobs
+	}
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE stream_nodes SET healthy = $2, active_jobs = $3, egress_kbps = $4, last_stats = $5, network_access = $7,
-		        drain_state = COALESCE($8, drain_state), last_health_check = NOW()
+		        drain_state = COALESCE($8, drain_state), last_health_check = NOW(),
+		 max_jobs = CASE WHEN type = 'transcode' AND $9::integer > 0 AND (max_jobs IS NULL OR max_jobs <= 0 OR max_jobs > $9) THEN $9 ELSE max_jobs END
 		 WHERE id = $1 AND rtrim(url, '/') = rtrim($6, '/')`,
-		id, healthy, activeJobs, egressKbps, lastStats, checkedURL, networkAccessJSON, drainState)
+		id, healthy, activeJobs, egressKbps, lastStats, checkedURL, networkAccessJSON, drainState, ceiling)
 	if err != nil {
 		return fmt.Errorf("update node health: %w", err)
 	}

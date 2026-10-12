@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -394,7 +396,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		cmd.WaitDelay = 3 * time.Second
 
 		logs.event("ffmpeg process starting", "")
-		err := cmd.Run()
+		err := encodinglimit.Run(cmd)
 		logs.flush()
 		if err != nil {
 			_ = os.Remove(partPath)
@@ -409,7 +411,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	}
 
 	err := runOnce(opts)
-	if err != nil && ctx.Err() == nil && opts.ToneMapMode != tonemap.ModeHardware {
+	if err != nil && !errors.Is(err, encodinglimit.ErrAtCapacity) && ctx.Err() == nil && opts.ToneMapMode != tonemap.ModeHardware {
 		// Mirror the transport startup retry: a VideoToolbox encode the
 		// hardware cannot perform (e.g. at the artifact's dimensions) retries
 		// once in software. A frozen hardware tone-map recipe cannot take this

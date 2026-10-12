@@ -19,11 +19,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"github.com/google/uuid"
 )
 
 func init() {
@@ -452,7 +454,12 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// this ffmpeg produces is strictly newer than the stamp.
 	inheritedManifest := statManifest(opts.OutputDir)
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdinPipe.Close()
+		if pipe, ok := cmd.Stdin.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
@@ -473,7 +480,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 }
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
-	waitErr := cmd.Wait()
+	waitErr := encodinglimit.Wait(cmd)
 	// The child no longer owns the device once Wait returns. Release before
 	// flushing/logging so slow diagnostics cannot make the allocator count a
 	// process that has already exited.
@@ -3283,7 +3290,12 @@ func (s *TranscodeSession) restart(
 	// As in StartTranscode, stamp the generation before the process can write.
 	inheritedManifest := statManifest(opts.OutputDir)
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdinPipe.Close()
+		if pipe, ok := cmd.Stdin.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()

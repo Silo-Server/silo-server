@@ -1,0 +1,185 @@
+package nodepool
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestHealthPersistsEncodingCapacityWithoutResourceSample(t *testing.T) {
+	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":9,"encoding_capacity":{"max_jobs":4,"active_jobs":2,"available_jobs":2}}`)
+	healthy, jobs, _, _, stats, _ := CheckNode(context.Background(), &Node{URL: url})
+	if !healthy || jobs != 9 {
+		t.Fatalf("health = %v, jobs = %d", healthy, jobs)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(stats, &decoded); err != nil {
+		t.Fatalf("capacity report was not persisted: %v (%s)", err, stats)
+	}
+	if string(decoded["encoding_capacity"]) != `{"max_jobs":4,"active_jobs":2,"available_jobs":2}` {
+		t.Fatalf("encoding capacity changed: %s", stats)
+	}
+}
+
+func TestReportedEncodingCeilingFitsDatabaseInteger(t *testing.T) {
+	if capacity := reportedEncodingCapacity(&Node{LastStats: []byte(`{"encoding_capacity":{"max_jobs":2147483647,"active_jobs":0}}`)}); capacity == nil {
+		t.Fatal("maximum valid ceiling rejected")
+	}
+	if capacity := reportedEncodingCapacity(&Node{LastStats: []byte(`{"encoding_capacity":{"max_jobs":2147483648,"active_jobs":0}}`)}); capacity != nil {
+		t.Fatal("ceiling that overflows Postgres integer accepted")
+	}
+}
+
+func TestPlannerHonorsWorkerEncodingCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stats       string
+		jobs        int
+		customerCap *int
+		wantNode    bool
+	}{
+		{"full worker with unlimited customer cap", `{"encoding_capacity":{"max_jobs":2,"active_jobs":2,"available_jobs":0}}`, 0, nil, false},
+		{"worker ceiling lower than customer cap", `{"encoding_capacity":{"max_jobs":2,"active_jobs":2,"available_jobs":0}}`, 0, intPtr(20), false},
+		{"customer ceiling lower than worker", `{"encoding_capacity":{"max_jobs":4,"active_jobs":1,"available_jobs":3}}`, 1, intPtr(1), false},
+		{"finished encoders release worker capacity", `{"encoding_capacity":{"max_jobs":2,"active_jobs":0,"available_jobs":2}}`, 8, nil, true},
+		{"worker unlimited", `{"encoding_capacity":{"max_jobs":0,"active_jobs":8,"available_jobs":null}}`, 8, nil, true},
+		{"old worker", "", 8, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := transcodeNode(1, "http://tc-1", nil, tc.jobs)
+			node.LastStats = json.RawMessage(tc.stats)
+			node.MaxJobs = tc.customerCap
+			f := newFixture(nil, []*Node{node})
+			got := f.planner.PlanSession("s1", "", true, 0).TranscodeNode
+			if (got != nil) != tc.wantNode {
+				t.Fatalf("selected node = %v, want node = %v", got, tc.wantNode)
+			}
+		})
+	}
+}
+
+func TestPlannerWorkerCeilingIncludesProvisionalReservations(t *testing.T) {
+	node := transcodeNode(1, "http://tc-1", nil, 0)
+	node.LastStats = json.RawMessage(`{"encoding_capacity":{"max_jobs":1,"active_jobs":0,"available_jobs":1}}`)
+	f := newFixture(nil, []*Node{node})
+	if f.planner.PlanSession("s1", "", true, 0).TranscodeNode == nil {
+		t.Fatal("first encoder was refused")
+	}
+	if f.planner.PlanSession("s2", "", true, 0).TranscodeNode != nil {
+		t.Fatal("second encoder bypassed the worker ceiling through a stale health report")
+	}
+	f.planner.ReleaseSession("s1")
+	if f.planner.PlanSession("s3", "", true, 0).TranscodeNode == nil {
+		t.Fatal("released reservation still consumes capacity")
+	}
+	// A report newer than a reservation replaces its provisional accounting.
+	checked := time.Now().Add(time.Second)
+	node.LastHealthCheck = &checked
+	node.LastStats = json.RawMessage(`{"encoding_capacity":{"max_jobs":1,"active_jobs":1,"available_jobs":0}}`)
+	if f.planner.PlanSession("s4", "", true, 0).TranscodeNode != nil {
+		t.Fatal("new health report ignored the running encoder")
+	}
+	node.LastStats = json.RawMessage(`{"encoding_capacity":{"max_jobs":1,"active_jobs":0,"available_jobs":1}}`)
+	if f.planner.PlanSession("s5", "", true, 0).TranscodeNode == nil {
+		t.Fatal("new idle report double counted an old reservation")
+	}
+}
+
+func TestPoolLowersCustomerCapToReportedWorkerCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured *int
+		worker     int
+		want       *int
+	}{
+		{"higher", intPtr(20), 4, intPtr(4)}, {"unlimited", nil, 4, intPtr(4)},
+		{"lower", intPtr(2), 4, intPtr(2)}, {"default remains unlimited", nil, 0, nil},
+		{"default preserves existing finite cap", intPtr(20), 0, intPtr(20)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := transcodeNode(1, "http://tc-1", nil, 0)
+			node.MaxJobs = tc.configured
+			f := newFixture(nil, []*Node{node})
+			stats, _ := json.Marshal(map[string]any{"encoding_capacity": map[string]any{"max_jobs": tc.worker, "active_jobs": 0}})
+			f.transcodes.ApplyHealth(node.ID, node.URL, true, 0, 0, "", stats, nil, time.Now())
+			got := f.transcodes.Nodes()[0].MaxJobs
+			if got == nil && tc.want != nil || got != nil && (tc.want == nil || *got != *tc.want) {
+				t.Fatalf("core cap = %v, want %v", got, tc.want)
+			}
+			if node.MaxJobs != tc.configured {
+				t.Fatal("health mutated a published node")
+			}
+		})
+	}
+}
+
+func TestReconciledWorkerCeilingUsesLiveEncoders(t *testing.T) {
+	node := transcodeNode(1, "http://tc-1", nil, 9)
+	f := newFixture(nil, []*Node{node})
+	f.transcodes.ApplyHealth(node.ID, node.URL, true, 9, 0, "", []byte(`{"encoding_capacity":{"max_jobs":4,"active_jobs":0,"available_jobs":4}}`), nil, time.Now())
+	if f.planner.PlanSession("new-encode", "", true, 0).TranscodeNode == nil {
+		t.Fatal("completed encoders retained capacity after the stored cap was reconciled")
+	}
+}
+
+func TestRepositoryHealthReconcilesWorkerCeilingAndRevision(t *testing.T) {
+	repo := newLastStatsTestPool(t)
+	ctx := context.Background()
+	node := createLastStatsNode(t, repo)
+	if _, err := repo.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: intPtr(20)}); err != nil {
+		t.Fatal(err)
+	}
+	// Default, older and invalid reports must leave existing customer limits alone.
+	for _, stats := range []string{`{"encoding_capacity":{"max_jobs":0,"active_jobs":0}}`, `{}`, `{"encoding_capacity":{"max_jobs":2147483648,"active_jobs":0}}`} {
+		if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 0, 0, []byte(stats), nil); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := repo.GetByID(ctx, node.ID)
+		if err != nil || stored.MaxJobs == nil || *stored.MaxJobs != 20 {
+			t.Fatalf("non-finite report changed existing cap: %+v, %v", stored, err)
+		}
+	}
+	var before, after int64
+	if err := repo.pool.QueryRow(ctx, `SELECT admin_revision FROM stream_nodes WHERE id=$1`, node.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	stats := []byte(`{"encoding_capacity":{"max_jobs":4,"active_jobs":0,"available_jobs":4}}`)
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 0, 0, stats, nil); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetByID(ctx, node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxJobs == nil || *stored.MaxJobs != 4 {
+		t.Fatalf("stored core cap = %v, want 4", stored.MaxJobs)
+	}
+	if err := repo.pool.QueryRow(ctx, `SELECT admin_revision FROM stream_nodes WHERE id=$1`, node.ID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after <= before {
+		t.Fatal("automatic configuration change did not invalidate the admin revision")
+	}
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 0, 0, stats, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.pool.QueryRow(ctx, `SELECT admin_revision FROM stream_nodes WHERE id=$1`, node.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatal("unchanged report invalidated the admin revision again")
+	}
+	for _, tc := range []struct {
+		requested int
+		want      int
+	}{{20, 4}, {2, 2}, {0, 4}} {
+		updated, err := repo.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: intPtr(tc.requested)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.MaxJobs == nil || *updated.MaxJobs != tc.want {
+			t.Fatalf("request %d stored %v, want %d", tc.requested, updated.MaxJobs, tc.want)
+		}
+	}
+}

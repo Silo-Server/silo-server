@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 const (
@@ -88,6 +90,9 @@ func warmHardwareEncoderCached(
 		// must not poison the negative cache for other viewers. Each command keeps
 		// its own short deadline below.
 		warmErr := warmHardwareEncoderWithRunner(context.WithoutCancel(ctx), hardwareEncoderWarmupTimeout, ffmpegPath, backend, devices, run)
+		if errors.Is(warmErr, encodinglimit.ErrAtCapacity) {
+			return nil, warmErr
+		}
 		fresh := hardwareEncoderWarmupCacheEntry{err: warmErr}
 		if warmErr != nil {
 			fresh.expiresAt = time.Now().Add(hardwareEncoderWarmupNegativeTTL)
@@ -117,6 +122,9 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		output, err := run(attemptCtx, ffmpegPath, args...)
 		cancel()
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			return err
+		}
 		if err != nil {
 			result = errors.Join(result, fmt.Errorf("warm %s encoder on %q: %s", backend, device, FormatFFmpegProbeFailure(err, output)))
 		}
@@ -125,7 +133,7 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 }
 
 func runHardwareEncoderWarmup(ctx context.Context, ffmpegPath string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...))
 }
 
 func hardwareEncoderWarmupDevices(backend, configured string) []string {

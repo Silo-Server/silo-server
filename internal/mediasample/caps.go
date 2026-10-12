@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -110,7 +111,7 @@ func runListing(ctx context.Context, name string, stdin []byte, args ...string) 
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	return cmd.CombinedOutput()
+	return encodinglimit.CombinedOutput(cmd)
 }
 
 var capsCache = struct {
@@ -214,7 +215,10 @@ func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
 		lower := bytes.ToLower(help)
 		caps.chromaprintRaw = bytes.Contains(lower, []byte("fp_format")) && bytes.Contains(lower, []byte("raw"))
 	}
-	caps.concatSamples = checkConcatSamples(runWith)
+	caps.concatSamples, err = checkConcatSamples(runWith)
+	if err != nil {
+		return Capabilities{}, err
+	}
 	return caps, nil
 }
 
@@ -229,16 +233,19 @@ const concatCheckInput = "/nonexistent/silo-concat-check.mkv"
 // protocol fails before, typically with "Invalid data found when processing
 // input". Without this check that message would read as a broken file and
 // mark every sampled input unusable.
-func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) bool {
+func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) (bool, error) {
 	list, err := buildConcatList(concatCheckInput, []float64{1}, 0)
 	if err != nil {
-		return false
+		return false, err
 	}
 	args := append(quietArgs(errorLogLevel), concatInputArgs...)
 	args = append(args, "-i", concatListInput, "-f", "null", "-")
 	// The run fails by design, so only its output counts.
-	output, _ := run(list, args...)
-	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open 'file:"+concatCheckInput+"'"))
+	output, err := run(list, args...)
+	if errors.Is(err, encodinglimit.ErrAtCapacity) {
+		return false, err
+	}
+	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open 'file:"+concatCheckInput+"'")), nil
 }
 
 // FilterCapabilities returns the capabilities an `ffmpeg -filters` listing

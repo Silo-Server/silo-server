@@ -211618,7 +211618,7 @@
                 }
               }
             },
-            "description": "Node busy with another trickplay run, re-probing, or unconfigured"
+            "description": "Node at encoding capacity, busy with another trickplay run, re-probing, or unconfigured"
           }
         }
       },
@@ -217474,6 +217474,32 @@
         ],
         "type": "object"
       },
+      "encodinglimit_Capacity": {
+        "additionalProperties": false,
+        "properties": {
+          "active_jobs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "available_jobs": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_jobs": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_jobs",
+          "active_jobs",
+          "available_jobs"
+        ],
+        "type": "object"
+      },
       "mediasample_At": {
         "additionalProperties": false,
         "properties": {
@@ -218871,6 +218897,9 @@
           "attribution": {
             "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceAttribution"
           },
+          "encoding_capacity": {
+            "$ref": "#/x-silo-worker-protocols/schemas/encodinglimit_Capacity"
+          },
           "gpu": {
             "items": {
               "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_GPUStats"
@@ -218895,6 +218924,7 @@
           }
         },
         "required": [
+          "encoding_capacity",
           "status",
           "active_jobs",
           "sessions"

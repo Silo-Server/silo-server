@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -14,11 +15,12 @@ const minSecretKeyLen = 32
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
-	DatabaseURL string
-	RedisURL    string // optional override; empty means use DB setting
-	Listen      string
-	JFListen    string
-	Mode        string
+	DatabaseURL      string
+	RedisURL         string // optional override; empty means use DB setting
+	Listen           string
+	JFListen         string
+	Mode             string
+	TranscodeMaxJobs int // operator-owned worker ceiling; 0 means unlimited
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
 	// so encrypted secrets survive a full database compromise/dump.
@@ -72,13 +74,22 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
+	maxJobs := 0
+	if value := os.Getenv("SILO_TRANSCODE_MAX_JOBS"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || parsed < 0 {
+			return nil, fmt.Errorf("SILO_TRANSCODE_MAX_JOBS must be an integer between 0 and 2147483647")
+		}
+		maxJobs = int(parsed)
+	}
 
 	return &BootstrapConfig{
-		DatabaseURL: dbURL,
-		RedisURL:    redisURL,
-		Listen:      ":" + port,
-		JFListen:    ":" + jfPort,
-		Mode:        mode,
-		SecretKey:   []byte(secretKey),
+		DatabaseURL:      dbURL,
+		RedisURL:         redisURL,
+		Listen:           ":" + port,
+		JFListen:         ":" + jfPort,
+		Mode:             mode,
+		TranscodeMaxJobs: maxJobs,
+		SecretKey:        []byte(secretKey),
 	}, nil
 }

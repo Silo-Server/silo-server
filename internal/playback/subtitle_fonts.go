@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 )
 
 const (
@@ -180,16 +182,21 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdout.Close()
+		if pipe, ok := cmd.Stdout.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		return nil, fmt.Errorf("subtitle fonts: start attachment extract: %w", err)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(stdout, expected+1))
 	if readErr != nil || int64(len(data)) > expected {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = encodinglimit.Wait(cmd)
 		return nil, errors.New("subtitle fonts: attachment data exceeds probed size or could not be read")
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := encodinglimit.Wait(cmd); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

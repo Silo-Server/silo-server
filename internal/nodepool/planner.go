@@ -909,7 +909,18 @@ func (p *Planner) pickProxy(proxies []*Node, groupHealthy map[string]bool, group
 
 // underCap reports whether a node can take one more job.
 func (p *Planner) underCap(n *Node, now time.Time) bool {
-	return n.MaxJobs == nil || p.effectiveJobs(n, now) < *n.MaxJobs
+	capacity := reportedEncodingCapacity(n)
+	jobs := p.effectiveJobs(n, now)
+	if capacity != nil && capacity.MaxJobs > 0 {
+		jobs = p.effectiveJobsFrom(n, capacity.ActiveJobs, now)
+	}
+	if n.MaxJobs != nil && jobs >= *n.MaxJobs {
+		return false
+	}
+	if capacity != nil && capacity.MaxJobs > 0 {
+		return jobs < capacity.MaxJobs
+	}
+	return true
 }
 
 // underBandwidthCap reports whether a proxy has bandwidth headroom for a
@@ -946,7 +957,10 @@ func (p *Planner) effectiveEgressKbps(n *Node, now time.Time) int {
 // effectiveJobs is the node's health-reported job count plus reservations the
 // health checker hasn't had a chance to observe yet.
 func (p *Planner) effectiveJobs(n *Node, now time.Time) int {
-	jobs := n.ActiveJobs
+	return p.effectiveJobsFrom(n, n.ActiveJobs, now)
+}
+
+func (p *Planner) effectiveJobsFrom(n *Node, jobs int, now time.Time) int {
 	for _, res := range p.reserved {
 		if now.Sub(res.createdAt) > maxReservationAge {
 			continue

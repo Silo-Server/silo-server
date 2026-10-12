@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 )
 
 // StreamExtractOpts configures a single streaming subtitle extract.
@@ -101,7 +103,12 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	cmd.Stderr = stderrBuf
 
 	start := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdout.Close()
+		if pipe, ok := cmd.Stdout.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
@@ -115,7 +122,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		cancel()
 	}
 
-	waitErr := cmd.Wait()
+	waitErr := encodinglimit.Wait(cmd)
 	slog.DebugContext(ctx, "subtitle stream extract finished", "component", "playback",
 		"track", opts.TrackIndex,
 		"seek", opts.SeekSeconds,

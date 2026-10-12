@@ -3,21 +3,24 @@ package transcodenode
 import (
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type statusResponse struct {
-	Status      string                           `json:"status"`
-	ActiveJobs  int32                            `json:"active_jobs"`
-	Sessions    []string                         `json:"sessions"`
-	System      *nodemetrics.SystemStats         `json:"system,omitempty"`
-	GPU         []nodemetrics.GPUStats           `json:"gpu,omitempty"`
-	Attribution *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
-	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
+	EncodingCapacity encodinglimit.Capacity           `json:"encoding_capacity"`
+	Status           string                           `json:"status"`
+	ActiveJobs       int32                            `json:"active_jobs"`
+	Sessions         []string                         `json:"sessions"`
+	System           *nodemetrics.SystemStats         `json:"system,omitempty"`
+	GPU              []nodemetrics.GPUStats           `json:"gpu,omitempty"`
+	Attribution      *nodemetrics.ResourceAttribution `json:"attribution,omitempty"`
+	SampledAt        time.Time                        `json:"sampled_at,omitzero"`
 	// Artifacts is the last measurement of the prepared-download directory,
 	// path included: this route requires the node bearer.
 	Artifacts *downloadstorage.Usage `json:"artifacts,omitempty"`

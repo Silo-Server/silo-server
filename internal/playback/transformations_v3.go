@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -28,6 +29,9 @@ type TransformationRegistryV3 struct {
 }
 
 var errHEVCEncoderUnavailableV3 = errors.New("libx265 encoder unavailable")
+
+// hevcRecipeProbeV3 lets tests order optional probe failures after AAC succeeds.
+var hevcRecipeProbeV3 = probeHEVCRecipeV3
 
 const transformationProbeRetryDelayV3 = 15 * time.Second
 
@@ -60,7 +64,7 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	cancelEncoders()
 	normalizeRecipeErr, normalizeRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "stereo", aacTimestampNormalizeFilterV3)
 	downmixRecipeErr, downmixRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "5.1", stereoDownmixBoostFilterV3)
-	hevcRecipeErr, hevcRecipeContextErr := probeHEVCRecipeV3(ctx, ffmpegPath, encoders)
+	hevcRecipeErr, hevcRecipeContextErr := hevcRecipeProbeV3(ctx, ffmpegPath, encoders)
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: bytes.Contains(bsfs, []byte("dovi_rpu")) && bytes.Contains(bsfs, []byte("filter_units")), RequiredCapability: "ffmpeg_bsf:dovi_rpu+filter_units", PromisedDynamicRange: DynamicRangeHDR10V3, ValidatedClaims: DV7ToHDR10ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
@@ -75,7 +79,12 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 		// probing after a short delay instead of caching HEVC absence forever.
 		registry.refreshAfter = time.Now().Add(transformationProbeRetryDelayV3)
 	}
+	var capacityErr error
+	if errors.Is(hevcRecipeErr, encodinglimit.ErrAtCapacity) {
+		capacityErr = hevcRecipeErr
+	}
 	return registry, errors.Join(
+		capacityErr,
 		bsfErr,
 		encoderErr,
 		bsfContextErr,
@@ -84,9 +93,9 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 		normalizeRecipeContextErr,
 		audioRecipeProbeInfrastructureError(downmixRecipeErr),
 		downmixRecipeContextErr,
-		// Optional HEVC failure, including its own smoke deadline, only
-		// removes HEVC. A canceled inventory caller still invalidates the
-		// snapshot rather than publishing an incomplete capability report.
+		// Optional codec/driver failure, including its own smoke deadline,
+		// only removes HEVC. Capacity exhaustion and caller cancellation
+		// invalidate the snapshot rather than publish missing capabilities.
 		ctx.Err(),
 	)
 }
@@ -96,12 +105,12 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 // failures at the registry boundary.
 func probeAudioRecipeFilterV3(ctx context.Context, ffmpegPath, channelLayout, filter string) (error, error) {
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath,
+	probeErr := encodinglimit.Run(exec.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "anullsrc=r=8000:cl="+channelLayout,
 		"-frames:a", "1", "-af", filter,
 		"-f", "null", "-",
-	).Run()
+	))
 	probeContextErr := probeCtx.Err()
 	cancelProbe()
 	return probeErr, probeContextErr
@@ -117,7 +126,7 @@ func probeHEVCRecipeV3(ctx context.Context, ffmpegPath string, encoders []byte) 
 		return errHEVCEncoderUnavailableV3, nil
 	}
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...).Run()
+	probeErr := encodinglimit.Run(exec.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...))
 	probeContextErr := probeCtx.Err()
 	cancelProbe()
 	return probeErr, probeContextErr

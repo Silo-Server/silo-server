@@ -15,6 +15,7 @@ import {
   describeNodeGPU,
   describeNodeGroups,
   describeNodeJobs,
+  describeNodeEncodingCapacity,
   describeNodeSystem,
   describeReprobeOutcome,
   describeResourceSample,
@@ -1017,6 +1018,19 @@ describe("load meter fills", () => {
 });
 
 describe("describeNodeJobs", () => {
+  it("uses live encoding work for a finite worker ceiling after completed playback sessions remain", () => {
+    expect(
+      describeNodeJobs(
+        makeNode({
+          active_jobs: 8,
+          max_jobs: 4,
+          last_stats: {
+            encoding_capacity: { max_jobs: 4, active_jobs: 0, available_jobs: 4 },
+          },
+        }),
+      ),
+    ).toMatchObject({ value: "0 / 4", warning: false, fill: 0 });
+  });
   it("reports a capped node against its cap", () => {
     expect(describeNodeJobs(makeNode({ active_jobs: 3, max_jobs: 4 }))).toMatchObject({
       label: "Transcodes",
@@ -1045,6 +1059,52 @@ describe("describeNodeJobs", () => {
       fill: null,
     });
     expect(describeNodeJobs(makeNode({ active_jobs: 7, max_jobs: 0 })).fill).toBe(null);
+  });
+});
+
+describe("describeNodeEncodingCapacity", () => {
+  it("shows the operator ceiling independently of the customer limit", () => {
+    const node = makeNode({
+      max_jobs: 100,
+      active_jobs: 8,
+      last_stats: {
+        encoding_capacity: { max_jobs: 4, active_jobs: 2, available_jobs: 2 },
+      },
+    });
+    expect(describeNodeEncodingCapacity(node)).toMatchObject({
+      label: "Encoding",
+      value: "2 / 4",
+      detail: "2 available",
+      warning: false,
+      fill: 50,
+    });
+    expect(describeNodeEncodingCapacity(node)?.title).toContain("operator");
+  });
+
+  it("warns when the worker has no available slots", () => {
+    expect(
+      describeNodeEncodingCapacity(
+        makeNode({
+          last_stats: {
+            encoding_capacity: { max_jobs: 4, active_jobs: 4, available_jobs: 0 },
+          },
+        }),
+      ),
+    ).toMatchObject({ value: "4 / 4", detail: "0 available", warning: true, fill: 100 });
+  });
+
+  it("supports unlimited and older workers", () => {
+    expect(
+      describeNodeEncodingCapacity(
+        makeNode({
+          last_stats: {
+            encoding_capacity: { max_jobs: 0, active_jobs: 7, available_jobs: null },
+          },
+        }),
+      ),
+    ).toMatchObject({ value: "7", detail: "unlimited", fill: null });
+    expect(describeNodeEncodingCapacity(makeNode())).toBeNull();
+    expect(describeNodeEncodingCapacity(makeNode({ type: "proxy" }))).toBeNull();
   });
 });
 

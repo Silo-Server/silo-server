@@ -62,6 +62,7 @@ import {
   describeNodeGPU,
   describeNodeGroups,
   describeNodeJobs,
+  describeNodeEncodingCapacity,
   describeNodeSystem,
   describeSharedGPU,
   filterNodesByGroup,
@@ -216,11 +217,13 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
 }
 
 function NodeCapacityBlock({ node, showEgress }: { node: StreamNode; showEgress: boolean }) {
+  const encodingCapacity = describeNodeEncodingCapacity(node);
   return (
     <div>
       <UnitLabel>Capacity</UnitLabel>
       <div className={METRIC_GRID}>
         <NodeMetricRow metric={describeNodeJobs(node)} />
+        {encodingCapacity && <NodeMetricRow metric={encodingCapacity} />}
         {showEgress && <NodeMetricRow metric={describeNodeEgress(node)} />}
         {/*
           Relative, because the question this answers is "is anything still
@@ -1108,6 +1111,9 @@ function NodeForm({
           />
           <p className="text-muted-foreground text-sm">
             Optional concurrency cap for this node. Leave empty (or 0) for unlimited.
+            {nodeType === "transcode" && (node?.last_stats?.encoding_capacity?.max_jobs ?? 0) > 0
+              ? ` The node operator enforces a ceiling of ${node?.last_stats?.encoding_capacity?.max_jobs} encoding jobs. Higher values here cannot increase it.`
+              : null}
           </p>
         </div>
 

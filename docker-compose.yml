@@ -159,6 +159,8 @@ services:
   #   stop_grace_period: 11m
   #   environment:
   #     MODE: transcode
+  #     # Operator-owned encoding ceiling; unset or 0 preserves unlimited.
+  #     SILO_TRANSCODE_MAX_JOBS: ${SILO_TRANSCODE_MAX_JOBS:-0}
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
   #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable

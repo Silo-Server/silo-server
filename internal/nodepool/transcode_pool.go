@@ -212,6 +212,9 @@ func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, act
 		if drainState != nil {
 			clone.DrainState = *drainState
 		}
+		if healthy {
+			clampEncodingCap(&clone)
+		}
 		nodes[i] = &clone
 		return
 	}

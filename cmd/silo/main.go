@@ -27,13 +27,12 @@ import (
 	"syscall"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
@@ -63,6 +62,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -998,7 +998,14 @@ func main() {
 	quietFilter := logfilter.New(baseHandler, cfg.Server.LogQuiet)
 	slog.SetDefault(slog.New(quietFilter))
 
+	const (
+		transcodeMode = "transcode"
+		proxyMode     = "proxy"
+	)
 	mode := cfg.Server.Mode
+	if mode == transcodeMode {
+		encodinglimit.Configure(bc.TranscodeMaxJobs)
+	}
 	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
 	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
 
@@ -1072,7 +1079,7 @@ func main() {
 	defer stopOperationalLog()
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
-	if mode == "proxy" || mode == "transcode" {
+	if mode == proxyMode || mode == transcodeMode {
 		// Delivery writes run in the background with a short deadline. Honor it
 		// on the sockets too, so a stalled Redis cannot retain their connections.
 		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
@@ -1135,7 +1142,7 @@ func main() {
 		var handler http.Handler
 		var shutdownStandalone func(context.Context) error
 		var standaloneHooks standaloneServerHooks
-		if mode == "proxy" {
+		if mode == proxyMode {
 			srv := proxy.NewServer(watcher, tracker)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
