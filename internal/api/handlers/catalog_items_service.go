@@ -101,6 +101,23 @@ func (h *CatalogHandler) Browse(ctx context.Context, v ItemViewer, req catalog.C
 	return catalogBrowseView(result, items), nil
 }
 
+// LetterIndex answers the letter index of a title-ordered query-source
+// browse; see catalog.CatalogResolver.LetterIndex.
+func (h *CatalogHandler) LetterIndex(ctx context.Context, v ItemViewer, req catalog.CatalogRequest) ([]catalog.LetterBucket, error) {
+	if h == nil || h.resolver == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Catalog is not configured")
+	}
+	// Numbering every match sorts the whole result; bound it like a distant
+	// window seek.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	buckets, err := h.resolver.LetterIndex(ctx, req, v.Access)
+	if err != nil {
+		return nil, catalogResolveError(ctx, err, false)
+	}
+	return buckets, nil
+}
+
 // catalogResolveError keeps grouped and ordinary catalog resolution on the
 // same error contract. A grouped search still runs through the bounded
 // PostgreSQL path and must report search_timeout rather than hiding a

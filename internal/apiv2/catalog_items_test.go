@@ -87,6 +87,14 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 	return handlers.CatalogFacetSearchView{}, nil
 }
 
+func (f *fakeCatalog) LetterIndex(_ context.Context, v handlers.ItemViewer, req catalogpkg.CatalogRequest) ([]catalogpkg.LetterBucket, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.lastReq, f.lastViewer = req, v
+	return []catalogpkg.LetterBucket{{Letter: "#", Count: 2, Position: 0}, {Letter: "H", Count: 3, Position: 2}}, nil
+}
+
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {
 	if f.err != nil {
 		return handlers.AudiobookGroupsView{}, f.err

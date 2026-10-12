@@ -7,12 +7,15 @@ import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
   useLibraryHasItems: vi.fn(),
+  useCatalogLetters: vi.fn(),
   itemGridEmptyState: undefined as ReactNode,
+  itemGridTotalItems: undefined as number | undefined,
 }));
 
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
   useLibraryHasItems: (...args: unknown[]) => mocks.useLibraryHasItems(...args),
+  useCatalogLetters: (...args: unknown[]) => mocks.useCatalogLetters(...args),
 }));
 
 vi.mock("@/components/ItemGrid", () => ({
@@ -26,6 +29,7 @@ vi.mock("@/components/ItemGrid", () => ({
     emptyState?: ReactNode;
   }) => {
     mocks.itemGridEmptyState = emptyState;
+    mocks.itemGridTotalItems = totalItems;
     if (loading) return <div>Grid loading</div>;
     if (totalItems === 0) return <div>{emptyState ?? "No items found."}</div>;
     return <div>Grid</div>;
@@ -70,7 +74,64 @@ describe("LibraryBrowse", () => {
     });
     mocks.useLibraryHasItems.mockReset();
     mocks.useLibraryHasItems.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useCatalogLetters.mockReset();
+    mocks.useCatalogLetters.mockReturnValue({ data: undefined });
     mocks.itemGridEmptyState = undefined;
+    mocks.itemGridTotalItems = undefined;
+  });
+
+  describe("letter bar", () => {
+    const render = (sort: QueryDefinition["sort"]) =>
+      renderToStaticMarkup(
+        <LibraryBrowse
+          libraryId={7}
+          libraryType="movie"
+          browseType="series"
+          queryDefinition={{ library_ids: [], match: "all", groups: [], sort }}
+          onBrowseTypeChange={() => {}}
+          onQueryDefinitionChange={() => {}}
+        />,
+      );
+
+    it("shows in title order and sizes the grid to the index's exact total", () => {
+      mocks.useCatalogLetters.mockReturnValue({
+        data: {
+          total: 640,
+          letters: [
+            { letter: "#", count: 40, position: 0 },
+            { letter: "H", count: 600, position: 40 },
+          ],
+        },
+      });
+
+      const markup = render({ field: "title", order: "asc" });
+
+      expect(mocks.useCatalogLetters).toHaveBeenCalledWith(
+        expect.objectContaining({ library_id: 7 }),
+        { enabled: true },
+      );
+      expect(markup).toContain('aria-label="Jump to letter"');
+      expect(markup).toContain('aria-label="H, 600 titles"');
+      expect(markup).toContain('aria-label="Q, no titles"');
+      expect(mocks.itemGridTotalItems).toBe(640);
+    });
+
+    it("stays away and asks for nothing in other orders", () => {
+      const markup = render({ field: "added_at", order: "desc" });
+
+      expect(mocks.useCatalogLetters).toHaveBeenCalledWith(expect.anything(), { enabled: false });
+      expect(markup).not.toContain("Jump to letter");
+      expect(mocks.itemGridTotalItems).toBe(1);
+    });
+
+    it("waits for the browse before trusting the index", () => {
+      mocks.useCatalogWindow.mockReturnValue({ data: undefined, isLoading: true });
+      mocks.useCatalogLetters.mockReturnValue({
+        data: { total: 3, letters: [{ letter: "A", count: 3, position: 0 }] },
+      });
+
+      expect(render({ field: "title", order: "asc" })).not.toContain("Jump to letter");
+    });
   });
 
   it("does not show the estimated item count as an exact result count", () => {

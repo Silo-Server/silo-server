@@ -487,6 +487,54 @@ export function useLibraryHasItems(libraryId: number, options: { enabled?: boole
   });
 }
 
+/** One letter of a title-ordered browse; see `queryCatalogLetters`. */
+export type CatalogLetter = V2Result<"POST /api/v2/catalog/letters">["letters"][number];
+
+export interface CatalogLetters {
+  /** Every title in the result: the exact total the counts add up to. */
+  total: number;
+  /** Letters with at least one title, in list order. */
+  letters: CatalogLetter[];
+}
+
+export async function fetchCatalogLetters(
+  state: CatalogSearchState,
+  options?: Pick<RequestInit, "signal">,
+): Promise<CatalogLetters> {
+  const scope = catalogScopeQuery(state);
+  const order = buildCatalogApiSearchParams(state).get("order");
+  return v2("POST /api/v2/catalog/letters", {
+    body: {
+      library_id: scope.library_id,
+      type: scope.type,
+      match: state.query_definition.match,
+      groups: state.query_definition.groups,
+      order: order === "desc" ? "desc" : "asc",
+    },
+    signal: options?.signal ?? undefined,
+  });
+}
+
+/**
+ * The letter index of a title-ordered query-source browse: how many titles
+ * file under each letter and the list position of each letter's first title,
+ * for an alphabetical jump bar. Keyed like the browse it indexes, so a filter
+ * or order change asks again and a library refresh invalidates both.
+ */
+export function useCatalogLetters(state: CatalogSearchState, options: { enabled?: boolean } = {}) {
+  const scope = catalogScopeQuery(state);
+  return useQuery({
+    queryKey: catalogKeys.letters({
+      library_id: scope.library_id ? Number(scope.library_id) : undefined,
+      type: scope.type,
+      query_fingerprint: catalogQueryFingerprint(state),
+    }),
+    queryFn: ({ signal }) => fetchCatalogLetters(state, { signal }),
+    enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
 export function useCatalogFilters(
   state: CatalogSearchState,
   options: { enabled?: boolean; includeTechnical?: boolean } = {},

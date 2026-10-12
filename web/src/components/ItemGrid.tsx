@@ -1,4 +1,13 @@
-import { useEffect, useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -18,6 +27,26 @@ interface SharedItemGridProps {
   onToggleSelect?: (item: BrowseItem) => void;
   /** Replaces the default "No items found." message when there are no items. */
   emptyState?: ReactNode;
+  /** Imperative access for jumping to a position, such as a letter bar. */
+  gridRef?: Ref<ItemGridHandle>;
+  /** The index of the first item in the top row the viewer can see. */
+  onFirstVisibleIndexChange?: (index: number) => void;
+}
+
+export interface ItemGridHandle {
+  /** Scroll so the row holding `index` sits at the top of the viewport. */
+  scrollToItem: (index: number) => void;
+}
+
+/**
+ * Height of the sticky page header covering the top of the viewport, if one
+ * is showing (the mobile header). Marked with `data-sticky-header`.
+ */
+function stickyHeaderInset(): number {
+  const header = document.querySelector<HTMLElement>("[data-sticky-header]");
+  if (!header) return 0;
+  const { bottom, height } = header.getBoundingClientRect();
+  return height > 0 && bottom > 0 ? bottom : 0;
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {
@@ -52,6 +81,8 @@ export default function ItemGrid(props: ItemGridProps) {
     selectedIds,
     onToggleSelect,
     emptyState,
+    gridRef,
+    onFirstVisibleIndexChange,
   } = props;
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
@@ -117,6 +148,27 @@ export default function ItemGrid(props: ItemGridProps) {
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
+
+  useImperativeHandle(
+    gridRef,
+    () => ({
+      scrollToItem: (index: number) => {
+        const row = Math.floor(Math.max(0, index) / columnCount);
+        virtualizer.scrollToOffset(
+          Math.max(0, virtualizer.options.scrollMargin + row * rowHeight - stickyHeaderInset()),
+          { behavior: "auto" },
+        );
+      },
+    }),
+    [columnCount, rowHeight, virtualizer],
+  );
+
+  const scrollOffset = virtualizer.scrollOffset ?? 0;
+  useEffect(() => {
+    if (!onFirstVisibleIndexChange) return;
+    const row = Math.floor((scrollOffset + stickyHeaderInset() - scrollMargin) / rowHeight);
+    onFirstVisibleIndexChange(Math.max(0, row) * columnCount);
+  }, [onFirstVisibleIndexChange, scrollOffset, scrollMargin, rowHeight, columnCount]);
 
   const showsItems = !loading && totalItems > 0;
   // Static grids rebuild `pages` each render; key on the data behind it.

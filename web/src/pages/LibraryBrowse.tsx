@@ -3,13 +3,15 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
 import AudiobookGroupsView from "@/components/audiobooks/AudiobookGroupsView";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
-import ItemGrid from "@/components/ItemGrid";
+import LetterBar from "@/components/catalog/LetterBar";
+import { letterAtIndex } from "@/components/catalog/letterBar";
+import ItemGrid, { type ItemGridHandle } from "@/components/ItemGrid";
 import LibraryEmptyState from "@/components/LibraryEmptyState";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
-import { useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
+import { useCatalogLetters, useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
 import { cn } from "@/lib/utils";
 import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
@@ -202,6 +204,17 @@ export default function LibraryBrowse({
   });
   const totalItems = catalogQuery.data?.totalItems ?? 0;
   const pages = catalogQuery.data?.pages ?? new Map();
+  // Title order gets an A–Z bar. The letter index carries each letter's list
+  // position and the exact total, so the grid can size itself to the whole
+  // result and a jump lands on the letter's first title without loading the
+  // titles before it.
+  const titleOrdered = !isGroupedAxis && scopedQueryDefinition.sort.field === "title";
+  const lettersQuery = useCatalogLetters(state, { enabled: titleOrdered });
+  const letterIndex = titleOrdered && totalItems > 0 ? lettersQuery.data : undefined;
+  const showLetterBar = letterIndex !== undefined && letterIndex.total > 0;
+  const gridTotalItems = showLetterBar ? letterIndex.total : totalItems;
+  const gridRef = useRef<ItemGridHandle>(null);
+  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
   // An empty result only says the current view matched nothing. Ask whether
   // the library holds anything at all before calling it empty, so an
   // over-filtered view keeps pointing at its filters.
@@ -335,17 +348,28 @@ export default function LibraryBrowse({
           retrying={retrying}
         />
       ) : (
-        <ItemGrid
-          totalItems={totalItems}
-          pages={pages}
-          pageSize={limit}
-          libraryId={libraryId}
-          loading={isLoading}
-          onVisibleRangeChange={handleVisibleRangeChange}
-          sortField={scopedQueryDefinition.sort.field}
-          emptyState={emptyState}
-        />
+        <div className={showLetterBar ? "pr-6 sm:pr-9" : undefined}>
+          <ItemGrid
+            gridRef={gridRef}
+            totalItems={gridTotalItems}
+            pages={pages}
+            pageSize={limit}
+            libraryId={libraryId}
+            loading={isLoading}
+            onVisibleRangeChange={handleVisibleRangeChange}
+            onFirstVisibleIndexChange={showLetterBar ? setFirstVisibleIndex : undefined}
+            sortField={scopedQueryDefinition.sort.field}
+            emptyState={emptyState}
+          />
+        </div>
       )}
+      {showLetterBar && !browseFailed ? (
+        <LetterBar
+          letters={letterIndex.letters}
+          activeLetter={letterAtIndex(letterIndex.letters, firstVisibleIndex)}
+          onJump={(letter) => gridRef.current?.scrollToItem(letter.position)}
+        />
+      ) : null}
       <ScrollToTopButton />
     </div>
   );
