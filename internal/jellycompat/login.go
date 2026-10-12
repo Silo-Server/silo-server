@@ -102,7 +102,7 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	}
 
 	// Try auth with full password first, fall back to base#pin split.
-	basePw, pinCandidate := splitPasswordPIN(password)
+	basePw, pinCandidate := auth.SplitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
 	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
@@ -250,16 +250,6 @@ func (r *LoginResolver) newSession(token, username string, user *models.User, to
 		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
 		CreatedAt:             now,
 	}
-}
-
-// splitPasswordPIN splits "password#pin" at the last '#'.
-// Returns ("", "") if there is no '#' or the split would produce empty parts.
-func splitPasswordPIN(password string) (basePw, pin string) {
-	idx := strings.LastIndex(password, "#")
-	if idx <= 0 || idx >= len(password)-1 {
-		return "", ""
-	}
-	return password[:idx], password[idx+1:]
 }
 
 // parseLogin reads username#profile. When no account has the name before

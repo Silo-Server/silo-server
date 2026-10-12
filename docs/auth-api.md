@@ -358,6 +358,19 @@ per-profile budget. A locked profile fails there the way a wrong PIN does (401
 `InvalidUsernameOrPassword`), and only the message names the lockout. PIN guesses
 are counted only after the account password matched.
 
+Audiobookshelf-compatible sign-ins (beta) use the same conventions:
+`username#profile` names the profile and `password#PIN` carries its PIN. A bare
+username names the profile called like the account when there is one, and otherwise
+signs in to the primary profile only when that profile has no PIN. PIN
+guesses count against the same per-profile budget, again only after the account
+password matched, and a locked profile answers 401 like a wrong PIN, with a message
+naming the lockout. Audiobookshelf access and refresh tokens carry the profile's PIN
+revision. Once the profile has a PIN at another revision, because one was set or
+changed, or once the profile is deleted, its tokens answer 401 and refresh is refused,
+so the app signs in again. A token that names no profile works only while the account
+has no profiles. The Socket.io connection checks the token the same way when it
+authenticates.
+
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting
 is enabled. Only a server without Redis keeps it in process memory, which is correct
