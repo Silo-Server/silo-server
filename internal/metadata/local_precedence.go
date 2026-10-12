@@ -1,10 +1,6 @@
 package metadata
 
-import (
-	"slices"
-
-	"github.com/Silo-Server/silo-server/internal/models"
-)
+import "slices"
 
 // localListFields records which list fields the local provider (NFO)
 // supplied while one pipeline run folds provider results together. Precedence
@@ -49,8 +45,10 @@ func (l localListFields) keepStoredLists(accumulator, stored *MetadataResult) {
 // restrict returns a remote result with the lists the local provider supplied
 // removed, so merging it cannot extend them. Its cast and crew instead enrich
 // the matching local credits in accumulator (provider IDs, photos, roles)
-// without adding anyone the local files did not list. The result itself is
-// not modified: provider results can be shared.
+// without adding anyone the local files did not list, and a credit group the
+// local files left empty fills from the remote one here, matched within its
+// own role. The result itself is not modified: provider results can be
+// shared.
 func (l localListFields) restrict(accumulator, result *MetadataResult) *MetadataResult {
 	if l == (localListFields{}) {
 		return result
@@ -76,18 +74,16 @@ func (l localListFields) restrict(accumulator, result *MetadataResult) *Metadata
 		// result; enrich a copy.
 		accumulator.People = slices.Clone(accumulator.People)
 		remoteCast, remoteCrew := splitPeopleByRole(result.People)
-		var kept []models.ItemPerson
 		if l.cast {
 			enrichPeople(accumulator.People, remoteCast, true)
-		} else {
-			kept = append(kept, remoteCast...)
 		}
 		if l.crew {
 			enrichPeople(accumulator.People, remoteCrew, false)
-		} else {
-			kept = append(kept, remoteCrew...)
 		}
-		out.People = kept
+		// Merging across roles would match a remote director to the same
+		// person's local actor credit by provider ID and drop the director.
+		mergePeopleUnlocked(&accumulator.People, result.People, MergeFillEmpty, l.cast, l.crew)
+		out.People = nil
 	}
 	return &out
 }

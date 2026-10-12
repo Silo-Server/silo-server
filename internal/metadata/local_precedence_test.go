@@ -208,3 +208,36 @@ func TestFold_EnrichesEachCreditWithinItsRole(t *testing.T) {
 		}
 	}
 }
+
+// When the NFO lists cast but no crew, the remote crew fills the crew matched
+// within its own role: a director the NFO lists as an actor, with the same
+// provider ID, keeps the director credit.
+func TestFold_RemoteCrewFillsWithoutFoldingIntoLocalCast(t *testing.T) {
+	t.Parallel()
+
+	local := &MetadataResult{HasMetadata: true, People: []models.ItemPerson{
+		{Person: models.Person{Name: "Clint Eastwood", TmdbID: "190"}, Kind: models.PersonKindActor, Character: "Will Munny"},
+	}}
+	remote := &MetadataResult{HasMetadata: true, People: []models.ItemPerson{
+		{Person: models.Person{Name: "Clint Eastwood", TmdbID: "190", PhotoPath: "/clint.jpg"}, Kind: models.PersonKindActor, Character: "William Munny"},
+		{Person: models.Person{Name: "Clint Eastwood", TmdbID: "190"}, Kind: models.PersonKindDirector},
+		{Person: models.Person{Name: "Gene Hackman", TmdbID: "193"}, Kind: models.PersonKindActor, Character: "Little Bill"},
+	}}
+	accumulator := &MetadataResult{}
+	foldProviderResult(accumulator, local, "en", "nfo", true, nil)
+	foldProviderResult(accumulator, remote, "en", "tmdb", false, nil)
+
+	cast, crew := splitPeopleByRole(accumulator.People)
+	if got := personNames(cast); !reflect.DeepEqual(got, []string{"Clint Eastwood"}) {
+		t.Errorf("cast = %v, want only the NFO actor", got)
+	}
+	if len(cast) == 1 && (cast[0].Character != "Will Munny" || cast[0].PhotoPath != "/clint.jpg") {
+		t.Errorf("actor credit = %+v, want the NFO role, enriched", cast[0])
+	}
+	if len(crew) != 1 || crew[0].Kind != models.PersonKindDirector || crew[0].TmdbID != "190" {
+		t.Errorf("crew = %+v, want the remote director credit", crew)
+	}
+	if len(remote.People) != 3 {
+		t.Errorf("remote result was modified: %d people", len(remote.People))
+	}
+}

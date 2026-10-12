@@ -28,8 +28,9 @@ import (
 // leaves the mark to it. Renames and merges carry the mark along. The choice
 // outranks the file in every mode: any declared IDs that do not confirm the
 // stored identity count as a conflict.
-// A stored ID already recorded as dead (404) is no identity to keep, so the
-// file may name its replacement.
+// An ID already recorded as dead (404) counts on neither side: a dead stored ID
+// is no identity to keep, so the file may name its replacement, and a dead ID
+// the file still declares names nothing.
 
 // metadataIdentityChoiceRepo records and reads an admin's Identify choice. It
 // is asserted on itemRepo; *catalog.ItemRepository satisfies it.
@@ -91,10 +92,11 @@ func declaredLocalIDs(local []localIdentityHint) map[string]string {
 
 // localIdentityConflict reports whether a pipeline run in mode must leave the
 // local provider out because the IDs its files declare name a different
-// title than the identity the run keeps, and logs the conflict. Stored IDs in
-// stale (recorded 404s) are left out of the identity.
+// title than the identity the run keeps, and logs the conflict. IDs in stale
+// (recorded 404s) are left out on both sides.
 func (s *MetadataService) localIdentityConflict(ctx context.Context, mode RefreshMode, contentID string, local []localIdentityHint, stored map[string]string, stale providerIDValueSet) (bool, error) {
 	declared := declaredLocalIDs(local)
+	suppressProviderIDValues(declared, stale)
 	if len(declared) == 0 {
 		return false, nil
 	}

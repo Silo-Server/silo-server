@@ -28,6 +28,8 @@ func TestLocalIdentityConflict(t *testing.T) {
 		{"scheduled: other key only, not identified", ModeScheduledRefresh, false, map[string]string{"imdb": "tt0000456"}, map[string]string{"tvdb": "789"}, nil, false},
 		{"scheduled: other key only, identified", ModeScheduledRefresh, true, map[string]string{"imdb": "tt0000456"}, map[string]string{"tvdb": "789"}, nil, true},
 		{"scheduled: stored ID is dead", ModeScheduledRefresh, false, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, dead, false},
+		{"scheduled: file declares a dead ID", ModeScheduledRefresh, false, map[string]string{"tmdb": "123"}, map[string]string{"tmdb": "456"}, dead, false},
+		{"manual: identified, file declares a dead ID", ModeManualRefresh, true, map[string]string{"tmdb": "123"}, map[string]string{"tmdb": "456"}, dead, false},
 		{"initial match: same-key contradiction", ModeInitialMatch, false, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, nil, true},
 		{"manual: contradiction re-matches", ModeManualRefresh, false, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, nil, false},
 		{"manual: identified", ModeManualRefresh, true, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, nil, true},
@@ -47,7 +49,7 @@ func TestLocalIdentityConflict(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("conflict = %v, want %v", got, tc.want)
 			}
-			if tc.stored["tmdb"] != "123" && tc.stored["tvdb"] != "789" {
+			if tc.stored["tmdb"] == "" && tc.stored["tvdb"] == "" {
 				t.Errorf("stored identity was modified: %v", tc.stored)
 			}
 		})
