@@ -197,9 +197,15 @@ func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
 		return false
 	}
 	// A missing extrafanart folder means a missing file; one that can't be
-	// listed proves nothing.
-	if folder := r.probe(dir); !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodeNotFound {
-		return false
+	// listed proves nothing, and neither does a symlinked one whose target
+	// can't be reached, which is a share that is down rather than removed.
+	if folder := r.probe(dir); !folder.Reachable {
+		if folder.ErrorCode != rootcheck.ErrCodeNotFound {
+			return false
+		}
+		if link, err := os.Lstat(dir); err == nil && link.Mode()&fs.ModeSymlink != 0 {
+			return false
+		}
 	}
 	return sidecarFileGone(path)
 }

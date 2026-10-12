@@ -426,6 +426,15 @@ func TestPrimaryBackdropFromRemovedExtraFanartIsNotKept(t *testing.T) {
 	if !itemRetention(searched).keep(remote, cached, unmounted) {
 		t.Fatal("dropped a primary backdrop while its item folder is unreachable")
 	}
+	// An extrafanart folder that links to storage which is down is
+	// unavailable, not removed.
+	target := filepath.Join(t.TempDir(), "fanart-share")
+	if err := os.Symlink(target, filepath.Join(root, "ExtraFanart")); err != nil {
+		t.Fatal(err)
+	}
+	if !itemRetention(searched).keep(remote, cached, localSource(filepath.Join(root, "ExtraFanart", "x.jpg"))) {
+		t.Fatal("dropped a primary backdrop while its extrafanart link's target is unreachable")
+	}
 }
 
 func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
