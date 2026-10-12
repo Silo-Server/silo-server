@@ -61,7 +61,9 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
   their locks) are not extended by remote results; remote providers fill only
   the lists the NFO left empty. Remote cast and crew enrich the NFO's credits
   that match by provider ID or by name and kind (IDs, photos, roles) and never
-  add people (`internal/metadata/local_precedence.go`). Lists from two remote
+  add people (`internal/metadata/local_precedence.go`). Credits match only
+  within their role, so a remote director credit fills an empty crew rather
+  than folding into the same person's NFO actor credit. Lists from two remote
   providers still accumulate. In fill-empty writes (scheduled refresh,
   initial match of a stored item) an NFO list, credits included, fills an
   empty stored list but is not added to or swapped for a stored one; a manual
