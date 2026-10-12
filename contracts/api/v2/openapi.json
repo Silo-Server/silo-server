@@ -10402,6 +10402,63 @@
         ],
         "type": "object"
       },
+      "AdminNodeEnrollmentBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_token": {
+            "maxLength": 512,
+            "minLength": 32,
+            "type": "string",
+            "writeOnly": true
+          },
+          "group": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "max_jobs": {
+            "format": "int64",
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "transcode"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          },
+          "worker_database_url": {
+            "maxLength": 8192,
+            "type": "string",
+            "writeOnly": true
+          },
+          "worker_redis_url": {
+            "maxLength": 8192,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "url",
+          "enrollment_token"
+        ],
+        "type": "object"
+      },
       "AdminNodeHealth": {
         "additionalProperties": false,
         "properties": {
@@ -90086,6 +90143,207 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true
+      }
+    },
+    "/api/v2/admin/nodes/enroll": {
+      "post": {
+        "operationId": "enrollAdminNode",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminNodeEnrollmentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNode"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bind a provider transcode node using a one-time token and server-side customer configuration, wait for authenticated runtime readiness, then persist its natural URL configuration. HTTP or HTTPS is supported. Exact retries recover an existing same-customer binding and registration; another customer or conflicting registration returns 409. A 503 may follow a saved binding: retry the same request to finish registration. The operator encoding ceiling limits max_jobs; secrets are not included in the receipt.",
+        "tags": [
+          "admin-nodes"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "unique_constraint",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/admin/nodes/force-reload": {
@@ -211085,6 +211343,45 @@
       {
         "listener": "transcode_node",
         "method": "GET",
+        "path": "/api/v1/node/enrollment",
+        "handler": "(*internal/transcodenode.Server).handleEnrollmentReceipt",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodeenrollment_Receipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "listener": "transcode_node",
+        "method": "GET",
         "path": "/hw-capabilities",
         "handler": "(*internal/transcodenode.Server).handleHWCapabilities",
         "auth_class": "node_bearer",
@@ -211455,6 +211752,87 @@
               }
             },
             "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodeenrollment_Binding"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "One-time provider-token configuration handoff. Validates customer database settings and effective Redis access before saving an immutable private binding. Response confirms a saved binding; use the bound runtime's authenticated enrollment receipt to recover a lost reply and verify readiness. The provider encoding ceiling cannot be supplied here. HTTP and HTTPS are supported.",
+        "retry_safety": "non_retryable",
+        "listener": "node_enrollment",
+        "method": "POST",
+        "path": "/api/v1/node/enroll",
+        "handler": "(*internal/nodeenrollment.Server).enroll",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodeenrollment_Receipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         }
       },
@@ -218070,6 +218448,61 @@
           "installation_id",
           "provider",
           "state"
+        ],
+        "type": "object"
+      },
+      "nodeenrollment_Binding": {
+        "additionalProperties": false,
+        "properties": {
+          "database_url": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          },
+          "node_name": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "node_url": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          },
+          "redis_url": {
+            "maxLength": 8192,
+            "type": "string",
+            "writeOnly": true
+          },
+          "secret_key": {
+            "maxLength": 4096,
+            "minLength": 32,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "database_url",
+          "secret_key",
+          "node_url",
+          "node_name"
+        ],
+        "type": "object"
+      },
+      "nodeenrollment_Receipt": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "encoding_capacity": {
+            "$ref": "#/x-silo-worker-protocols/schemas/encodinglimit_Capacity"
+          }
+        },
+        "required": [
+          "binding_id",
+          "encoding_capacity"
         ],
         "type": "object"
       },

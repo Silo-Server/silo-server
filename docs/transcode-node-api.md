@@ -1,5 +1,52 @@
 # Transcode node capacity and throttle contract
 
+## First-connect customer configuration handoff
+
+Enrollment is opt-in for `MODE=transcode`. With `SILO_NODE_ENROLLMENT_TOKEN`
+(32–512 characters) and a persistent `SILO_NODE_BINDING_FILE`, a worker may start
+without `DATABASE_URL`, `REDIS_URL` or `SECRET_KEY`. The binding path defaults to
+`/var/lib/silo/node-binding/binding.json` when only the token is supplied.
+Legacy workers and maintenance commands still require their existing bootstrap
+credentials. Other server modes cannot enroll.
+
+Before the database-backed runtime starts, its separate listener exposes
+`GET /api/v1/health` with `status: "unbound"` and the provider's encoding capacity,
+and `POST /api/v1/node/enroll` authenticated by the provider's one-time bearer
+token. HTTP is supported for trusted internal networks; HTTPS is optional and
+normal certificate verification applies. The core never follows enrollment
+redirects.
+
+The native acting-admin, demo-restricted `POST /api/v2/admin/nodes/enroll`
+accepts a transcode node's registration fields, `enrollment_token`, and optional
+`worker_database_url` / `worker_redis_url` overrides for endpoints reachable by
+the worker. The core supplies its bootstrap database URL, optional Redis URL and
+shared encryption key. The browser receives only the ordinary node registration
+receipt and configuration ETag. Neither the token nor customer credentials are
+stored in the node registry or returned in responses. Configuration-only
+`POST /api/v2/admin/nodes` keeps its existing behavior.
+
+The worker validates encrypted customer settings and effective Redis access,
+then saves an immutable binding containing the connection credentials and node
+identity. The directory must be private (0700), the file is 0600, and publication
+is atomic and never overwrites a prior binding. Failed validation leaves the
+token usable. Successful binding retires admission and starts the existing worker
+runtime. The provider encoding ceiling remains in operator bootstrap and cannot
+be supplied in the binding payload or changed by customer settings.
+
+The bound worker exposes bearer-authenticated `GET /api/v1/node/enrollment` with
+`binding_id` (an HMAC of a fixed protocol label under the shared encryption key)
+and `encoding_capacity`. The core requires that receipt under the customer's
+worker bearer before registering the node, and clamps initial `max_jobs` to a
+positive provider ceiling. Exact retries recover lost replies, startup delays and
+failed registry writes through the same authenticated receipt and natural URL
+registration. A 503 can follow a saved binding; retry the same enrollment request.
+A worker bound to another customer returns a conflict without another handoff.
+
+Restarts load the private saved binding before opening the normal worker
+listener. Reassignment requires a provider reset while the worker is stopped,
+including clearing the binding and prior customer artifacts and issuing a new
+token. Removing a core registry row does not release or reset the worker binding.
+
 ## Operator-owned encoding capacity
 
 Dedicated workers accept `SILO_TRANSCODE_MAX_JOBS` in their startup environment

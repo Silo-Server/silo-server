@@ -7,6 +7,7 @@ import type { StreamNode, CreateNodeRequest, UpdateNodeRequest } from "@/api/typ
 import {
   useAdminNodes,
   useCreateNode,
+  useEnrollNode,
   useUpdateNode,
   useDeleteNode,
   useCheckNodeHealth,
@@ -938,6 +939,9 @@ function NodeForm({
   const [name, setName] = useState(node?.name ?? "");
   const [url, setUrl] = useState(node?.url ?? "");
   const [publicUrl, setPublicUrl] = useState(node?.public_url ?? "");
+  const [enrollmentToken, setEnrollmentToken] = useState("");
+  const [workerDatabaseURL, setWorkerDatabaseURL] = useState("");
+  const [workerRedisURL, setWorkerRedisURL] = useState("");
   const [group, setGroup] = useState(node?.group ?? defaultGroup);
   const [maxJobs, setMaxJobs] = useState(node?.max_jobs?.toString() ?? "");
   const [maxBandwidthMbps, setMaxBandwidthMbps] = useState(
@@ -977,8 +981,10 @@ function NodeForm({
   const devicePaths = nodeHWDevicePaths(node);
   const effectiveAcceleration = node ? describeEffectiveAcceleration(node) : null;
   const createMutation = useCreateNode();
+  const enrollmentMutation = useEnrollNode();
   const updateMutation = useUpdateNode();
-  const isPending = createMutation.isPending || updateMutation.isPending;
+  const isPending =
+    createMutation.isPending || updateMutation.isPending || enrollmentMutation.isPending;
 
   const urlPlaceholder =
     nodeType === "proxy" ? "https://proxy1.example.com" : "http://10.0.0.5:8082";
@@ -1022,7 +1028,23 @@ function NodeForm({
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
         body.public_url = publicUrl.trim();
       }
-      createMutation.mutate(body, { onSuccess: onClose });
+      if (nodeType === "transcode" && enrollmentToken !== "") {
+        enrollmentMutation.mutate(
+          {
+            type: "transcode",
+            name,
+            url,
+            group: fields.group,
+            max_jobs: fields.max_jobs,
+            enrollment_token: enrollmentToken,
+            worker_database_url: workerDatabaseURL || undefined,
+            worker_redis_url: workerRedisURL || undefined,
+          },
+          { onSuccess: onClose },
+        );
+      } else {
+        createMutation.mutate(body, { onSuccess: onClose });
+      }
     }
   }
 
@@ -1068,6 +1090,54 @@ function NodeForm({
             </p>
           )}
         </div>
+
+        {!node && nodeType === "transcode" && (
+          <div className="space-y-2">
+            <Label htmlFor="node-enrollment-token">Enrollment token</Label>
+            <Input
+              id="node-enrollment-token"
+              type="password"
+              autoComplete="new-password"
+              value={enrollmentToken}
+              onChange={(e) => setEnrollmentToken(e.target.value)}
+              minLength={32}
+              maxLength={512}
+              placeholder="Optional provider token"
+            />
+            <p className="text-muted-foreground text-sm">
+              Enter the provider's one-time token to connect this node automatically. The server
+              supplies your configuration and limits capacity to the node's allowance. Leave empty
+              for an already configured node.
+            </p>
+            {enrollmentToken !== "" && (
+              <details className="space-y-2">
+                <summary className="cursor-pointer text-sm">Worker connection settings</summary>
+                <p className="text-muted-foreground text-sm">
+                  Optional addresses when the worker cannot reach the database or Redis using this
+                  server's addresses.
+                </p>
+                <Label htmlFor="node-worker-database">Worker database URL</Label>
+                <Input
+                  id="node-worker-database"
+                  type="password"
+                  autoComplete="new-password"
+                  value={workerDatabaseURL}
+                  onChange={(e) => setWorkerDatabaseURL(e.target.value)}
+                  placeholder="Use server configuration"
+                />
+                <Label htmlFor="node-worker-redis">Worker Redis URL</Label>
+                <Input
+                  id="node-worker-redis"
+                  type="password"
+                  autoComplete="new-password"
+                  value={workerRedisURL}
+                  onChange={(e) => setWorkerRedisURL(e.target.value)}
+                  placeholder="Use server configuration"
+                />
+              </details>
+            )}
+          </div>
+        )}
 
         {nodeType === "proxy" && (
           <div className="space-y-2">

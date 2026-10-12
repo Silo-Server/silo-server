@@ -266,17 +266,18 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher           *nodeconfig.Watcher
-	streamDeny        *playback.StreamDeny
-	nodeRowID         func() (int, bool)
-	registeredNodeURL func() (string, bool)
-	tracker           sessionTracker
-	ffmpegSink        playback.FFmpegLogSink
-	prepareProgress   prepareProgressRegistry
-	inputPaths        InputPathAuthorizer
-	themeInputs       ThemeInputApprover
-	transcodeDir      string
-	artifactRoot      string
+	enrollmentIdentity string // fixed at startup; no bootstrap secrets
+	watcher            *nodeconfig.Watcher
+	streamDeny         *playback.StreamDeny
+	nodeRowID          func() (int, bool)
+	registeredNodeURL  func() (string, bool)
+	tracker            sessionTracker
+	ffmpegSink         playback.FFmpegLogSink
+	prepareProgress    prepareProgressRegistry
+	inputPaths         InputPathAuthorizer
+	themeInputs        ThemeInputApprover
+	transcodeDir       string
+	artifactRoot       string
 	// artifactProber measures artifactRoot in the background for health,
 	// status, and the artifact listing.
 	artifactProber *downloadstorage.Prober
@@ -946,6 +947,7 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		r.Get("/api/v1/node/enrollment", s.handleEnrollmentReceipt)
 	})
 	return r
 }

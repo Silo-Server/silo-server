@@ -630,6 +630,7 @@ export const v2Operations = {
   "POST /api/v2/admin/network-access/{provider}/connect": "connectNetworkAccess",
   "POST /api/v2/admin/network-access/{provider}/disconnect": "disconnectNetworkAccess",
   "POST /api/v2/admin/nodes": "createAdminNode",
+  "POST /api/v2/admin/nodes/enroll": "enrollAdminNode",
   "POST /api/v2/admin/nodes/force-reload": "forceReloadAdminNodes",
   "POST /api/v2/admin/nodes/{id}/check": "checkAdminNode",
   "POST /api/v2/admin/nodes/{id}/drain": "drainAdminNode",

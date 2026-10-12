@@ -89,6 +89,7 @@ import (
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -135,6 +136,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 	"github.com/Silo-Server/silo-server/migrations"
 	siloweb "github.com/Silo-Server/silo-server/web"
+)
+
+const (
+	transcodeMode = "transcode"
+	proxyMode     = "proxy"
 )
 
 // resolveNodeIdentity returns a stable node identifier used by the
@@ -754,9 +760,21 @@ func main() {
 		"etag", contractETag)
 
 	// Step 1: Bootstrap from .env
-	bc, err := config.LoadBootstrap(*envFile)
+	bc, err := config.LoadStartupBootstrap(*envFile, !*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
+	}
+	if bc.Mode == transcodeMode {
+		encodinglimit.Configure(bc.TranscodeMaxJobs)
+		bindingCtx, stopBinding := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		err = completeNodeBootstrap(bindingCtx, bc)
+		stopBinding()
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if err != nil {
+			log.Fatalf("node enrollment: %v", err)
+		}
 	}
 	stopDebugListener, err := startBootstrapDebugListener(!*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
 	if err != nil {
@@ -998,14 +1016,7 @@ func main() {
 	quietFilter := logfilter.New(baseHandler, cfg.Server.LogQuiet)
 	slog.SetDefault(slog.New(quietFilter))
 
-	const (
-		transcodeMode = "transcode"
-		proxyMode     = "proxy"
-	)
 	mode := cfg.Server.Mode
-	if mode == transcodeMode {
-		encodinglimit.Configure(bc.TranscodeMaxJobs)
-	}
 	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
 	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
 
@@ -1093,8 +1104,8 @@ func main() {
 		// Resolved before the watcher starts: NODE_URL is this process's
 		// stream_nodes identity, and the watcher needs it on its very first
 		// load to overlay the node's own acceleration overrides.
-		nodeURL := os.Getenv("NODE_URL")
-		nodeName := os.Getenv("NODE_NAME")
+		nodeURL := bc.NodeURL
+		nodeName := bc.NodeName
 		if nodeURL == "" {
 			nodeURL = "http://localhost" + cfg.Server.Listen
 			// The guess is this process's whole identity: it keys session
@@ -1190,6 +1201,7 @@ func main() {
 			// Consult the session-deny marker central writes on stop, expiry,
 			// and admin terminate before serving or reconstructing a session,
 			// so a revoked stream token stops here instead of at its 24h TTL.
+			srv.SetEnrollmentIdentity(nodeenrollment.Identity(string(bc.SecretKey)))
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
@@ -1301,6 +1313,7 @@ func main() {
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
+		NodeEnrollment:               &nodeenrollment.Client{Bootstrap: nodeenrollment.Binding{DatabaseURL: bc.DatabaseURL, RedisURL: bc.RedisURL, SecretKey: string(bc.SecretKey)}, JWTSecret: cfg.Auth.JWTSecret},
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,

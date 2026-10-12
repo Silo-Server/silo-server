@@ -53,3 +53,48 @@ func TestLoadDatabaseURLNeedsNoSecretKey(t *testing.T) {
 		t.Fatal("LoadDatabaseURL accepted a missing DATABASE_URL")
 	}
 }
+
+func TestStartupBootstrapAllowsOptInUnboundTranscodeOnly(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("SECRET_KEY", "")
+	t.Setenv("SILO_NODE_ENROLLMENT_TOKEN", strings.Repeat("t", 48))
+	t.Setenv("SILO_NODE_BINDING_FILE", "/private/node-binding.json")
+	t.Setenv("SILO_TRANSCODE_MAX_JOBS", "4")
+	for _, mode := range []string{"integrated", "api", "proxy", "transcode"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("MODE", mode)
+			bc, err := LoadStartupBootstrap("", true)
+			if mode != "transcode" {
+				if err == nil {
+					t.Fatal("non-transcode worker started unbound")
+				}
+				return
+			}
+			if err != nil || bc.DatabaseURL != "" || len(bc.SecretKey) != 0 || bc.TranscodeMaxJobs != 4 || bc.EnrollmentToken == "" {
+				t.Fatalf("unbound bootstrap: %+v %v", bc, err)
+			}
+			if _, err := LoadBootstrap(""); err == nil {
+				t.Fatal("legacy/maintenance loader became unbound")
+			}
+			t.Setenv("SILO_TRANSCODE_MAX_JOBS", "-1")
+			if _, err := LoadStartupBootstrap("", true); err == nil {
+				t.Fatal("unbound node accepted negative provider cap")
+			}
+		})
+	}
+}
+func TestStartupBootstrapRefusesUnprotectedOrPartialEnrollment(t *testing.T) {
+	t.Setenv("MODE", "transcode")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("SECRET_KEY", "")
+	t.Setenv("SILO_NODE_ENROLLMENT_TOKEN", "")
+	t.Setenv("SILO_NODE_BINDING_FILE", "")
+	if _, err := LoadStartupBootstrap("", true); err == nil {
+		t.Fatal("unprotected unbound node allowed")
+	}
+	t.Setenv("SILO_NODE_ENROLLMENT_TOKEN", strings.Repeat("t", 48))
+	t.Setenv("DATABASE_URL", "postgres://old-customer.invalid/silo")
+	if _, err := LoadStartupBootstrap("", true); err == nil {
+		t.Fatal("partial customer bootstrap accepted")
+	}
+}

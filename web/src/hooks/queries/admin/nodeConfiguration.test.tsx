@@ -19,7 +19,7 @@ import {
   setProfileToken,
 } from "@/api/client";
 import type { StreamNode } from "@/api/types";
-import { useCreateNode, useUpdateNode, useDeleteNode } from "./nodes";
+import { useCreateNode, useUpdateNode, useDeleteNode, useEnrollNode } from "./nodes";
 import { adminKeys } from "../keys";
 import AdminNodes from "@/pages/AdminNodes";
 const node: StreamNode = {
@@ -292,4 +292,59 @@ it("old mounted form acknowledgement cannot close a newly opened draft", async (
   await act(async () => finish(saved()));
   expect(screen.getByRole("dialog")).toBeInTheDocument();
   expect(screen.getByDisplayValue("New retained draft")).toBeInTheDocument();
+});
+it("enrollment sends one handoff and never automatically retries a pending binding", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+        status: 503,
+        title: "Startup pending",
+      }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/problem+json", "Retry-After": "5" },
+      },
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useEnrollNode, fixture());
+  act(() =>
+    result.current.mutate({
+      name: "Sold",
+      type: "transcode",
+      url: "http://worker.internal",
+      enrollment_token: "provider-token-at-least-32-characters",
+    }),
+  );
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [url, init] = fetchMock.mock.calls[0]!;
+  expect(url).toBe("/api/v2/admin/nodes/enroll");
+  expect(JSON.parse(init.body)).toEqual({
+    name: "Sold",
+    type: "transcode",
+    url: "http://worker.internal",
+    enrollment_token: "provider-token-at-least-32-characters",
+  });
+});
+it("enrollment cannot submit queued credentials after profile authority changes", async () => {
+  onlineManager.setOnline(false);
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useEnrollNode, fixture());
+  act(() =>
+    result.current.mutate({
+      name: "Sold",
+      type: "transcode",
+      url: "http://worker.internal",
+      enrollment_token: "provider-token-at-least-32-characters",
+    }),
+  );
+  act(() => {
+    setProfileId("b");
+    onlineManager.setOnline(true);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).not.toHaveBeenCalled();
 });

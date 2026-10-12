@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -30,6 +31,7 @@ type statusResponse struct {
 // proxy status shape. Both workers report the shared hardware capability DTO.
 func ProtocolReads(schemas huma.Registry) []workerprotocol.Operation {
 	return []workerprotocol.Operation{
+		workerprotocol.JSONRead[nodeenrollment.Receipt](schemas, "transcode_node", nodeenrollment.ReceiptPath, "(*internal/transcodenode.Server).handleEnrollmentReceipt", 401, 503),
 		workerprotocol.JSONRead[playback.HWAccelInfo](schemas, "transcode_node", "/hw-capabilities", "(*internal/transcodenode.Server).handleHWCapabilities", 401, 503),
 		workerprotocol.JSONRead[statusResponse](schemas, "transcode_node", "/status", "(*internal/transcodenode.Server).handleStatus", 401, 503),
 		artifactListOperation(schemas),

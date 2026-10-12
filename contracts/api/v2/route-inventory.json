@@ -23,6 +23,12 @@
       "route_count": 81
     },
     {
+      "id": "node_enrollment",
+      "entrypoint": "internal/nodeenrollment.(*Server).Handler",
+      "description": "Unbound transcode node listener for one-time customer configuration handoff before database startup.",
+      "route_count": 2
+    },
+    {
       "id": "operational_metrics",
       "entrypoint": "cmd/silo.newMetricsHandler",
       "description": "Optional operator metrics listener, separate from every client-facing port.",
@@ -56,11 +62,11 @@
       "id": "transcode_node",
       "entrypoint": "internal/transcodenode.(*Server).Handler",
       "description": "Transcode node listener: transcode/remux session control, artifacts, and probes.",
-      "route_count": 23
+      "route_count": 24
     }
   ],
   "totals": {
-    "routes": 873,
+    "routes": 876,
     "conditional_routes": 691,
     "streaming_routes": 44,
     "websocket_routes": 4
@@ -2511,6 +2517,58 @@
       "success_statuses": null,
       "error_codes": null,
       "source_file": "internal/debugserver/handlers.go"
+    },
+    {
+      "listener": "node_enrollment",
+      "namespace": "api_v1",
+      "method": "GET",
+      "path": "/api/v1/health",
+      "route_group": "/",
+      "handler": "(*internal/nodeenrollment.Server).handleHealth",
+      "handler_expr": "s.handleHealth",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 0,
+      "auth_class": "public",
+      "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/nodeenrollment/server.go"
+    },
+    {
+      "listener": "node_enrollment",
+      "namespace": "api_v1",
+      "method": "POST",
+      "path": "/api/v1/node/enroll",
+      "route_group": "/",
+      "handler": "(*internal/nodeenrollment.Server).enroll",
+      "handler_expr": "s.enroll",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "binary",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/nodeenrollment/server.go"
     },
     {
       "listener": "operational_metrics",
@@ -28004,6 +28062,33 @@
       "middleware_chain": 0,
       "auth_class": "public",
       "auth_traits": [],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "api_v1",
+      "method": "GET",
+      "path": "/api/v1/node/enrollment",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleEnrollmentReceipt",
+      "handler_expr": "s.handleEnrollmentReceipt",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "none",

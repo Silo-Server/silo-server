@@ -13,6 +13,11 @@ import (
 // the bootstrap loader dependency-free, so the two constants must stay in sync.
 const minSecretKeyLen = 32
 
+const (
+	bootstrapModeIntegrated = "integrated"
+	bootstrapModeTranscode  = "transcode"
+)
+
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
 	DatabaseURL      string
@@ -21,6 +26,10 @@ type BootstrapConfig struct {
 	JFListen         string
 	Mode             string
 	TranscodeMaxJobs int // operator-owned worker ceiling; 0 means unlimited
+	EnrollmentToken  string
+	BindingFile      string
+	NodeURL          string
+	NodeName         string
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
 	// so encrypted secrets survive a full database compromise/dump.
@@ -42,20 +51,35 @@ func LoadDatabaseURL(envFile string) (string, error) {
 }
 
 // LoadBootstrap loads bootstrap configuration from a .env file (if it exists)
-// and environment variables. Only DATABASE_URL is required.
+// and environment variables. Customer DATABASE_URL and SECRET_KEY are required.
 func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
-	dbURL, err := LoadDatabaseURL(envFile)
-	if err != nil {
-		return nil, err
-	}
+	return LoadStartupBootstrap(envFile, false)
+}
 
-	// SECRET_KEY is the at-rest encryption master key. It is required: the server
-	// must never fall back to a zero key or a key derived from another value, or
-	// encrypted credentials would not survive a database dump. godotenv has
-	// already loaded .env above, so dev sets it there.
+// LoadStartupBootstrap permits credential-free startup only for an explicitly
+// enrolled transcode worker. Maintenance and legacy loaders stay strict.
+func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfig, error) {
+	if envFile != "" {
+		_ = godotenv.Load(envFile)
+	}
+	dbURL := os.Getenv("DATABASE_URL")
 	secretKey := os.Getenv("SECRET_KEY")
-	if len(secretKey) < minSecretKeyLen {
-		return nil, fmt.Errorf("SECRET_KEY is required (>=%d chars); generate one with: openssl rand -base64 48", minSecretKeyLen)
+	mode := os.Getenv("MODE")
+	if mode == "" {
+		mode = bootstrapModeIntegrated
+	}
+	token, bindingFile := os.Getenv("SILO_NODE_ENROLLMENT_TOKEN"), os.Getenv("SILO_NODE_BINDING_FILE")
+	canEnroll := allowEnrollment && mode == bootstrapModeTranscode && (token != "" || bindingFile != "")
+	if token != "" && (len(token) < 32 || len(token) > 512) {
+		return nil, fmt.Errorf("SILO_NODE_ENROLLMENT_TOKEN must contain 32 to 512 characters")
+	}
+	if !canEnroll || dbURL != "" || secretKey != "" {
+		if dbURL == "" {
+			return nil, fmt.Errorf("DATABASE_URL is required (set in .env or environment)")
+		}
+		if len(secretKey) < minSecretKeyLen {
+			return nil, fmt.Errorf("SECRET_KEY is required (>=%d chars); generate one with: openssl rand -base64 48", minSecretKeyLen)
+		}
 	}
 
 	port := os.Getenv("PORT")
@@ -66,11 +90,6 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	jfPort := os.Getenv("JF_PORT")
 	if jfPort == "" {
 		jfPort = "8096"
-	}
-
-	mode := os.Getenv("MODE")
-	if mode == "" {
-		mode = "integrated"
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -90,6 +109,10 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 		JFListen:         ":" + jfPort,
 		Mode:             mode,
 		TranscodeMaxJobs: maxJobs,
+		EnrollmentToken:  token,
+		BindingFile:      bindingFile,
+		NodeURL:          os.Getenv("NODE_URL"),
+		NodeName:         os.Getenv("NODE_NAME"),
 		SecretKey:        []byte(secretKey),
 	}, nil
 }

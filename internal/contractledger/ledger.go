@@ -98,13 +98,14 @@ const (
 	ListenerAPI                 = "api"
 	ListenerProxy               = "proxy"
 	ListenerTranscodeNode       = "transcode_node"
+	ListenerNodeEnrollment      = "node_enrollment"
 	ruleListenerDelegation      = "listener_delegation"
 	nodeListenerRetentionPrefix = "Retained on "
 )
 
 // isNodeListener reports whether a row belongs to a worker listener.
 func isNodeListener(listener string) bool {
-	return listener == ListenerProxy || listener == ListenerTranscodeNode
+	return listener == ListenerProxy || listener == ListenerTranscodeNode || listener == ListenerNodeEnrollment
 }
 
 // Operational probes (GET health/ready) are the one redesign that yields no
