@@ -32,9 +32,10 @@ INSERT INTO plugin_capabilities VALUES
 -- 12: a library created after NFO existed, NFO first but disabled.
 -- 13: an admin turned NFO on, still last.
 -- 15: two remote providers, NFO off and last.
--- 16, 17: legacy unlevelled chains, NFO on (16) and off (17), not yet copied
---         to per-level rows.
+-- 16, 17, 18: legacy unlevelled chains, NFO on (16) and off (17, 18), not yet
+--             copied to per-level rows; 18 has two remote providers.
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
+    (18, 2, 'tmdb', '', 0, true), (18, 3, 'tvdb', '', 1, true), (18, 1, 'nfo', '', 2, false),
     (16, 2, 'tmdb', '', 0, true), (16, 1, 'nfo', '', 1, true),
     (17, 2, 'tmdb', '', 0, true), (17, 1, 'nfo', '', 1, false),
     (15, 2, 'tmdb', 'movie', 0, true), (15, 3, 'tvdb', 'movie', 1, true), (15, 1, 'nfo', 'movie', 2, false),
@@ -88,6 +89,7 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 		{15, "nfo", 0, true}, {15, "tmdb", 1, true}, {15, "tvdb", 2, true},
 		{16, "nfo", 0, true}, {16, "tmdb", 1, true},
 		{17, "nfo", 0, true}, {17, "tmdb", 1, true},
+		{18, "nfo", 0, true}, {18, "tmdb", 1, true}, {18, "tvdb", 2, true},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Up =\n%+v\nwant\n%+v", got, want)
@@ -95,8 +97,9 @@ INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, ca
 
 	// After the upgrade: a new library seeds NFO on, an admin turns on TMDB
 	// in library 11, another turns NFO off in library 13 and swaps the remote
-	// providers in library 15, and the startup sync copies the legacy chains
-	// of 16 and 17 to per-level rows.
+	// providers in library 15, the startup sync copies the legacy chains of
+	// 16, 17 and 18 to per-level rows, and an admin swaps 18's copied remote
+	// providers.
 	migrationExec(t, tx, `INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled) VALUES
     (14, 1, 'nfo', 'movie', 0, true), (14, 2, 'tmdb', 'movie', 1, true);
 UPDATE library_provider_chains SET enabled = true WHERE media_folder_id = 11 AND capability_id = 'tmdb';
@@ -104,7 +107,8 @@ UPDATE library_provider_chains SET enabled = false WHERE media_folder_id = 13 AN
 UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id = 15 AND capability_id IN ('tmdb', 'tvdb');
 INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, content_level, priority, enabled)
 SELECT media_folder_id, plugin_installation_id, capability_id, 'movie', priority, enabled
-FROM library_provider_chains WHERE media_folder_id IN (16, 17) AND content_level = '';`)
+FROM library_provider_chains WHERE media_folder_id IN (16, 17, 18) AND content_level = '';
+UPDATE library_provider_chains SET priority = 3 - priority WHERE media_folder_id = 18 AND content_level = 'movie' AND capability_id IN ('tmdb', 'tvdb');`)
 
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	if defaultEnabled() {
@@ -122,6 +126,10 @@ FROM library_provider_chains WHERE media_folder_id IN (16, 17) AND content_level
 		// return to the legacy chain's state, NFO on in 16 and off in 17.
 		{16, "tmdb", 0, true}, {16, "nfo", 1, true}, {16, "tmdb", 0, true}, {16, "nfo", 1, true},
 		{17, "tmdb", 0, true}, {17, "nfo", 1, false}, {17, "tmdb", 0, true}, {17, "nfo", 1, false},
+		// The admin's swap of the copied remote rows stays, and the restored
+		// NFO row goes behind them, not ahead on its installation ID.
+		{18, "tmdb", 0, true}, {18, "tvdb", 1, true}, {18, "nfo", 2, false},
+		{18, "tvdb", 0, true}, {18, "tmdb", 1, true}, {18, "nfo", 2, false},
 	}
 	if got := chains(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("chains after Down =\n%+v\nwant\n%+v", got, want)
