@@ -23,21 +23,25 @@ func letterOf(key string) string {
 	return LetterOther
 }
 
-// lettersOfList buckets an ordered list of title keys the way LetterIndex
-// reports it: non-empty letters in list order with their first position.
-func lettersOfList(keys []string) []LetterBucket {
-	var buckets []LetterBucket
+// lettersOfList indexes an ordered list of title keys the way LetterIndex
+// reports it: non-empty letters in list order with their first position, and
+// the runs of consecutive keys under one letter.
+func lettersOfList(keys []string) LetterIndex {
+	index := LetterIndex{Letters: []LetterBucket{}, Runs: []LetterRun{}}
 	at := map[string]int{}
 	for position, key := range keys {
 		letter := letterOf(key)
+		if len(index.Runs) == 0 || index.Runs[len(index.Runs)-1].Letter != letter {
+			index.Runs = append(index.Runs, LetterRun{Letter: letter, Position: position})
+		}
 		if i, ok := at[letter]; ok {
-			buckets[i].Count++
+			index.Letters[i].Count++
 			continue
 		}
-		at[letter] = len(buckets)
-		buckets = append(buckets, LetterBucket{Letter: letter, Count: 1, Position: position})
+		at[letter] = len(index.Letters)
+		index.Letters = append(index.Letters, LetterBucket{Letter: letter, Count: 1, Position: position})
 	}
-	return buckets
+	return index
 }
 
 // orderedTitleKeys pages the whole query through the cursor pager and returns
@@ -66,9 +70,10 @@ func orderedTitleKeys(t *testing.T, resolver *CatalogResolver, req CatalogReques
 
 // TestLetterIndexMatchesCursorPagesPostgres checks the letter index against
 // real rows: titles file under their sort title's initial (articles moved
-// away, accents folded, anything else under #), and every letter's position
-// is where the cursor pager lists its first title, in both directions and
-// when a seek jumps there. Set SILO_TEST_DATABASE_URL to a migrated
+// away, accents folded, anything else under #), every letter's position is
+// where the cursor pager lists its first title, in both directions and when a
+// seek jumps there, and the runs match the pager's order whatever the
+// database collation does with accented and non-Latin initials. Set SILO_TEST_DATABASE_URL to a migrated
 // disposable database; every inserted row is removed on completion.
 func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 	pool := collectionSortTestPool(t)
@@ -101,6 +106,8 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 		{"Avatar", ""},
 		{"Zodiac", "  "},
 		{"Ōkami", ""},
+		{"Șarada", ""},
+		{"Амели", ""},
 	} {
 		id := fmt.Sprintf("%s-%02d", prefix, i)
 		if _, err := pool.Exec(ctx, `
@@ -119,7 +126,7 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
 	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}}
-	wantCounts := map[string]int{"#": 2, "A": 2, "E": 2, "H": 2, "O": 1, "T": 1, "Z": 1}
+	wantCounts := map[string]int{"#": 3, "A": 2, "E": 2, "H": 2, "O": 1, "S": 1, "T": 1, "Z": 1}
 
 	for _, order := range []string{"asc", "desc"} {
 		t.Run(order, func(t *testing.T) {
@@ -136,19 +143,30 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 				t.Fatalf("letter index: %v", err)
 			}
 			want := lettersOfList(orderedTitleKeys(t, resolver, req, access))
-			if !slices.Equal(got, want) {
+			if !slices.Equal(got.Letters, want.Letters) || !slices.Equal(got.Runs, want.Runs) {
 				t.Fatalf("letter index = %+v, want the pager's %+v", got, want)
 			}
 			counts := map[string]int{}
-			for _, b := range got {
+			for _, b := range got.Letters {
 				counts[b.Letter] = b.Count
 			}
 			if fmt.Sprint(counts) != fmt.Sprint(wantCounts) {
 				t.Fatalf("letter counts = %v, want %v", counts, wantCounts)
 			}
+			// Every collation sorts Cyrillic apart from the digits and
+			// symbols, so # comes in at least two runs.
+			hashRuns := 0
+			for _, run := range got.Runs {
+				if run.Letter == LetterOther {
+					hashRuns++
+				}
+			}
+			if hashRuns < 2 {
+				t.Fatalf("runs = %+v, want # split around the Latin letters", got.Runs)
+			}
 
 			// A seek to a letter's position lands on that letter's first title.
-			for _, b := range got {
+			for _, b := range got.Letters {
 				seekReq := req
 				seekReq.CursorPaging = true
 				seekReq.Limit = 1
@@ -190,7 +208,7 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 			t.Fatalf("letter index: %v", err)
 		}
 		want := lettersOfList(orderedTitleKeys(t, resolver, req, access))
-		if len(want) == 0 || !slices.Equal(got, want) {
+		if len(want.Letters) == 0 || !slices.Equal(got.Letters, want.Letters) || !slices.Equal(got.Runs, want.Runs) {
 			t.Fatalf("filtered letter index = %+v, want the pager's %+v", got, want)
 		}
 	})
@@ -235,7 +253,7 @@ func TestLetterIndexEpisodesMatchCursorPagesPostgres(t *testing.T) {
 		t.Fatalf("letter index: %v", err)
 	}
 	total := 0
-	for _, b := range got {
+	for _, b := range got.Letters {
 		total += b.Count
 	}
 	req.CursorPaging = true
@@ -247,7 +265,7 @@ func TestLetterIndexEpisodesMatchCursorPagesPostgres(t *testing.T) {
 	if total != len(result.Items) || total == 0 {
 		t.Fatalf("letter index counts %d episodes, pager lists %d", total, len(result.Items))
 	}
-	if got[0].Position != 0 {
-		t.Fatalf("first letter starts at %d, want 0", got[0].Position)
+	if got.Letters[0].Position != 0 || got.Runs[0].Position != 0 {
+		t.Fatalf("first letter starts at %d and first run at %d, want 0", got.Letters[0].Position, got.Runs[0].Position)
 	}
 }

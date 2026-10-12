@@ -87,12 +87,17 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 	return handlers.CatalogFacetSearchView{}, nil
 }
 
-func (f *fakeCatalog) LetterIndex(_ context.Context, v handlers.ItemViewer, req catalogpkg.CatalogRequest) ([]catalogpkg.LetterBucket, error) {
+func (f *fakeCatalog) LetterIndex(_ context.Context, v handlers.ItemViewer, req catalogpkg.CatalogRequest) (catalogpkg.LetterIndex, error) {
 	if f.err != nil {
-		return nil, f.err
+		return catalogpkg.LetterIndex{}, f.err
 	}
 	f.lastReq, f.lastViewer = req, v
-	return []catalogpkg.LetterBucket{{Letter: "#", Count: 2, Position: 0}, {Letter: "H", Count: 3, Position: 2}}, nil
+	// A digit title, three H titles, and a non-Latin one the collation sorts
+	// after them, so # has two runs.
+	return catalogpkg.LetterIndex{
+		Letters: []catalogpkg.LetterBucket{{Letter: "#", Count: 2, Position: 0}, {Letter: "H", Count: 3, Position: 1}},
+		Runs:    []catalogpkg.LetterRun{{Letter: "#", Position: 0}, {Letter: "H", Position: 1}, {Letter: "#", Position: 4}},
+	}, nil
 }
 
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {

@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { Query, QueryClient } from "@tanstack/react-query";
 import type { HomeSectionItemsResponse, ItemDetail } from "@/api/types";
 import {
   adminKeys,
@@ -189,9 +189,36 @@ export async function invalidateMediaSurfaceQueries(
   // `cancelRefetch: false` — reusing an in-flight request would let a response
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
+  const matches = (query: Query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options);
+  const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
   await queryClient.invalidateQueries({
-    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options),
+    predicate: (query) => matches(query) && !runningLetterIndexes.has(query),
   });
+}
+
+// A letter index sorts the whole result, which on a large library can outlast
+// a scan's invalidation window, so cancelling and restarting it on every sweep
+// would keep it from ever finishing. A running read finishes instead, and one
+// more read follows it so changes made while it ran still land. Returns the
+// running reads, for the sweep to leave alone.
+function refetchLetterIndexesWhenDone(
+  queryClient: QueryClient,
+  matches: (query: Query) => boolean,
+): Set<Query> {
+  const running = queryClient.getQueryCache().findAll({
+    queryKey: catalogKeys.allLetters,
+    fetchStatus: "fetching",
+    predicate: matches,
+  });
+  for (const query of running) {
+    const refetchAfter = () =>
+      queryClient.invalidateQueries(
+        { queryKey: query.queryKey, exact: true },
+        { cancelRefetch: false },
+      );
+    void query.promise?.then(refetchAfter, refetchAfter);
+  }
+  return new Set(running);
 }
 
 export function scheduleMediaSurfaceInvalidation(

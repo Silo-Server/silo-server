@@ -101,6 +101,10 @@ describe("LibraryBrowse", () => {
             { letter: "#", count: 40, position: 0 },
             { letter: "H", count: 600, position: 40 },
           ],
+          runs: [
+            { letter: "#", position: 0 },
+            { letter: "H", position: 40 },
+          ],
         },
       });
 
@@ -116,6 +120,45 @@ describe("LibraryBrowse", () => {
       expect(mocks.itemGridTotalItems).toBe(640);
     });
 
+    it("sizes the grid past the pager's estimated runway to the exact total", () => {
+      // A full first page with more to come: the pager guesses five pages of
+      // runway, but the index knows there are only 100 titles.
+      mocks.useCatalogWindow.mockReturnValue({
+        data: { totalItems: 360, knownItems: 60, pages: new Map([[0, []]]) },
+        isLoading: false,
+      });
+      mocks.useCatalogLetters.mockReturnValue({
+        data: {
+          total: 100,
+          letters: [{ letter: "A", count: 100, position: 0 }],
+          runs: [{ letter: "A", position: 0 }],
+        },
+      });
+
+      render({ field: "title", order: "asc" });
+
+      expect(mocks.itemGridTotalItems).toBe(100);
+    });
+
+    it("keeps the bar and says so when the index fails to refresh", () => {
+      const refetch = vi.fn(async () => undefined);
+      mocks.useCatalogLetters.mockReturnValue({
+        data: {
+          total: 1,
+          letters: [{ letter: "H", count: 1, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
+        },
+        isRefetchError: true,
+        error: new Error("boom"),
+        refetch,
+      });
+
+      const markup = render({ field: "title", order: "asc" });
+
+      expect(markup).toContain('aria-label="Jump to letter"');
+      expect(markup).toContain("Couldn&#x27;t refresh the letter bar");
+    });
+
     it("stays away and asks for nothing in other orders", () => {
       const markup = render({ field: "added_at", order: "desc" });
 
@@ -127,7 +170,11 @@ describe("LibraryBrowse", () => {
     it("waits for the browse before trusting the index", () => {
       mocks.useCatalogWindow.mockReturnValue({ data: undefined, isLoading: true });
       mocks.useCatalogLetters.mockReturnValue({
-        data: { total: 3, letters: [{ letter: "A", count: 3, position: 0 }] },
+        data: {
+          total: 3,
+          letters: [{ letter: "A", count: 3, position: 0 }],
+          runs: [{ letter: "A", position: 0 }],
+        },
       });
 
       expect(render({ field: "title", order: "asc" })).not.toContain("Jump to letter");

@@ -1,4 +1,4 @@
-import type { CatalogLetter } from "@/hooks/queries/catalog";
+import type { CatalogLetterRun } from "@/hooks/queries/catalog";
 
 /** The bar's letters in display order; `#` holds digits, symbols, and other scripts. */
 export const LETTER_BAR_LETTERS = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"] as const;
@@ -12,14 +12,16 @@ export function titleCount(count: number) {
 }
 
 /**
- * The letter whose titles the list is showing at `index`: the last letter, in
- * list order, that starts at or before it.
+ * The letter whose titles the list is showing at `index`: the letter of the
+ * last run that starts at or before it. Runs, not each letter's first
+ * position, because a collation can sort some of a letter's titles apart
+ * from the rest.
  */
-export function letterAtIndex(letters: readonly CatalogLetter[], index: number) {
-  let current: CatalogLetter | undefined;
-  for (const letter of letters) {
-    if (letter.position > index) break;
-    current = letter;
+export function letterAtIndex(runs: readonly CatalogLetterRun[], index: number) {
+  let current: CatalogLetterRun | undefined;
+  for (const run of runs) {
+    if (run.position > index) break;
+    current = run;
   }
   return current?.letter;
 }

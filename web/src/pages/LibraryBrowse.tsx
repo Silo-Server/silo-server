@@ -217,10 +217,13 @@ export default function LibraryBrowse({
   const lettersQuery = useCatalogLetters(state, { enabled: titleOrdered });
   const letterIndex = titleOrdered && totalItems > 0 ? lettersQuery.data : undefined;
   const showLetterBar = letterIndex !== undefined && letterIndex.total > 0;
-  // The index and the pages are separate reads, so a scan between them can
-  // leave either one a few titles behind. The larger total never hides a title
-  // the pages return.
-  const gridTotalItems = showLetterBar ? Math.max(letterIndex.total, totalItems) : totalItems;
+  // The index's exact total replaces the pager's estimated runway. The index
+  // and the pages are separate reads, so a scan between them can leave either
+  // one a few titles behind; the larger count never hides a title the pages
+  // return.
+  const gridTotalItems = showLetterBar
+    ? Math.max(letterIndex.total, catalogQuery.data?.knownItems ?? 0)
+    : totalItems;
   const gridRef = useRef<ItemGridHandle>(null);
   // The last title in the top row: a jump scrolls the letter's first title
   // into that row, often after titles of the letter before it.
@@ -273,10 +276,16 @@ export default function LibraryBrowse({
       />
     );
   }
+  // A failed refresh of the letter index keeps the bar on its cached
+  // positions, which may now land a little off, so say so like a failed page.
+  const lettersRefreshFailed = showLetterBar && lettersQuery.isRefetchError;
   const [retrying, setRetrying] = useState(false);
   const retryBrowse = () => {
     setRetrying(true);
-    void catalogQuery.refetch().finally(() => setRetrying(false));
+    void Promise.all([
+      catalogQuery.isError || !lettersRefreshFailed ? catalogQuery.refetch() : null,
+      lettersRefreshFailed ? lettersQuery.refetch() : null,
+    ]).finally(() => setRetrying(false));
   };
   // The first page carries the result window, so without it (or with only an
   // empty one) a failure leaves nothing to show: the browse failed outright
@@ -284,6 +293,14 @@ export default function LibraryBrowse({
   // failed later page keeps the loaded grid and the viewer's place in it.
   const browseFailed = catalogQuery.isError && (!pages.has(0) || totalItems === 0);
   const browsePartlyFailed = catalogQuery.isError && !browseFailed;
+  let refreshFailedMessage: string | undefined;
+  if (browsePartlyFailed) {
+    refreshFailedMessage = catalogQuery.sourceError
+      ? "Couldn't refresh this library."
+      : "Some items couldn't be loaded.";
+  } else if (lettersRefreshFailed) {
+    refreshFailedMessage = "Couldn't refresh the letter bar, so a jump may land a little off.";
+  }
 
   if (isGroupedAxis) {
     const groupedAxis = audiobookAxis as Exclude<AudiobookBrowseAxis, "books">;
@@ -352,14 +369,10 @@ export default function LibraryBrowse({
         sortRelevanceScope={sortRelevanceScope}
         libraryType={libraryType}
       />
-      {browsePartlyFailed ? (
+      {refreshFailedMessage ? (
         <RefreshFailedNotice
-          message={
-            catalogQuery.sourceError
-              ? "Couldn't refresh this library."
-              : "Some items couldn't be loaded."
-          }
-          error={catalogQuery.error}
+          message={refreshFailedMessage}
+          error={browsePartlyFailed ? catalogQuery.error : lettersQuery.error}
           onRetry={retryBrowse}
           retrying={retrying}
         />
@@ -394,7 +407,7 @@ export default function LibraryBrowse({
       {showLetterBar && !browseFailed ? (
         <LetterBar
           letters={letterIndex.letters}
-          activeLetter={jumpedLetter ?? letterAtIndex(letterIndex.letters, topRowEnd)}
+          activeLetter={jumpedLetter ?? letterAtIndex(letterIndex.runs, topRowEnd)}
           onJump={(letter) => {
             setJumpedLetter(letter.letter);
             gridRef.current?.scrollToItem(letter.position);

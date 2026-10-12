@@ -19,12 +19,30 @@ type LetterBucket struct {
 	Position int
 }
 
+// LetterRun is a block of consecutive list positions whose items all file
+// under one letter, starting at Position and ending where the next run
+// starts. A letter usually has one run, but a collation can sort some of its
+// titles apart from the rest: under C, accented initials sort after z, and
+// most collations put non-Latin scripts after the Latin letters.
+type LetterRun struct {
+	Letter   string
+	Position int
+}
+
+// LetterIndex is a title-ordered list's letters, with their counts and first
+// positions in list order, and the runs that tell which letter any position
+// is under.
+type LetterIndex struct {
+	Letters []LetterBucket
+	Runs    []LetterRun
+}
+
 // letterFoldFrom and letterFoldTo fold accented Latin initials to their base
 // letter, so "Élite" files under E rather than #. Capitals are listed too:
 // under a C ctype the title key's LOWER() leaves non-ASCII letters as they are.
 const (
-	letterFoldFrom = "àáâãäåāăąçćĉċčďđèéêëēĕėęěĝğġģĥħìíîïĩīĭįıĵķĺļľŀłñńņňòóôõöøōŏőŕŗřśŝşšţťŧùúûüũūŭůűųŵýÿŷźżžÀÁÂÃÄÅĀĂĄÇĆĈĊČĎĐÈÉÊËĒĔĖĘĚĜĞĠĢĤĦÌÍÎÏĨĪĬĮĴĶĹĻĽĿŁÑŃŅŇÒÓÔÕÖØŌŎŐŔŖŘŚŜŞŠŢŤŦÙÚÛÜŨŪŬŮŰŲŴÝŸŶŹŻŽ"
-	letterFoldTo   = "aaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzaaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzz"
+	letterFoldFrom = "àáâãäåāăąçćĉċčďđèéêëēĕėęěĝğġģĥħìíîïĩīĭįıĵķĺļľŀłñńņňòóôõöøōŏőŕŗřśŝşšţťŧùúûüũūŭůűųŵýÿŷźżžÀÁÂÃÄÅĀĂĄÇĆĈĊČĎĐÈÉÊËĒĔĖĘĚĜĞĠĢĤĦÌÍÎÏĨĪĬĮĴĶĹĻĽĿŁÑŃŅŇÒÓÔÕÖØŌŎŐŔŖŘŚŜŞŠŢŤŦÙÚÛÜŨŪŬŮŰŲŴÝŸŶŹŻŽșțȘȚ"
+	letterFoldTo   = "aaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzaaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzstst"
 )
 
 // letterBucketSQL files a lowercased title key under its initial: A to Z after
@@ -36,46 +54,56 @@ func letterBucketSQL(titleKey string) string {
 }
 
 // LetterIndex answers, for def in title order, how many matches file under
-// each letter and where each letter's first match sits in the list. Letters
-// without matches are left out; the rest come in list order. The positions
-// number the rows of the same plan PreviewCursorPage and SeekCursor page
-// through, so a client can seek straight to one.
-func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, access AccessFilter) ([]LetterBucket, error) {
+// each letter, where each letter's first match sits in the list, and the runs
+// of consecutive matches under one letter. Letters without matches are left
+// out; the rest come in list order. The positions number the rows of the same
+// plan PreviewCursorPage and SeekCursor page through, so a client can seek
+// straight to one.
+func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, access AccessFilter) (LetterIndex, error) {
 	if e == nil || e.Pool == nil {
-		return nil, fmt.Errorf("query executor requires a database pool")
+		return LetterIndex{}, fmt.Errorf("query executor requires a database pool")
 	}
 	if e.GroupByWork {
-		return nil, fmt.Errorf("%w: the letter index does not group by work", ErrInvalidCatalogRequest)
+		return LetterIndex{}, fmt.Errorf("%w: the letter index does not group by work", ErrInvalidCatalogRequest)
 	}
 	if NormalizeQuerySort(def.Sort).Field != querySortTitle {
-		return nil, fmt.Errorf("%w: the letter index needs title order", ErrInvalidCatalogRequest)
+		return LetterIndex{}, fmt.Errorf("%w: the letter index needs title order", ErrInvalidCatalogRequest)
 	}
 	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
 	if err != nil {
-		return nil, err
+		return LetterIndex{}, err
 	}
 	sql, args := plan.letterIndexSQL()
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, fmt.Errorf("querying letter index: %w", err)
+		return LetterIndex{}, fmt.Errorf("querying letter index: %w", err)
 	}
 	defer rows.Close()
-	buckets := []LetterBucket{}
+	index := LetterIndex{Letters: []LetterBucket{}, Runs: []LetterRun{}}
+	bucketAt := map[string]int{}
 	for rows.Next() {
-		var b LetterBucket
-		if err := rows.Scan(&b.Letter, &b.Count, &b.Position); err != nil {
-			return nil, fmt.Errorf("scanning letter index: %w", err)
+		var run LetterRun
+		var length int
+		if err := rows.Scan(&run.Letter, &run.Position, &length); err != nil {
+			return LetterIndex{}, fmt.Errorf("scanning letter index: %w", err)
 		}
-		buckets = append(buckets, b)
+		index.Runs = append(index.Runs, run)
+		if i, ok := bucketAt[run.Letter]; ok {
+			index.Letters[i].Count += length
+			continue
+		}
+		bucketAt[run.Letter] = len(index.Letters)
+		index.Letters = append(index.Letters, LetterBucket{Letter: run.Letter, Count: length, Position: run.Position})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading letter index: %w", err)
+		return LetterIndex{}, fmt.Errorf("reading letter index: %w", err)
 	}
-	return buckets, nil
+	return index, nil
 }
 
-// letterIndexSQL numbers the plan's rows in its own order and groups them by
-// initial, keeping each group's size and first row.
+// letterIndexSQL numbers the plan's rows in its own order, files each under
+// its initial, and keeps the rows that open a run (their letter differs from
+// the row before), with the run's length.
 func (p previewPagePlan) letterIndexSQL() (string, []any) {
 	args := append([]any{}, p.cteArgs...)
 	args = append(args, p.args...)
@@ -85,9 +113,13 @@ func (p previewPagePlan) letterIndexSQL() (string, []any) {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
 	}
 	sql := fmt.Sprintf(
-		`%sSELECT bucket, COUNT(*)::int, (MIN(position) - 1)::int FROM (
-			SELECT %s AS bucket, ROW_NUMBER() OVER (%s) AS position %s %s
-		) ranked GROUP BY bucket ORDER BY 3`,
+		`%sSELECT bucket, start, COALESCE(LEAD(start) OVER (ORDER BY start), total) - start FROM (
+			SELECT bucket, (position - 1)::int AS start, total::int AS total,
+				bucket IS DISTINCT FROM LAG(bucket) OVER (ORDER BY position) AS opens_run
+			FROM (
+				SELECT %s AS bucket, ROW_NUMBER() OVER (%s) AS position, COUNT(*) OVER () AS total %s %s
+			) ranked
+		) marked WHERE opens_run ORDER BY start`,
 		withClause, letterBucketSQL(p.titleKey), p.orderBy, p.fromClausePaged, p.whereClause,
 	)
 	return sql, args
@@ -97,21 +129,21 @@ func (p previewPagePlan) letterIndexSQL() (string, []any) {
 // browse: the catalog, optionally narrowed by library, media type, and rule
 // groups. Search text and other sources have no stable title position to
 // jump to, so they are refused.
-func (r *CatalogResolver) LetterIndex(ctx context.Context, req CatalogRequest, access AccessFilter) ([]LetterBucket, error) {
+func (r *CatalogResolver) LetterIndex(ctx context.Context, req CatalogRequest, access AccessFilter) (LetterIndex, error) {
 	if r == nil || r.itemRepo == nil {
-		return nil, fmt.Errorf("catalog resolver requires an item repository")
+		return LetterIndex{}, fmt.Errorf("catalog resolver requires an item repository")
 	}
 	if req.Source != CatalogSourceQuery {
-		return nil, fmt.Errorf("%w: the letter index covers source=query only", ErrInvalidCatalogRequest)
+		return LetterIndex{}, fmt.Errorf("%w: the letter index covers source=query only", ErrInvalidCatalogRequest)
 	}
 	if strings.TrimSpace(req.SearchQuery) != "" || strings.TrimSpace(req.NamePrefix) != "" {
-		return nil, fmt.Errorf("%w: the letter index does not take search text or a name prefix", ErrInvalidCatalogRequest)
+		return LetterIndex{}, fmt.Errorf("%w: the letter index does not take search text or a name prefix", ErrInvalidCatalogRequest)
 	}
 	if err := validateCatalogQueryRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
-		return nil, err
+		return LetterIndex{}, err
 	}
 	if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
-		return nil, err
+		return LetterIndex{}, err
 	}
 	now := time.Now()
 	return r.queryExecutorForScope(req.Query.MediaScope, &now).LetterIndex(ctx, req.Query, access)

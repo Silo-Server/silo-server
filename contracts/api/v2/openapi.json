@@ -22730,6 +22730,31 @@
         ],
         "type": "object"
       },
+      "CatalogLetterRun": {
+        "additionalProperties": false,
+        "properties": {
+          "letter": {
+            "description": "The letter every title in the block files under",
+            "examples": [
+              "H"
+            ],
+            "type": "string"
+          },
+          "position": {
+            "description": "Zero-based list position of the block's first title; the block ends where the next one starts, or at total",
+            "examples": [
+              318
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "letter",
+          "position"
+        ],
+        "type": "object"
+      },
       "CatalogLetters": {
         "additionalProperties": false,
         "properties": {
@@ -22737,6 +22762,13 @@
             "description": "Letters with at least one title, in list order; empty, never null",
             "items": {
               "$ref": "#/components/schemas/CatalogLetter"
+            },
+            "type": "array"
+          },
+          "runs": {
+            "description": "Blocks of consecutive titles under one letter, in list order, covering the whole result; empty, never null. A letter usually has one block, but the database's collation can sort some of its titles apart from the rest (under C, accented initials sort after Z; most collations put non-Latin scripts after the Latin letters), so use these, not letters, to tell which letter a list position is under",
+            "items": {
+              "$ref": "#/components/schemas/CatalogLetterRun"
             },
             "type": "array"
           },
@@ -22751,7 +22783,8 @@
         },
         "required": [
           "total",
-          "letters"
+          "letters",
+          "runs"
         ],
         "type": "object"
       },

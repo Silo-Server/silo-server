@@ -25,11 +25,25 @@ describe("letterAtIndex", () => {
 
   it("follows list order when titles run Z to A", () => {
     const descending = [
-      { letter: "Z", count: 3, position: 0 },
-      { letter: "A", count: 5, position: 3 },
+      { letter: "Z", position: 0 },
+      { letter: "A", position: 3 },
     ];
     expect(letterAtIndex(descending, 2)).toBe("Z");
     expect(letterAtIndex(descending, 3)).toBe("A");
+  });
+
+  it("names a letter whose titles the collation sorts apart", () => {
+    // Under C, "Élite" sorts after "Zebra" but files under E, and non-Latin
+    // titles come after every Latin letter.
+    const runs = [
+      { letter: "E", position: 0 },
+      { letter: "Z", position: 1 },
+      { letter: "E", position: 2 },
+      { letter: "#", position: 3 },
+    ];
+    expect(letterAtIndex(runs, 1)).toBe("Z");
+    expect(letterAtIndex(runs, 2)).toBe("E");
+    expect(letterAtIndex(runs, 9)).toBe("#");
   });
 });
 

@@ -26,6 +26,7 @@ vi.mock("@/api/v2/request", async (importOriginal) => ({
       ? Promise.resolve({
           total: queryCatalogItemsOk.total,
           letters: [{ letter: "H", count: queryCatalogItemsOk.total, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
         })
       : mocks.v2(key, options),
 }));

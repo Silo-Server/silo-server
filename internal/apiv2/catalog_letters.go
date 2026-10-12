@@ -11,7 +11,7 @@ import (
 // Section catalog-letters: the letter index behind an alphabetical jump bar.
 // It counts a title-ordered query-source browse by initial and reports where
 // each letter starts, so a client can seek straight to it in the list
-// queryCatalogItems pages.
+// queryCatalogItems pages, and which letter each stretch of the list is under.
 
 const (
 	opQueryCatalogLetters = "queryCatalogLetters"
@@ -43,10 +43,17 @@ type CatalogLetter struct {
 	Position int    `json:"position" doc:"Zero-based list position of the letter's first title in the same query sorted by title in the same order; pass it as seek to queryCatalogItems" example:"318"`
 }
 
+// CatalogLetterRun is one block of consecutive titles under one letter.
+type CatalogLetterRun struct {
+	Letter   string `json:"letter" doc:"The letter every title in the block files under" example:"H"`
+	Position int    `json:"position" doc:"Zero-based list position of the block's first title; the block ends where the next one starts, or at total" example:"318"`
+}
+
 // CatalogLetters is the queryCatalogLetters response.
 type CatalogLetters struct {
-	Total   int             `json:"total" doc:"Titles in the whole result: the sum of the counts" example:"1240"`
-	Letters []CatalogLetter `json:"letters" doc:"Letters with at least one title, in list order; empty, never null"`
+	Total   int                `json:"total" doc:"Titles in the whole result: the sum of the counts" example:"1240"`
+	Letters []CatalogLetter    `json:"letters" doc:"Letters with at least one title, in list order; empty, never null"`
+	Runs    []CatalogLetterRun `json:"runs" doc:"Blocks of consecutive titles under one letter, in list order, covering the whole result; empty, never null. A letter usually has one block, but the database's collation can sort some of its titles apart from the rest (under C, accented initials sort after Z; most collations put non-Latin scripts after the Latin letters), so use these, not letters, to tell which letter a list position is under"`
 }
 
 // CatalogLettersOutput is the queryCatalogLetters response.
@@ -76,14 +83,20 @@ func (reg *Registry) queryCatalogLetters(ctx context.Context, in *CatalogLetters
 	if p != nil {
 		return nil, p
 	}
-	buckets, err := svc.LetterIndex(ctx, viewer, req)
+	index, err := svc.LetterIndex(ctx, viewer, req)
 	if err != nil {
 		return nil, catalogProblem(err, "body")
 	}
-	out := CatalogLetters{Letters: make([]CatalogLetter, 0, len(buckets))}
-	for _, b := range buckets {
+	out := CatalogLetters{
+		Letters: make([]CatalogLetter, 0, len(index.Letters)),
+		Runs:    make([]CatalogLetterRun, 0, len(index.Runs)),
+	}
+	for _, b := range index.Letters {
 		out.Letters = append(out.Letters, CatalogLetter{Letter: b.Letter, Count: b.Count, Position: b.Position})
 		out.Total += b.Count
+	}
+	for _, run := range index.Runs {
+		out.Runs = append(out.Runs, CatalogLetterRun{Letter: run.Letter, Position: run.Position})
 	}
 	return &CatalogLettersOutput{Body: out}, nil
 }

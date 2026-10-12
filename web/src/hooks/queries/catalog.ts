@@ -440,6 +440,13 @@ export function useCatalogWindow(
     data: {
       title,
       totalItems,
+      // Items known to exist: the exact total when the source reports one,
+      // else the end of the furthest loaded page. Unlike `totalItems`, never
+      // the scroll runway estimated past it.
+      knownItems:
+        page0Result.data?.total_exact !== false
+          ? (page0Result.data?.total ?? 0)
+          : nonExactPageStats.maxLoadedEnd,
       pages,
       // Collection sources report the order they actually resolved in, after
       // the viewer's saved override and the collection's configured default.
@@ -490,6 +497,7 @@ export function useLibraryHasItems(libraryId: number, options: { enabled?: boole
 /** The letter index of a title-ordered browse; see `queryCatalogLetters`. */
 export type CatalogLetters = V2Result<"POST /api/v2/catalog/letters">;
 export type CatalogLetter = CatalogLetters["letters"][number];
+export type CatalogLetterRun = CatalogLetters["runs"][number];
 
 export async function fetchCatalogLetters(
   state: CatalogSearchState,

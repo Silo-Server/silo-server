@@ -9,7 +9,21 @@
     {
       "letter": "H",
       "count": 3,
-      "position": 2
+      "position": 1
+    }
+  ],
+  "runs": [
+    {
+      "letter": "#",
+      "position": 0
+    },
+    {
+      "letter": "H",
+      "position": 1
+    },
+    {
+      "letter": "#",
+      "position": 4
     }
   ]
 }

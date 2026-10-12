@@ -19,7 +19,8 @@ func TestQueryCatalogLetters(t *testing.T) {
 	}
 	var body CatalogLetters
 	decodeJSON(t, rec.Body, &body)
-	if body.Total != 5 || len(body.Letters) != 2 || body.Letters[1] != (CatalogLetter{Letter: "H", Count: 3, Position: 2}) {
+	if body.Total != 5 || len(body.Letters) != 2 || body.Letters[1] != (CatalogLetter{Letter: "H", Count: 3, Position: 1}) ||
+		len(body.Runs) != 3 || body.Runs[2] != (CatalogLetterRun{Letter: "#", Position: 4}) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	req := fake.lastReq

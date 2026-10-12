@@ -600,7 +600,7 @@ Redis failure returns `dependency_unavailable`. Restarting performs a new search
 bar over a query-source browse in title order. It takes the browse's
 `library_id`, `type`, `match`, and rule `groups`, as `queryCatalogItems` does,
 and an `order` of `asc` (default) or `desc`. It answers the letters that have
-titles, in list order:
+titles, in list order, and the runs of consecutive titles under one letter:
 
 ```json
 {
@@ -608,6 +608,10 @@ titles, in list order:
   "letters": [
     { "letter": "#", "count": 14, "position": 0 },
     { "letter": "A", "count": 96, "position": 14 }
+  ],
+  "runs": [
+    { "letter": "#", "position": 0 },
+    { "letter": "A", "position": 14 }
   ]
 }
 ```
@@ -634,6 +638,15 @@ punctuated title sorted among plain ones), `count` still covers every title
 under the letter and `position` is the first one. `total` is the exact count of
 the result at that moment, so a client can size a virtualized list without
 `skip_total=false`.
+
+`runs` covers the whole result in list order: each run starts at its
+`position` and ends where the next starts, or at `total`. Use it, not
+`letters`, to tell which letter a list position is under, such as to mark the
+current letter while the viewer scrolls. A letter has more than one run when
+the collation sorts some of its titles apart: under `C`, accented initials sort
+after Z, and most collations put non-Latin scripts, which file under `#`, after
+the Latin letters. The number of runs grows with that interleaving, not with
+the result.
 
 The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
