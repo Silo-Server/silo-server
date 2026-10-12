@@ -314,9 +314,9 @@ API servers and proxies sign every call to a worker's node bearer routes;
 before sending, and the transcode node and proxy middleware call
 `nodeauth.Verify`. There is no worker-to-API call.
 
-The shared `auth.jwt_secret` never crosses the wire. It also signs login,
-profile, and stream tokens, so a copy captured from a worker link would mint
-them. Each side instead derives a MAC key from it with HKDF-SHA256 (no salt,
+A signed request never carries the shared `auth.jwt_secret`. That secret also
+signs login, profile, and stream tokens, so a copy captured from a worker link
+would mint them. Each side instead derives a MAC key from it with HKDF-SHA256 (no salt,
 info `silo/node-request-auth/v1`, 32 bytes). Nothing else uses that label, so
 the key cannot sign or verify any other token. A request carries:
 
@@ -353,8 +353,8 @@ What this requires and allows:
 - A reverse proxy in front of a worker may strip the path prefix of the
   worker's registered URL, but must otherwise forward the path and query
   unchanged. Headers, including `Host`, are not signed.
-- A captured request can be replayed, to the same or another worker, until its
-  timestamp expires. Its method, path, query, and body cannot be altered; its
+- A captured signed request can be replayed, to the same or another worker,
+  until its timestamp expires. Its method, path, query, and body cannot be altered; its
   headers can, since they are not signed. It reveals nothing that signs another
   request or token. Signing does not encrypt: worker links that cross untrusted
   networks still need TLS to keep media and requests private.
@@ -367,8 +367,10 @@ together, as a stop-and-replace, has no mixed state. For a rolling upgrade,
 workers also accept the previous release's `Authorization: Bearer <secret>`,
 compared in constant time, and log a warning at most once every ten minutes
 when they do. Senders from this release only sign, which earlier workers
-refuse, so upgrade transcode nodes first, then proxies, then API servers.
-Recovery from a failed upgrade is the release-wide backup and redeploy;
+refuse, so upgrade transcode nodes first, then proxies, then API servers. Until
+the last older sender is upgraded, its requests still carry the secret, so a
+rolling upgrade over links without TLS exposes it for that window; a
+stop-and-replace upgrade does not. Recovery from a failed upgrade is the release-wide backup and redeploy;
 rolling one worker back alone leaves it refusing every upgraded sender.
 
 The next release removes the legacy bearer from `nodeauth.Verify`. Its release
