@@ -288,7 +288,13 @@ func (s *PersonRefreshService) refreshPerson(
 	}
 
 	accumulator.PhotoSourcePath = providerImageSourcePath(accumulator.PhotoPath)
-	if accumulator.PhotoSourcePath != "" {
+	if keepsLocalPhoto(*person) {
+		// A cached photo a title's NFO named outranks a provider's, as local
+		// artwork does on titles.
+		accumulator.PhotoPath = person.PhotoPath
+		accumulator.PhotoSourcePath = person.PhotoSourcePath
+		accumulator.PhotoThumbhash = person.PhotoThumbhash
+	} else if accumulator.PhotoSourcePath != "" {
 		accumulator.PhotoPath, accumulator.PhotoThumbhash, accumulator.PhotoSourcePath = preserveCachedArtwork(
 			accumulator.PhotoPath,
 			accumulator.PhotoThumbhash,
@@ -575,4 +581,12 @@ func personCacheContentID(
 // status, which PluginProvider passes through as is.
 func providerDoesNotKnow(err error) bool {
 	return isProvider404(err) || status.Code(err) == codes.NotFound
+}
+
+// keepsLocalPhoto reports whether a person's photo is a cached copy of one a
+// title's NFO named (a local file or a URL), which a provider's photo does
+// not replace. One still waiting for its copy gives way, so a photo that
+// cannot be copied never leaves the person without one.
+func keepsLocalPhoto(person models.Person) bool {
+	return isLocalImageSourcePath(person.PhotoSourcePath) && isCachedImagePath(person.PhotoPath)
 }

@@ -675,6 +675,15 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Extended item artwork
+
+Movie and series detail can carry `banner_url`, `banner_thumbhash`, `thumb_url`,
+`thumb_thumbhash`, `clearart_url`, `disc_url` and `backdrop_urls` (every backdrop,
+`backdrop_url` first). `GET /api/v2/images/capabilities` reports
+`"extended_item_artwork": true` when the server returns them. Cards, seasons and
+episodes do not carry them. See [extended item artwork](images-api.md#extended-item-artwork)
+for each image and its widths.
+
 ## Play target season
 
 A v2 item detail whose `play_content_id` names an episode also carries
@@ -942,9 +951,11 @@ outside 0-100, and a vote count that is not a whole, non-negative number while
 keeping its score.
 
 Silo itself names only IMDb and TMDB. Every other rating comes from a metadata
-provider that declares it. The built-in NFO provider declares `rt_critic` and
-`rt_audience`, the Rotten Tomatoes scores it reads from local `.nfo` files. A
-plugin declares its ratings in its capability's manifest metadata, at the top
+provider that declares it. The built-in NFO provider declares the named ratings
+it reads from local `.nfo` files: `rt_critic` and `rt_audience` (percentages),
+`metacritic` (scale 100), `trakt` (a percentage), `tvdb` (scale 10), and
+`letterboxd` (scale 5). It reports no `imdb` or `tmdb` source rows; its IMDb
+and TMDB scores fill the rating columns. A plugin declares its ratings in its capability's manifest metadata, at the top
 level or inside the SDK's `metadata` envelope:
 
 ```json

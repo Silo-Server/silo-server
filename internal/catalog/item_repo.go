@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -206,12 +207,23 @@ const (
 	advisorySourceColumn = "advisory_source"
 )
 
+// Served-path columns of the banner, thumb, clear art and disc slots, shared
+// by the item select lists in this package.
+const (
+	bannerPathColumn   = "banner_path"
+	thumbPathColumn    = "thumb_path"
+	clearArtPathColumn = "clearart_path"
+	discPathColumn     = "disc_path"
+)
+
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
 	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_source_path", "backdrop_thumbhash", "logo_path", "logo_source_path",
+	bannerPathColumn, "banner_source_path", "banner_thumbhash", thumbPathColumn, "thumb_source_path", "thumb_thumbhash",
+	clearArtPathColumn, "clearart_source_path", discPathColumn, "disc_source_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -321,6 +333,16 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.BackdropThumbhash,
 		&item.LogoPath,
 		&item.LogoSourcePath,
+		&item.BannerPath,
+		&item.BannerSourcePath,
+		&item.BannerThumbhash,
+		&item.ThumbPath,
+		&item.ThumbSourcePath,
+		&item.ThumbThumbhash,
+		&item.ClearArtPath,
+		&item.ClearArtSourcePath,
+		&item.DiscPath,
+		&item.DiscSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -389,6 +411,16 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.BackdropThumbhash,
 		&item.LogoPath,
 		&item.LogoSourcePath,
+		&item.BannerPath,
+		&item.BannerSourcePath,
+		&item.BannerThumbhash,
+		&item.ThumbPath,
+		&item.ThumbSourcePath,
+		&item.ThumbThumbhash,
+		&item.ClearArtPath,
+		&item.ClearArtSourcePath,
+		&item.DiscPath,
+		&item.DiscSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -617,7 +649,9 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			matched_at, last_refreshed, refresh_failures,
 			episode_metadata_incomplete, episode_metadata_last_checked_at, status,
 			content_rating_age,
-			advisory_age, advisory_source
+			advisory_age, advisory_source,
+			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
+			clearart_path, clearart_source_path, disc_path, disc_source_path
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -630,7 +664,9 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$42, $43, $44,
 			$45, $46, $47,
 			$48,
-			$49, $50
+			$49, $50,
+			$51, $52, $53, $54, $55, $56,
+			$57, $58, $59, $60
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -686,6 +722,16 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age = EXCLUDED.content_rating_age,
 			advisory_age = EXCLUDED.advisory_age,
 			advisory_source = EXCLUDED.advisory_source,
+			banner_path = EXCLUDED.banner_path,
+			banner_source_path = EXCLUDED.banner_source_path,
+			banner_thumbhash = EXCLUDED.banner_thumbhash,
+			thumb_path = EXCLUDED.thumb_path,
+			thumb_source_path = EXCLUDED.thumb_source_path,
+			thumb_thumbhash = EXCLUDED.thumb_thumbhash,
+			clearart_path = EXCLUDED.clearart_path,
+			clearart_source_path = EXCLUDED.clearart_source_path,
+			disc_path = EXCLUDED.disc_path,
+			disc_source_path = EXCLUDED.disc_source_path,
 			updated_at = NOW()`
 	}
 
@@ -745,6 +791,16 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		contentRatingAge,
 		advisoryAge,
 		advisorySource,
+		item.BannerPath,
+		item.BannerSourcePath,
+		item.BannerThumbhash,
+		item.ThumbPath,
+		item.ThumbSourcePath,
+		item.ThumbThumbhash,
+		item.ClearArtPath,
+		item.ClearArtSourcePath,
+		item.DiscPath,
+		item.DiscSourcePath,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)
@@ -1062,6 +1118,12 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 	// Collect image paths before deletion.
 	imgRows, err := tx.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT banner_path, thumb_path, clearart_path FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT disc_path, '', '' FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = $1
 		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = $1
 		UNION ALL
@@ -2495,6 +2557,27 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND logo_source_path = $2`
+		args = []any{contentID, sourcePath, cachedPath}
+	case artworkkey.ImageBanner, artworkkey.ImageThumb:
+		// imageType is one of the two literals matched above, so it is safe
+		// to splice into the column names.
+		query = fmt.Sprintf(`
+			UPDATE media_items
+			SET %[1]s_path = $3,
+				%[1]s_source_path = $2,
+				%[1]s_thumbhash = $4,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND %[1]s_source_path = $2`, imageType)
+		args = []any{contentID, sourcePath, cachedPath, thumbhash}
+	case artworkkey.ImageClearArt, artworkkey.ImageDisc:
+		query = fmt.Sprintf(`
+			UPDATE media_items
+			SET %[1]s_path = $3,
+				%[1]s_source_path = $2,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND %[1]s_source_path = $2`, imageType)
 		args = []any{contentID, sourcePath, cachedPath}
 	default:
 		return false, fmt.Errorf("unsupported media item artwork type %q", imageType)

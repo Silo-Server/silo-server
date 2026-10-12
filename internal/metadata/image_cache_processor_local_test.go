@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -420,5 +422,63 @@ func TestProcessLocalImageSizeCapMatchesRemoteImages(t *testing.T) {
 	}
 	if stats.Failed != 1 || len(cacher.byteReqs) != 0 || !isStableProviderImageFailure(jobs.failedText) {
 		t.Fatalf("oversized: stats = %+v failed text %q", stats, jobs.failedText)
+	}
+}
+
+// recordingRootResolver records which content the processor asked roots for.
+type recordingRootResolver struct {
+	roots []string
+	asked []string
+}
+
+func (r *recordingRootResolver) LibraryRootsForContent(_ context.Context, contentID string) ([]string, error) {
+	r.asked = append(r.asked, contentID)
+	return r.roots, nil
+}
+
+// An NFO actor photo is a person job whose SeriesID names the title that
+// credited it, so the read is confined to that title's library roots. Its
+// source carries discovery's fingerprint, and the person's photo is set only
+// while the stored source is that fingerprinted source.
+func TestProcessLocalPersonPhotoConfinedToTitleRoots(t *testing.T) {
+	root := t.TempDir()
+	photo := filepath.Join(root, ".actors", "Lead.jpg")
+	if err := os.MkdirAll(filepath.Dir(photo), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(photo, []byte("photo-bytes"), 0o644); err != nil {
+		t.Fatalf("writing photo: %v", err)
+	}
+	source := fingerprintedSource(t, photo)
+	job := &models.MetadataImageCacheJob{
+		ID:                9,
+		TargetType:        ImageCacheTargetPerson,
+		TargetContentID:   "287",
+		SeriesID:          "movie-1",
+		SourcePath:        source,
+		ProviderID:        imageCacheLocalProviderID,
+		ProviderContentID: "287",
+		ContentType:       personImageContentType,
+		ImageType:         ImageCacheImageProfile,
+	}
+	jobs := &fakeLocalImageCacheJobs{fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}}}
+	cacher := &fakeByteImageCacher{thumbhash: "th"}
+	people := &fakePersonPhotoUpdater{updated: true}
+	roots := &recordingRootResolver{roots: []string{root}}
+	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{People: people})
+	p.SetLibraryRootResolver(roots)
+
+	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if stats.Succeeded != 1 || len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "photo-bytes" {
+		t.Fatalf("stats = %+v, reads = %d (failed text %q)", stats, len(cacher.byteReqs), jobs.failedText)
+	}
+	if !reflect.DeepEqual(roots.asked, []string{"movie-1"}) {
+		t.Errorf("roots asked for %v, want the crediting title", roots.asked)
+	}
+	if people.personID != 287 || people.sourcePath != source || !strings.HasPrefix(people.cachedPath, "local/people/287/") {
+		t.Errorf("person update = %+v", people)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -87,6 +88,24 @@ func localArtworkSearchedLevels(ctx context.Context) localArtworkLevel {
 	return levels
 }
 
+type localMetadataUnreadableKey struct{}
+
+// withLocalMetadataUnreadable marks ctx as serving a fill-empty refresh that
+// went on without a local sidecar (an NFO) it could not read at levels. An
+// image URL that NFO names cannot be confirmed gone there, so its cached copy
+// stays (see sidecarGone).
+func withLocalMetadataUnreadable(ctx context.Context, levels localArtworkLevel) context.Context {
+	if levels == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, localMetadataUnreadableKey{}, localMetadataUnreadableLevels(ctx)|levels)
+}
+
+func localMetadataUnreadableLevels(ctx context.Context) localArtworkLevel {
+	levels, _ := ctx.Value(localMetadataUnreadableKey{}).(localArtworkLevel)
+	return levels
+}
+
 // localArtworkRetention keeps cached local artwork through a refresh that did
 // not rediscover it. A library mount that is down, or a sidecar that is
 // briefly unreadable, yields no local candidate; without this, rated remote
@@ -99,6 +118,9 @@ type localArtworkRetention struct {
 	// at this retention's level (withLocalArtworkSearched); otherwise nothing
 	// is kept.
 	searched bool
+	// metadataUnreadable is set when the refresh could not read the local
+	// metadata at this level (withLocalMetadataUnreadable).
+	metadataUnreadable bool
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe. Retentions made with atLevel share it.
 	probes map[string]rootcheck.Result
@@ -107,7 +129,8 @@ type localArtworkRetention struct {
 func newLocalArtworkRetention(ctx context.Context, contentID string, level localArtworkLevel) *localArtworkRetention {
 	return &localArtworkRetention{
 		ctx: ctx, contentID: contentID, searched: localArtworkSearchedLevels(ctx)&level != 0,
-		probes: make(map[string]rootcheck.Result),
+		metadataUnreadable: localMetadataUnreadableLevels(ctx)&level != 0,
+		probes:             make(map[string]rootcheck.Result),
 	}
 }
 
@@ -117,17 +140,22 @@ func newLocalArtworkRetention(ctx context.Context, contentID string, level local
 func (r *localArtworkRetention) atLevel(level localArtworkLevel) *localArtworkRetention {
 	other := *r
 	other.searched = localArtworkSearchedLevels(r.ctx)&level != 0
+	other.metadataUnreadable = localMetadataUnreadableLevels(r.ctx)&level != 0
 	return &other
 }
 
-// keep reports whether a slot serving a cached copy of a local sidecar should
-// ignore the remote incoming path this refresh chose.
-func (r *localArtworkRetention) keep(incoming, existingPath, existingSource string) bool {
+// keep reports whether a slot of imageType serving a cached copy of a local
+// sidecar should ignore the remote incoming path this refresh chose.
+func (r *localArtworkRetention) keep(imageType ImageType, incoming, existingPath, existingSource string) bool {
+	gone := r.sidecarGone
+	if imageType == ImageBackdrop {
+		gone = r.backdropSidecarGone
+	}
 	if !r.searched ||
 		!artworkkey.IsLocal(existingPath) ||
 		!isLocalImageSourcePath(existingSource) ||
 		!isRemoteImageSourcePath(incoming) ||
-		r.sidecarGone(existingSource) {
+		gone(existingSource) {
 		return false
 	}
 	slog.DebugContext(r.ctx, "metadata: keeping cached local artwork the refresh did not rediscover", "component", "metadata",
@@ -135,10 +163,11 @@ func (r *localArtworkRetention) keep(incoming, existingPath, existingSource stri
 	return true
 }
 
-// providerPath returns the path a season or episode slot should treat as the
-// provider's choice: the stored local source when keep holds, else incoming.
-func (r *localArtworkRetention) providerPath(incoming, existingPath, existingSource string) string {
-	if r.keep(incoming, existingPath, existingSource) {
+// providerPath returns the path a season or episode slot of imageType should
+// treat as the provider's choice: the stored local source when keep holds,
+// else incoming.
+func (r *localArtworkRetention) providerPath(imageType ImageType, incoming, existingPath, existingSource string) string {
+	if r.keep(imageType, incoming, existingPath, existingSource) {
 		return existingSource
 	}
 	return incoming
@@ -147,15 +176,14 @@ func (r *localArtworkRetention) providerPath(incoming, existingPath, existingSou
 // keepUnconfirmedLocalItemArtwork restores the cached path of each item
 // artwork slot that applyBestImages moved from cached local art to a remote
 // image, when keep holds. prepareItemImagesForQueue then keeps the stored
-// local source.
-func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models.MediaItem) {
+// local source. retention is the item level's (localArtworkItem).
+func keepUnconfirmedLocalItemArtwork(retention *localArtworkRetention, item, existing *models.MediaItem) {
 	if item == nil || existing == nil {
 		return
 	}
-	retention := newLocalArtworkRetention(ctx, existing.ContentID, localArtworkItem)
 	stored := itemArtworkFields(existing)
 	for i, field := range itemArtworkFields(item) {
-		if retention.keep(*field.path, *stored[i].path, *stored[i].source) {
+		if retention.keep(field.imageType, *field.path, *stored[i].path, *stored[i].source) {
 			*field.path = *stored[i].path
 		}
 	}
@@ -171,19 +199,79 @@ func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models
 // those cases the local copy stays. The folder is probed through rootcheck,
 // with its timeout, before the file itself is looked up.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
+	if _, ok := localMetadataImageURL(source); ok {
+		// An image URL an NFO names is gone once the refresh read the NFO and
+		// it no longer offers the URL; an NFO it could not read confirms
+		// nothing.
+		return !r.metadataUnreadable
+	}
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true
 	}
+	if !r.folderAnswers(filepath.Dir(path)) {
+		return false
+	}
+	return sidecarFileGone(path)
+}
+
+// backdropSidecarGone is sidecarGone for a backdrop. Only backdrops come from
+// an extrafanart folder beside the item, so only a backdrop there is judged by
+// extraFanartSidecarGone; any other slot keeps the plain rule even when its
+// folder, a library mount point for instance, happens to be named extrafanart.
+func (r *localArtworkRetention) backdropSidecarGone(source string) bool {
+	path, ok := localImageSourceFilePath(source)
+	if ok && filepath.IsAbs(path) && strings.EqualFold(filepath.Base(filepath.Dir(path)), ExtraFanartFolder) {
+		return r.extraFanartSidecarGone(path)
+	}
+	return r.sidecarGone(source)
+}
+
+// extraFanartSidecarGone is sidecarGone for an image in an extrafanart folder,
+// which can supply the primary backdrop as well as extra ones. It is judged
+// from the folder holding the extrafanart folder: once that answers, a missing
+// or emptied extrafanart folder, or a missing file in it, means the image is
+// gone, which the plain rule reads as an unmounted share and keeps forever. An
+// extrafanart folder that cannot be listed keeps its images.
+func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
 	dir := filepath.Dir(path)
+	if !r.folderAnswers(filepath.Dir(dir)) {
+		return false
+	}
+	// A missing extrafanart folder means a missing file; one that can't be
+	// listed proves nothing, and neither does a symlinked one whose target
+	// can't be reached, which is a share that is down rather than removed.
+	if folder := r.probe(dir); !folder.Reachable {
+		if folder.ErrorCode != rootcheck.ErrCodeNotFound {
+			return false
+		}
+		if link, err := os.Lstat(dir); err == nil && link.Mode()&fs.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return sidecarFileGone(path)
+}
+
+// sidecarFileGone reports whether a sidecar in a folder that answers is gone:
+// missing, or still on disk but passed over by discovery. Any other error
+// proves nothing.
+func sidecarFileGone(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil || errors.Is(err, fs.ErrNotExist)
+}
+
+// folderAnswers reports whether dir answered its probe and listed entries.
+func (r *localArtworkRetention) folderAnswers(dir string) bool {
+	folder := r.probe(dir)
+	return folder.Reachable && !folder.Empty
+}
+
+// probe probes dir once per refresh through rootcheck, with its timeout.
+func (r *localArtworkRetention) probe(dir string) rootcheck.Result {
 	folder, ok := r.probes[dir]
 	if !ok {
 		folder = rootcheck.ProbeWithTimeout(r.ctx, dir, rootcheck.DefaultProbeTimeout)
 		r.probes[dir] = folder
 	}
-	if !folder.Reachable || folder.Empty {
-		return false
-	}
-	_, err := os.Lstat(path)
-	return err == nil || errors.Is(err, fs.ErrNotExist)
+	return folder
 }

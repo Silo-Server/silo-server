@@ -22191,6 +22191,13 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "backdrop_urls": {
+            "description": "Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "badges": {
             "description": "Section-specific badges (new, returning, …)",
             "items": {
@@ -22198,12 +22205,23 @@
             },
             "type": "array"
           },
+          "banner_thumbhash": {
+            "type": "string"
+          },
+          "banner_url": {
+            "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
+            "type": "string"
+          },
           "cast": {
             "description": "Empty, never null",
             "items": {
               "$ref": "#/components/schemas/CastCredit"
             },
             "type": "array"
+          },
+          "clearart_url": {
+            "description": "Presigned, short-lived. Transparent cut-out art. Movies and series only",
+            "type": "string"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",
@@ -22233,6 +22251,10 @@
               "$ref": "#/components/schemas/CrewCredit"
             },
             "type": "array"
+          },
+          "disc_url": {
+            "description": "Presigned, short-lived. Transparent disc art. Movies only",
+            "type": "string"
           },
           "duration_seconds": {
             "format": "double",
@@ -22515,6 +22537,13 @@
           },
           "themes": {
             "$ref": "#/components/schemas/ThemeSongSet"
+          },
+          "thumb_thumbhash": {
+            "type": "string"
+          },
+          "thumb_url": {
+            "description": "Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only",
+            "type": "string"
           },
           "title": {
             "examples": [
@@ -26294,7 +26323,7 @@
         "additionalProperties": false,
         "properties": {
           "client_purpose": {
-            "description": "Purpose the request was opened with",
+            "description": "Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff",
             "examples": [
               "device_login"
             ],
@@ -26385,7 +26414,7 @@
             "type": "boolean"
           },
           "user_code": {
-            "description": "User code; empty once the request is no longer decidable",
+            "description": "User code: eight digits as 4821-7730, or six digits for a Jellyfin Quick Connect request; empty once the request is no longer decidable",
             "examples": [
               "4821-7730"
             ],
@@ -26442,6 +26471,13 @@
             ],
             "type": "boolean"
           },
+          "jellyfin_quick_connect": {
+            "description": "Whether a signed-in approver can look up six-digit Jellyfin Quick Connect codes and approve them for a profile through approve-handoff",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "opened_signal": {
             "description": "Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved",
             "examples": [
@@ -26486,6 +26522,7 @@
         },
         "required": [
           "remote_playback_handoff",
+          "jellyfin_quick_connect",
           "protocol_versions",
           "cancel",
           "opened_signal",
@@ -31061,6 +31098,10 @@
             "description": "Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown",
             "type": "boolean"
           },
+          "extended_item_artwork": {
+            "description": "Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc",
+            "type": "boolean"
+          },
           "original_max_width_px": {
             "format": "int64",
             "type": "integer"
@@ -31108,6 +31149,7 @@
         },
         "required": [
           "episode_still_provenance",
+          "extended_item_artwork",
           "season_list_artwork_param",
           "param",
           "sizes",
@@ -41341,6 +41383,13 @@
             ],
             "type": "boolean"
           },
+          "local": {
+            "description": "The built-in local metadata provider, which reads .nfo files and sidecar artwork. It runs before every remote provider at its level, so it is always listed and stored first.",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "plugin_installation_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -41369,7 +41418,8 @@
           "capability_id",
           "provider_slug",
           "priority",
-          "enabled"
+          "enabled",
+          "local"
         ],
         "type": "object"
       },
@@ -127515,6 +127565,7 @@
     },
     "/api/v2/auth/device": {
       "get": {
+        "description": "A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget.",
         "operationId": "getDeviceLogin",
         "parameters": [
           {
@@ -127531,12 +127582,12 @@
             }
           },
           {
-            "description": "User code from the verification link or typed by the person",
+            "description": "User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token",
             "explode": false,
             "in": "query",
             "name": "code",
             "schema": {
-              "description": "User code from the verification link or typed by the person",
+              "description": "User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token",
               "examples": [
                 "48217730"
               ],
@@ -127564,6 +127615,26 @@
               }
             },
             "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -127594,6 +127665,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -128000,7 +128081,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Approve a remote-playback pairing request for the caller's verified profile.",
+        "summary": "Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.",
         "tags": [
           "device-login"
         ],
@@ -165588,7 +165669,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.",
+        "summary": "Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers. The local metadata entry is stored first in its level whatever priority it is sent with.",
         "tags": [
           "libraries"
         ],

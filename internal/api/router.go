@@ -197,7 +197,11 @@ type Dependencies struct {
 	// shared with the Jellyfin login so both count against one budget.
 	// Nil gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	ClientIPResolver   *clientip.Resolver
+	// QuickConnectCodeAttempts bounds the six-digit Jellyfin Quick Connect
+	// codes each account tries, shared with the Jellyfin-compatible API's
+	// Authorize route. Nil gets a process-local limiter.
+	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
+	ClientIPResolver         *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -633,6 +637,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.UserStoreProvider,
 			profileTokenService,
 		)
+		if deviceLoginService != nil {
+			quickConnectAttempts := deps.QuickConnectCodeAttempts
+			if quickConnectAttempts == nil {
+				quickConnectAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.QuickConnectCodePolicy)
+			}
+			deviceLoginService.WithQuickConnectAttempts(quickConnectAttempts)
+		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		if accessGroupStore != nil {

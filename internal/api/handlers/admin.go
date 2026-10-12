@@ -528,11 +528,24 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 	return true
 }
 
-// rejectScopedAPIKeyUpdate stops a scoped API key from escalating through an
-// existing account: it may neither grant the admin role nor touch the
-// credentials or role of an account that is already an admin — either would
-// hand it an unscoped admin session. Editing an ordinary account, password
-// included, stays in scope.
+// checkScopedAPIKeyUpdate is the mutation policy shared by both API versions.
+// Recovery email is a credential: replacing it lets the key's holder reset
+// the administrator's password and obtain an unrestricted login session.
+// Callers check the account locked by the mutation transaction.
+func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
+	if !actorIsScopedAPIKey(ctx) {
+		return nil
+	}
+	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
+	changesAdminCredentials := target.Role == roleAdmin &&
+		(input.Password != nil || input.Email != nil || input.Role != nil || input.BreakGlass != nil)
+	if grantsAdmin || changesAdminCredentials {
+		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+	}
+	return nil
+}
+
+// rejectScopedAPIKeyUpdate applies the shared policy before v1 validation.
 //
 // It returns the target account when it had to load one, so the caller can
 // reuse it as the pre-update snapshot instead of reading the row twice, and
@@ -546,22 +559,13 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	if !actorIsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
-	if req.Role != nil && *req.Role == roleAdmin {
-		writeError(w, http.StatusForbidden, "insufficient_scope",
-			"A scoped API key may not grant the admin role")
-		return nil, true
-	}
-	if req.Password == nil && req.Role == nil {
-		return nil, false
-	}
-
 	target, blocked := h.loadTargetUser(w, r, id)
 	if blocked {
 		return nil, true
 	}
-	if target.Role == roleAdmin {
-		writeError(w, http.StatusForbidden, "insufficient_scope",
-			"A scoped API key may not change the password or role of an admin account")
+	input := models.UpdateUserInput{Password: req.Password, Email: req.Email, Role: req.Role}
+	if err := checkScopedAPIKeyUpdate(r.Context(), target, input); err != nil {
+		writeAPIError(w, err)
 		return nil, true
 	}
 	return target, false
@@ -1052,8 +1056,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 		// Recheck the scoped-key limits against the locked account: the
 		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
-		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
-			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		if err := checkScopedAPIKeyUpdate(r.Context(), current, updateInput); err != nil {
+			return false, err
 		}
 		// The frozen v1 route keeps the break-glass invariant v2 enforces:
 		// with local password sign-in off, the last usable break-glass admin

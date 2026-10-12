@@ -21,12 +21,19 @@ const (
 	ImageCacheTargetSeasonLocalization = "season_localization"
 	ImageCacheTargetEpisode            = "episode"
 	ImageCacheTargetPerson             = "person"
+	// ImageCacheTargetItemBackdrop is one media_item_backdrops row:
+	// target_content_id is the row ID and series_id the item's content ID.
+	ImageCacheTargetItemBackdrop = "item_backdrop"
 
 	ImageCacheImagePoster   = "poster"
 	ImageCacheImageBackdrop = "backdrop"
 	ImageCacheImageLogo     = "logo"
 	ImageCacheImageStill    = "still"
 	ImageCacheImageProfile  = "profile"
+	ImageCacheImageBanner   = "banner"
+	ImageCacheImageThumb    = "thumb"
+	ImageCacheImageClearArt = "clearart"
+	ImageCacheImageDisc     = "disc"
 
 	ImageCacheStatusQueued    = "queued"
 	ImageCacheStatusRunning   = "running"
@@ -414,9 +421,10 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 // refresh only reaches them through series_id. Item and item_localization
 // rows carry series_id = the item's own content ID, so a movie or a
 // season/episode target still matches on target_content_id alone. Person
-// jobs have an empty series_id and stay out of scope.
+// jobs stay out of scope: a photo an NFO names carries the title's content
+// ID in series_id only to confine its read to that title's library roots.
 func imageCacheTargetScope(param string) string {
-	return "(target_content_id = " + param + " OR series_id = " + param + ")"
+	return "(target_content_id = " + param + " OR (series_id = " + param + " AND target_type <> '" + ImageCacheTargetPerson + "'))"
 }
 
 // recoverExpiredRunning releases jobs whose worker lease expired, burning one
@@ -702,11 +710,10 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	if r == nil || r.pool == nil || job == nil {
 		return "", nil
 	}
-	query, args, ok := currentTargetSourceQuery(job)
+	query, args, ok := currentTargetCachedPathQuery(job)
 	if !ok {
 		return "", nil
 	}
-	query = strings.Replace(query, "_source_path", "_path", 1)
 	var current string
 	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -718,14 +725,28 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	return current, nil
 }
 
+// currentTargetCachedPathQuery reads the served path column beside the source
+// column currentTargetSourceQuery reads ("poster_source_path" ->
+// "poster_path", "source_path" -> "path").
+func currentTargetCachedPathQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
+	query, args, ok := currentTargetSourceQuery(job)
+	return strings.Replace(query, "source_path", "path", 1), args, ok
+}
+
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
 		if !ok {
+			col, ok = itemOnlyArtworkSourceColumn(job.ImageType)
+		}
+		if !ok {
 			return "", nil, false
 		}
 		return fmt.Sprintf("SELECT %s FROM media_items WHERE content_id = $1", col),
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetItemBackdrop:
+		return "SELECT source_path FROM media_item_backdrops WHERE id = $1::bigint",
 			[]any{job.TargetContentID}, true
 	case ImageCacheTargetItemLocalization:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
@@ -764,6 +785,63 @@ func itemArtworkSourceColumn(imageType string) (string, bool) {
 	}
 }
 
+// itemOnlyArtworkSlot is an item image slot that localizations do not carry.
+type itemOnlyArtworkSlot struct {
+	imageType    string
+	sourceColumn string
+	pathColumn   string
+}
+
+// itemOnlyArtworkSlots lists those slots in the order the provider-artwork
+// backfill walks them.
+var itemOnlyArtworkSlots = [...]itemOnlyArtworkSlot{
+	{ImageCacheImageBanner, "banner_source_path", "banner_path"},
+	{ImageCacheImageThumb, "thumb_source_path", "thumb_path"},
+	{ImageCacheImageClearArt, "clearart_source_path", "clearart_path"},
+	{ImageCacheImageDisc, "disc_source_path", "disc_path"},
+}
+
+// itemOnlyArtworkSourceColumn names the source column of the item slots that
+// localizations do not carry.
+func itemOnlyArtworkSourceColumn(imageType string) (string, bool) {
+	for _, slot := range itemOnlyArtworkSlots {
+		if slot.imageType == imageType {
+			return slot.sourceColumn, true
+		}
+	}
+	return "", false
+}
+
+// itemOnlyArtworkRepairBranches adds the item-only slots to
+// enqueueArtworkRepair's candidates, one branch per slot as for the other
+// columns, so a repair by path can use each slot's partial path index.
+func itemOnlyArtworkRepairBranches() string {
+	var b strings.Builder
+	for _, slot := range itemOnlyArtworkSlots {
+		fmt.Fprintf(&b, `
+			UNION ALL
+			SELECT
+				'%[1]s'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.%[2]s,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.%[2]s LIKE '%%://%%'
+			  AND lower(mi.%[2]s) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.%[3]s LIKE '%%://%%' OR mi.%[3]s = '')) OR (mi.%[3]s = ANY($2) AND mi.%[3]s <> ''))`,
+			slot.imageType, slot.sourceColumn, slot.pathColumn)
+	}
+	return b.String()
+}
+
 func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return 0, nil
@@ -796,7 +874,7 @@ func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, path
 	return r.enqueueArtworkRepair(ctx, limit, paths)
 }
 
-const imageCacheDiscoverySurfaceCount = 10
+const imageCacheDiscoverySurfaceCount = 14
 const imageCachePosterPathColumn = "poster_path"
 const imageCacheBackdropPathColumn = "backdrop_path"
 const imageCacheLogoPathColumn = "logo_path"
@@ -947,11 +1025,7 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 	textArgs := []any{limit, cursor.Key}
 	localizedArgs := []any{limit, cursor.Key, cursor.Subkey}
 
-	switch cursor.Surface {
-	case 0, 1, 2:
-		imageType := imageTypes[cursor.Surface]
-		sourceColumn := sourceColumns[cursor.Surface]
-		pathColumn := pathColumns[cursor.Surface]
+	itemQuery := func(imageType, sourceColumn, pathColumn string) (string, []any) {
 		return fmt.Sprintf(`
 			SELECT '%s'::text AS image_type, 'item'::text AS target_type,
 			       mi.content_id AS target_content_id, ''::text AS target_language,
@@ -969,6 +1043,11 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) mi
 		`, imageType, sourceColumn, candidate("mi."+sourceColumn, "mi."+pathColumn)), textArgs
+	}
+
+	switch cursor.Surface {
+	case 0, 1, 2:
+		return itemQuery(imageTypes[cursor.Surface], sourceColumns[cursor.Surface], pathColumns[cursor.Surface])
 	case 3, 4, 5:
 		index := cursor.Surface - 3
 		imageType := imageTypes[index]
@@ -1068,6 +1147,10 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) p
 		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
+	case 10, 11, 12, 13:
+		// Banner, thumb, clear art and disc art, one surface each like 0-2.
+		slot := itemOnlyArtworkSlots[cursor.Surface-10]
+		return itemQuery(slot.imageType, slot.sourceColumn, slot.pathColumn)
 	default:
 		return `SELECT NULL WHERE false`, []any{limit}
 	}
@@ -1590,7 +1673,7 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
+			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))@itemOnlyArtworkBranches
 		),
 		candidates AS (
 			SELECT ac.*
@@ -1616,7 +1699,8 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	`, "@itemOnlyArtworkBranches", itemOnlyArtworkRepairBranches())
+	query = strings.ReplaceAll(query, "@nonProviderSchemes", nonProviderImageSchemesSQL)
 	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
@@ -1661,7 +1745,7 @@ const imageCacheLocalProviderID = "local"
 
 func imageCacheProviderIDFromSource(sourcePath, fallback string) string {
 	if isLocalImageSourcePath(sourcePath) {
-		return imageCacheLocalProviderID
+		return localSourceProviderID(sourcePath)
 	}
 	if provider := providerIDFromPluginURL(sourcePath); provider != "" {
 		return provider

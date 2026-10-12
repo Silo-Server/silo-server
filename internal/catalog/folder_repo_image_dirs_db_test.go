@@ -40,6 +40,11 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
  ('imgdir-exact','movie','Exact','imgdirtest/exact/','',''),
  ('imgdir-series','series','Series','','',''),
  ('imgdir-gone-series','series','Gone series','','','');
+ UPDATE media_items SET banner_path = 'imgdirtest/movies/1/banner/a.webp', disc_path = 'imgdirtest/movies/1/disc/a.webp'
+ WHERE content_id = 'imgdir-kept';
+ INSERT INTO media_item_backdrops(content_id,ordinal,path) VALUES
+ ('imgdir-kept',1,'imgdirtest/movies/1/extra/b.webp'),
+ ('imgdir-gone',1,'imgdirtest/movies/2/extra/b.webp');
  INSERT INTO seasons(content_id,series_id,season_number,poster_path) VALUES
  ('imgdir-series-s1','imgdir-series',1,'imgdirtest/series/3/season1/p.webp');
  INSERT INTO episodes(content_id,series_id,season_number,episode_number,still_path) VALUES
@@ -52,6 +57,10 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
 		"imgdirtest/",                 // ancestor of live artwork: kept
 		"imgdirtest/movies/",          // ancestor of live artwork: kept
 		"imgdirtest/movies/1/poster/", // live poster: kept
+		"imgdirtest/movies/1/banner/", // live banner: kept
+		"imgdirtest/movies/1/disc/",   // live disc art: kept
+		"imgdirtest/movies/1/extra/",  // live extra backdrop: kept
+		"imgdirtest/movies/2/extra/",  // extra backdrop of an owner being deleted
 		"imgdirtest/series/3/season1/",
 		"imgdirtest/series/3/e1/",
 		"imgdirtest/exact/",           // a stored path that is itself the directory
@@ -79,7 +88,7 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
 		{
 			name:     "owners being deleted",
 			deleting: []string{"imgdir-gone", "imgdir-gone-series"},
-			want:     append(slices.Clone(alwaysUnreferenced), "imgdirtest/movies/2/poster/", "imgdirtest/series/4/e1/"),
+			want:     append(slices.Clone(alwaysUnreferenced), "imgdirtest/movies/2/poster/", "imgdirtest/movies/2/extra/", "imgdirtest/series/4/e1/"),
 		},
 		{name: "empty deleting set", deleting: []string{}, want: alwaysUnreferenced},
 		{name: "nil deleting set", deleting: nil, want: alwaysUnreferenced},

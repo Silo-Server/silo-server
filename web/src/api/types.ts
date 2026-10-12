@@ -3747,6 +3747,8 @@ export interface LibraryProviderChainEntry {
   provider_slug: string;
   priority: number;
   enabled: boolean;
+  /** The built-in local metadata provider (.nfo files and sidecar artwork), always first. */
+  local: boolean;
 }
 
 export interface LibraryProviderChainResponse {

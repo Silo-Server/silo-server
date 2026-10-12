@@ -560,3 +560,35 @@ func TestPhase2_NFOMetadataDoesNotInjectProviderIDs(t *testing.T) {
 		t.Errorf("item imdb id = %q, want empty (NFO must not extend a remotely-anchored identity)", item.ImdbID)
 	}
 }
+
+// Manual refresh: an NFO ID already recorded as dead neither re-matches the
+// item nor counts as a correction, so the valid stored ID stays.
+func TestManualRefresh_DeadNFOHintKeepsStoredID(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	seedMovieItem(t, h, "movie:tmdb:100", "Stored Movie", 2018)
+	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+	staleRepo := newFakeStaleIDRepo()
+	staleRepo.set("movie:tmdb:100", &models.StaleMediaID{ContentID: "movie:tmdb:100", Provider: "tmdb", ProviderID: "200"})
+	h.service.staleIDRepo = staleRepo
+
+	nfo := &localHintStubProvider{
+		hints:    map[string]string{"tmdb": "200"},
+		metadata: &MetadataResult{HasMetadata: true, Title: "Stored Movie"},
+	}
+	remote := &remoteStubProvider{
+		slug:     "tmdb",
+		metadata: &MetadataResult{HasMetadata: true, Title: "Stored Movie", ProviderIDs: map[string]string{"tmdb": "100"}},
+	}
+
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID: "movie:tmdb:100",
+		Language:  "en",
+		Mode:      ModeManualRefresh,
+	}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if got := remote.lastMetadataIDs()["tmdb"]; got != "100" {
+		t.Errorf("manual refresh tmdb id = %q, want the stored 100 (the NFO's 200 is dead)", got)
+	}
+}

@@ -152,8 +152,13 @@ type PersonPhotoUpdater interface {
 	UpdatePhotoIfSourceMatches(ctx context.Context, personID int64, sourcePath, cachedPath, thumbhash string) (bool, error)
 }
 
+type ItemBackdropArtworkUpdater interface {
+	UpdateArtworkIfSourceMatches(ctx context.Context, id int64, sourcePath, cachedPath, thumbhash string) (bool, error)
+}
+
 type ImageCacheProcessorTargets struct {
 	Items               ItemArtworkUpdater
+	ItemBackdrops       ItemBackdropArtworkUpdater
 	Seasons             SeasonArtworkUpdater
 	Episodes            EpisodeStillUpdater
 	ItemLocalizations   ItemLocalizationArtworkUpdater
@@ -808,11 +813,14 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		return imageCacheProcessResult{outcome: "skipped"}
 	}
 
-	if isLocalImageSourcePath(job.SourcePath) {
+	downloadURL := job.SourcePath
+	if url, ok := localMetadataImageURL(job.SourcePath); ok {
+		// An image URL an NFO names downloads like a provider's, through the
+		// cacher's public-address guard.
+		downloadURL = url
+	} else if isLocalImageSourcePath(job.SourcePath) {
 		return p.processLocalOne(ctx, job, imageType)
 	}
-
-	downloadURL := job.SourcePath
 	if isProviderImagePath(downloadURL) {
 		if p.resolver == nil {
 			p.markFailed(ctx, job, "missing image resolver")
@@ -882,6 +890,15 @@ func (p *ImageCacheProcessor) updateTargetArtwork(ctx context.Context, job *mode
 			return false, errors.New("missing item updater")
 		}
 		return p.targets.Items.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, thumbhash)
+	case ImageCacheTargetItemBackdrop:
+		if p.targets.ItemBackdrops == nil {
+			return false, errors.New("missing item backdrop updater")
+		}
+		rowID, parseErr := strconv.ParseInt(job.TargetContentID, 10, 64)
+		if parseErr != nil {
+			return false, fmt.Errorf("invalid item backdrop image cache target %q: %w", job.TargetContentID, parseErr)
+		}
+		return p.targets.ItemBackdrops.UpdateArtworkIfSourceMatches(ctx, rowID, job.SourcePath, cachedPath, thumbhash)
 	case ImageCacheTargetItemLocalization:
 		if p.targets.ItemLocalizations == nil {
 			return false, errors.New("missing item localization updater")
@@ -979,6 +996,17 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	}
 
 	digest := sha256.Sum256(data)
+	discriminator := hex.EncodeToString(digest[:4])
+	if job.TargetType == ImageCacheTargetItemBackdrop {
+		// An item's backdrops share its key folder, and two sidecars can hold
+		// the same bytes. A hash of the sidecar's own path keeps each file's
+		// key apart from the primary's and every other file's, so the
+		// stale-prefix cleanup below never deletes art another backdrop shows,
+		// even after rows shift. A backdrop that moves to another row keeps
+		// its key.
+		pathDigest := sha256.Sum256([]byte(localPath))
+		discriminator += "-" + hex.EncodeToString(pathDigest[:4])
+	}
 	result, err := byteCacher.CacheImageBytes(ctx, data, CacheImageRequest{
 		SourceURL:        job.SourcePath,
 		ProviderID:       imageCacheLocalProviderID,
@@ -988,7 +1016,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		SeasonNumber:     job.SeasonNumber,
 		EpisodeNumber:    job.EpisodeNumber,
 		Language:         job.TargetLanguage,
-		KeyDiscriminator: hex.EncodeToString(digest[:4]),
+		KeyDiscriminator: discriminator,
 	})
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
@@ -1163,6 +1191,14 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 		return ImageStill, nil
 	case ImageCacheImageProfile:
 		return ImageProfile, nil
+	case ImageCacheImageBanner:
+		return ImageBanner, nil
+	case ImageCacheImageThumb:
+		return ImageThumb, nil
+	case ImageCacheImageClearArt:
+		return ImageClearArt, nil
+	case ImageCacheImageDisc:
+		return ImageDisc, nil
 	default:
 		return ImagePoster, fmt.Errorf("unknown metadata image cache image type %q", value)
 	}

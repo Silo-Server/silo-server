@@ -3162,6 +3162,8 @@ func itemColumnsList(alias string) []string {
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
 		"advisory_age", "advisory_source",
+		// Jellyfin-compatible lists advertise these images from the paths.
+		"banner_path", "thumb_path", "clearart_path", "disc_path",
 	}
 	prefixed := make([]string, len(cols))
 	for i, c := range cols {
@@ -3177,8 +3179,8 @@ func itemColumnsList(alias string) []string {
 	return prefixed
 }
 
-// itemColumns returns the SELECT column list matching scanMediaItems.
-// Mirrors catalog.browseItemColumns.
+// itemColumns returns the SELECT column list matching scanMediaItems by
+// position. It carries the columns section rows need, not catalog's list.
 func itemColumns(alias string) string {
 	return strings.Join(itemColumnsList(alias), ", ")
 }
@@ -3239,6 +3241,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 			&item.AdvisoryAge, &item.AdvisorySource,
+			&item.BannerPath, &item.ThumbPath, &item.ClearArtPath, &item.DiscPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning item: %w", err)

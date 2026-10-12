@@ -451,6 +451,14 @@ func imageTypeName(t metadata.ImageType) string {
 		return "still"
 	case metadata.ImageProfile:
 		return "profile"
+	case metadata.ImageBanner:
+		return "banner"
+	case metadata.ImageThumb:
+		return "thumb"
+	case metadata.ImageClearArt:
+		return "clearart"
+	case metadata.ImageDisc:
+		return "disc"
 	default:
 		return "unknown"
 	}
