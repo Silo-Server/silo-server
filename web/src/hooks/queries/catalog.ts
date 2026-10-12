@@ -377,6 +377,19 @@ export function useCatalogWindow(
     return { maxLoadedEnd, highestPageHasMore };
   }, [limit, pageResults]);
 
+  // The furthest any page of this browse and snapshot has loaded. Pages
+  // scrolled out of the window drop out of `pageResults`, but the titles they
+  // returned still exist; a new snapshot starts over.
+  const loadedEndKey = `${estimateKey}|${snapshot ?? ""}`;
+  const [loadedEndMark, setLoadedEndMark] = useState({ key: loadedEndKey, end: 0 });
+  const loadedEnd = Math.max(
+    nonExactPageStats.maxLoadedEnd,
+    loadedEndMark.key === loadedEndKey ? loadedEndMark.end : 0,
+  );
+  if (loadedEndMark.key !== loadedEndKey || loadedEndMark.end < loadedEnd) {
+    setLoadedEndMark({ key: loadedEndKey, end: loadedEnd });
+  }
+
   const initialEstimatedTotalItems = useMemo(() => {
     if (page0Result.data?.total_exact !== false) {
       return page0Result.data?.total ?? 0;
@@ -441,12 +454,10 @@ export function useCatalogWindow(
       title,
       totalItems,
       // Items known to exist: the exact total when the source reports one,
-      // else the end of the furthest loaded page. Unlike `totalItems`, never
+      // else the end of the furthest page loaded. Unlike `totalItems`, never
       // the scroll runway estimated past it.
       knownItems:
-        page0Result.data?.total_exact !== false
-          ? (page0Result.data?.total ?? 0)
-          : nonExactPageStats.maxLoadedEnd,
+        page0Result.data?.total_exact !== false ? (page0Result.data?.total ?? 0) : loadedEnd,
       pages,
       // Collection sources report the order they actually resolved in, after
       // the viewer's saved override and the collection's configured default.
