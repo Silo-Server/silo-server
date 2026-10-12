@@ -190,7 +190,9 @@ func TestGetSeasons_SeasonNFOAndPoster(t *testing.T) {
 	writeTestFile(t, filepath.Join(s1, "season.nfo"),
 		`<season><title>Course A: Classic</title><plot>Classic plan.</plot><seasonnumber>1</seasonnumber></season>`)
 	writeTestFile(t, filepath.Join(s1, "poster.jpg"), "img")
+	writeTestFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
 	writeTestFile(t, filepath.Join(s2, "season.nfo"), `<season><title>Course B</title></season>`)
+	writeTestFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
 	// Season 2 poster lives at the series root using the seasonNN-poster form.
 	writeTestFile(t, filepath.Join(root, "season02-poster.jpg"), "img")
 
@@ -230,6 +232,7 @@ func TestGetSeasons_NumberConflictPrefersDirectoryNumber(t *testing.T) {
 
 	root := t.TempDir()
 	s2 := filepath.Join(root, "Season 02")
+	writeTestFile(t, filepath.Join(s2, "Show S02E01.mkv"), "video")
 	writeTestFile(t, filepath.Join(s2, "season.nfo"),
 		`<season><title>Course B</title><seasonnumber>7</seasonnumber></season>`)
 
@@ -253,6 +256,9 @@ func TestGetSeasons_NoSidecarsReturnsNothing(t *testing.T) {
 	root := t.TempDir()
 	s1 := filepath.Join(root, "Season 01")
 	if err := os.MkdirAll(s1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s1, "Show S01E01.mkv"), []byte("video"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	p := NewProvider()

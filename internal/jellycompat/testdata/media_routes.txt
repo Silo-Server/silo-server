@@ -46,7 +46,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -83,6 +87,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media
@@ -203,7 +208,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -240,6 +249,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media

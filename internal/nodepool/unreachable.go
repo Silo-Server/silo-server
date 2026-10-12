@@ -8,8 +8,6 @@ import (
 	"net"
 	"syscall"
 	"time"
-
-	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // A transcode node that dies between health sweeps keeps winning selection
@@ -235,16 +233,14 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 				}
 				return
 			}
-			healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess := CheckNode(ctx, n)
-			if !healthy {
+			if !hc.recheckOne(ctx, n, release) {
 				continue
 			}
-			release()
 			// Every entry for the endpoint was marked, so every one comes back;
 			// two rows can name it with and without a trailing slash.
 			for _, entry := range hc.transcodePool.Nodes() {
-				if entry != nil && sameNodeURL(entry.URL, nodeURL) {
-					hc.applyRecheckedHealth(ctx, entry, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess)
+				if entry != nil && entry.ID != n.ID && sameNodeURL(entry.URL, nodeURL) {
+					hc.checkOne(ctx, entry, hc.transcodePool.ApplyHealthReport, hc.transcodePool.ApplyCapabilities)
 				}
 			}
 			return
@@ -252,23 +248,17 @@ func (hc *HealthChecker) recheckUnreachable(ctx context.Context, nodeURL string)
 	})
 }
 
-// applyRecheckedHealth publishes a successful recheck for one pool entry.
-func (hc *HealthChecker) applyRecheckedHealth(ctx context.Context, n *Node, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) {
-	hc.transcodePool.ApplyHealth(n.ID, n.URL, true, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
-	// Persisted like a sweep result: the node configuration reconciliation
-	// rebuilds the pool from the stored rows every few seconds, and a sweep
-	// that saw the node down would otherwise take it back out until the next
-	// sweep.
-	if hc.repo != nil {
-		if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, true, activeJobs, egressKbps, lastStats, networkAccess); err != nil && !errors.Is(err, ErrNodeMoved) {
-			slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
-		}
+// recheckOne checks n under its check lock, as the sweep does, so the result
+// cannot overwrite a newer check of the node. Only an answer is published, and
+// release lets go of the recheck slot first. Reports whether n answered.
+func (hc *HealthChecker) recheckOne(ctx context.Context, n *Node, release func()) bool {
+	unlock := hc.lockNodeCheck(n.ID)
+	defer unlock()
+	report := CheckNodeReport(ctx, n)
+	if !report.Healthy {
+		return false
 	}
-	slog.InfoContext(ctx, "stream node answered a recheck after a connection failure", "component", "nodepool",
-		"id", n.ID, "name", n.Name, "url", n.URL)
-	// A node back from a crash may come back with different hardware, which
-	// the sweep would otherwise only notice on its next pass.
-	if capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
-		hc.startCapabilityRefresh(ctx, n, hc.transcodePool.ApplyCapabilities)
-	}
+	release()
+	hc.publishHealth(ctx, n, report, hc.transcodePool.ApplyHealthReport, hc.transcodePool.ApplyCapabilities)
+	return true
 }

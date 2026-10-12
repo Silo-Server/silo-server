@@ -325,7 +325,7 @@ func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
 		t.Fatal("a pool reload from stale rows undid the mark")
 	}
 
-	pool.ApplyHealth(3, "http://node:8080", true, 0, 0, "", nil, nil, time.Now())
+	pool.ApplyHealthReport(3, "http://node:8080", HealthReport{Healthy: true}, time.Now())
 	pool.SetNodes(row())
 	if !planner.TranscodeNodeHealthy("http://node:8080") {
 		t.Fatal("a successful health check did not clear the mark")
@@ -396,7 +396,7 @@ func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
 	pool.MarkUnreachable("http://worker:8080")
 
 	// A late result for a node that used to have this URL under another id.
-	pool.ApplyHealth(3, "http://worker:8080", true, 0, 0, "", nil, nil, time.Now())
+	pool.ApplyHealthReport(3, "http://worker:8080", HealthReport{Healthy: true}, time.Now())
 	pool.SetNodes(row())
 	if pool.FindByURL("http://worker:8080").Healthy {
 		t.Fatal("a result about another node cleared the mark")
@@ -418,5 +418,28 @@ func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
 		if !n.Healthy {
 			t.Fatalf("node %d at the rechecked endpoint is still unhealthy", n.ID)
 		}
+	}
+}
+
+// A node can come back from a connection failure draining, after a restart
+// that is winding it down. The recheck must publish that, or placement would
+// send it new work until the next sweep.
+func TestRecheckPublishesTheDrainStateTheNodeAnsweredWith(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: string(DrainStateDraining)})
+	}))
+	t.Cleanup(server.Close)
+	pool := NewTranscodePool()
+	pool.SetNodes([]*Node{{ID: 1, URL: server.URL, Type: NodeTypeTranscode, Enabled: true, Healthy: true}})
+	checker := NewHealthChecker(NewProxyPool(), pool, nil)
+	checker.ReportUnreachable(server.URL)
+	checker.rechecks.Wait()
+
+	n := pool.FindByURL(server.URL)
+	if !n.Healthy || n.DrainState != DrainStateDraining {
+		t.Fatalf("after the recheck healthy=%v drain_state=%q, want healthy and draining", n.Healthy, n.DrainState)
+	}
+	if n.TakesNewWork() {
+		t.Fatal("a node that answered draining takes new work")
 	}
 }

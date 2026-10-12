@@ -45,6 +45,7 @@ func (t *trickplayWork) resolver() *mediasample.HardwareResolver {
 // answers 503 node_busy past that, runs it at idle priority, and decodes on
 // its own hardware: hardware attempts it cannot run are dropped.
 func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	var req mediasample.Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrickplayRequestBytes)).Decode(&req); err != nil {
 		writeTrickplayError(w, http.StatusBadRequest, trickplay.ExtractError{Reason: trickplayInvalidRequest, Message: "invalid request body"})
@@ -55,6 +56,10 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !s.requireApprovedInputPath(w, r, req.Input) {
+		return
+	}
+	if s.draining() {
+		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: errNodeDraining})
 		return
 	}
 	cfg := s.watcher.Config()

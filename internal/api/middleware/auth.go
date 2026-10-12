@@ -202,6 +202,48 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// AttachSession is for public routes whose answer depends on whether a
+// signed-in person asks. It puts the claims of a valid login session's
+// access token in the request context, as RequireAuth would, and otherwise
+// lets the request through anonymously: a missing, invalid or expired token,
+// a revoked session, an API key, a session restricted to changing its
+// temporary password, or a session check that cannot run all leave it
+// anonymous. It never refuses a request.
+func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if claims := am.sessionClaims(r); claims != nil {
+			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+				uid := claims.UserID
+				lc.UserID = &uid
+				lc.ImpersonatorUserID = claims.ImpersonatorUserID
+				lc.SessionID = claims.SessionID
+			}
+			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sessionClaims returns the claims of r's access token when it belongs to an
+// active login session, or nil.
+func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
+	token, ok := extractBearerToken(r)
+	if !ok || strings.HasPrefix(token, "sa_") {
+		return nil
+	}
+	claims, err := am.tokenValidator.ValidateToken(token)
+	if err != nil || claims == nil || claims.UserID <= 0 || claims.TokenType != auth.TokenTypeAccess ||
+		claims.PasswordChangeRequired {
+		return nil
+	}
+	role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+	if err != nil || !active || role != claims.Role {
+		return nil
+	}
+	am.sessionLastSeen.Touch(claims.SessionID)
+	return claims
+}
+
 // passwordChangeRoutes are the only routes a session holding a temporary
 // password may call: enough to read the account, replace the password, and
 // sign out. Refreshing the session afterwards is a public route; the refreshed

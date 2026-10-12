@@ -59,6 +59,14 @@ affect work admitted after the first attempt. Operator observation and a new
 explicit decision are required after uncertainty. This description does not change
 the operations API's scheduling, UI or existing worker client behavior.
 
+A draining transcode node ([node-drain.md](node-drain.md)) refuses new work
+with `503`: `POST /transcode/start` answers plain-text `node is draining`
+unless it replaces a session the node runs, and download preparation,
+trickplay extraction, chapter-thumbnail extraction and media sampling answer
+their existing unavailable shapes. Reads, deletes, stops and the traffic of
+running sessions are unaffected. Its health `status` is `draining`, then
+`drained`.
+
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
 Only a nonempty `input_path` is required by the handler; omitted seek/tone-map

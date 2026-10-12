@@ -123,6 +123,10 @@ type Dependencies struct {
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
+	// ShuttingDown reports whether this process has begun shutting down.
+	// /api/v1/ready fails once it does, while the server still answers
+	// requests. May be nil.
+	ShuttingDown func() bool
 	// OnConfigChange registers a callback fired after a live config reload
 	// actually changes the config. May be nil when hot reload is not wired.
 	OnConfigChange               func(fn func(old, updated *config.Config))
@@ -193,7 +197,11 @@ type Dependencies struct {
 	// shared with the Jellyfin login so both count against one budget.
 	// Nil gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	ClientIPResolver   *clientip.Resolver
+	// QuickConnectCodeAttempts bounds the six-digit Jellyfin Quick Connect
+	// codes each account tries, shared with the Jellyfin-compatible API's
+	// Authorize route. Nil gets a process-local limiter.
+	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
+	ClientIPResolver         *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -421,6 +429,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Blobs.Assets)
+	readyHandler.SetShuttingDown(deps.ShuttingDown)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
@@ -628,6 +637,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.UserStoreProvider,
 			profileTokenService,
 		)
+		if deviceLoginService != nil {
+			quickConnectAttempts := deps.QuickConnectCodeAttempts
+			if quickConnectAttempts == nil {
+				quickConnectAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.QuickConnectCodePolicy)
+			}
+			deviceLoginService.WithQuickConnectAttempts(quickConnectAttempts)
+		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		if accessGroupStore != nil {
@@ -2795,6 +2811,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
+		v2deps.AdminNodeDrain = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
 		// Network access admin operations fan out to every enabled proxy node
 		// over its bearer routes, the same way force-reload does.

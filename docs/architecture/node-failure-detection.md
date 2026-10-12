@@ -56,10 +56,13 @@ health result for the node, or the node leaving the pool, clears its entry.
 A mark must not keep a healthy node out for a whole sweep interval. The health
 checker rechecks a marked node right away, then up to twice more five seconds
 apart. The first successful recheck or sweep puts it back, so a node that
-answers loses milliseconds of selection to one transient error. A successful
-recheck is stored like a sweep result, so the reconciliation cannot restore an
-older failed sweep over it. A node that fails every recheck stays out until a
-sweep finds it answering.
+answers loses milliseconds of selection to one transient error. A recheck holds
+the node's check lock, like the sweep and the check a drain announcement starts,
+so it cannot overwrite a newer result. A successful recheck is published and
+stored like a sweep result, drain state included: the reconciliation cannot
+restore an older failed sweep over it, and a node that comes back draining takes
+no new work. A node that fails every recheck stays out until a sweep finds it
+answering.
 
 After a failed start, or a Jellyfin-compatible start whose first manifest fetch
 fails, the start paths send the node a stop request in case it started the job.

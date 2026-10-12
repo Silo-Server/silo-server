@@ -1387,6 +1387,14 @@ func TestShouldReanchorProviderContentIDRequiresManualRefreshOrCorrection(t *tes
 			contentID: anchoredID, mode: ModeScheduledRefresh, corrected: true,
 		},
 		{
+			name:      "initial match keeping the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch,
+		},
+		{
+			name:      "initial match whose NFO ids replaced the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch, corrected: true, want: true,
+		},
+		{
 			name:      "manual refresh",
 			contentID: anchoredID, mode: ModeManualRefresh, want: true,
 		},

@@ -444,6 +444,30 @@ sign in to Silo first: Jellyfin clients cannot run the password change it requir
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
 
+### Quick Connect
+
+Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
+([device-login.md](architecture/device-login.md#jellyfin-quick-connect)). It
+needs no Silo password, so it also serves accounts that sign in only through an
+external provider, and it picks the profile without the `username#profile`
+syntax.
+
+| Route | Behavior |
+|---|---|
+| `GET /QuickConnect/Enabled` | `true` whenever device sign-in is wired. |
+| `POST /QuickConnect/Initiate` (and `GET`, for Jellyfin 10.8 apps) | Opens a request and answers Jellyfin's `QuickConnectResult`: a six-digit `Code` without a leading zero, a 64-character hex `Secret`, and `DeviceName`, `AppName`, `DeviceId` and `AppVersion` from the MediaBrowser authorization header. |
+| `GET /QuickConnect/Connect?secret=` | `Authenticated: false` while pending, `true` once approved or collected, with the same `Code` on every poll. A denied, expired or unknown request is `404`, so the app stops polling. The secret parameter matches in any case. |
+| `POST /QuickConnect/Authorize?code=` | From an app already signed in here: approves the code for the session's own account and profile and answers `true`. An API key is refused; `userId`, if given, must be the session's own user (`403`). An unknown or finished code is `404`, a code another approver already approved is `409`, and a spent code budget is `429` with `Retry-After`. |
+| `POST /Users/AuthenticateWithQuickConnect` | Exchanges the secret of an approved request for a session answered like `AuthenticateByName`. Asking again with the same secret while the request lives returns the same session, as Jellyfin does, so an app that lost the answer can still sign in; once the app signs out, it is `404`. Its user name is what password sign-in accepts for the same profile: `username#profile`, or the bare account name for the profile named after the account. A secret that is not approved is `404`. |
+
+A person approves the code on `/activate` or in a Silo app, choosing one of the
+account's profiles (a PIN profile needs its PIN), or from a signed-in Jellyfin
+app with `Authorize`. The request expires, is held open by approver lookups,
+and survives a node restart exactly as a device sign-in request does. Jellyfin
+has no route for an app to withdraw its own request; an abandoned code expires.
+Authorize also spends the account's Quick Connect code budget; the
+per-address budgets are listed under [Rate limiting](#rate-limiting).
+
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
 apply to the returned list. Current native play state is included when locally
@@ -505,6 +529,10 @@ trusted-proxy resolution and ingress-token stripping, as on the native API.
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
   against the same per-IP `login` counter.
+- The Quick Connect routes spend the native device sign-in budgets, as the
+  native device operations do: Initiate spends `device_start`, Connect and
+  `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize
+  spends `device_lookup` in place of the generic limiter.
 - Authenticated routes, media and HLS included, run the generic limiter
   (global and per-IP) after authentication, as the native authenticated routes
   and v2 playback delivery do. Unauthenticated requests are refused before they
@@ -547,9 +575,8 @@ probed `original` disposition in the native track model), the
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 remembered per-item subtitle selections, and `Accept-Language` localization.
-`/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay group operations
-are not served. `/SyncPlay/List` only provides the empty discovery response
-described above.
+`/Devices`, `/Playlists`, and SyncPlay group operations are not served.
+`/SyncPlay/List` only provides the empty discovery response described above.
 
 The compatibility surface does not add audio-library playback, Live TV, IPTV,
 DVR, or `.strm` support. See `docs/non-goals.md` for permanent product boundaries.

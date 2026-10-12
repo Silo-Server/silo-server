@@ -2,13 +2,18 @@ package jellycompat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -24,7 +29,17 @@ var (
 	ErrProfileHasPIN = errors.New("profile is PIN protected")
 	// ErrInvalidPIN indicates the provided PIN did not match.
 	ErrInvalidPIN = errors.New("invalid profile PIN")
+	// ErrQuickConnectNotAuthorized indicates a Quick Connect secret that is
+	// not an approved, uncollected request.
+	ErrQuickConnectNotAuthorized = errors.New("quick connect request is not authorized")
 )
+
+// quickConnectCollector exchanges an approved Quick Connect secret for a
+// login session of the approving account and names the approved profile
+// (auth.DeviceLoginService.CollectQuickConnect).
+type quickConnectCollector interface {
+	CollectQuickConnect(ctx context.Context, secret string, persist auth.QuickConnectPersist) (*auth.DeviceLoginPollResult, error)
+}
 
 // LoginResolver performs username#profile login resolution against Silo.
 type LoginResolver struct {
@@ -37,6 +52,9 @@ type LoginResolver struct {
 	// guesses here count against the same per-profile budget. Nil allows
 	// every attempt.
 	pinAttempts *ratelimit.AttemptLimiter
+	// quickConnect collects approved Quick Connect requests. Nil refuses
+	// every Quick Connect sign-in.
+	quickConnect quickConnectCollector
 }
 
 // NewLoginResolver creates a new login resolver using direct auth service.
@@ -59,6 +77,12 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 // WithPINAttempts sets the per-profile PIN attempt limiter and returns r.
 func (r *LoginResolver) WithPINAttempts(l *ratelimit.AttemptLimiter) *LoginResolver {
 	r.pinAttempts = l
+	return r
+}
+
+// WithQuickConnect sets the Quick Connect collector and returns r.
+func (r *LoginResolver) WithQuickConnect(c quickConnectCollector) *LoginResolver {
+	r.quickConnect = c
 	return r
 }
 
@@ -135,25 +159,97 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
+	session := r.newSession(r.tokenGenerator(), combinedUsername, user, tokenPair, profile.ID, profile.Name)
+	if err := r.sessions.Put(session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+// ResolveQuickConnect exchanges an approved Quick Connect secret for a compat
+// session bound to the profile the approver chose. The approver already
+// verified that profile, so no PIN is asked here. The session is stored in
+// the transaction that consumes the request, under a token derived from the
+// secret, so asking again while the request lives returns the same session,
+// as Jellyfin answers a collected secret until it expires. An app that lost
+// the first answer can still sign in, and no second login session is minted.
+func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) (*Session, error) {
+	if r.quickConnect == nil {
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	token := quickConnectSessionToken(secret)
+	var session *Session
+	result, err := r.quickConnect.CollectQuickConnect(ctx, secret, func(ctx context.Context, tx pgx.Tx, result *auth.DeviceLoginPollResult) error {
+		// Collection loaded the approved profile under the request's lock.
+		stored, err := r.sessions.PutTx(ctx, tx, r.newSession(token,
+			quickConnectUsername(result.User.Username, result.ProfileName),
+			result.User, result.TokenPair, result.ProfileID, result.ProfileName))
+		if err != nil {
+			return err
+		}
+		session = &stored
+		return nil
+	})
+	if errors.Is(err, auth.ErrDeviceLoginNotFound) {
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	if errors.Is(err, auth.ErrDeviceLoginNoProfile) {
+		return nil, ErrProfileNotFound
+	}
+	if err != nil {
+		return nil, mapAuthError(err)
+	}
+	if session != nil {
+		return session, nil
+	}
+	if result.Status != auth.DeviceLoginStatusConsumed {
+		// Pending, denied, withdrawn or expired.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	existing, err := r.sessions.Lookup(ctx, token)
+	if errors.Is(err, ErrSessionNotFound) {
+		// The app signed out since.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	return existing, err
+}
+
+// quickConnectSessionToken is the compat token of the session a Quick
+// Connect secret buys. It is derived one-way from the secret, so only the
+// app holding the secret can compute it, and the stored token says nothing
+// about the secret.
+func quickConnectSessionToken(secret string) string {
+	sum := sha256.Sum256([]byte("silo-quick-connect-session:" + strings.TrimSpace(secret)))
+	return hex.EncodeToString(sum[:16])
+}
+
+// quickConnectUsername is the name a Quick Connect session reports: the
+// username#profile form password sign-in accepts for the same profile, or the
+// account name alone when the profile carries it.
+func quickConnectUsername(account, profile string) string {
+	if strings.EqualFold(account, profile) {
+		return account
+	}
+	return account + "#" + profile
+}
+
+// newSession builds a compat session for the account's token pair, bound to
+// one profile.
+func (r *LoginResolver) newSession(token, username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) Session {
 	now := r.now()
-	session := Session{
-		Token:                 r.tokenGenerator(),
-		Username:              combinedUsername,
+	return Session{
+		Token:                 token,
+		Username:              username,
 		AccountUsername:       user.Username,
-		ProfileID:             profile.ID,
-		ProfileName:           profile.Name,
-		PseudoUserID:          PseudoUserID(user.ID, profile.ID),
+		ProfileID:             profileID,
+		ProfileName:           profileName,
+		PseudoUserID:          PseudoUserID(user.ID, profileID),
 		StreamAppUserID:       user.ID,
 		StreamAppAccessToken:  tokenPair.AccessToken,
 		StreamAppRefreshToken: tokenPair.RefreshToken,
 		StreamAppTokenExpiry:  now.Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
 		CreatedAt:             now,
 	}
-	if err := r.sessions.Put(session); err != nil {
-		return nil, err
-	}
-
-	return &session, nil
 }
 
 // splitPasswordPIN splits "password#pin" at the last '#'.

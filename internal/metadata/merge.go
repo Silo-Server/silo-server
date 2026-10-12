@@ -74,10 +74,8 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 		mergeStringSlice(&target.Keywords, source.Keywords, mode)
 	}
 
-	// Smart merge people (unified cast/crew)
-	if !isLocked(FieldCast) || !isLocked(FieldCrew) {
-		mergePeople(&target.People, source.People, mode)
-	}
+	// Smart merge people (unified cast/crew); each role group has its own lock.
+	mergePeopleUnlocked(&target.People, source.People, mode, isLocked(FieldCast), isLocked(FieldCrew))
 
 	// Images
 	if !isLocked(FieldImages) {
@@ -149,9 +147,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 		mergeStringSlice(&target.Countries, source.Countries, mode)
 		mergeStringSlice(&target.Keywords, source.Keywords, mode)
 	}
-	if !isLocked(FieldCast) || !isLocked(FieldCrew) {
-		mergePeople(&target.People, source.People, mode)
-	}
+	mergePeopleUnlocked(&target.People, source.People, mode, isLocked(FieldCast), isLocked(FieldCrew))
 	if !isLocked(FieldVideos) {
 		mergeVideos(&target.Videos, source.Videos)
 	}
@@ -379,6 +375,46 @@ func mergePrioritizedStringSlice(target *[]string, source []string, mode MergeMo
 	}
 }
 
+// isCastKind reports whether a credit belongs to the cast (FieldCast) rather
+// than the crew (FieldCrew).
+func isCastKind(kind models.PersonKind) bool {
+	return kind == models.PersonKindActor || kind == models.PersonKindGuestStar
+}
+
+// splitPeopleByRole splits credits into cast and crew, keeping their order.
+func splitPeopleByRole(people []models.ItemPerson) (cast, crew []models.ItemPerson) {
+	for _, p := range people {
+		if isCastKind(p.Kind) {
+			cast = append(cast, p)
+		} else {
+			crew = append(crew, p)
+		}
+	}
+	return cast, crew
+}
+
+// mergePeopleUnlocked merges source credits into target, leaving the target's
+// cast alone under a Cast lock and its crew alone under a Crew lock. With one
+// group locked, the other merges on its own and the result lists cast before
+// crew.
+func mergePeopleUnlocked(target *[]models.ItemPerson, source []models.ItemPerson, mode MergeMode, castLocked, crewLocked bool) {
+	switch {
+	case castLocked && crewLocked:
+		return
+	case !castLocked && !crewLocked:
+		mergePeople(target, source, mode)
+		return
+	}
+	targetCast, targetCrew := splitPeopleByRole(*target)
+	sourceCast, sourceCrew := splitPeopleByRole(source)
+	if castLocked {
+		mergePeople(&targetCrew, sourceCrew, mode)
+	} else {
+		mergePeople(&targetCast, sourceCast, mode)
+	}
+	*target = append(targetCast, targetCrew...)
+}
+
 func mergePeople(target *[]models.ItemPerson, source []models.ItemPerson, mode MergeMode) {
 	if len(source) == 0 {
 		return
@@ -391,20 +427,52 @@ func mergePeople(target *[]models.ItemPerson, source []models.ItemPerson, mode M
 		*target = source
 		return
 	}
-	byTmdbID := indexPeopleBy(*target, func(p models.ItemPerson) string { return p.TmdbID })
-	byTvdbID := indexPeopleBy(*target, func(p models.ItemPerson) string { return p.TvdbID })
-	byImdbID := indexPeopleBy(*target, func(p models.ItemPerson) string { return p.ImdbID })
-	byPlexGUID := indexPeopleBy(*target, func(p models.ItemPerson) string { return p.PlexGUID })
-	byNameKind := indexPeopleBy(*target, func(p models.ItemPerson) string {
-		return strings.ToLower(p.Name) + "|" + strconv.Itoa(int(p.Kind))
-	})
-
+	indexes := personMatchIndexes(*target)
 	for _, sp := range source {
-		if idx, ok := findPersonMatch(sp, byTmdbID, byTvdbID, byImdbID, byPlexGUID, byNameKind); ok {
+		if idx, ok := findPersonMatch(sp, indexes...); ok {
 			mergePersonFields(&(*target)[idx], sp)
 		} else {
 			*target = append(*target, sp)
 		}
+	}
+}
+
+// enrichPeople fills IDs, photos and roles on the target's cast (cast true)
+// or crew from the source credits that match them by provider ID or by name
+// and kind. Matching stays within that group, so one person credited as both
+// actor and director is enriched once per credit. Unlike mergePeople it never
+// adds a credit: the target list is authoritative.
+func enrichPeople(target []models.ItemPerson, source []models.ItemPerson, cast bool) {
+	if len(target) == 0 || len(source) == 0 {
+		return
+	}
+	var positions []int
+	var group []models.ItemPerson
+	for i, p := range target {
+		if isCastKind(p.Kind) == cast {
+			positions = append(positions, i)
+			group = append(group, p)
+		}
+	}
+	indexes := personMatchIndexes(group)
+	for _, sp := range source {
+		if idx, ok := findPersonMatch(sp, indexes...); ok {
+			mergePersonFields(&target[positions[idx]], sp)
+		}
+	}
+}
+
+// personMatchIndexes indexes credits by each key findPersonMatch tries, in
+// its order: TMDB, TVDB and IMDb IDs, Plex GUID, then name and kind.
+func personMatchIndexes(people []models.ItemPerson) []map[string]int {
+	return []map[string]int{
+		indexPeopleBy(people, func(p models.ItemPerson) string { return p.TmdbID }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return p.TvdbID }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return p.ImdbID }),
+		indexPeopleBy(people, func(p models.ItemPerson) string { return p.PlexGUID }),
+		indexPeopleBy(people, func(p models.ItemPerson) string {
+			return strings.ToLower(p.Name) + "|" + strconv.Itoa(int(p.Kind))
+		}),
 	}
 }
 
