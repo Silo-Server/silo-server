@@ -325,6 +325,23 @@ watch-together and admin-logs sockets (a watch-together re-check that fails clos
 room). None of them is a token refresh, so a client that signs out only on a refresh 401
 stays signed in and retries.
 
+## Sign-in rate limits
+
+Operations that name a rate-limit budget (`login`, `setup`, `signup`, `invitation`,
+`password_reset`, the `device_*` budgets and the others above) spend one counter per
+budget wherever they run: v1 and v2, and for `login` and the device budgets the
+Jellyfin-compatible listener too. A budget counts per client IP. That is the address taken
+from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
+(`clientip.trusted_proxies`, every private range and loopback by default), otherwise the
+connection's own address.
+
+When the client IP came from those headers, the request also spends a budget keyed on the
+connection's own address: ten times the per-client one, shared by every client behind that
+proxy. Naming a new client in the headers on each request therefore stops at that budget.
+Direct connections and requests through a network access provider, whose plugin writes the
+header itself, spend only the per-client budget. An exhausted budget answers 429 with
+`Retry-After`.
+
 ## Profile PINs
 
 `POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) and v1

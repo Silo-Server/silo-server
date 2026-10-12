@@ -542,7 +542,10 @@ claim remote-control command support.
 The listener uses the native API's rate limiter instance, so the admin
 rate-limit settings, their hot reloads, and the counters (in memory or Redis)
 are shared with the native API. Budgets key on the resolved client IP, after
-trusted-proxy resolution and ingress-token stripping, as on the native API.
+trusted-proxy resolution and ingress-token stripping, as on the native API. A
+sign-in whose client IP came from forwarding headers also spends the
+connection's shared budget, as described in
+[Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
