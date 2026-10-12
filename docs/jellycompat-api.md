@@ -522,12 +522,14 @@ A limited request answers 429 with `Retry-After` and the `X-RateLimit-*`
 headers, in the listener's error envelope:
 `{"Error":"TooManyRequests","Message":"..."}`.
 
-A limited `POST /Users/AuthenticateByName` answers 403 instead, with the same
-headers and envelope. Jellyfin refuses a locked-out account with 403, and Jellyfin
-Web shows a 403 sign-in failure as "not authorized at this time" but reports any
-status other than 401 or 403 as an unreachable server. With rate limiting disabled
-the listener applies no request limit. Profile PIN attempts keep their separate
-per-profile budget (see [auth-api.md](auth-api.md)).
+A limited `POST /Users/AuthenticateByName` from Jellyfin Web (MediaBrowser
+`Client` "Jellyfin Web") answers 403 instead, with the same headers and envelope.
+Jellyfin refuses a locked-out account with 403, and Jellyfin Web shows a 403
+sign-in failure as "not authorized at this time" but any status other than 401 or
+403 as an unreachable server. Other clients keep 429, which some (Streamyfin) show
+as "too many requests" while showing 403 as a permission denial. With rate
+limiting disabled the listener applies no request limit. Profile PIN attempts keep
+their separate per-profile budget (see [auth-api.md](auth-api.md)).
 
 ## Scope and deployment
 

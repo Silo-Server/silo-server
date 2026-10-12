@@ -94,7 +94,7 @@ func signInFrom(router http.Handler, ip, password string) *httptest.ResponseReco
 
 // TestRouterRateLimitsSignInPerClientIP pins that Jellyfin password sign-in
 // spends the native login budget per client IP, rejects with a Jellyfin-style
-// 403 and Retry-After once it is spent, leaves other clients unaffected, and
+// 429 and Retry-After once it is spent, leaves other clients unaffected, and
 // shares its counter with the native login route.
 func TestRouterRateLimitsSignInPerClientIP(t *testing.T) {
 	mw := newTestRateLimit(t, map[string]string{
@@ -110,18 +110,18 @@ func TestRouterRateLimitsSignInPerClientIP(t *testing.T) {
 		}
 	}
 	rec := signInFrom(router, attacker, "right")
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("attempt over budget: status = %d, want 403", rec.Code)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt over budget: status = %d, want 429", rec.Code)
 	}
 	if rec.Header().Get("Retry-After") == "" {
-		t.Fatal("throttled sign-in has no Retry-After header")
+		t.Fatal("429 response has no Retry-After header")
 	}
 	var body errorResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode refusal body %q: %v", rec.Body.String(), err)
+		t.Fatalf("decode 429 body %q: %v", rec.Body.String(), err)
 	}
 	if body.Error != "TooManyRequests" || body.Message == "" {
-		t.Fatalf("refusal body = %+v, want the compat error envelope", body)
+		t.Fatalf("429 body = %+v, want the compat error envelope", body)
 	}
 
 	if rec := signInFrom(router, other, "right"); rec.Code != http.StatusOK {
@@ -203,5 +203,45 @@ func TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly(t *testing.T) {
 	// limiter, matching the native authenticated group.
 	if rec := serveFrom(router, ip, http.MethodGet, "/SyncPlay/List", "", ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated request: status = %d, want 401", rec.Code)
+	}
+}
+
+// TestRouterSignInRefusalStatusPerClient pins the status a throttled sign-in
+// gets: Jellyfin Web, which shows a 429 at sign-in as an unreachable server,
+// gets 403; other clients, such as Streamyfin, keep 429. Both carry
+// Retry-After and spend the same per-IP login counter.
+func TestRouterSignInRefusalStatusPerClient(t *testing.T) {
+	mw := newTestRateLimit(t, map[string]string{
+		"ratelimit.auth.login.requests_per_minute": "1",
+		"ratelimit.auth.login.burst":               "1",
+	})
+	router := newRateLimitedRouter(t, mw, nil)
+	const ip = "203.0.113.30"
+	signInAs := func(client string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/Users/AuthenticateByName", strings.NewReader(`{"Username":"alice","Pw":"wrong"}`))
+		req.RemoteAddr = ip + ":40000"
+		req.Header.Set("X-Emby-Authorization", `MediaBrowser Client="`+client+`", Device="Test", DeviceId="d1", Version="10.11.0"`)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := signInAs("Streamyfin"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("first sign-in: status = %d, want 401 within the budget", rec.Code)
+	}
+	for _, tc := range []struct {
+		client string
+		want   int
+	}{
+		{"Jellyfin Web", http.StatusForbidden},
+		{"Streamyfin", http.StatusTooManyRequests},
+	} {
+		rec := signInAs(tc.client)
+		if rec.Code != tc.want {
+			t.Fatalf("%s over budget: status = %d, want %d", tc.client, rec.Code, tc.want)
+		}
+		if rec.Header().Get("Retry-After") == "" {
+			t.Fatalf("%s refusal has no Retry-After header", tc.client)
+		}
 	}
 }

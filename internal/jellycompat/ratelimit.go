@@ -25,12 +25,25 @@ func compatRateLimit(mw *ratelimit.Middleware) func(http.Handler) http.Handler {
 }
 
 // compatAuthEndpointRateLimit returns the native per-endpoint credential
-// limiter for bucket, refusing with writeCompatSignInRateLimited.
+// limiter for bucket with a Jellyfin-style error body. Jellyfin Web is refused
+// with writeCompatJellyfinWebRateLimited; every other client gets the 429.
+// Both writers spend the same counters.
 func compatAuthEndpointRateLimit(mw *ratelimit.Middleware, bucket string) func(http.Handler) http.Handler {
 	if mw == nil {
 		return passThrough
 	}
-	return mw.AuthEndpointHandlerWithRejectBody(bucket, writeCompatSignInRateLimited)
+	limit := mw.AuthEndpointHandlerWithRejectBody(bucket, writeCompatRateLimited)
+	limitJellyfinWeb := mw.AuthEndpointHandlerWithRejectBody(bucket, writeCompatJellyfinWebRateLimited)
+	return func(next http.Handler) http.Handler {
+		limited, limitedJellyfinWeb := limit(next), limitJellyfinWeb(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if compatClientFamily(r) == compatClientJellyfinWeb {
+				limitedJellyfinWeb.ServeHTTP(w, r)
+				return
+			}
+			limited.ServeHTTP(w, r)
+		})
+	}
 }
 
 func passThrough(next http.Handler) http.Handler { return next }
@@ -42,12 +55,12 @@ func writeCompatRateLimited(w http.ResponseWriter, retryAfterSeconds int) {
 		fmt.Sprintf("Too many requests. Please retry after %d seconds.", retryAfterSeconds))
 }
 
-// writeCompatSignInRateLimited is writeCompatRateLimited with status 403, the
-// status Jellyfin gives a locked-out account: Jellyfin Web shows a 403 sign-in
-// failure as "not authorized at this time" but a 429 as an unreachable server.
-// Any of the credential limiter's budgets can refuse, so the message names no
-// cause. Retry-After is already set.
-func writeCompatSignInRateLimited(w http.ResponseWriter, retryAfterSeconds int) {
+// writeCompatJellyfinWebRateLimited is writeCompatRateLimited with status 403,
+// the status Jellyfin gives a locked-out account. Jellyfin Web shows a 403
+// sign-in failure as "not authorized at this time" but a 429 as an unreachable
+// server. Other clients keep the 429: Streamyfin, for one, shows it as "too
+// many requests" and a 403 as a permission denial. Retry-After is already set.
+func writeCompatJellyfinWebRateLimited(w http.ResponseWriter, retryAfterSeconds int) {
 	writeError(w, http.StatusForbidden, "TooManyRequests",
 		fmt.Sprintf("Too many requests. Please retry after %d seconds.", retryAfterSeconds))
 }

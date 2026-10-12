@@ -36,10 +36,11 @@ const (
 const (
 	// compatRouteUnmatched is the route label of a request no registered route
 	// matched: a 404, a 405, or one a middleware answered before routing.
-	compatRouteUnmatched = "unmatched"
-	compatLabelOther     = "other"
-	compatClientNone     = "none"
-	compatStatusHijacked = "hijacked"
+	compatRouteUnmatched    = "unmatched"
+	compatLabelOther        = "other"
+	compatClientNone        = "none"
+	compatClientJellyfinWeb = "jellyfin-web"
+	compatStatusHijacked    = "hijacked"
 )
 
 // compatStatusClasses labels a status by its first digit.
@@ -186,7 +187,7 @@ var compatClientFamilies = []struct {
 	{token: "vidhub", family: "vidhub"},
 	{token: "kodi", family: "kodi"},
 	{token: "jellycon", family: "kodi"},
-	{token: "jellyfin web", family: "jellyfin-web"},
+	{token: "jellyfin web", family: compatClientJellyfinWeb},
 	{token: "android tv", family: "jellyfin-androidtv", nameOnly: true},
 	{token: "jellyfin", family: "jellyfin"},
 }
