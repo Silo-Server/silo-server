@@ -112,10 +112,11 @@ season and episode), since its text, lists and art describe the other title
 (scheduled refresh, initial match of a stored item, and a refresh of one
 season or episode, judged by the series' own files) treat a declared ID that
 differs from the stored one for the same provider as a conflict; an ID for a
-provider the item lacks only adds to it. A manual refresh after Identify
-treats any declared IDs that don't confirm the chosen identity as a conflict,
-since it would otherwise re-match on them. A title-only NFO declares no
-identity and always applies.
+provider the item lacks only adds to it. After Identify, every run, manual
+refresh included, treats any declared IDs that don't confirm the chosen
+identity as a conflict. A stored ID already recorded as dead (a 404 in
+`stale_media_ids`) doesn't count as identity, so an NFO naming its replacement
+applies. A title-only NFO declares no identity and always applies.
 
 The NFO search candidate exists only for the title-only case and is defanged:
 ID-less candidates lose provider-priority tie-breaks to ID-bearing group
