@@ -337,20 +337,52 @@ func compatSubtitleTrackLabel(track catalog.VersionSubtitleTrack) string {
 // client last saved, or "" when none is stored or it cannot be read. It only
 // tells Jellyfin's Default apart from Smart, which share Silo's "auto".
 func savedCompatSubtitleMode(ctx context.Context, provider userstore.UserStoreProvider, session *Session) string {
+	saved, _ := compatSavedConfiguration(ctx, provider, session)
+	return saved.SubtitleMode
+}
+
+// compatSavedUserConfiguration holds the user configuration fields a Jellyfin
+// client saved that playback consults.
+type compatSavedUserConfiguration struct {
+	SubtitleMode               string
+	RememberAudioSelections    *bool
+	RememberSubtitleSelections *bool
+}
+
+// remembersAudio reports RememberAudioSelections, true unless the client
+// turned it off, as in Jellyfin.
+func (c compatSavedUserConfiguration) remembersAudio() bool {
+	return c.RememberAudioSelections == nil || *c.RememberAudioSelections
+}
+
+// remembersSubtitles reports RememberSubtitleSelections, true unless the
+// client turned it off.
+func (c compatSavedUserConfiguration) remembersSubtitles() bool {
+	return c.RememberSubtitleSelections == nil || *c.RememberSubtitleSelections
+}
+
+// compatSavedConfiguration reads the configuration the viewer's Jellyfin
+// client last saved. It is zero when none is stored, and zero with an error
+// when it cannot be read, so a caller that must honor an opt-out can tell the
+// two apart.
+func compatSavedConfiguration(ctx context.Context, provider userstore.UserStoreProvider, session *Session) (compatSavedUserConfiguration, error) {
+	var saved compatSavedUserConfiguration
 	if provider == nil || session == nil || session.ProfileID == "" {
-		return ""
+		return saved, nil
 	}
 	store, err := provider.ForUser(ctx, session.StreamAppUserID)
-	if err != nil || store == nil {
-		return ""
+	if err != nil {
+		return saved, err
+	}
+	if store == nil {
+		return saved, nil
 	}
 	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
 	if err != nil || raw == "" {
-		return ""
+		return saved, err
 	}
-	var saved struct{ SubtitleMode string }
-	if json.Unmarshal([]byte(raw), &saved) != nil {
-		return ""
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		return compatSavedUserConfiguration{}, err
 	}
-	return saved.SubtitleMode
+	return saved, nil
 }

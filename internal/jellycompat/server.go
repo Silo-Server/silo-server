@@ -152,6 +152,10 @@ type Dependencies struct {
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients play as the series' remembered tracks (optional).
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// SubtitlePlaySync aligns a subtitle the first time a client is served
 	// it, when it was never synced; nil leaves that to a request.
 	SubtitlePlaySync subtitles.PlaySyncer

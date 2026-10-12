@@ -100,9 +100,10 @@ each item's original-language audio, as native clients do.
 
 Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
 viewer's effective subtitle mode and language, including downloaded subtitles.
-In `Always` mode, a track the viewer picked for the series in a Silo client
-(its source, language, codec, label, forced and hearing-impaired traits) wins
-when the file has one that matches; otherwise the language rules apply.
+In `Always` mode, a track the viewer picked for the series in a Silo or
+Jellyfin client (its source, language, codec, label, forced and
+hearing-impaired traits) wins when the file has one that matches; otherwise the
+language rules apply.
 The detail-page selection therefore carries into playback instead of sending
 an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit
@@ -122,6 +123,35 @@ files. A file's default-flagged track therefore beats an external file in
 flagged. An unset subtitle language matches any language.
 In `Always` mode, Silo's per-series remembered subtitle track is applied first,
 as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
+
+Playback reports save the viewer's track choices for the next episode. For a
+play negotiated through `PlaybackInfo`, an `AudioStreamIndex` or
+`SubtitleStreamIndex` in `/Sessions/Playing`, `/Sessions/Playing/Progress`, or
+`/Sessions/Playing/Stopped` that differs from the default `PlaybackInfo`
+offered, or from the track last saved for that play, becomes the series'
+remembered track (a movie's is kept under the movie). Silo writes it the way
+`PUT /api/v2/audio-prefs/{series_id}` and `PUT /api/v2/subtitle-prefs/{series_id}`
+do: the audio track's language and signature; a subtitle track's language,
+signature and v3 combined index in mode `always`; or mode `off` with no track
+for `SubtitleStreamIndex: -1`, which later plays offer as `OnlyForced` or
+`None` depending on the forced-subtitle setting. Reports cannot tell a pick
+from a client's automatic choice, so a report of the offered defaults saves
+nothing; neither does the audio track the viewer's preferences select when
+`PlaybackInfo` offered a device fallback in its place (AC3 for TrueHD). A
+client that plays a different track from the one offered has it saved. Plays
+that skip `PlaybackInfo` (static direct play), an audio switch the server
+refused, and repeated or late Stopped reports for a finished play save
+nothing. A failed write is logged and not retried. `RememberAudioSelections`
+or `RememberSubtitleSelections` set to `false` in the user configuration turns
+either half off. Jellyfin remembers choices per item; Silo remembers them per
+series, as its own clients do.
+
+Each change is claimed on the play before it is written. After writing, the
+report reads the play's latest claim back and writes it again until the two
+match, so overlapping reports leave the newest choice. Known gap: a write that
+stalls until after a later Stopped report has finished the play and its record
+is removed has nothing to read back, so the older choice can remain. Closing it
+would need ordering on the stored preference itself.
 
 ## Browse and response fields
 
@@ -546,7 +576,7 @@ probed `original` disposition in the native track model), the
 `VideoRotation` profile condition and `VideoRotationNotSupported` reason
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
-remembered per-item subtitle selections, and `Accept-Language` localization.
+and `Accept-Language` localization.
 `/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay group operations
 are not served. `/SyncPlay/List` only provides the empty discovery response
 described above.

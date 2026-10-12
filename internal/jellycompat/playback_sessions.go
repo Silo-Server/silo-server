@@ -46,9 +46,14 @@ type PlaybackSession struct {
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
 	ClientPlaySessionID string
-	UserID              string
-	InitialSeekSeconds  float64
-	MediaSources        []PlaybackMediaSource
+	// PreferenceKey is the series (or movie) id the play's remembered audio
+	// and subtitle tracks are saved under; empty saves none. Only PlaybackInfo
+	// sets it: a static play never offered the client its defaults, so its
+	// reports cannot tell a pick from the client's own choice.
+	PreferenceKey      string
+	UserID             string
+	InitialSeekSeconds float64
+	MediaSources       []PlaybackMediaSource
 	// UpstreamMediaFileID survives API restarts so previews can follow the
 	// selected source without consulting a process-local native session.
 	UpstreamMediaFileID        int
@@ -141,7 +146,13 @@ type PlaybackMediaSource struct {
 	SelectedAudioStreamIndex    *int
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
-	ETag                        string
+	// RememberedAudioStreamIndex and RememberedSubtitleStreamIndex are the
+	// last tracks a playback report settled as the series' remembered tracks
+	// (-1 is subtitles off). Nil until then: the Default*StreamIndex, which
+	// already comes from the remembered tracks, stands in.
+	RememberedAudioStreamIndex    *int
+	RememberedSubtitleStreamIndex *int
+	ETag                          string
 	// SubtitleDeliveries preserves client delivery capabilities for tracks that
 	// may be enabled later. The scalar fields above retain the selected track's
 	// delivery for sessions read by older binaries during a rolling update.
