@@ -19,7 +19,7 @@ import (
 // state (a store beside the catalog) to the one-query-at-a-time path other
 // stores take, and checks that a watchlist title the library now has is
 // promoted before in_watchlist is reported, although the batch reads the
-// watchlist first. Skips unless SILO_TEST_DATABASE_URL names a migrated
+// watchlist first, and that a prefetch does not promote it. Skips unless SILO_TEST_DATABASE_URL names a migrated
 // database.
 func TestItemDetailViewerStateBatchDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
@@ -81,12 +81,19 @@ func TestItemDetailViewerStateBatchDB(t *testing.T) {
 	viewer := ItemViewer{ProfileID: profile, Access: catalog.AccessFilter{UserID: f.account, ProfileID: profile, AllowedLibraryIDs: []int{f.library}}}
 	detailOf := func(h *CatalogResourceHandler, id string) *catalog.ItemDetail {
 		detail := &catalog.ItemDetail{ContentID: id, Type: itemTypeMovie}
-		h.enrichItemDetail(reqCtx, viewer, detail, true)
+		h.enrichItemDetail(reqCtx, viewer, detail, true, false)
 		return detail
 	}
 
-	if _, ok := batched.batchedViewerState(reqCtx, viewer, &catalog.ItemDetail{ContentID: plain, Type: itemTypeMovie}); !ok {
+	if _, ok := batched.batchedViewerState(reqCtx, viewer, &catalog.ItemDetail{ContentID: plain, Type: itemTypeMovie}, false); !ok {
 		t.Fatal("the Postgres store was not read in one batch")
+	}
+	// A prefetch reads the watchlist as it stands and leaves promotion to the
+	// view that follows it.
+	prefetched := &catalog.ItemDetail{ContentID: promoted, Type: itemTypeMovie}
+	batched.enrichItemDetail(reqCtx, viewer, prefetched, true, true)
+	if prefetched.UserState == nil || prefetched.UserState.InWatchlist {
+		t.Fatalf("prefetched title user_state = %+v, want read without promotion", prefetched.UserState)
 	}
 	if got := detailOf(batched, promoted); got.UserState == nil || !got.UserState.InWatchlist {
 		t.Fatalf("promoted title user_state = %+v, want in_watchlist", got.UserState)

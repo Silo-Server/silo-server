@@ -368,8 +368,10 @@ func (h *CatalogHandler) AudiobookGroups(ctx context.Context, v ItemViewer, quer
 }
 
 // ItemDetail answers the full detail of one item, a synthetic season
-// included, enriched with the viewer's state.
-func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, id string) (*catalog.ItemDetail, error) {
+// included, enriched with the viewer's state. A view also queues a metadata
+// refresh when one is due and promotes a matching watchlist entry; a
+// speculative prefetch does neither, so warming a cache has no side effects.
+func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, id string, prefetch bool) (*catalog.ItemDetail, error) {
 	// Neither view carries playback previews, and only curators see folder
 	// paths, so the detail leaves out what the response would drop.
 	curates := h.items.canViewFilePaths(ctx)
@@ -383,14 +385,18 @@ func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, i
 				}
 				return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get item detail")
 			}
-			h.enrichItemDetail(ctx, v, syntheticDetail, curates)
-			h.items.maybeRequestStaleDetailMetadataRefresh(ctx, syntheticDetail)
+			h.enrichItemDetail(ctx, v, syntheticDetail, curates, prefetch)
+			if !prefetch {
+				h.items.maybeRequestStaleDetailMetadataRefresh(ctx, syntheticDetail)
+			}
 			return syntheticDetail, nil
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get item detail")
 	}
-	h.enrichItemDetail(ctx, v, detail, curates)
-	h.items.maybeRequestStaleDetailMetadataRefresh(ctx, detail)
+	h.enrichItemDetail(ctx, v, detail, curates, prefetch)
+	if !prefetch {
+		h.items.maybeRequestStaleDetailMetadataRefresh(ctx, detail)
+	}
 	return detail, nil
 }
 

@@ -26,7 +26,7 @@ vi.mock("react-router", async () => {
 });
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  useCatalogItemDetail: (...args: unknown[]) => mocks.useCatalogItemDetail(...args),
+  useCatalogItemDetailView: (...args: unknown[]) => mocks.useCatalogItemDetail(...args),
 }));
 
 vi.mock("@/hooks/queries/libraries", () => ({

@@ -53,7 +53,7 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
-	view, err := h.ItemDetail(r.Context(), viewerFromRequest(r, filter), id)
+	view, err := h.ItemDetail(r.Context(), viewerFromRequest(r, filter), id, false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -259,8 +259,9 @@ func parseSyntheticSeasonID(contentID string) (string, int, bool) {
 }
 
 // enrichItemDetail adds the viewer's state to detail. curates is
-// canViewFilePaths for the request; paths are stripped without it.
-func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, curates bool) {
+// canViewFilePaths for the request; paths are stripped without it. A
+// prefetch leaves watchlist promotion to the view that follows it.
+func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, curates, prefetch bool) {
 	if detail == nil {
 		return
 	}
@@ -276,7 +277,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 		detail.PlaySeasonNumber = target.SeasonNumber
 	}
 
-	state, batched := h.batchedViewerState(ctx, v, detail)
+	state, batched := h.batchedViewerState(ctx, v, detail, prefetch)
 	switch detail.Type {
 	case "season":
 		if h.items.episodeRepo != nil {
@@ -315,7 +316,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 		state.applyTo(detail)
 		return
 	}
-	h.enrichViewerState(ctx, v, detail)
+	h.enrichViewerState(ctx, v, detail, prefetch)
 }
 
 // detailViewerState is the viewer's own state for one item detail, as
@@ -350,7 +351,7 @@ func (s detailViewerState) applyTo(detail *catalog.ItemDetail) {
 // title entry that promotion could move onto the library watchlist. It
 // needs a store whose state lives beside the catalog; batched is false
 // otherwise, and the caller reads one at a time.
-func (h *CatalogResourceHandler) batchedViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) (state detailViewerState, batched bool) {
+func (h *CatalogResourceHandler) batchedViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, prefetch bool) (state detailViewerState, batched bool) {
 	store, profileID, ok := h.items.viewerUserStore(ctx, v.ProfileID)
 	if !ok || h.items.browseRepo == nil || h.items.browseRepo.Pool() == nil {
 		return state, false
@@ -375,7 +376,7 @@ func (h *CatalogResourceHandler) batchedViewerState(ctx context.Context, v ItemV
 	promoteAccess := v.Access
 	promoteAccess.UserID, promoteAccess.ProfileID = userID, profileID
 	var promotable bool
-	if h.watchlistPromoter != nil && (detail.Type == itemTypeMovie || detail.Type == itemTypeSeries) {
+	if !prefetch && h.watchlistPromoter != nil && (detail.Type == itemTypeMovie || detail.Type == itemTypeSeries) {
 		h.watchlistPromoter.QueuePromotable(&batch, promoteAccess, &promotable)
 	}
 	if err := h.items.browseRepo.Pool().SendBatch(ctx, &batch).Close(); err != nil {
@@ -409,7 +410,7 @@ func (h *CatalogResourceHandler) batchedViewerState(ctx context.Context, v ItemV
 	return state, true
 }
 
-func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {
+func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, prefetch bool) {
 	store, profileID, ok := h.items.viewerUserStore(ctx, v.ProfileID)
 	if !ok || detail == nil {
 		return
@@ -419,7 +420,7 @@ func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemVi
 	if err != nil {
 		return
 	}
-	if h.watchlistPromoter != nil && (detail.Type == "movie" || detail.Type == "series") {
+	if !prefetch && h.watchlistPromoter != nil && (detail.Type == "movie" || detail.Type == "series") {
 		promoteAccess := v.Access
 		promoteAccess.UserID, promoteAccess.ProfileID = apimw.GetUserID(ctx), profileID
 		h.watchlistPromoter.PromoteWatchlistItem(ctx, promoteAccess, detail.ContentID)

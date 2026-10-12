@@ -6946,7 +6946,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The detail page of one item, with the viewer's state. */
+    /** The detail page of one item, with the viewer's state; viewing queues a metadata refresh when one is due and promotes a matching watchlist entry, unless the read is a prefetch. */
     get: operations["getCatalogItem"];
     put?: never;
     post?: never;
@@ -22998,6 +22998,8 @@ export interface components {
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
       facet_value_search?: boolean;
+      /** @description getCatalogItem accepts prefetch=true for speculative reads that neither queue a metadata refresh nor promote a watchlist entry */
+      item_detail_prefetch?: boolean;
       /** @description queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar */
       letter_index?: boolean;
       /**
@@ -96346,6 +96348,8 @@ export interface operations {
         photo_width?: number;
         /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
         poster_width?: number;
+        /** @description Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first. */
+        prefetch?: boolean;
         /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
         still_width?: number;
       };

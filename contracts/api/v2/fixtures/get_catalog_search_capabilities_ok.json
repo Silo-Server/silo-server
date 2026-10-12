@@ -1,10 +1,11 @@
 {
-  "revision": "9cc6c59e878668a6410bba1c347d11c8d7fbafd7ef5684f84089fc56cb25f86b",
+  "revision": "e6cc0db56b6868c2f77d5ea86e5ad5cd8ec7869b629c099a5c34f7a4550ffa9f",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
   "facet_value_search": true,
   "person_prefetch": true,
+  "item_detail_prefetch": true,
   "video_with_episodes_scope": true,
   "extended_query_rules": true,
   "show_title_rules": true,
