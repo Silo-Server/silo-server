@@ -2459,6 +2459,9 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
 		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
 	}
+	if !stop || !unidentified {
+		h.rememberCompatTracks(r.Context(), session, playSession, req)
+	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
 			r.Context(), playSession, findMediaSource(playSession, req.MediaSourceID),
@@ -3761,6 +3764,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ItemID:              detail.ContentID,
 		RouteItemID:         routeID,
 		ClientPlaySessionID: clientPlaySessionID,
+		PreferenceKey:       compatTrackPreferenceKey(detail),
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
 	}

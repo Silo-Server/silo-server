@@ -1,0 +1,274 @@
+package jellycompat
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+)
+
+type recordingTrackPreferences struct {
+	audio     []userstore.AudioPreference
+	subtitles []userstore.SubtitlePreference
+	fail      error
+}
+
+func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID int, pref userstore.AudioPreference) error {
+	if userID != 1 {
+		return fmt.Errorf("user %d, want 1", userID)
+	}
+	if r.fail != nil {
+		return r.fail
+	}
+	r.audio = append(r.audio, pref)
+	return nil
+}
+
+func (r *recordingTrackPreferences) SetSubtitlePreferenceCanonical(_ context.Context, userID int, pref userstore.SubtitlePreference) error {
+	if userID != 1 {
+		return fmt.Errorf("user %d, want 1", userID)
+	}
+	if r.fail != nil {
+		return r.fail
+	}
+	r.subtitles = append(r.subtitles, pref)
+	return nil
+}
+
+// Stream indexes of trackMemoryVersion as PlaybackInfo advertises them.
+const (
+	trackMemoryJapaneseAudio  = 1
+	trackMemoryEnglishAudio   = 2
+	trackMemoryForcedSubtitle = 3
+	trackMemorySDHSubtitle    = 5
+)
+
+func trackMemoryVersion() catalog.FileVersion {
+	return catalog.FileVersion{
+		FileID:      42,
+		Duration:    1440,
+		Container:   "mkv",
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Language: "ja", Title: "Japanese", Channels: 2, Layout: "stereo", Default: true},
+			{Codec: "aac", Language: "en", Title: "English", Channels: 2, Layout: "stereo"},
+		},
+		SubtitleTracks: []catalog.VersionSubtitleTrack{
+			{Language: "en", Codec: "subrip", Title: "Forced", Forced: true, Default: true},
+			{Language: "en", Codec: "subrip", Title: "English"},
+			{Language: "en", Codec: "subrip", Title: "SDH", HearingImpaired: true},
+		},
+	}
+}
+
+// newTrackMemoryPlay is an episode play that started on Japanese audio and
+// the forced English subtitles, the defaults PlaybackInfo resolved.
+func newTrackMemoryPlay(t *testing.T, preferenceKey string) (*PlaybackHandler, *recordingTrackPreferences, userstore.UserStore, string) {
+	t.Helper()
+	codec := NewResourceIDCodec()
+	version := trackMemoryVersion()
+	source := PlaybackMediaSource{
+		ID:                          codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID)),
+		FileID:                      version.FileID,
+		Version:                     version,
+		SupportsDirectPlay:          true,
+		DefaultAudioStreamIndex:     intPtr(trackMemoryJapaneseAudio),
+		SelectedAudioStreamIndex:    intPtr(trackMemoryJapaneseAudio),
+		DefaultSubtitleStreamIndex:  intPtr(trackMemoryForcedSubtitle),
+		SelectedSubtitleStreamIndex: intPtr(trackMemoryForcedSubtitle),
+	}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID:                       "play-1",
+		CompatToken:              "token-1",
+		ItemID:                   "episode-1",
+		RouteItemID:              codec.EncodeStringID(EncodedIDItem, "episode-1"),
+		PreferenceKey:            preferenceKey,
+		UpstreamSessionID:        "upstream-1",
+		UpstreamPlayMethod:       "direct",
+		ProgressPersistenceKnown: true,
+		MediaSources:             []PlaybackMediaSource{source},
+	})
+	userStore := newJellycompatUserStore(t)
+	prefs := &recordingTrackPreferences{}
+	handler := &PlaybackHandler{
+		codec:               codec,
+		playbackStore:       store,
+		sessionMgr:          &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayDirect, BasePlayMethod: playback.PlayDirect}}},
+		tm:                  playback.NewTranscodeManager(),
+		storeProvider:       compatTestUserStoreProvider{store: userStore},
+		AudioPreferences:    prefs,
+		SubtitlePreferences: prefs,
+	}
+	return handler, prefs, userStore, source.ID
+}
+
+func postTrackReport(t *testing.T, handler *PlaybackHandler, path, sourceID string, audio, subtitle int) {
+	t.Helper()
+	body := fmt.Sprintf(`{"PlaySessionId":"play-1","MediaSourceId":%q,"AudioStreamIndex":%d,"SubtitleStreamIndex":%d,"PositionTicks":600000000}`,
+		sourceID, audio, subtitle)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	switch path {
+	case "/Sessions/Playing":
+		handler.HandleSessionPlaying(rec, req)
+	case "/Sessions/Playing/Stopped":
+		handler.HandleSessionPlayingStopped(rec, req)
+	default:
+		handler.HandleSessionPlayingProgress(rec, req)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("%s: status = %d, body = %s", path, rec.Code, rec.Body.String())
+	}
+}
+
+func TestPlaybackReportOnDefaultTracksRemembersNothing(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+
+	postTrackReport(t, handler, "/Sessions/Playing", sourceID, trackMemoryJapaneseAudio, trackMemoryForcedSubtitle)
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemoryForcedSubtitle)
+	postTrackReport(t, handler, "/Sessions/Playing/Stopped", sourceID, trackMemoryJapaneseAudio, trackMemoryForcedSubtitle)
+
+	if len(prefs.audio) != 0 || len(prefs.subtitles) != 0 {
+		t.Fatalf("saved audio %+v, subtitles %+v; the default tracks are not a choice", prefs.audio, prefs.subtitles)
+	}
+}
+
+func TestPlaybackReportRemembersChangedTracksForTheSeries(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	// The play already streams English audio, so only the preference changes.
+	if err := handler.playbackStore.Update("play-1", func(s *PlaybackSession) error {
+		s.MediaSources[0].SelectedAudioStreamIndex = intPtr(trackMemoryEnglishAudio)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemorySDHSubtitle)
+	// Every later report repeats the same tracks; they are saved once.
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemorySDHSubtitle)
+
+	if len(prefs.audio) != 1 {
+		t.Fatalf("audio saves = %d, want 1: %+v", len(prefs.audio), prefs.audio)
+	}
+	audio := prefs.audio[0]
+	if audio.ProfileID != "profile-1" || audio.SeriesID != "series-1" || audio.AudioTrackIndex != 1 || audio.AudioLanguage != "en" {
+		t.Fatalf("audio preference = %+v", audio)
+	}
+	want := playback.AudioTrackSignatureFromTrack(trackMemoryVersion().AudioTracks[1])
+	if audio.TrackSignature == nil || *audio.TrackSignature != *want {
+		t.Fatalf("audio signature = %+v, want %+v", audio.TrackSignature, want)
+	}
+
+	if len(prefs.subtitles) != 1 {
+		t.Fatalf("subtitle saves = %d, want 1: %+v", len(prefs.subtitles), prefs.subtitles)
+	}
+	subtitle := prefs.subtitles[0]
+	wantSig := userstore.SubtitleTrackSignature{Source: playback.SubtitleSourceEmbeddedV3, Language: "en", Codec: "subrip", Label: "SDH", HearingImpaired: true}
+	if subtitle.SeriesID != "series-1" || subtitle.SubtitleTrackIndex != 2 || subtitle.SubtitleLanguage != "en" ||
+		subtitle.SubtitleMode != profileSubtitleAlways || subtitle.TrackSignature == nil || *subtitle.TrackSignature != wantSig {
+		t.Fatalf("subtitle preference = %+v (signature %+v)", subtitle, subtitle.TrackSignature)
+	}
+	// The saved signature is the one PlaybackInfo matches for the next episode.
+	candidates := compatSubtitleCandidates(trackMemoryVersion(), nil)
+	if index := compatSignatureSubtitleIndex(candidates, subtitle.TrackSignature); index == nil || *index != trackMemorySDHSubtitle {
+		t.Fatalf("signature selects %v, want stream %d", index, trackMemorySDHSubtitle)
+	}
+
+	// Switching back to the default is a new choice too.
+	postTrackReport(t, handler, "/Sessions/Playing/Stopped", sourceID, trackMemoryEnglishAudio, trackMemoryForcedSubtitle)
+	if len(prefs.subtitles) != 2 || prefs.subtitles[1].TrackSignature == nil || !prefs.subtitles[1].TrackSignature.Forced {
+		t.Fatalf("subtitle saves after switching back = %+v", prefs.subtitles)
+	}
+	if len(prefs.audio) != 1 {
+		t.Fatalf("audio saves = %d after an unchanged audio report, want 1", len(prefs.audio))
+	}
+}
+
+func TestPlaybackReportRemembersSubtitlesOff(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+
+	if len(prefs.audio) != 0 {
+		t.Fatalf("audio saves = %+v, want none", prefs.audio)
+	}
+	if len(prefs.subtitles) != 1 {
+		t.Fatalf("subtitle saves = %+v, want one", prefs.subtitles)
+	}
+	off := prefs.subtitles[0]
+	if off.SubtitleTrackIndex != -1 || off.SubtitleMode != profileSubtitleOff || off.SubtitleLanguage != "" || off.TrackSignature != nil {
+		t.Fatalf("subtitles-off preference = %+v", off)
+	}
+}
+
+func TestPlaybackReportHonorsRememberSelectionSettings(t *testing.T) {
+	handler, prefs, userStore, sourceID := newTrackMemoryPlay(t, "series-1")
+	if err := userStore.SetSetting(context.Background(), configurationKey("profile-1"), `{"RememberAudioSelections":true,"RememberSubtitleSelections":false}`); err != nil {
+		t.Fatal(err)
+	}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemorySDHSubtitle)
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryEnglishAudio, trackMemorySDHSubtitle)
+
+	if len(prefs.audio) != 1 || len(prefs.subtitles) != 0 {
+		t.Fatalf("saved audio %+v, subtitles %+v; want audio only", prefs.audio, prefs.subtitles)
+	}
+}
+
+func TestPlaybackReportRetriesAFailedSave(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	prefs.fail = errors.New("store unavailable")
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+	prefs.fail = nil
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+
+	if len(prefs.subtitles) != 1 || prefs.subtitles[0].SubtitleMode != profileSubtitleOff {
+		t.Fatalf("subtitle saves = %+v, want the retried off choice", prefs.subtitles)
+	}
+}
+
+func TestPlaybackReportWithoutPreferenceKeyRemembersNothing(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "")
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, trackMemorySDHSubtitle)
+
+	if len(prefs.audio) != 0 || len(prefs.subtitles) != 0 {
+		t.Fatalf("saved audio %+v, subtitles %+v for a play with no series", prefs.audio, prefs.subtitles)
+	}
+}
+
+func TestCompatTrackPreferenceKey(t *testing.T) {
+	for _, tc := range []struct {
+		detail upstreamItemDetail
+		want   string
+	}{
+		{upstreamItemDetail{Type: "episode", ContentID: "episode-1", SeriesID: "series-1"}, "series-1"},
+		{upstreamItemDetail{Type: "movie", ContentID: "movie-1"}, "movie-1"},
+		{upstreamItemDetail{Type: "audiobook", ContentID: "book-1"}, ""},
+	} {
+		if got := compatTrackPreferenceKey(&tc.detail); got != tc.want {
+			t.Errorf("%s: key = %q, want %q", tc.detail.Type, got, tc.want)
+		}
+	}
+}
+
+func TestCompatPreferenceLanguageDropsUndefinedTags(t *testing.T) {
+	for language, want := range map[string]string{"en": "en", "jpn": "jpn", "und": "", "": "", "not a tag": ""} {
+		if got := compatPreferenceLanguage(language); got != want {
+			t.Errorf("compatPreferenceLanguage(%q) = %q, want %q", language, got, want)
+		}
+	}
+}
