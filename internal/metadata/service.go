@@ -4772,7 +4772,9 @@ func preserveCachedArtwork(providerPath, providerThumbhash, existingCachedPath, 
 		return "", "", providerPath
 	}
 	if !isRemoteImageSourcePath(providerPath) {
-		if strings.TrimSpace(providerPath) == "" && keepExisting {
+		// With nothing offered, a slot keeps what it has, including a local
+		// source whose copy is still pending.
+		if strings.TrimSpace(providerPath) == "" && (isCachedImagePath(existingCachedPath) || isLocalImageSourcePath(existingSourcePath)) {
 			return existingCachedPath, existingThumbhash, existingSourcePath
 		}
 		return providerPath, providerThumbhash, ""

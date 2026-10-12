@@ -577,18 +577,22 @@ func TestCacheTargetArtworkStopsWhenAPageMakesNoProgress(t *testing.T) {
 
 // A refresh on a server without the library mount keeps a local source whose
 // copy is still pending, and the remote stand-in it serves meanwhile, rather
-// than letting the remote pick take the slot and its queued job.
+// than letting the remote pick take the slot and its queued job. A slot that
+// serves nothing yet keeps its source when nothing is offered, too.
 func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	const (
 		contentID    = "movie:tmdb:7"
 		standIn      = "https://img.example/stand-in.jpg"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
+	offered := []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}}
 	for _, tc := range []struct {
 		name, path, wantPath string
+		images               []RemoteImage
 	}{
-		{name: "serving a stand-in", path: standIn, wantPath: standIn},
-		{name: "serving nothing yet", path: "", wantPath: remotePoster},
+		{name: "serving a stand-in", path: standIn, wantPath: standIn, images: offered},
+		{name: "serving nothing yet", path: "", wantPath: remotePoster, images: offered},
+		{name: "serving nothing, nothing offered", path: "", wantPath: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			localSource := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
@@ -609,8 +613,7 @@ func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 
 			if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
 				&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
-				[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
-				nil, nil, "movie"); err != nil {
+				tc.images, nil, nil, "movie"); err != nil {
 				t.Fatalf("mergeAndPersist: %v", err)
 			}
 			got, err := h.itemRepo.GetByID(ctx, contentID)
@@ -700,7 +703,8 @@ func TestItemLeftOnItsStandInKeepsPendingLocalSource(t *testing.T) {
 
 // Seasons and episodes keep a pending local source and its stand-in the same
 // way, also when the refresh offers no artwork at all. A slot with no stand-in
-// yet takes the remote artwork this refresh chose as one.
+// yet takes the remote artwork this refresh chose as one, and keeps its local
+// source when nothing is offered.
 func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	const (
 		seriesID      = "series:tvdb:123"
@@ -732,6 +736,7 @@ func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *tes
 			remoteSeason: remoteSeason, remoteStill: remoteStill,
 			wantSeason: slot{remoteSeason, "remote-season-thumb"}, wantStill: slot{remoteStill, ""},
 		},
+		{name: "serving nothing, nothing offered"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			folder := filepath.Join(t.TempDir(), "missing-mount", "Show", "Season 01")

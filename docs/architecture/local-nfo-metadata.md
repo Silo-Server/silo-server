@@ -427,8 +427,9 @@ Caching and refresh:
   episodes the first remote poster or still that the local one displaced while
   provider results merged, or, when the refresh kept a local source it could
   not see, the remote one it chose. The slot's source stays the local file, so the
-  copy replaces the stand-in through the source-matched update. Locked artwork
-  gets no stand-in.
+  copy replaces the stand-in through the source-matched update, and a refresh
+  that offers no artwork at all leaves the slot, local source included, as it
+  is. Locked artwork gets no stand-in.
 - `metadata.cache_images` governs remote artwork only. With it off, local art
   is still selected, copied, and served: the drain claims local jobs only
   (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
