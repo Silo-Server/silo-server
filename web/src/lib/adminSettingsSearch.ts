@@ -143,8 +143,8 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
       {
         id: "appearance",
         label: "Appearance",
-        description: "Logos, accent color, theme colors, custom CSS, and poster badges.",
-        groups: ["Logos and icons", "Colors", "Card overlays"],
+        description: "Logos, accent color, theme colors, custom CSS, poster badges, and title art.",
+        groups: ["Logos and icons", "Colors", "Card overlays", "Title pages"],
         keywords: [
           "logo",
           "wordmark",
@@ -161,6 +161,9 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "reset theme",
           "overlays",
           "poster badges",
+          "title art",
+          "logo art",
+          "title logo",
         ],
         settings: settingIndex(
           "Logos and icons",
@@ -177,6 +180,8 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Card overlays",
           "Show badges on poster art",
           "Badge style",
+          "Title pages",
+          "Show title art",
         ),
         icon: Paintbrush,
       },

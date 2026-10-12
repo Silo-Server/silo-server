@@ -1212,6 +1212,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// profile on its own account. Without the token service a
 			// PIN-locked primary cannot widen rather than widening unguarded.
 			settingValuesHandler.ProfileTokens = profileTokenService
+			if settingsRepo != nil {
+				settingValuesHandler.SetAdminDefaults(settingsRepo)
+			}
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
 			} else if deps.DB != nil {

@@ -93,6 +93,25 @@ device follow its own value again. The switch's state is whether the effective
 source is `profile`, so clients still read one server-resolved value.
 `ui.title_art` works this way; its manifest notes define the writes.
 
+A definition can declare `admin_default`, letting the server administrator
+replace `default_value` for the whole server. The replacement is a server
+setting named `defaults.<key>`, validated against the definition's value
+schema when it is written and again when it is read. It is the value a viewer
+inherits, so it resolves after every allowed scope and is still reported with
+source `default`: clients that only know the contract default keep treating it
+as inherited, and an explicit value at any scope, including one equal to the
+default, still wins. A stored administrator default the schema no longer
+accepts, or one that cannot be read, falls back to `default_value` rather than
+failing the read. `ui.title_art` declares it.
+
+Only resolvers built with `WithAdminDefaults` read administrator defaults;
+today that is the settings-values handler, which is the only server-side
+reader of `ui.title_art`. Before a definition that another server path
+resolves (playback, home sections, jellycompat) declares `admin_default`, that
+path's resolver must be built the same way, or it will answer with
+`default_value` while the settings API answers with the administrator's
+value.
+
 ## Preferences versus restrictions
 
 `internal/policy` is a second resolver over some of the same subject matter,

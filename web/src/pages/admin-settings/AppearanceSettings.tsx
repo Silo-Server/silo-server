@@ -44,6 +44,7 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import { parseVarsJson } from "@/lib/themeTokens";
 import type { ThemeToken, ThemeVarOverrides } from "@/lib/themeTokens";
 import { cn } from "@/lib/utils";
@@ -71,10 +72,19 @@ const THEME_VARS_KEY = "ui.admin_theme_vars";
 const CUSTOM_CSS_KEY = "ui.admin_custom_css";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
+/**
+ * The server-wide default for ui.title_art, which its manifest definition marks
+ * admin_default. Unset means the contract default; viewers who chose their own
+ * keep it.
+ */
+const TITLE_ART_DEFAULT_KEY = `defaults.${SETTING_KEYS.UI_TITLE_ART}`;
+const TITLE_ART = SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART];
 
 const THEME_KEYS = [ACCENT_KEY, THEME_VARS_KEY, CUSTOM_CSS_KEY];
 
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
+
+const TITLE_ART_KEYS = [TITLE_ART_DEFAULT_KEY];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -93,7 +103,7 @@ const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
  * Server name and login subtitle deliberately live on the General page: they are
  * server identity, not look and feel.
  */
-const KEYS = [...THEME_KEYS, ...OVERLAY_KEYS];
+const KEYS = [...THEME_KEYS, ...OVERLAY_KEYS, ...TITLE_ART_KEYS];
 
 export default function AppearanceSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -521,6 +531,17 @@ export default function AppearanceSettings() {
               })}
             </AdvancedSection>
           </div>
+        </FieldGroup>
+
+        <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
+          <SettingField
+            label={TITLE_ART.label}
+            description="Default for people who have not chosen their own. Anyone can still change it for themselves."
+            type="toggle"
+            value={form.getValue(TITLE_ART_DEFAULT_KEY) || String(TITLE_ART.defaultValue)}
+            onChange={(v) => form.setValue(TITLE_ART_DEFAULT_KEY, v)}
+            restartRequired={restartKeys.has(TITLE_ART_DEFAULT_KEY)}
+          />
         </FieldGroup>
       </div>
 
