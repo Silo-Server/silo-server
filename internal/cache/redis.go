@@ -80,6 +80,12 @@ const EventAuthProvidersChanged = "auth_providers_changed"
 // in-memory Jellyfin-compatible sessions.
 const EventUserSessionsRevoked = "user_sessions_revoked"
 
+// EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
+// it starts or stops draining, with its stream_nodes id as the payload, so
+// every API server rechecks that node instead of waiting for its next health
+// sweep. Draining means the node takes no new work; see nodepool.DrainState.
+const EventNodeDrainChanged = "node_drain_changed"
+
 // ---------------------------------------------------------------------------
 // Event
 // ---------------------------------------------------------------------------

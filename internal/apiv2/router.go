@@ -193,6 +193,7 @@ type Dependencies struct {
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService
+	AdminNodeDrain                AdminNodeDrainService
 	AdminNodeReload               AdminNodeReloadService
 	AdminNodeConfiguration        AdminNodeConfigurationService
 	AdminServerStatus             AdminServerStatusService

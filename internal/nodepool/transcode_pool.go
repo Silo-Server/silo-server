@@ -91,7 +91,15 @@ func (p *TranscodePool) Nodes() []*Node {
 func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
+	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, nil, checkedAt)
+}
+
+// ApplyHealthReport is ApplyHealth for a whole report, drain state included.
+func (p *TranscodePool) ApplyHealthReport(id int, checkedURL string, report HealthReport, checkedAt time.Time) {
+	drainState := report.DrainState.normalized()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	applyNodeHealth(p.nodes, id, checkedURL, report.Healthy, report.ActiveJobs, report.EgressKbps, report.CapabilitiesHash, report.LastStats, report.NetworkAccess, &drainState, checkedAt)
 }
 
 // ApplyCapabilities records a freshly fetched capability report by swapping the
@@ -138,7 +146,9 @@ func sameNodeURL(a, b string) bool {
 // by id alone would then write one worker's health — and the scratch fill
 // transcode admission reads — onto the replacement, and the database fence
 // downstream cannot undo that. The pool would stay wrong until a later sweep.
-func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
+//
+// A nil drainState leaves the node's drain state as it was.
+func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, drainState *DrainState, checkedAt time.Time) {
 	for i, n := range nodes {
 		if n.ID != id || !sameNodeURL(n.URL, checkedURL) {
 			continue
@@ -165,6 +175,9 @@ func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, act
 		// clears it, so ClientURLFor never hands out an origin the node has
 		// stopped confirming. Cloned so the published copy is immutable.
 		clone.NetworkAccess = networkAccess.Normalized().Clone()
+		if drainState != nil {
+			clone.DrainState = *drainState
+		}
 		nodes[i] = &clone
 		return
 	}

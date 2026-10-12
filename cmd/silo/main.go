@@ -1197,6 +1197,10 @@ func main() {
 			// Reclaim orphaned transcode dirs at boot and hourly thereafter, bound
 			// to appCtx so it stops on shutdown.
 			srv.StartOrphanSweeper(appCtx)
+			// SIGTERM drains the node before it shuts down, and every drain
+			// change is announced so placement reacts before the next sweep.
+			srv.SetDrainAnnouncer(nodeDrainAnnouncer(appCtx, eventBus, watcher))
+			standaloneHooks.drain = newTranscodeNodeDrain(srv)
 			handler = srv.Handler()
 			shutdownStandalone = srv.Shutdown
 		}
@@ -1283,7 +1287,10 @@ func main() {
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
+	// Set when shutdown begins; /api/v1/ready fails from then on.
+	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -1428,6 +1435,7 @@ func main() {
 		healthChecker.SetCapabilityFetchBudget(capabilityBudget)
 		deps.NodeHealthChecker = healthChecker
 		healthChecker.Start(appCtx)
+		subscribeNodeDrainChanges(appCtx, eventBus, healthChecker)
 		slog.Info("node pools initialized", "proxy_nodes", len(proxyNodes), "transcode_nodes", len(transcodeNodes))
 
 		// The API host runs the same sampler the nodes do. It is not a
@@ -3553,6 +3561,9 @@ func main() {
 			SubtitlePlaySync: subtitlePlaySync,
 			// One PIN budget per profile across the native and Jellyfin logins.
 			ProfilePINAttempts: deps.ProfilePINAttempts,
+			// The native limiter itself, so budgets, reloads, and counters
+			// are shared with the native API. Nil when rate limiting is off.
+			RateLimit: deps.RateLimitMW,
 		}
 
 		// Wire direct dependencies when DB is available.
@@ -3728,8 +3739,12 @@ func main() {
 
 	errCh := make(chan error, 3)
 	// Closed when the LAN advertiser has sent its goodbye packets; nil when
-	// discovery is off.
+	// discovery is off. Shutdown ends the advertisement through lanCtx before
+	// the rest of appCtx, so LAN clients stop finding a server that is about
+	// to close.
 	var lanDiscoveryDone chan struct{}
+	lanCtx, stopLANDiscovery := context.WithCancel(appCtx)
+	defer stopLANDiscovery()
 	// Bind before serving so resident plugins, which reverse-proxy to this
 	// listener, are only started once it exists.
 	apiListener, apiListenErr := net.Listen("tcp", cfg.Server.Listen)
@@ -3751,7 +3766,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginService != nil {
@@ -3782,17 +3797,17 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sigCh)
 
-	select {
-	case sig := <-sigCh:
-		appCancel()
-		slog.Info("received signal, shutting down", "signal", sig)
-	case <-restartReqCh:
-		appCancel()
-		slog.Info("server restart requested, shutting down")
-	case serverErr := <-errCh:
-		appCancel()
-		slog.Error("server error, shutting down", "error", serverErr)
-	}
+	// A signal fails readiness first and keeps serving for
+	// SILO_SHUTDOWN_DELAY, so a load balancer routes traffic away before the
+	// listeners close. A restart request stops at once, even during that wait:
+	// storage admission loss sends one after it has already stopped storage
+	// writers, and an administrator's restart has told players it is
+	// restarting now. A listener failure stops at once too.
+	waitForAPIStop(sigCh, restartReqCh, errCh, apiShutdownDelay(os.Getenv(apiShutdownDelayEnv)), func() {
+		shuttingDown.Store(true)
+		stopLANDiscovery()
+	})
+	appCancel()
 
 	// Step 12: Graceful shutdown sequence.
 	slog.Info("beginning graceful shutdown")
@@ -3908,9 +3923,12 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 // listener's lifetime: afterListen runs once the address is bound (resident
 // plugins reverse-proxy to it, so they start only then), beforeDrain runs
 // before the HTTP server drains (their overlay ingress goes away first).
+// drain, when set, runs first on SIGTERM: the node stops taking new work and
+// finishes what it has while everything keeps running.
 type standaloneServerHooks struct {
 	afterListen func()
 	beforeDrain func(context.Context)
+	drain       *nodeDrain
 }
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
@@ -3949,6 +3967,9 @@ func startStandaloneServer(addr string, handler http.Handler, appCancel context.
 	select {
 	case sig := <-sigCh:
 		slog.Info("received signal, shutting down", "signal", sig)
+		if hooks.drain != nil {
+			hooks.drain.run(sigCh)
+		}
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
 	}

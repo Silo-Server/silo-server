@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -159,6 +161,12 @@ type compatSessionProxyReservationReleaser interface {
 // serves; *nodepool.Planner implements it.
 type compatTranscodeNodeHealth interface {
 	TranscodeNodeHealthy(nodeURL string) bool
+}
+
+// compatTranscodeNodeDrain reports whether a pooled transcode node has
+// drained; *nodepool.Planner implements it.
+type compatTranscodeNodeDrain interface {
+	TranscodeNodeDrained(nodeURL string) bool
 }
 
 // compatTranscodeNodeLookup resolves the pooled record behind a transcode node
@@ -1572,8 +1580,12 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			current.Recipe.SourceAudioChannels == expectedSourceAudioChannels &&
 			current.Recipe.AudioTrackIndex == expectedAudioTrackIndex &&
 			playback.ValidateCopyFMP4RecipeCard(*current.Recipe) == nil {
+			// A drained node runs no session, so the runtime recorded on it is
+			// gone; start a fresh one instead of pinning the client to it.
+			drain, canDrain := h.NodePlanner.(compatTranscodeNodeDrain)
 			if upstream, sessionErr := h.sessionMgr.GetSession(upstreamSessionID); sessionErr == nil && upstream != nil &&
-				strings.TrimRight(upstream.TranscodeNodeURL, "/") == strings.TrimRight(current.Recipe.TranscodeNodeURL, "/") {
+				strings.TrimRight(upstream.TranscodeNodeURL, "/") == strings.TrimRight(current.Recipe.TranscodeNodeURL, "/") &&
+				(!canDrain || !drain.TranscodeNodeDrained(current.Recipe.TranscodeNodeURL)) {
 				return &remoteStartAdoptedRemoteError{nodeURL: current.Recipe.TranscodeNodeURL}
 			}
 		}
@@ -2125,7 +2137,7 @@ func (h *PlaybackHandler) HandleCapabilitiesFull(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// HandleBitrateTest returns a small binary payload for clients that probe bandwidth.
+// HandleBitrateTest serves Size random bytes (default 102400) for clients that probe bandwidth.
 func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Request) {
 	// Jellyfin's authenticated bandwidth probe: transfer-observed, cap-exempt
 	// (§4.2 "classify but exempt"). It resolves no play session, so the subject
@@ -2144,9 +2156,16 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.WriteHeader(http.StatusOK)
+	// Random bytes, as Jellyfin sends: a compressing proxy would shrink a
+	// constant payload and inflate the measured bandwidth.
+	var seed [32]byte
+	_, _ = crand.Read(seed[:])
+	source := rand.NewChaCha8(seed)
 	block := make([]byte, min(size, 32768))
 	for size > 0 {
-		n, err := w.Write(block[:min(size, len(block))])
+		chunk := block[:min(size, len(block))]
+		_, _ = source.Read(chunk)
+		n, err := w.Write(chunk)
 		if err != nil || n == 0 {
 			return
 		}

@@ -62,21 +62,66 @@ stable in the background). NFO field edits propagate on **manual refresh only**
 
 ## Sidecar artwork: copy into the S3 image cache
 
-Sidecar images (`poster`/`folder`/`cover`, `fanart`/`backdrop`/`background`,
-`logo`/`clearlogo`, and `<basename>-poster/-fanart/-logo` variants; extensions
-`.jpg/.jpeg/.png/.webp`, 8 MiB cap, symlinked leaves rejected) are discovered
-by the provider's `GetImages` (`internal/metadata/nfo/images.go`). Clients —
-including jellycompat — always receive the normal presigned
-`poster_url`/`backdrop_url`/`logo_url`; library files are never served
-directly, and API nodes never need filesystem access to libraries.
+Sidecar images are discovered by the provider's `GetImages`
+(`internal/metadata/nfo/images.go`) and its season and episode lookups
+(`internal/metadata/nfo/series_depth.go`). Clients — including jellycompat —
+always receive the normal presigned `poster_url`/`backdrop_url`/`logo_url`;
+library files are never served directly, and API nodes never need filesystem
+access to libraries.
 
-- Sources are recorded as `file://<absolute-logical-path>` in `*_source_path`
-  columns and cached by the metadata image-cache processor under
+Discovery lists each folder once per request and matches names ignoring case,
+so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems; an entry
+spelled exactly as listed below wins over other spellings. A folder that can
+be searched but not listed (execute-only permission) still serves names looked
+up exactly. Listings of folders with 256 or more entries (a flat folder of many
+movies) are shared across requests for up to a minute while the folder's mtime
+is unchanged, and only once that mtime is a few seconds old (coarse filesystem
+timestamps), so such a folder is not listed again for every movie in it. Names
+in
+precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
+`.gif` (the formats libvips decodes; `.tbn` is a JPEG):
+
+| Slot | Names |
+| --- | --- |
+| Movie poster | `<basename>-poster`, then `poster`, `folder`, `cover`, `default`, `movie` |
+| Series poster | `poster`, `folder`, `cover`, `default`, `show` |
+| Backdrop | movie `<basename>-fanart`, then `fanart`, `backdrop`, `background`, `art` |
+| Logo | movie `<basename>-logo`, `<basename>-clearlogo`, then `logo`, `clearlogo` |
+| Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
+| Episode still | `<basename>-thumb`, then `<basename>` |
+
+- Basename names attach to one of the item's own media files and beat generic
+  names, as in Kodi. A series has no media file of its own (its request lists
+  every episode file), so a series uses generic names only and
+  `S01E01-poster.jpg` never becomes series art. Silo stores one backdrop, so
+  the first match wins.
+- Generic names attach only in folders that hold a single content group; a
+  shared `folder.jpg` in a flat multi-movie folder applies to none. A season
+  folder that is the series root itself (a flat series) is not searched for
+  season names, so the series' own `poster.jpg` is not reused as every
+  season's poster.
+- Files must be regular (symlinked leaves are rejected), non-empty, and at most
+  25 MiB (`metadata.MaxArtworkSourceBytes`, which also caps provider
+  downloads in `internal/imagecache`). Skips an admin can fix (symlink, oversize, unreadable) log at
+  warn level; the rest at debug.
+
+Caching and refresh:
+
+- Sources are recorded as `file://<absolute-logical-path>?v=<size>-<mtime>`
+  (mtime in whole seconds, so mounts reporting different sub-second precision
+  agree) in `*_source_path` columns. The fingerprint exists only to change the source
+  path when a file is replaced under the same name: the changed source
+  re-queues the image-cache job (`EnqueueBatch` requeues on a different
+  `source_path`), and the processor strips the fingerprint before confining
+  and reading the file. Other consumers treat `file://` as a scheme prefix
+  only. The first refresh after this fingerprint was introduced re-queues
+  every local slot once.
+- The metadata image-cache processor caches the file under
   `local/{contentType}/{contentID}/{hash8}/{imageType}/...` (`hash8` = content
   hash; the discriminator sits before the imageType segment because variant
-  clamping reads the parent directory). Editing the file and refreshing rotates
-  the key; the stale hashed prefix is deleted after a successful re-cache, and
-  item deletion trims local paths to the content prefix.
+  clamping reads the parent directory). A replaced image rotates the key; the
+  stale hashed prefix is deleted after a successful re-cache, and item
+  deletion trims local paths to the content prefix.
 - The processor confines each read to the owning library's `media_folders`
   roots: a lexical check on the logical path, then a symlink-resolving re-check
   (both path and roots are resolved, so a legitimately symlinked root stays
@@ -85,12 +130,42 @@ directly, and API nodes never need filesystem access to libraries.
   over-cap) paths are stable failures with a long retry deferral; recovery is
   refresh-driven — the provider-artwork backfill sweep deliberately skips
   `file://` sources.
-- Generic filenames attach only when the directory holds a single content
-  group; a shared `folder.jpg` in a flat multi-movie folder applies to none.
-  `<basename>-poster.jpg` style names always attach to their file.
-- `applyBestImages`' final write has a local exemption so rating-0 local art
-  can fill already-matched items and cannot be stickily displaced by remote
-  art; the localization pass skips language-neutral local candidates.
+
+Precedence: local artwork beats remote providers wherever the NFO provider
+sits in the chain.
+
+- Items: `applyBestImages` always applies a local candidate, so rating-0 local
+  art fills already-matched items.
+- Seasons and episodes: `accumulateSeasonResults`/`accumulateEpisodeResults`
+  merge first-provider-wins, except that a local poster or still replaces a
+  remote one from an earlier provider (`internal/metadata/local_artwork_precedence.go`).
+  The remote poster a local one displaced stays on the merged result, and a
+  write that touches only a season's localization row (a refresh in a
+  language other than the item's canonical one) stores that provider poster,
+  as item localization rows skip local candidates.
+- A refresh that does not rediscover a slot's cached local copy (a `local/`
+  key with a `file://` source) keeps it unless the sidecar's own folder answers
+  and lists entries: then the file is either missing or still on disk but no
+  longer offered (renamed out of the naming rules, replaced by a better match,
+  or local metadata disabled), and the slot takes the provider's art. A folder
+  that is missing, empty, unreadable or slow to answer is what an unmounted
+  share or a vanished nested mount looks like, so the local copy stays. When
+  an item's media moves, the old art therefore stays only while its former
+  folder is gone; a former folder that still lists entries proves the library
+  is mounted, so the slot takes the new folder's local art or, without any,
+  the provider's. The folder is probed through `internal/rootcheck` with its
+  timeout, once per folder, before the sidecar itself is looked up. This
+  applies only at a level (item, season, episode) where the local provider
+  answered a request for artwork in this refresh (`withLocalArtworkSearched`):
+  with local metadata off for that level, during an Identify, or when the
+  local provider's call failed, cached local art is stored artwork like any
+  other and no library folder is probed.
+- Localization: local art is language-neutral. Localization rows skip local
+  candidates, and the read-side overlay (`internal/catalog/localize.go`) keeps
+  base art served from a `local/` key (`artworkkey.IsLocal`), so a viewer in
+  another language sees the same local art. A slot whose local copy is not
+  cached yet still serves its earlier art, which a localized image may
+  replace.
 
 **Deployment constraint:** the host running the metadata image-cache processor
 must mount the media libraries at the same paths as the scanner/metadata
@@ -99,7 +174,7 @@ worker, otherwise local artwork jobs fail until the mount is present.
 ## Series depth and mixed libraries
 
 `SeasonsRequest`/`EpisodesRequest` carry local path context; `season.nfo`
-supplies season name/plot, `<basename>.nfo` + `<basename>-thumb.ext` supply
+supplies season name/plot, `<basename>.nfo` and the episode still (see above) supply
 episode metadata/thumbs (`internal/metadata/nfo/series_depth.go`). **Naming
 supplies structure; NFOs supply metadata**: NFO season/episode numbers are
 advisory — directory/filename-derived numbers win with a warning. Episode NFOs

@@ -91,6 +91,42 @@ func TestApplyItemLocalizationKeepsManuallySelectedArtwork(t *testing.T) {
 	}
 }
 
+// Base artwork served from a cached copy of a local sidecar is
+// language-neutral and outranks provider art, so a viewer in another language
+// keeps it. A localized slot still fills base art that is remote, including a
+// slot whose local copy is not cached yet and still serves earlier remote art.
+func TestApplyItemLocalizationKeepsLocalSidecarArtwork(t *testing.T) {
+	item := baseItem()
+	item.PosterPath = "local/movies/c1/0badf00d/poster/original.webp"
+	item.PosterSourcePath = "file:///media/Film/Poster.JPG?v=12-1"
+	item.BackdropPath = "tmdb/movies/1/backdrop/original.webp"
+	item.BackdropSourcePath = "file:///media/Film/fanart.jpg?v=12-1"
+	item.LogoSourcePath = "tmdb://logo.png"
+	loc := &models.MediaItemLocalization{
+		Title:              "Titre",
+		PosterPath:         "posters/fr.jpg",
+		PosterSourcePath:   "tmdb://fr-poster.jpg",
+		PosterThumbhash:    "hash-fr",
+		BackdropPath:       "backdrops/fr.jpg",
+		BackdropSourcePath: "tmdb://fr-backdrop.jpg",
+		LogoPath:           "logos/fr.png",
+		LogoSourcePath:     "tmdb://fr-logo.png",
+	}
+	got := applyItemLocalization(item, loc)
+	if got.Title != "Titre" {
+		t.Errorf("localized title lost: %q", got.Title)
+	}
+	if got.PosterPath != item.PosterPath || got.PosterSourcePath != item.PosterSourcePath || got.PosterThumbhash != item.PosterThumbhash {
+		t.Errorf("localized poster replaced local art: path %q source %q", got.PosterPath, got.PosterSourcePath)
+	}
+	if got.BackdropPath != "backdrops/fr.jpg" {
+		t.Errorf("a slot still serving remote art should take the localized backdrop, got %q", got.BackdropPath)
+	}
+	if got.LogoPath != "logos/fr.png" {
+		t.Errorf("remote base logo should take the localized logo, got %q", got.LogoPath)
+	}
+}
+
 func TestApplyItemLocalizationDoesNotMutateBase(t *testing.T) {
 	item := baseItem()
 	_ = applyItemLocalization(item, &models.MediaItemLocalization{Title: "Titre"})
@@ -141,5 +177,23 @@ func TestApplyEpisodeLocalizationPartialRow(t *testing.T) {
 	}
 	if got.Title != "Pilot" {
 		t.Errorf("empty localized title blanked the base: %q", got.Title)
+	}
+}
+
+func TestApplySeasonLocalizationKeepsLocalSidecarPoster(t *testing.T) {
+	season := &models.Season{
+		ContentID:        "s1",
+		Title:            "Season 1",
+		PosterPath:       "local/series/c1/0badf00d/poster/original.webp",
+		PosterSourcePath: "file:///media/Show/season01-poster.jpg?v=12-1",
+		PosterThumbhash:  "local-hash",
+	}
+	loc := &models.SeasonLocalization{Title: "Saison 1", PosterPath: "provider.jpg", PosterSourcePath: "tvdb://fr.jpg", PosterThumbhash: "provider-hash"}
+	got := applySeasonLocalization(season, loc, false)
+	if got.Title != "Saison 1" {
+		t.Errorf("localized title lost: %q", got.Title)
+	}
+	if got.PosterPath != season.PosterPath || got.PosterSourcePath != season.PosterSourcePath || got.PosterThumbhash != season.PosterThumbhash {
+		t.Errorf("localized poster replaced local art: %+v", got)
 	}
 }

@@ -9,6 +9,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -67,6 +69,7 @@ GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media
@@ -163,6 +166,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -221,6 +226,7 @@ GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media

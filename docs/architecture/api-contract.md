@@ -1221,10 +1221,20 @@ tombstone. The retained contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
+  answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
+  while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
+  listeners close. The booleans report the last dependency probe, so the answer does not wait
+  on a slow dependency; `shutting_down` is additive to the frozen shape. See
+  [api-shutdown.md](api-shutdown.md).
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also
   `egress_kbps`); read from already-published snapshots, never a probe, path-redacted because the
   route takes no credential. `internal/nodepool/health.go` `CheckNode` is the internal consumer.
+  Revision (2026-10-11, with node drain): a draining transcode node answers the same `200` shape
+  with `status` `draining`, then `drained` once it has no work left; the values are additive to
+  the frozen shape, and the status code does not change, so probes keep passing while the node
+  finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator

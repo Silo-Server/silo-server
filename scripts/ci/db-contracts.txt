@@ -81,8 +81,10 @@
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
-# Image cache jobs run again for artwork the target no longer holds.
+# Image cache jobs run again for artwork the target no longer holds, and for a
+# local sidecar replaced under the same name.
 ./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
+./internal/metadata TestReplacedLocalSidecarRequeuesSucceededJobDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
