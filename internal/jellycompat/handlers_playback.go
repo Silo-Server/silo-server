@@ -1764,7 +1764,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
 		if err != nil {
 			nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
-			// A start that never connected left nothing on the node to stop.
+			// A start that could not reach the node left nothing there to stop.
 			return transcodenode.TranscodeStartResponse{}, 0, !nodepool.IsConnectFailure(err), fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
 		}
 		defer func() { _ = resp.Body.Close() }()

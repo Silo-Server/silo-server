@@ -4035,9 +4035,9 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 		// A timeout can fire after the node actually started the job; the
 		// stop is a harmless 404 when it never did, and reaps an orphan
-		// full-length transcode when it did. A start that never connected
-		// reached no node, and a stop to a dead host would only hold up the
-		// next candidate.
+		// full-length transcode when it did. A start that could not reach the
+		// node left nothing there to stop, and a stop to a dead host would only
+		// hold up the next candidate.
 		if !nodepool.IsConnectFailure(err) {
 			h.tm.StopRemoteTranscode(transportID, node.URL)
 		}

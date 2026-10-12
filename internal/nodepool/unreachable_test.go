@@ -54,6 +54,8 @@ func TestIsConnectFailure(t *testing.T) {
 		{name: "local descriptors exhausted", err: &net.OpError{Op: dialOp, Net: "tcp", Err: os.NewSyscallError("socket", syscall.EMFILE)}, want: false},
 		{name: "local ports exhausted", err: &net.OpError{Op: dialOp, Net: "tcp", Err: os.NewSyscallError("connect", syscall.EADDRNOTAVAIL)}, want: false},
 		{name: "reset after connecting", err: &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, want: false},
+		{name: "node stopped acknowledging", err: &url.Error{Op: "Post", URL: "http://node", Err: &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ETIMEDOUT)}}, want: true},
+		{name: "caller deadline after connecting", err: &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}, want: false},
 		{name: "plain error", err: errors.New("node returned 503"), want: false},
 	}
 	for _, tt := range tests {

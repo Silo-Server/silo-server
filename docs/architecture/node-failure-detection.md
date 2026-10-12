@@ -19,16 +19,24 @@ Other node calls, such as trickplay and chapter-thumbnail extraction, media
 sampling, download preparation, and the admin node actions, still build their
 own clients with Go's 30-second default and do not report failures.
 
-Only the connect is bounded. A node may take a long time to answer a start or
-a manifest request it has to rebuild, and a segment streams for as long as the
-viewer downloads it, so neither has a response timeout. The request context of each
-call bounds it instead.
+A request can also go out on a pooled connection that was opened before the node
+died, where the connect bound never applies. On Linux the same dialer sets
+`TCP_USER_TIMEOUT` to `nodepool.NodeUnacknowledgedTimeout` (10 seconds): data sent
+to the node that goes unacknowledged that long fails the connection with
+`ETIMEDOUT`. Other platforms have no such bound.
+
+Neither bound is a response timeout. A node may take a long time to answer a start
+or a manifest request it has to rebuild, and a segment streams for as long as the
+viewer downloads it; a live node acknowledges the request at once, and the API
+sends nothing that needs acknowledging while it receives. The request context of
+each call bounds the wait for an answer.
 
 ## Marking a node unreachable
 
-A call that cannot open a connection reports the node through
-`nodepool.ReportConnectFailure`. A connect failure is a dial error: refused, timed
-out, or no route. These do not count:
+A call that cannot reach a node reports it through
+`nodepool.ReportConnectFailure`. That covers a dial error (refused, timed out, or no
+route) and an open connection that failed with `ETIMEDOUT` because the node stopped
+acknowledging. These do not count:
 
 - an error after the connection opened;
 - an HTTP error status;
@@ -48,11 +56,11 @@ apart. The first successful recheck or sweep puts it back, so a node that
 answers loses milliseconds of selection to one transient error. A node that
 fails every recheck stays out until a sweep finds it answering.
 
-A start that failed to connect, a name lookup included, sent nothing to the node,
-so the start paths skip the stop request they otherwise send after a failed start.
-The same goes for a Jellyfin-compatible start whose first manifest fetch cannot
-connect. That request would only wait on the dead host before the next candidate
-is tried.
+A start that could not reach the node, a failed name lookup included, left
+nothing there to stop, so the start paths skip the stop request they otherwise
+send after a failed start. The same goes for a Jellyfin-compatible start whose
+first manifest fetch cannot reach the node. That request would only wait on the
+dead host before the next candidate is tried.
 
 ## Other API servers
 

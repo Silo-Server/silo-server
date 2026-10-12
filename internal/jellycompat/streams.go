@@ -926,7 +926,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		manifest, relayErr := h.fetchRemoteCompatManifest(r.Context(), remoteNodeURL, playSession.UpstreamSessionID)
 		if relayErr != nil {
 			lastPreparationErr = relayErr
-			// A node that refused the connection cannot take the stop either;
+			// A node that cannot be reached cannot take the stop either;
 			// sending it would only hold up the next candidate.
 			if !nodepool.IsConnectFailure(relayErr) {
 				h.tm.StopRemoteTranscode(playSession.UpstreamSessionID, remoteNodeURL)

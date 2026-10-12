@@ -27,9 +27,11 @@ const (
 // dialOp is the net.OpError operation for opening a connection.
 const dialOp = "dial"
 
-// IsConnectFailure reports whether err means a connection to a node could not
-// be opened: refused, timed out, no route, or a name that does not resolve. An
-// error after the connection opened, an HTTP error status, and the caller
+// IsConnectFailure reports whether err means the node could not be reached: a
+// connection could not be opened (refused, timed out, no route, or a name that
+// does not resolve), or an open connection failed because the node stopped
+// acknowledging what was sent to it (ETIMEDOUT; see controlNodeSocket). Other
+// errors after the connection opened, an HTTP error status, and the caller
 // giving up are not connect failures. Neither is running out of local sockets
 // or file descriptors, which says nothing about the node.
 func IsConnectFailure(err error) bool {
@@ -42,7 +44,10 @@ func IsConnectFailure(err error) bool {
 		}
 	}
 	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == dialOp
+	if errors.As(err, &opErr) && opErr.Op == dialOp {
+		return true
+	}
+	return errors.Is(err, syscall.ETIMEDOUT)
 }
 
 // unreachableMarker is implemented by *Planner.
