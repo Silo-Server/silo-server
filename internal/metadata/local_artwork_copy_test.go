@@ -222,6 +222,31 @@ func TestLocalArtworkFallsBackToQueueWhenCopierFails(t *testing.T) {
 	}
 }
 
+// Only sidecars this server can see go to its copier. A local source a
+// refresh kept without seeing it (no mount here) is queued the usual way, so
+// it neither takes a discovery hold nor gets claimed by a copy that can only
+// defer it.
+func TestOnlyVisibleLocalArtworkGoesToTheCopier(t *testing.T) {
+	dir := t.TempDir()
+	writeTestBytes(t, filepath.Join(dir, "poster.jpg"))
+	seen := "file://" + filepath.Join(dir, "poster.jpg") + "?v=5-1"
+	unseen := "file://" + filepath.Join(dir, "missing-mount", "fanart.jpg") + "?v=5-1"
+	jobs := &capturingImageJobEnqueuer{}
+	copier := &recordingLocalArtworkCopier{}
+	s := &MetadataService{imageCacheJobs: jobs}
+	s.SetLocalArtworkCopier(copier)
+	s.enqueueImageCacheJobs(context.Background(), "item", "movie-1", []EnqueueImageCacheJobInput{
+		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: seen},
+		{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImageBackdrop, SourcePath: unseen},
+	})
+	if len(copier.inputs) != 1 || copier.inputs[0].SourcePath != seen {
+		t.Fatalf("copier got %#v, want only the poster this server can see", copier.inputs)
+	}
+	if len(jobs.inputs) != 1 || jobs.inputs[0].SourcePath != unseen {
+		t.Fatalf("queued %#v, want only the unseen backdrop", jobs.inputs)
+	}
+}
+
 // A manual refresh does not report its artwork done while another worker has
 // left one of the target's local jobs for a server with the storage mounted.
 func TestCacheTargetArtworkReportsLocalArtworkDeferredElsewhere(t *testing.T) {

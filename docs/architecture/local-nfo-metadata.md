@@ -381,7 +381,7 @@ Caching and refresh:
   (`internal/metadata/local_artwork_copy.go`). Only `api` and `integrated`
   processes run refreshes and the image cache, and a refresh can only discover
   a file it can read, so that process sees the library mount. The refresh hands
-  its local slots (item, season, episode; the copier takes any target type, and
+  the local slots whose files it sees (item, season, episode; the copier takes any target type, and
   a person photo carries the owning item's content ID as `series_id` for root
   confinement) to `ImageCacheProcessor.CopyLocalArtwork`, which queues the jobs
   behind a 10-minute discovery hold that other drains respect and copies them
@@ -412,10 +412,11 @@ Caching and refresh:
   deferred job goes back to the queue without counting an attempt, for a
   server that has the mount: after 10 minutes, or an hour when it was last
   deferred for the same reason, so storage no server mounts any more stays
-  cheap. A discovery copy that claims a deferred job early leaves it its
-  remaining wait (at least 10 minutes), so a server without the mount that
-  keeps a pending source through its refreshes cannot push the job further
-  from servers that have the mount. A manual refresh makes such a job due again and starts its deferral
+  cheap. A local source that a refresh on a server without the mount keeps
+  (see retention below) is queued the usual way, not handed to that server's
+  copier, so its hold or deferral stays as it was; and a copy that claims a
+  deferred job early leaves it its remaining wait (at least 10 minutes). A
+  manual refresh makes such a job due again and starts its deferral
   over, and reports its artwork as still pending while a job of its target
   waits this way. Otherwise missing/unreadable/out-of-root and
   structurally-unusable (non-regular, over-cap) paths are stable failures with

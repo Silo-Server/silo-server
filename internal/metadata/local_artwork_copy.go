@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -50,6 +52,8 @@ type localArtworkCopies struct {
 	pending chan EnqueueImageCacheJobInput
 	// inflight counts queued and running copies, so tests can wait for them.
 	inflight sync.WaitGroup
+	// lastFullLog rate-limits the full-backlog message (Unix nanoseconds).
+	lastFullLog atomic.Int64
 }
 
 // CopyLocalArtwork queues the local sidecar inputs and copies them on this
@@ -103,8 +107,14 @@ func (p *ImageCacheProcessor) startLocalArtworkCopies(ctx context.Context, store
 		}
 	}
 	if dropped > 0 {
-		slog.InfoContext(ctx, "metadata image cache: local artwork backlog full, leaving copies to the queue",
-			"component", "metadata", "count", dropped, "retry_after", localArtworkDiscoveryHold)
+		// A large first scan can overflow the backlog on every refresh; one
+		// line a minute is enough to say so.
+		now := time.Now().UnixNano()
+		last := p.localCopies.lastFullLog.Load()
+		if now-last >= int64(time.Minute) && p.localCopies.lastFullLog.CompareAndSwap(last, now) {
+			slog.InfoContext(ctx, "metadata image cache: local artwork backlog full, leaving copies to the queue",
+				"component", "metadata", "count", dropped, "retry_after", localArtworkDiscoveryHold)
+		}
 	}
 }
 

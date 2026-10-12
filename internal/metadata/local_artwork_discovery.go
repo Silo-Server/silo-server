@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -16,23 +17,45 @@ func (s *MetadataService) SetLocalArtworkCopier(copier LocalArtworkCopier) {
 	s.localArtwork = copier
 }
 
-// copyLocalArtwork hands the local sidecar inputs to the copier and returns
-// the inputs still to queue the usual way: the remote ones, or all of them
-// when no copier is wired or it failed.
+// copyLocalArtwork hands the local sidecar inputs this process can see to the
+// copier and returns the inputs still to queue the usual way: the remote ones
+// and the unseen local ones, or all of them when no copier is wired or it
+// failed. A refresh finds only files it can read, so a discovered sidecar is
+// seen; a local source kept by a refresh on a server without the mount is
+// not, and the usual queueing leaves its hold or deferral as it is.
 func (s *MetadataService) copyLocalArtwork(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) []EnqueueImageCacheJobInput {
 	if s.localArtwork == nil {
 		return inputs
 	}
-	local, remote := splitLocalImageCacheInputs(inputs)
-	if len(local) == 0 {
+	local, rest := splitLocalImageCacheInputs(inputs)
+	var seen []EnqueueImageCacheJobInput
+	for _, in := range local {
+		if localSidecarVisible(in.SourcePath) {
+			seen = append(seen, in)
+		} else {
+			rest = append(rest, in)
+		}
+	}
+	if len(seen) == 0 {
 		return inputs
 	}
-	if err := s.localArtwork.CopyLocalArtwork(ctx, local); err != nil {
+	if err := s.localArtwork.CopyLocalArtwork(ctx, seen); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to start copying local artwork, leaving it to the queue", "component", "metadata",
-			"target_kind", targetKind, "target_id", targetID, "count", len(local), "error", err)
+			"target_kind", targetKind, "target_id", targetID, "count", len(seen), "error", err)
 		return inputs
 	}
-	return remote
+	return rest
+}
+
+// localSidecarVisible reports whether the file a local source names exists
+// on this server.
+func localSidecarVisible(source string) bool {
+	path, ok := localImageSourceFilePath(source)
+	if !ok {
+		return false
+	}
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // applyLocalArtworkFallback fills each item slot waiting on its local copy,
