@@ -668,7 +668,7 @@ func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
 
 // DeleteProfileAudited is DeleteProfile through the wrapped store's audited
 // delete. A backend without one deletes the profile without an audit row.
-func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx) error) error {
+func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx, *userstore.Profile) error) error {
 	deleter, ok := s.UserStore.(userstore.AuditedProfileDeleter)
 	if !ok {
 		return s.DeleteProfile(ctx, id)

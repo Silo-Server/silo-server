@@ -81,9 +81,11 @@ type AuditedProfileWriter interface {
 
 // AuditedProfileDeleter deletes a profile like UserStore.DeleteProfile and
 // runs audit in the same PostgreSQL transaction, after the delete and before
-// the commit; an audit error rolls the delete back.
+// the commit; an audit error rolls the delete back. audit receives the
+// profile as the transaction locked and deleted it, so a concurrent update
+// that committed first is reflected.
 type AuditedProfileDeleter interface {
-	DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx) error) error
+	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) error
 }
 
 // UserStore defines the interface for per-user data storage.
