@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"encoding/json"
-	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -137,17 +136,17 @@ func (d *EventDispatcher) dispatchEnvelope(ctx context.Context, env events.Envel
 }
 
 // deliverDue delivers every due delivery in d's memoryDeliveryStore and waits
-// until none is due or claimed by a delivery still running. The delivery loop
-// Start runs may take some of them first.
+// until none is due or claimed by a delivery still running. A started
+// dispatcher's own loop does the delivering.
 func (d *EventDispatcher) deliverDue(ctx context.Context) {
 	store := d.deliveries.(*memoryDeliveryStore)
-	for {
+	for store.busy() {
+		if d.cancel != nil {
+			time.Sleep(time.Millisecond)
+			continue
+		}
 		d.claimAndDeliver(ctx)
 		d.inflight.Wait()
-		if !store.busy() {
-			return
-		}
-		runtime.Gosched()
 	}
 }
 

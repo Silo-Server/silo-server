@@ -171,10 +171,12 @@ func TestEventDeliveryOutboxPostgres(t *testing.T) {
 		if err := store.Enqueue(ctx, []EventDelivery{
 			{EventID: "with", EventName: "scan_complete", Payload: json.RawMessage(`{"libraryId":"lib-1"}`), InstallationID: installation, CapabilityID: "events"},
 			{EventID: "without", EventName: "scan_complete", InstallationID: installation, CapabilityID: "events"},
+			// jsonb would refuse the whole insert over this escape.
+			{EventID: "nul", EventName: "scan_complete", Payload: json.RawMessage(`{"name":"a\u0000b"}`), InstallationID: installation, CapabilityID: "events"},
 		}); err != nil {
 			t.Fatal(err)
 		}
-		for _, delivery := range claim(t, 2, time.Hour) {
+		for _, delivery := range claim(t, 3, time.Hour) {
 			switch delivery.EventID {
 			case "with":
 				var payload map[string]any
@@ -184,6 +186,11 @@ func TestEventDeliveryOutboxPostgres(t *testing.T) {
 			case "without":
 				if delivery.Payload != nil {
 					t.Fatalf("payload = %s, want none", delivery.Payload)
+				}
+			case "nul":
+				var payload map[string]string
+				if err := json.Unmarshal(delivery.Payload, &payload); err != nil || payload["name"] != "a\x00b" {
+					t.Fatalf("payload = %s, %v", delivery.Payload, err)
 				}
 			}
 		}

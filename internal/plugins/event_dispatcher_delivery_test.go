@@ -70,9 +70,7 @@ func TestClusterDeliversEachEventOnce(t *testing.T) {
 		t.Fatalf("publish envelope on api-b: %v", err)
 	}
 	waitFor(t, client)
-	for deliveries.busy() {
-		a.dispatcher.deliverDue(ctx)
-	}
+	a.dispatcher.deliverDue(ctx)
 
 	ids := map[string]string{}
 	for _, req := range client.get() {
@@ -198,21 +196,95 @@ func TestDeliveryGivesUpAfterTheLastRetry(t *testing.T) {
 	}
 }
 
-func TestDeliveryToDisabledInstallationIsDropped(t *testing.T) {
+// TestDeliveryToDisabledInstallationIsRetried: the delivering server's
+// installation cache can lag an enable made on another server, so a disabled
+// installation is retried like any failure rather than dropped at once.
+func TestDeliveryToDisabledInstallationIsRetried(t *testing.T) {
 	ctx := t.Context()
 	deliveries := newMemoryDeliveryStore()
 	store := &fakeInstallationStore{
 		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
 		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
 	}
+	client := &flakyClient{}
+	disabled := true
 	resolver := eventConsumerResolverFunc(func(context.Context, int, string) (eventConsumerClient, error) {
-		return nil, ErrInstallationDisabled
+		if disabled {
+			return nil, ErrInstallationDisabled
+		}
+		return client, nil
 	})
 	d := NewEventDispatcher(newFakeBus(), nil, store, resolver, deliveries, 4)
 
 	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+	if pending := deliveries.pending(); len(pending) != 1 || len(pending[0].delays) != 1 {
+		t.Fatalf("outbox after delivering to a disabled installation = %+v, want the delivery waiting to retry", pending)
+	}
+	disabled = false
+	deliveries.advance(eventRetryDelays[0])
+	d.deliverDue(ctx)
+	if got := len(client.get()); got != 1 {
+		t.Fatalf("deliveries once the installation is enabled = %d, want 1", got)
+	}
 	if pending := deliveries.pending(); len(pending) != 0 {
-		t.Fatalf("outbox after delivering to a disabled installation = %+v, want empty", pending)
+		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
+func TestUndeliverablePayloadIsDropped(t *testing.T) {
+	ctx := t.Context()
+	client := &flakyClient{}
+	d, deliveries := newDeliveryFixture(client)
+	if err := deliveries.Enqueue(ctx, []EventDelivery{{EventID: "e", EventName: cache.EventScanComplete, Payload: []byte(`[1]`), InstallationID: 1, CapabilityID: "events"}}); err != nil {
+		t.Fatal(err)
+	}
+	d.deliverDue(ctx)
+	if got := len(client.get()); got != 0 {
+		t.Fatalf("deliveries of a payload that is not an object = %d, want 0", got)
+	}
+	if pending := deliveries.pending(); len(pending) != 0 {
+		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
+// TestUnsubscribedEventsAreNotQueued: once the index is built, events no
+// installation subscribes to never take a place in the intake.
+func TestUnsubscribedEventsAreNotQueued(t *testing.T) {
+	ctx := t.Context()
+	d, _ := newDeliveryFixture(&flakyClient{})
+	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete})
+
+	d.ObservePublish(cache.ChannelPlayback, cache.Event{Type: cache.EventPlaybackSessionsChanged})
+	if got := len(d.intake); got != 0 {
+		t.Fatalf("intake after an unsubscribed event = %d, want 0", got)
+	}
+	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete})
+	if got := len(d.intake); got != 1 {
+		t.Fatalf("intake after a subscribed event = %d, want 1", got)
+	}
+}
+
+// TestStopStoresEventsPublishedWhileDraining: the server's context ends
+// before it drains its requests, and events those requests publish must still
+// reach the outbox.
+func TestStopStoresEventsPublishedWhileDraining(t *testing.T) {
+	deliveries := newMemoryDeliveryStore()
+	store := &fakeInstallationStore{
+		installations: []*Installation{{ID: 1, PluginID: "silo.notify", Enabled: true}},
+		capabilities:  map[int][]*Capability{1: {eventConsumer(1, "events", cache.EventScanComplete)}},
+	}
+	d := NewEventDispatcher(newFakeBus(), nil, store, staticResolver{client: &flakyClient{}}, deliveries, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := d.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	d.loops.Wait()
+
+	d.ObservePublish(cache.ChannelCatalog, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	d.Stop()
+	if pending := deliveries.pending(); len(pending) != 1 || pending[0].EventName != cache.EventScanComplete {
+		t.Fatalf("outbox after Stop = %+v, want the event published while draining", pending)
 	}
 }
 

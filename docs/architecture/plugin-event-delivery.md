@@ -2,9 +2,11 @@
 
 `plugins.EventDispatcher` (`internal/plugins/event_dispatcher.go`) delivers
 host events to plugin `event_consumer.v1` capabilities whose manifest
-`subscriptions` list the event's name. Each event reaches each subscribing
-installation at least once across the cluster, with a stable `event_id` that
-plugins can deduplicate on. Deliveries are not ordered.
+`subscriptions` list the event's name. Once an event is stored, it reaches
+each subscribing installation at least once across the cluster unless every
+attempt fails, with a stable `event_id` that plugins can deduplicate on. One
+plugin process handles each attempt, on whichever API server claimed it.
+Deliveries are not ordered.
 
 ## Where events come from
 
@@ -23,6 +25,8 @@ servers does not change how often a plugin hears of it.
   relays other nodes' envelopes to its local subscribers; the dispatcher
   takes only envelopes whose `SourceID` is its own hub's.
 
+Both paths check the subscriber index before queueing, so events no plugin
+subscribes to cost a map lookup and never take a place in the intake queue.
 A bus event gets a new ULID as its `event_id`. An envelope keeps its
 `EventID`.
 
@@ -33,19 +37,24 @@ subscribing installation and wakes its delivery loop. Every API server runs
 that loop. It claims due rows with `FOR UPDATE SKIP LOCKED` inside a
 `MATERIALIZED` CTE, which counts the attempt and pushes `next_attempt_at` out
 by a two-minute lease. It then calls `HandleEvent` on its own process for the
-installation, with one minute for the client and the call together.
+installation, with one minute for starting the plugin and the call together.
 
 | Outcome | Row |
 | --- | --- |
-| Success | Deleted. |
-| Installation disabled or gone | Deleted without retrying. Uninstalling also deletes the rows through the foreign key. |
-| Error or timeout | Due again after 10 s, 30 s, 1 min, 3 min, then 15 min. |
+| Success | Deleted, even when the server began shutting down after the plugin answered. |
+| Error, timeout, or the installation disabled or gone on this server | Due again after 10 s, 30 s, 1 min, 3 min, then 15 min. |
 | Error after the last delay | Deleted and logged. |
+| A payload that is not a JSON object | Deleted and logged. |
 | The server dies or shuts down mid-delivery | Claimed again by any server once the lease runs out. |
+
+Uninstalling a plugin deletes its rows through the foreign key. A disabled
+installation is retried rather than dropped because the delivering server's
+installation cache can lag an enable made on another server.
 
 Besides being woken, each server polls for due rows every 10 seconds. That
 picks up retries, rows whose producer had no free delivery slot, and rows
-whose claimer died.
+whose claimer died. `Stop` writes the events still queued, including those
+published while the server drains its requests after its context ended.
 
 ## Invariants
 
@@ -56,17 +65,30 @@ whose claimer died.
   `id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` the planner may run the
   subquery more than once and claim more than `n` rows.
 - The lease outlasts the delivery timeout, or a slow delivery is claimed by a
-  second server while the first is still running.
+  second server while the first is still running. Starting a plugin is shared
+  by its callers and ignores their deadlines, so the dispatcher stops waiting
+  for it at its own deadline.
 - Finishing a delivery is guarded by the attempt count its claim returned. A
   server whose lease ran out and whose row another server claimed since
   neither deletes nor reschedules that row.
-- An event is stored only by the server that produced it. If that server
-  dies before the row is written, plugins do not get the event; the intake
-  queue holds at most 1024 events, and a bus publish that finds it full is
-  dropped and logged.
+- `payload` is `json`, not `jsonb`: `jsonb` refuses a `\u0000` escape, and one
+  such payload would fail the whole insert for every subscriber.
+
+## Limits
+
+- An event is lost before it is stored when its server dies first, when the
+  intake queue (1024 events) is full, or when the outbox write fails. A full
+  queue drops bus events with a log line; hub envelopes wait in the hub's
+  64-envelope buffer for that subscriber, and `Hub.Dropped` counts the ones
+  it drops.
+- Each server delivers four events at a time across all plugins. A plugin
+  that hangs holds a slot for up to a minute per attempt, so its backlog
+  delays other plugins' events.
+- One process sees each event, so a plugin that keeps per-process state
+  cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver from their
-  bus and hub subscriptions, once per server and without retries, until they
-  are replaced.
+  bus and hub subscriptions, once per server, without retries and without an
+  `event_id`, until they are replaced.
 
 ## Plugin contract
 

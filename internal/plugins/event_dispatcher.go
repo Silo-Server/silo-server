@@ -51,6 +51,11 @@ const (
 	// other servers. It outlasts eventDeliveryTimeout so a slow delivery is
 	// not claimed twice.
 	eventDeliveryLease = 2 * eventDeliveryTimeout
+	// eventOutcomeTimeout bounds recording a delivery's outcome, which
+	// outlives a server that starts shutting down after the plugin answered.
+	eventOutcomeTimeout = 10 * time.Second
+	// eventDrainTimeout bounds Stop writing the events still queued.
+	eventDrainTimeout = 5 * time.Second
 )
 
 // eventRetryDelays is the wait after each failed attempt; a delivery that
@@ -67,14 +72,15 @@ var eventRetryDelays = []time.Duration{
 // EventDispatcher delivers host events to plugin event_consumer.v1
 // capabilities whose manifest "subscriptions" list matches the event name.
 //
-// Every event reaches each subscribing installation at least once across the
-// cluster, with the same event_id on every attempt. Only the server that
-// produced an event stores it: one row per subscribing installation in the
-// plugin_event_deliveries outbox. Any server then claims due rows, calls
-// HandleEvent on its own process for the installation, and deletes the row
-// on success. A failed attempt is retried after eventRetryDelays, and a row
-// whose claimer died is claimed again once its lease runs out. Deliveries
-// are not ordered.
+// Only the server that produced an event stores it: one row per subscribing
+// installation in the plugin_event_deliveries outbox. Any server then claims
+// due rows, calls HandleEvent on its own process for the installation, and
+// deletes the row on success. A failed attempt is retried after
+// eventRetryDelays with the same event_id, and a row whose claimer died is
+// claimed again once its lease runs out, so a stored event reaches each
+// subscribing installation at least once unless every attempt fails.
+// Deliveries are not ordered. An event is lost before it is stored when its
+// server dies first, when the intake is full, or when the write fails.
 //
 // Events come from two places on the producing server:
 //
@@ -106,6 +112,9 @@ type EventDispatcher struct {
 	wake chan struct{}
 
 	hubUnsubscribe func()
+	// cancel ends the goroutines Start runs, and loops waits for them.
+	cancel context.CancelFunc
+	loops  sync.WaitGroup
 
 	// index maps an event name to its subscribers so an event costs a map
 	// lookup instead of 1+N store reads. It is
@@ -193,9 +202,11 @@ func NewEventDispatcherWithTypedResolver(
 }
 
 // Start follows lifecycle changes from other servers, takes envelopes from
-// the hub, and starts storing and delivering events until ctx ends. Bus
-// events arrive through ObservePublish, which the caller registers.
+// the hub, and starts storing and delivering events until ctx ends or Stop
+// is called. Bus events arrive through ObservePublish, which the caller
+// registers.
 func (d *EventDispatcher) Start(ctx context.Context) error {
+	ctx, d.cancel = context.WithCancel(ctx)
 	if err := d.bus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type == cache.EventPluginsChanged {
 			d.invalidateIndex()
@@ -207,21 +218,45 @@ func (d *EventDispatcher) Start(ctx context.Context) error {
 	if d.hub != nil {
 		envCh, unsub := d.hub.Subscribe()
 		d.hubUnsubscribe = unsub
-		go d.consumeHub(ctx, envCh)
+		d.loops.Go(func() { d.consumeHub(ctx, envCh) })
 	}
-	go d.storeEvents(ctx)
-	go d.deliverEvents(ctx)
+	d.loops.Go(func() { d.storeEvents(ctx) })
+	d.loops.Go(func() { d.deliverEvents(ctx) })
 	return nil
 }
 
-// Stop stops taking hub envelopes and waits for the deliveries in flight,
-// which end with the context Start was given.
+// Stop ends what Start began and waits for the deliveries in flight, then
+// stores the events still queued. Those include events published while the
+// server drains after its context ended.
 func (d *EventDispatcher) Stop() {
 	if d.hubUnsubscribe != nil {
 		d.hubUnsubscribe()
 		d.hubUnsubscribe = nil
 	}
+	if d.cancel != nil {
+		d.cancel()
+	}
+	d.loops.Wait()
 	d.inflight.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), eventDrainTimeout)
+	defer cancel()
+	for {
+		select {
+		case produced := <-d.intake:
+			d.store(ctx, produced)
+		default:
+			return
+		}
+	}
+}
+
+// mayHaveSubscribers reports whether eventName could have subscribers,
+// reading only the index: an event goes on to the intake when the index has
+// subscribers for it, or is missing or stale.
+func (d *EventDispatcher) mayHaveSubscribers(eventName string) bool {
+	index, ok := d.currentIndex()
+	return !ok || len(index[eventName]) > 0
 }
 
 // ObservePublish takes an event this server published on the bus. It is a
@@ -230,6 +265,9 @@ func (d *EventDispatcher) ObservePublish(channel string, event cache.Event) {
 	switch channel {
 	case cache.ChannelCatalog, cache.ChannelAdmin, cache.ChannelPlayback:
 	default:
+		return
+	}
+	if !d.mayHaveSubscribers(event.Type) {
 		return
 	}
 	produced := busEvent(event)
@@ -266,7 +304,7 @@ func (d *EventDispatcher) consumeHub(ctx context.Context, ch <-chan events.Envel
 			if !ok {
 				return
 			}
-			if env.SourceID != d.hub.SourceID() {
+			if env.SourceID != d.hub.SourceID() || !d.mayHaveSubscribers(env.Event) {
 				continue
 			}
 			select {
@@ -532,10 +570,14 @@ func (d *EventDispatcher) claimAndDeliver(ctx context.Context) {
 // deliver makes one attempt at a claimed delivery and records the outcome.
 func (d *EventDispatcher) deliver(ctx context.Context, delivery EventDelivery) {
 	err := d.handleEvent(ctx, delivery)
-	if ctx.Err() != nil {
+	if err != nil && ctx.Err() != nil {
 		// Shutting down. The lease runs out and a server claims it again.
 		return
 	}
+	// A plugin that answered just before shutdown has handled the event, so
+	// its outcome is recorded with a context of its own.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), eventOutcomeTimeout)
+	defer cancel()
 	logArgs := []any{
 		"component", "plugins",
 		"installation_id", delivery.InstallationID,
@@ -544,37 +586,48 @@ func (d *EventDispatcher) deliver(ctx context.Context, delivery EventDelivery) {
 		"event_id", delivery.EventID,
 		"attempt", delivery.Attempts,
 	}
+	var recordErr error
 	switch {
 	case err == nil:
-		err = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
-	case errors.Is(err, ErrInstallationDisabled), errors.Is(err, ErrInstallationNotFound):
-		slog.DebugContext(ctx, "plugin event dispatcher: installation gone, delivery dropped", append(logArgs, "error", err)...)
-		err = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
+		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
+	case errors.Is(err, errUndeliverable):
+		slog.WarnContext(ctx, "plugin event dispatcher: delivery dropped", append(logArgs, "error", err)...)
+		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
 	case delivery.Attempts > len(eventRetryDelays):
 		slog.WarnContext(ctx, "plugin event dispatcher: delivery failed, giving up", append(logArgs, "error", err)...)
-		err = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
+		recordErr = d.deliveries.Delete(ctx, delivery.ID, delivery.Attempts)
 	default:
 		delay := eventRetryDelays[delivery.Attempts-1]
-		slog.WarnContext(ctx, "plugin event dispatcher: delivery failed, will retry", append(logArgs, "retry_in", delay, "error", err)...)
-		err = d.deliveries.Retry(ctx, delivery.ID, delivery.Attempts, delay, err.Error())
+		level := slog.LevelWarn
+		if errors.Is(err, ErrInstallationDisabled) || errors.Is(err, ErrInstallationNotFound) {
+			// Usually a plugin disabled or removed after the event was
+			// stored, but this server's installation cache can lag a
+			// change made on another server, so it is retried too.
+			level = slog.LevelDebug
+		}
+		slog.Log(ctx, level, "plugin event dispatcher: delivery failed, will retry", append(logArgs, "retry_in", delay, "error", err)...)
+		recordErr = d.deliveries.Retry(ctx, delivery.ID, delivery.Attempts, delay, err.Error())
 	}
-	if err != nil {
+	if recordErr != nil {
 		// The lease runs out and the delivery is attempted again.
-		slog.WarnContext(ctx, "plugin event dispatcher: record delivery outcome failed", append(logArgs, "error", err)...)
+		slog.WarnContext(ctx, "plugin event dispatcher: record delivery outcome failed", append(logArgs, "error", recordErr)...)
 	}
 }
 
+// errUndeliverable marks a delivery no retry can make succeed.
+var errUndeliverable = errors.New("undeliverable")
+
 func (d *EventDispatcher) handleEvent(ctx context.Context, delivery EventDelivery) error {
-	ctx, cancel := context.WithTimeout(ctx, eventDeliveryTimeout)
-	defer cancel()
 	var payload *structpb.Struct
 	if len(delivery.Payload) > 0 {
 		payload = &structpb.Struct{}
 		if err := payload.UnmarshalJSON(delivery.Payload); err != nil {
-			return fmt.Errorf("decode payload: %w", err)
+			return fmt.Errorf("%w: decode payload: %w", errUndeliverable, err)
 		}
 	}
-	client, err := d.resolver.EventConsumerClient(ctx, delivery.InstallationID, delivery.CapabilityID)
+	ctx, cancel := context.WithTimeout(ctx, eventDeliveryTimeout)
+	defer cancel()
+	client, err := d.resolveClient(ctx, delivery)
 	if err != nil {
 		return fmt.Errorf("resolve client: %w", err)
 	}
@@ -584,6 +637,28 @@ func (d *EventDispatcher) handleEvent(ctx context.Context, delivery EventDeliver
 		Payload:   payload,
 	})
 	return err
+}
+
+// resolveClient resolves the installation's client within ctx. Starting a
+// plugin is shared by its callers and ignores their deadlines, and a
+// delivery still waiting once its lease ran out could be made by a second
+// server meanwhile.
+func (d *EventDispatcher) resolveClient(ctx context.Context, delivery EventDelivery) (eventConsumerClient, error) {
+	type resolved struct {
+		client eventConsumerClient
+		err    error
+	}
+	done := make(chan resolved, 1)
+	go func() {
+		client, err := d.resolver.EventConsumerClient(ctx, delivery.InstallationID, delivery.CapabilityID)
+		done <- resolved{client, err}
+	}()
+	select {
+	case r := <-done:
+		return r.client, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // subscriptionsOf returns the event names in the capability's manifest
