@@ -84,10 +84,16 @@ func TestEncodedOutputConditionsDoNotUseSourceCodecFacts(t *testing.T) {
 		{"scaled width", ProfileCondition{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}, 4000000, true},
 		{"scaled height", ProfileCondition{Condition: "LessThanEqual", Property: "Height", Value: "720", IsRequired: true}, 4000000, true},
 		{"known width exceeds constraint", ProfileCondition{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}, 0, false},
-		// The encoder picks profile and level, so a client's rule on them is an
-		// encode target, as Jellyfin's StreamBuilder treats it, not a refusal.
-		{"required encoder level unknown", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: true}, 0, true},
-		{"required encoder profile unknown", ProfileCondition{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline", IsRequired: true}, 0, true},
+		// An H.264 encode is High profile at the level its frame size, rate and
+		// bitrate need, never below the streaming libx264 pin of 4.1; here 4.1.
+		{"required level the encode meets", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: true}, 0, true},
+		{"required level below the encode", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "40", IsRequired: true}, 0, false},
+		{"required profile the encode meets", ProfileCondition{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline", IsRequired: true}, 0, true},
+		{"required baseline profile", ProfileCondition{Condition: "Equals", Property: "VideoProfile", Value: "baseline", IsRequired: true}, 0, false},
+		// The encoder chooses reference frames, so a rule on them is an encode
+		// target either way, as in Jellyfin.
+		{"required reference frame limit", ProfileCondition{Condition: "LessThanEqual", Property: "RefFrames", Value: "4", IsRequired: true}, 0, true},
+		{"required reference frame minimum", ProfileCondition{Condition: "GreaterThanEqual", Property: "RefFrames", Value: "2", IsRequired: true}, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profile := DeviceProfile{

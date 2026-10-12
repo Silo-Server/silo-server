@@ -307,24 +307,30 @@ func conditionsOnlyTargetAudio(conditions []ProfileCondition) bool {
 	return true
 }
 
-// encoderChosenConditionProperties are output facts the encoder picks rather
-// than inherits from the source. Jellyfin turns a client's rules on them into
-// encoder limits (StreamBuilder.ApplyTranscodingConditions) instead of
-// refusing the transcode.
-var encoderChosenConditionProperties = map[string]bool{
-	"videoprofile": true,
-	"videolevel":   true,
-	"refframes":    true,
+// encodeOutputConditionValues are the condition values of a planned encode.
+// Unlike a scanned file's, an encode's unknown reference-frame count gets no
+// FFmpeg 7 stand-in (see buildConditionValues): the encoder chooses it.
+func encodeOutputConditionValues(output catalog.FileVersion, audioStreamIndex *int) conditionValues {
+	values := buildConditionValues(output, audioStreamIndex)
+	if compatPrimaryVideoTrack(output).ReferenceFrames <= 0 {
+		delete(values, conditionPropertyRefFrames)
+	}
+	return values
 }
 
-// encodeOutputConditionsMatch matches conditions against a planned encode's
-// output, whose profile, level and reference frames stay unknown until a
-// worker's encoder is chosen. A rule on any of them is an encode target
-// there, not a refusal; every known value is still checked.
+// conditionPropertyRefFrames is the normalized RefFrames condition property.
+const conditionPropertyRefFrames = "refframes"
+
+// encodeOutputConditionsMatch matches conditions against a planned H.264
+// encode. Its reference frames are the encoder's choice and Silo does not yet
+// pass a client's limit to the encoder, so, as Jellyfin's StreamBuilder treats
+// a RefFrames rule (ApplyTranscodingConditions), the rule is an encode target
+// rather than a refusal. The streaming libx264 presets use one reference
+// frame. Every other rule, profile and level included, is checked as usual.
 func encodeOutputConditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
 	for _, condition := range conditions {
 		property := normalizeConditionToken(condition.Property)
-		if _, known := values[property]; !known && encoderChosenConditionProperties[property] {
+		if _, known := values[property]; !known && property == conditionPropertyRefFrames {
 			continue
 		}
 		if !conditionMatches(condition, values) {
@@ -385,9 +391,9 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 	}
 
 	// Everything below is only inserted when Silo actually knows the value,
-	// except reference frames (see below). An absent key falls through to
-	// conditionMatches' IsRequired handling,
-	// mirroring how Jellyfin's ConditionProcessor treats a null value.
+	// except a scanned file's reference frames (see below). An absent key
+	// falls through to conditionMatches' IsRequired handling, mirroring how
+	// Jellyfin's ConditionProcessor treats a null value.
 	if strings.TrimSpace(video.Profile) != "" {
 		values["videoprofile"] = conditionValue{text: video.Profile}
 	}
@@ -399,9 +405,10 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 	} else {
 		// FFmpeg 8.1 reports a stream's reference frames only while reading
 		// frames, so no scanned file carries a count (see mediaprobe.Stream).
-		// Under FFmpeg 7, which Jellyfin 10.x ships, ffprobe reported the
-		// decoder default of 1 for every file, and clients tuned their rules
-		// against that: Moonfin requires RefFrames <= 4 from 1900 pixels wide.
+		// Under FFmpeg 7, ffprobe reported the decoder default of 1 for every
+		// file, Jellyfin recorded that 1, and clients tuned their rules to it:
+		// Moonfin requires RefFrames <= 4 from 1900 pixels wide. A planned
+		// encode does not get this stand-in (see encodeOutputConditionValues).
 		// Failing such a rule here would force an encode of every HD H.264
 		// file those clients direct play on Jellyfin, so evaluate it against
 		// the same 1. Reading max_num_ref_frames from the SPS at scan time
