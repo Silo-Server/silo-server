@@ -103,6 +103,17 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 			"profile_id", session.ProfileID, "error", err)
 		return
 	}
+	// A track the viewer does not remember is not claimed either, so no
+	// report's read-back below can write it.
+	if !saved.remembersAudio() {
+		audio = nil
+	}
+	if !saved.remembersSubtitles() {
+		subtitle = nil
+	}
+	if audio == nil && subtitle == nil {
+		return
+	}
 	// Claim the change on the play before writing it, so overlapping reports
 	// (a retry, a Stopped beside a Progress, another replica) write it once.
 	audio, subtitle, err = h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle, stop)
@@ -120,7 +131,7 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	// back and written again until it matches, so whichever write lands last
 	// leaves the latest claimed track. Claims need new reports, so this ends;
 	// the report's deadline bounds it if writes stall.
-	if audio != nil && saved.remembersAudio() {
+	if audio != nil {
 		for index := *audio; ctx.Err() == nil; {
 			pref := compatAudioPreference(session, key, *source, index)
 			if err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, pref); err != nil {
@@ -135,7 +146,7 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 			index = *latest.RememberedAudioStreamIndex
 		}
 	}
-	if subtitle != nil && saved.remembersSubtitles() {
+	if subtitle != nil {
 		for index := *subtitle; ctx.Err() == nil; {
 			if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, subtitlePref); err != nil {
 				slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
@@ -155,14 +166,18 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 }
 
 // latestCompatTrackClaim is the play's source as the store holds it now, with
-// the tracks most recently claimed for it.
+// the tracks most recently claimed for it. It reads through Update rather than
+// Get: the durable store can serve Get from a replica's cached copy, while
+// Update ends on the stored row under its lock. That costs one row write per
+// track change.
 func (h *PlaybackHandler) latestCompatTrackClaim(playSessionID, sourceID string) (*PlaybackMediaSource, bool) {
-	current, ok := h.playbackStore.Get(playSessionID)
-	if !ok {
-		return nil, false
-	}
-	source, err := compatPlaybackSource(current, sourceID)
-	return source, err == nil
+	var latest *PlaybackMediaSource
+	err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+		source, err := compatPlaybackSource(current, sourceID)
+		latest = source
+		return err
+	})
+	return latest, err == nil && latest != nil
 }
 
 // errCompatTracksUnchanged ends a claim another report already made.
