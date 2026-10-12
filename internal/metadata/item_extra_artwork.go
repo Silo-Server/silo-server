@@ -2,16 +2,11 @@ package metadata
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
 
 // Banner, thumb, clear art and disc art, and the backdrops after the primary,
@@ -175,35 +170,15 @@ func planExtraBackdrops(retention *localArtworkRetention, item *models.MediaItem
 	return planned
 }
 
-// extraFanartSidecarGone is sidecarGone for an image in an extrafanart folder,
-// which can supply the primary backdrop as well as extra ones. It is judged
-// from the folder holding the extrafanart folder: once that answers, a missing
-// or emptied extrafanart folder, or a missing file in it, means the image is
-// gone, which the plain rule reads as an unmounted share and keeps forever. An
-// extrafanart folder that cannot be listed keeps its images.
-func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
-	dir := filepath.Dir(path)
-	if !r.folderAnswers(filepath.Dir(dir)) {
-		return false
-	}
-	// A missing extrafanart folder means a missing file; one that can't be
-	// listed proves nothing.
-	if folder := r.probe(dir); !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodeNotFound {
-		return false
-	}
-	_, err := os.Lstat(path)
-	return err == nil || errors.Is(err, fs.ErrNotExist)
-}
-
+// sameItemBackdrops reports whether the stored rows already hold the planned
+// sources in order. The cached path and thumbhash are left out: Replace takes
+// them from the stored row with the same source, so they cannot differ.
 func sameItemBackdrops(stored, planned []models.ItemBackdrop) bool {
 	if len(stored) != len(planned) {
 		return false
 	}
 	for i := range stored {
-		if stored[i].Ordinal != i+1 ||
-			stored[i].Path != planned[i].Path ||
-			stored[i].SourcePath != planned[i].SourcePath ||
-			stored[i].Thumbhash != planned[i].Thumbhash {
+		if stored[i].Ordinal != i+1 || stored[i].SourcePath != planned[i].SourcePath {
 			return false
 		}
 	}

@@ -53,9 +53,10 @@ func (r *ItemBackdropRepository) ListByContentIDs(ctx context.Context, contentID
 // Replace makes backdrops the item's extra backdrops, numbered from ordinal 1
 // in slice order, and returns the stored rows. A row keeps its ID while its
 // ordinal survives, so a cache job that targets it stays valid across
-// refreshes; rows past the new count are deleted. A row whose source is
-// unchanged keeps its cached path and thumbhash: only its cache job and
-// reconcile write those, and the caller's copy may predate the job's write.
+// refreshes; rows past the new count are deleted. The cached path and
+// thumbhash of a source already stored, at any ordinal, come from its stored
+// row: only its cache job and reconcile write those, and the caller's copy may
+// predate the job's write. The caller's copy is used for a new source.
 func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, backdrops []models.ItemBackdrop) ([]models.ItemBackdrop, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil
@@ -73,16 +74,20 @@ func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, 
 
 	var stored []models.ItemBackdrop
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM media_item_backdrops
-			WHERE content_id = $1 AND ordinal > $2`, contentID, len(backdrops)); err != nil {
-			return fmt.Errorf("trimming item backdrops: %w", err)
-		}
+		// Upsert before trimming, so a source moving down from a trimmed
+		// ordinal still finds its stored row.
 		if len(backdrops) > 0 {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO media_item_backdrops (content_id, ordinal, path, source_path, thumbhash)
-				SELECT $1, t.ordinal, t.path, t.source_path, t.thumbhash
+				SELECT $1, t.ordinal, COALESCE(cur.path, t.path), t.source_path, COALESCE(cur.thumbhash, t.thumbhash)
 				FROM unnest($2::int[], $3::text[], $4::text[], $5::text[]) AS t(ordinal, path, source_path, thumbhash)
+				LEFT JOIN LATERAL (
+					SELECT b.path, b.thumbhash
+					FROM media_item_backdrops b
+					WHERE b.content_id = $1 AND b.source_path = t.source_path
+					ORDER BY b.ordinal
+					LIMIT 1
+				) cur ON true
 				ON CONFLICT (content_id, ordinal) DO UPDATE SET
 					path = EXCLUDED.path,
 					source_path = EXCLUDED.source_path,
@@ -91,6 +96,11 @@ func (r *ItemBackdropRepository) Replace(ctx context.Context, contentID string, 
 				contentID, ordinals, paths, sources, thumbhashes); err != nil {
 				return fmt.Errorf("writing item backdrops: %w", err)
 			}
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_item_backdrops
+			WHERE content_id = $1 AND ordinal > $2`, contentID, len(backdrops)); err != nil {
+			return fmt.Errorf("trimming item backdrops: %w", err)
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT id, ordinal, path, source_path, thumbhash

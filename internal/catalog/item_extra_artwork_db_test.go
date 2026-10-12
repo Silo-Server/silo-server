@@ -142,6 +142,21 @@ func TestItemBackdropRepositoryDB(t *testing.T) {
 		t.Fatalf("rows after a stale refresh = %+v, want the cached copy kept", stale)
 	}
 
+	// A source that moves to another ordinal takes its stored cached copy
+	// along, even when the caller's copy predates the cache job's write.
+	shifted, err := repo.Replace(ctx, contentID, []models.ItemBackdrop{
+		{SourcePath: "file:///m/fanart-0.jpg"},
+		{SourcePath: "file:///m/fanart-1.jpg"},
+		{SourcePath: "file:///m/fanart-3.jpg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shifted) != 3 || shifted[0].Path != "" || shifted[1].Path != cached("a") || shifted[1].Thumbhash != "ta" ||
+		shifted[2].Path != cached("b") || shifted[2].Thumbhash != "tb" {
+		t.Fatalf("rows after shifting = %+v, want each source's cached copy to move with it", shifted)
+	}
+
 	// Deleting the item deletes its backdrops and queues their cached copies.
 	if _, err := items.Delete(ctx, contentID); err != nil {
 		t.Fatal(err)

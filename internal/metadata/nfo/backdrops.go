@@ -29,7 +29,8 @@ const (
 // metadata.MaxItemBackdrops. The first is the primary backdrop, found by the
 // same precedence findItemArtwork uses: the media file's "-fanart" sidecar,
 // then fanart, backdrop, background and art. The numbered families follow,
-// then every image in extrafanart/, sorted by name.
+// then the images in extrafanart/, sorted by name, while room remains; images
+// past the cap are never checked.
 func (f *sidecarFinder) findBackdrops(contentType string, searchDirs, mediaFiles []string) []string {
 	var sources []string
 	seen := make(map[string]bool)
@@ -86,6 +87,9 @@ func (f *sidecarFinder) findBackdrops(contentType string, searchDirs, mediaFiles
 // sorted by name ignoring case. It stops checking files once it has limit, so a
 // large folder on a network share is not checked file by file.
 func (f *sidecarFinder) extraFanart(dir string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
 	folders := []string{metadata.ExtraFanartFolder}
 	if listing := f.listing(dir); listing != nil {
 		folders = listing[metadata.ExtraFanartFolder]
@@ -104,7 +108,7 @@ func (f *sidecarFinder) extraFanart(dir string, limit int) []string {
 			for _, entry := range entries[lower] {
 				if source := f.usableSource(filepath.Join(dir, folder, entry)); source != "" {
 					sources = append(sources, source)
-					if len(sources) == limit {
+					if len(sources) >= limit {
 						return sources
 					}
 				}

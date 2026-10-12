@@ -7,6 +7,7 @@ import (
 )
 
 const itemExtraArtworkMigration = "20261011223116_add_item_extra_artwork"
+const itemExtraArtworkIndexMigration = "20261011223117_index_item_extra_artwork_paths"
 
 // The migration adds the banner, thumb, clear art and disc slots and the
 // extra-backdrop table, queues displaced copies of both for the revision GC,
@@ -56,6 +57,31 @@ VALUES ('` + targetType + `', '` + targetID + `', '` + language + `', 'm1', 'fil
 	migrationExec(t, tx, jobSQL("item_backdrop", "7", "backdrop", ""))
 	requireMigrationSQLState(t, tx, jobSQL("item_localization", "m1", "banner", "fr"), "23514")
 	requireMigrationSQLState(t, tx, jobSQL("item_backdrop", "8", "poster", ""), "23514")
+
+	// The widened checks are added NOT VALID, so the transaction that holds
+	// media_items does not scan the queue; the next migration validates them.
+	validatedChecks := func() int {
+		t.Helper()
+		var n int
+		if err := tx.QueryRow(t.Context(), `
+SELECT count(*) FROM pg_constraint
+WHERE conrelid = 'metadata_image_cache_jobs'::regclass AND convalidated
+  AND conname IN ('metadata_image_cache_jobs_target_check', 'metadata_image_cache_jobs_image_type_check', 'metadata_image_cache_jobs_shape_check')`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := validatedChecks(); n != 0 {
+		t.Fatalf("%d widened checks validated by the first migration, want 0", n)
+	}
+	for _, statement := range strings.Split(adminMigrationSQL(t, itemExtraArtworkIndexMigration, schema, false), "\n") {
+		if strings.Contains(statement, "VALIDATE CONSTRAINT") {
+			migrationExec(t, tx, statement)
+		}
+	}
+	if n := validatedChecks(); n != 3 {
+		t.Fatalf("%d widened checks validated after the index migration, want 3", n)
+	}
 
 	migrationExec(t, tx, `
 UPDATE media_items SET banner_path = 'local/movies/m1/aa/banner/original.r1.webp', disc_path = 'local/movies/m1/bb/disc/original.r1.webp' WHERE content_id = 'm1';

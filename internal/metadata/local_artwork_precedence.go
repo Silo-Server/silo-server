@@ -182,6 +182,32 @@ func (r *localArtworkRetention) sidecarGone(source string) bool {
 	if !r.folderAnswers(filepath.Dir(path)) {
 		return false
 	}
+	return sidecarFileGone(path)
+}
+
+// extraFanartSidecarGone is sidecarGone for an image in an extrafanart folder,
+// which can supply the primary backdrop as well as extra ones. It is judged
+// from the folder holding the extrafanart folder: once that answers, a missing
+// or emptied extrafanart folder, or a missing file in it, means the image is
+// gone, which the plain rule reads as an unmounted share and keeps forever. An
+// extrafanart folder that cannot be listed keeps its images.
+func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
+	dir := filepath.Dir(path)
+	if !r.folderAnswers(filepath.Dir(dir)) {
+		return false
+	}
+	// A missing extrafanart folder means a missing file; one that can't be
+	// listed proves nothing.
+	if folder := r.probe(dir); !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodeNotFound {
+		return false
+	}
+	return sidecarFileGone(path)
+}
+
+// sidecarFileGone reports whether a sidecar in a folder that answers is gone:
+// missing, or still on disk but passed over by discovery. Any other error
+// proves nothing.
+func sidecarFileGone(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil || errors.Is(err, fs.ErrNotExist)
 }

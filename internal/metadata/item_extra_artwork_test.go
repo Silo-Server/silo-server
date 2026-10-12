@@ -39,6 +39,14 @@ func (f *fakeItemBackdropRepo) Replace(_ context.Context, contentID string, back
 	rows := make([]models.ItemBackdrop, len(backdrops))
 	for i, b := range backdrops {
 		b.Ordinal = i + 1
+		// As in the database, a stored row with the same source supplies the
+		// cached copy.
+		for _, stored := range old {
+			if stored.SourcePath == b.SourcePath {
+				b.Path, b.Thumbhash = stored.Path, stored.Thumbhash
+				break
+			}
+		}
 		if i < len(old) {
 			b.ID = old[i].ID
 		} else {
