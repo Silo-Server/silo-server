@@ -71,6 +71,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+# Explicit modern-runtime image option for isolated Intel Flex/DG2 devices.
+# The default preserves Media SDK for older supported Intel graphics.
+ARG INTEL_QSV_RUNTIME=auto
+COPY scripts/configure-intel-qsv-runtime.sh /tmp/configure-intel-qsv-runtime.sh
+RUN sh /tmp/configure-intel-qsv-runtime.sh "${INTEL_QSV_RUNTIME}" "${TARGETARCH}" && \
+    rm /tmp/configure-intel-qsv-runtime.sh
 # Debian's Intel OpenCL runtime lags the media hardware supported by the
 # Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
 # tone mapping can use the quality-preserving OpenCL path. Other architectures
@@ -92,6 +98,9 @@ COPY --from=jellyfin_web_node /usr/local/bin/node /usr/local/bin/node
 COPY --from=jellyfin_web_node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+ARG BUILD_REVISION
+LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}" \
+      org.opencontainers.image.revision="${BUILD_REVISION}"
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an
