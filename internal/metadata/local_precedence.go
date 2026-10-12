@@ -69,7 +69,7 @@ func (l localListFields) restrict(accumulator, result *MetadataResult) *Metadata
 	if l.keywords {
 		out.Keywords = nil
 	}
-	if l.cast || l.crew {
+	if (l.cast || l.crew) && len(result.People) > 0 {
 		// The accumulator's credits may share their array with the local
 		// result; enrich a copy.
 		accumulator.People = slices.Clone(accumulator.People)

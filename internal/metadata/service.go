@@ -4158,7 +4158,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			canonicalLanguage = "en"
 		}
 
-		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language)
+		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language, skipLocal)
 		if err != nil {
 			return err
 		}
@@ -4187,7 +4187,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	return nil
 }
 
-func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, series *models.MediaItem, folderID int, language string) (map[string]string, error) {
+func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, series *models.MediaItem, folderID int, language string, skipLocal bool) (map[string]string, error) {
 	accumulatedIDs := make(map[string]string)
 	if series == nil {
 		return accumulatedIDs, nil
@@ -4237,6 +4237,9 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 	for _, p := range itemChain {
 		sp, ok := p.(SearchProvider)
 		if !ok {
+			continue
+		}
+		if _, local := p.(IdentityHintProvider); local && skipLocal {
 			continue
 		}
 		results, searchErr := sp.Search(ctx, searchQuery)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 
@@ -100,7 +99,9 @@ func (s *MetadataService) localIdentityConflict(ctx context.Context, mode Refres
 	if len(declared) == 0 {
 		return false, nil
 	}
-	stored = maps.Clone(stored)
+	// Compare canonical values: a legacy column can hold an IMDb ID in
+	// another case than the sanitized one the file declares.
+	stored = canonicalIdentityProviderIDs(stored)
 	suppressProviderIDValues(stored, stale)
 	if !identityChoiceCorrects(declared, stored) {
 		// The file confirms or extends the stored identity.

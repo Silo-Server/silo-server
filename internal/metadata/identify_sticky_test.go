@@ -35,6 +35,8 @@ func TestLocalIdentityConflict(t *testing.T) {
 		{"manual: identified", ModeManualRefresh, true, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, nil, true},
 		{"manual: identified ID is dead", ModeManualRefresh, true, map[string]string{"tmdb": "456"}, map[string]string{"tmdb": "123"}, dead, false},
 		{"no declared IDs", ModeScheduledRefresh, true, nil, map[string]string{"tmdb": "123"}, nil, false},
+		{"scheduled: stored IMDb ID in another case", ModeScheduledRefresh, false, map[string]string{"imdb": "tt0111161"}, map[string]string{"imdb": "TT0111161"}, nil, false},
+		{"manual: identified, stored IMDb ID in another case", ModeManualRefresh, true, map[string]string{"imdb": "tt0111161"}, map[string]string{"imdb": "TT0111161"}, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,7 +51,7 @@ func TestLocalIdentityConflict(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("conflict = %v, want %v", got, tc.want)
 			}
-			if tc.stored["tmdb"] == "" && tc.stored["tvdb"] == "" {
+			if tc.stored["tmdb"] == "" && tc.stored["tvdb"] == "" && tc.stored["imdb"] == "" {
 				t.Errorf("stored identity was modified: %v", tc.stored)
 			}
 		})
