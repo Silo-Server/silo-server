@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"slices"
 	"sync"
 )
 
@@ -11,14 +12,19 @@ import (
 // and its memory cap must hold for all of them together.
 //
 // It counts running jobs across limit changes: after the limit is lowered, no
-// job starts, waiting ones included, until enough running ones have finished.
+// job starts until enough running ones have finished. Waiting callers get
+// freed slots first come, first served, so a caller that just released a slot
+// cannot take it straight back ahead of them.
 type imageWorkBudget struct {
 	mu      sync.Mutex
 	limit   int // zero: unbounded
 	running int
-	// changed is closed, and replaced on demand, when a slot frees or the
-	// limit changes, so waiting callers check again.
-	changed chan struct{}
+	waiting []*imageWorkWaiter
+}
+
+type imageWorkWaiter struct {
+	granted bool
+	ready   chan struct{}
 }
 
 // set changes the limit; zero leaves jobs unbounded.
@@ -26,44 +32,63 @@ func (b *imageWorkBudget) set(limit int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.limit = max(limit, 0)
-	b.wakeLocked()
+	b.grantLocked()
 }
 
 // acquire waits for a slot and returns the function that frees it. A free
-// slot is taken even when ctx is already done.
+// slot nobody is waiting for is taken even when ctx is already done.
 func (b *imageWorkBudget) acquire(ctx context.Context) (release func(), err error) {
-	for {
-		b.mu.Lock()
-		if b.limit == 0 || b.running < b.limit {
-			b.running++
-			b.mu.Unlock()
-			var once sync.Once
-			return func() { once.Do(b.releaseOne) }, nil
-		}
-		if b.changed == nil {
-			b.changed = make(chan struct{})
-		}
-		changed := b.changed
+	b.mu.Lock()
+	if len(b.waiting) == 0 && b.freeLocked() {
+		b.running++
 		b.mu.Unlock()
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+		return b.releaser(), nil
+	}
+	w := &imageWorkWaiter{ready: make(chan struct{})}
+	b.waiting = append(b.waiting, w)
+	b.mu.Unlock()
+
+	select {
+	case <-w.ready:
+		return b.releaser(), nil
+	case <-ctx.Done():
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if w.granted {
+		// Granted while giving up: hand the slot on.
+		b.running--
+		b.grantLocked()
+	} else if i := slices.Index(b.waiting, w); i >= 0 {
+		b.waiting = slices.Delete(b.waiting, i, i+1)
+	}
+	return nil, ctx.Err()
+}
+
+func (b *imageWorkBudget) releaser() func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			b.running--
+			b.grantLocked()
+		})
 	}
 }
 
-func (b *imageWorkBudget) releaseOne() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.running--
-	b.wakeLocked()
+func (b *imageWorkBudget) freeLocked() bool {
+	return b.limit == 0 || b.running < b.limit
 }
 
-func (b *imageWorkBudget) wakeLocked() {
-	if b.changed != nil {
-		close(b.changed)
-		b.changed = nil
+// grantLocked gives free slots to the oldest waiting callers.
+func (b *imageWorkBudget) grantLocked() {
+	for len(b.waiting) > 0 && b.freeLocked() {
+		w := b.waiting[0]
+		b.waiting = b.waiting[1:]
+		b.running++
+		w.granted = true
+		close(w.ready)
 	}
 }
 

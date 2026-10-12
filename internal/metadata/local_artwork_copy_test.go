@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -471,5 +472,59 @@ func TestUnreadableFolderCountsAsMountedStorage(t *testing.T) {
 	}
 	if nearestExistingFolderListsEntries(context.Background(), filepath.Join(root, "Gone"), []string{filepath.Join(root, "Gone")}) {
 		t.Fatal("missing root read as mounted storage")
+	}
+}
+
+// A freed slot goes to the caller that was already waiting, not back to the
+// one that released it, so a busy copy worker cannot starve a refresh.
+func TestImageWorkBudgetHandsFreedSlotsToWaitingCallers(t *testing.T) {
+	var budget imageWorkBudget
+	budget.set(1)
+	worker, _ := budget.acquire(context.Background())
+	waiting := make(chan func())
+	go func() {
+		release, err := budget.acquire(context.Background())
+		if err != nil {
+			t.Errorf("waiting acquire: %v", err)
+		}
+		waiting <- release
+	}()
+	// Wait until the second caller is queued.
+	for {
+		budget.mu.Lock()
+		queued := len(budget.waiting)
+		budget.mu.Unlock()
+		if queued == 1 {
+			break
+		}
+		runtime.Gosched()
+	}
+	worker()
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := budget.acquire(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("releasing caller retook the slot: acquire = %v", err)
+	}
+	(<-waiting)()
+}
+
+// A manual refresh whose claimed page makes no progress leaves it to the
+// background drain and reports the artwork as pending, rather than claiming
+// the same jobs again.
+func TestCacheTargetArtworkStopsWhenAPageMakesNoProgress(t *testing.T) {
+	remote := &models.MetadataImageCacheJob{
+		ID: 9, TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", SourcePath: "https://img.example/p.jpg",
+		ProviderID: "tmdb", ProviderContentID: "1", ContentType: "movies", ImageType: ImageCacheImagePoster,
+	}
+	page := []*models.MetadataImageCacheJob{remote}
+	jobs := &targetImageCacheJobs{targetClaims: [][]*models.MetadataImageCacheJob{page, page, page}}
+	p := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+	// Remote jobs do not start while caching is off, so the page goes back.
+	p.SetEnabled(false)
+	if err := p.CacheTargetArtwork(context.Background(), "movie-1"); !errors.Is(err, ErrTargetArtworkPending) {
+		t.Fatalf("CacheTargetArtwork error = %v, want ErrTargetArtworkPending", err)
+	}
+	if jobs.targetCalls != 1 {
+		t.Fatalf("claims = %d, want one", jobs.targetCalls)
 	}
 }
