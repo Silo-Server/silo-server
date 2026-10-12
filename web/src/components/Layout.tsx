@@ -42,6 +42,7 @@ import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -95,12 +96,19 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  const showAdminActivity = useIsActingAdmin();
+  const criticalContentLoaded = useCriticalContentLoaded();
+  // The indicator's four requests wait for Home's first rows (see startupPriority).
+  const showAdminActivity = useIsActingAdmin() && criticalContentLoaded;
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   const isHomePath = location.pathname === "/";
+  // Only Home marks its own first content; every other page releases the
+  // deferred widgets as soon as it mounts.
+  useEffect(() => {
+    if (!isHomePath) markCriticalContentLoaded();
+  }, [isHomePath]);
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");

@@ -1,6 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { useCallback, useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import type { ProgressListEntry } from "@/hooks/queries/progress";
@@ -12,9 +12,9 @@ import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPrese
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
-import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { type EpisodeSpoilerPrefs, useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
@@ -36,13 +36,36 @@ type ContinueWatchingCardProps = (
   quickActionMode?: CardQuickActionMode;
   libraryId?: number;
   variant?: "wide" | "poster";
+  /**
+   * The card is in the first row and on screen at first paint: its artwork
+   * loads eagerly at high fetch priority.
+   */
+  priority?: boolean;
+};
+
+type ContinueWatchingCardViewProps = ContinueWatchingCardProps & {
+  spoilerPrefs: EpisodeSpoilerPrefs;
 };
 
 export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
+  return <ContinueWatchingCardView {...props} spoilerPrefs={spoilerPrefs} />;
+}
+
+/**
+ * A Continue Watching card whose spoiler preferences come from its row, so a
+ * row of cards shares one settings lookup instead of one per card.
+ */
+export const ContinueWatchingRowCard = memo(function ContinueWatchingRowCard(
+  props: ContinueWatchingCardViewProps,
+) {
+  return <ContinueWatchingCardView {...props} />;
+});
+
+function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCardViewProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
-  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const cardRef = useRef<HTMLDivElement>(null);
   const card =
     "sectionItem" in props && props.sectionItem
@@ -210,7 +233,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const playableContentId = card.contentId ?? "";
   const containerWidth = isPoster
     ? carouselCardWidthClasses(cardPresentation.poster_size)
-    : "w-[260px] shrink-0 sm:w-[315px]";
+    : WIDE_CAROUSEL_CARD_WIDTH_CLASSES;
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   // Audiobook covers are square (Audible-style); use 1:1 for the poster
@@ -250,7 +273,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
                   "h-full w-full object-cover transition-transform duration-300",
                   hideImage ? SPOILER_IMAGE_CLASS : "group-hover/media:scale-105",
                 )}
-                loading="lazy"
+                loading={props.priority ? "eager" : "lazy"}
+                fetchPriority={props.priority ? "high" : undefined}
                 decoding="async"
               />
             ) : (

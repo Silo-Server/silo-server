@@ -886,18 +886,6 @@ func (h *PlaybackHandler) loadFileByPreferredID(
 	return nil, nil
 }
 
-func directPlayAudioTrackIndex(file *models.MediaFile) int {
-	if file == nil || len(file.AudioTracks) == 0 {
-		return 0
-	}
-	for i, track := range file.AudioTracks {
-		if track.Default {
-			return i
-		}
-	}
-	return 0
-}
-
 func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if file == nil || len(file.AudioTracks) == 0 {
 		return 0
@@ -905,7 +893,7 @@ func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if audioTrackIndex >= 0 && audioTrackIndex < len(file.AudioTracks) {
 		return audioTrackIndex
 	}
-	return directPlayAudioTrackIndex(file)
+	return playback.SelectAudioTrack(file.AudioTracks, "", nil)
 }
 
 func (h *PlaybackHandler) resolveSeriesID(ctx context.Context, file *models.MediaFile) string {

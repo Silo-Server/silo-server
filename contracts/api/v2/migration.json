@@ -27666,7 +27666,7 @@
         "path": "/api/v2/home/layout",
         "operation_id": "getHomeLayout"
       },
-      "notes": "Section catalog-home (profile_scoped). Same body; the SectionLayout schema shared with getLibraryLayout."
+      "notes": "Section catalog-home (profile_scoped). Same sections as v1 in the HomeLayout schema (SectionLayoutEntry rows, as getLibraryLayout); v2 adds the opt-in include_items and image_size query parameters and the included_sections array, empty unless requested, that carries the first rows as getHomeSectionItems answers them."
     },
     {
       "listener": "api",

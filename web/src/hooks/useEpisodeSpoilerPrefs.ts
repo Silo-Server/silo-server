@@ -23,11 +23,16 @@ export interface EpisodeSpoilerPrefs {
  *
  * Both are off until the profile turns them on, and off against a server whose
  * manifest predates the settings, so an older server shows episodes as before.
+ * A caller that may not show episodes passes `enabled: false` to skip the
+ * lookup; both are then off.
  */
-export function useEpisodeSpoilerPrefs(): EpisodeSpoilerPrefs {
-  const capabilitiesQuery = useSettingsCapabilities();
+export function useEpisodeSpoilerPrefs({
+  enabled = true,
+}: { enabled?: boolean } = {}): EpisodeSpoilerPrefs {
+  const capabilitiesQuery = useSettingsCapabilities({ enabled });
   // Both keys share one introduced_in revision, so one check covers both.
-  const isSupported = settingsCapabilitiesSupportKey(capabilitiesQuery.data, SPOILER_KEYS[0]);
+  const isSupported =
+    enabled && settingsCapabilitiesSupportKey(capabilitiesQuery.data, SPOILER_KEYS[0]);
   const query = useEffectiveSettings({ keys: SPOILER_KEYS, enabled: isSupported });
   // A disabled query can still hold data cached before a server downgrade.
   // Ignore it until the connected server proves it knows the keys.
