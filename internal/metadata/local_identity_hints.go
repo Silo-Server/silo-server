@@ -116,6 +116,17 @@ func recordVerifiedIDs(verified, resultIDs, hints map[string]string) map[string]
 	return verified
 }
 
+// anyProviderIDIn reports whether set holds one of the given provider id
+// values, such as a verified NFO id a provider then answered 404 for.
+func anyProviderIDIn(set providerIDValueSet, ids map[string]string) bool {
+	for key, value := range ids {
+		if set.has(key, value) {
+			return true
+		}
+	}
+	return false
+}
+
 // chainChecksIDs reports whether chain holds a search provider that can
 // look the NFO's ids up: one other than the local provider and other than an
 // enrichment provider, which only looks items up by ids it is given.

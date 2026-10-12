@@ -823,3 +823,19 @@ func TestInitialMatch_NFOIDRejectedAfterSearchRetriesWithTagIDs(t *testing.T) {
 		t.Errorf("retry searched with %v, want the tag tmdb", last)
 	}
 }
+
+// Only a 404 counts as a provider rejecting an NFO id. A verified id that
+// left the set some other way (candidate consensus quarantining it) is not
+// on record as stale, so deferring for it would repeat forever.
+func TestAnyProviderIDIn(t *testing.T) {
+	t.Parallel()
+	dropped := make(providerIDValueSet)
+	dropped.add("tmdb", "1091")
+	dropped.add("imdb", "TT0084787")
+	if !anyProviderIDIn(dropped, map[string]string{"tmdb": "1091"}) || !anyProviderIDIn(dropped, map[string]string{"imdb": "tt0084787"}) {
+		t.Errorf("anyProviderIDIn() = false for a rejected id, want true")
+	}
+	if anyProviderIDIn(dropped, map[string]string{"tmdb": "578"}) || anyProviderIDIn(nil, map[string]string{"tmdb": "1091"}) {
+		t.Errorf("anyProviderIDIn() = true for an id not rejected, want false")
+	}
+}

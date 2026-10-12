@@ -1995,7 +1995,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	localUnreadable := localMetadataTemporarilyUnavailable(providerMatchErrors)
 	nfoIDsUnconfirmed := len(nfoReplacedTagIDs) > 0 && !anyProviderIDKept(accumulatedIDs, nfoVerifiedIDs)
 	nfoIDsUnchecked := nfoIDsUnconfirmed && hasTransientMatchError(providerMatchErrors)
-	nfoIDsRejected := nfoIDsUnconfirmed && len(nfoVerifiedIDs) > 0
+	nfoIDsRejected := nfoIDsUnconfirmed && anyProviderIDIn(provider404s.dropped, nfoVerifiedIDs)
 	if req.Mode == ModeInitialMatch && (localUnreadable || nfoIDsUnchecked || nfoIDsRejected) {
 		upsertStaleProviderIDValues(ctx, s.staleIDRepo, req.ContentID, provider404s.stale)
 		if matchDecision == nil {
