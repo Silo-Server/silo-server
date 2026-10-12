@@ -83,7 +83,15 @@
       "consumers": [
         "internal"
       ],
-      "consumer_call_sites": [],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodeenrollment/client.go",
+          "line": 132,
+          "types": [],
+          "match": "manual"
+        }
+      ],
       "section": "node-enrollment",
       "release_flow": "operational",
       "tier": 2,
@@ -47416,7 +47424,15 @@
       "consumers": [
         "internal"
       ],
-      "consumer_call_sites": [],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodeenrollment/client.go",
+          "line": 68,
+          "types": [],
+          "match": "manual"
+        }
+      ],
       "section": "node-transcode",
       "release_flow": "operational",
       "tier": 2,

@@ -20,16 +20,17 @@ const (
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
-	DatabaseURL      string
-	RedisURL         string // optional override; empty means use DB setting
-	Listen           string
-	JFListen         string
-	Mode             string
-	TranscodeMaxJobs int // operator-owned worker ceiling; 0 means unlimited
-	EnrollmentToken  string
-	BindingFile      string
-	NodeURL          string
-	NodeName         string
+	DatabaseURL       string
+	RedisURL          string // optional override; empty means use DB setting
+	Listen            string
+	JFListen          string
+	Mode              string
+	TranscodeMaxJobs  int  // operator-owned worker ceiling; 0 means unlimited
+	EnrollmentEnabled bool // core operator permits sending bootstrap secrets to workers
+	EnrollmentToken   string
+	BindingFile       string
+	NodeURL           string
+	NodeName          string
 	// SecretKey is the master key (raw SECRET_KEY env value) from which the
 	// at-rest credential cipher derives its data key. It lives outside Postgres
 	// so encrypted secrets survive a full database compromise/dump.
@@ -93,6 +94,14 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
+	enrollmentEnabled := false
+	if value := os.Getenv("SILO_NODE_ENROLLMENT_ENABLED"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("SILO_NODE_ENROLLMENT_ENABLED must be a boolean")
+		}
+		enrollmentEnabled = parsed
+	}
 	maxJobs := 0
 	if value := os.Getenv("SILO_TRANSCODE_MAX_JOBS"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 32)
@@ -103,16 +112,17 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	}
 
 	return &BootstrapConfig{
-		DatabaseURL:      dbURL,
-		RedisURL:         redisURL,
-		Listen:           ":" + port,
-		JFListen:         ":" + jfPort,
-		Mode:             mode,
-		TranscodeMaxJobs: maxJobs,
-		EnrollmentToken:  token,
-		BindingFile:      bindingFile,
-		NodeURL:          os.Getenv("NODE_URL"),
-		NodeName:         os.Getenv("NODE_NAME"),
-		SecretKey:        []byte(secretKey),
+		DatabaseURL:       dbURL,
+		RedisURL:          redisURL,
+		Listen:            ":" + port,
+		JFListen:          ":" + jfPort,
+		Mode:              mode,
+		TranscodeMaxJobs:  maxJobs,
+		EnrollmentEnabled: enrollmentEnabled,
+		EnrollmentToken:   token,
+		BindingFile:       bindingFile,
+		NodeURL:           os.Getenv("NODE_URL"),
+		NodeName:          os.Getenv("NODE_NAME"),
+		SecretKey:         []byte(secretKey),
 	}, nil
 }

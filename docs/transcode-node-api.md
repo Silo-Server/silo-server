@@ -2,12 +2,21 @@
 
 ## First-connect customer configuration handoff
 
+The core operator must set `SILO_NODE_ENROLLMENT_ENABLED=true` before using
+automatic handoff. It is disabled by default: acting admins receive HTTP 503
+without an outbound request when the operator has not allowed sending the core's
+bootstrap secrets to worker URLs. This switch is owned by the process environment,
+cannot be enabled through application settings, and does not affect ordinary
+registration of workers that already have customer configuration.
+
 Enrollment is opt-in for `MODE=transcode`. With `SILO_NODE_ENROLLMENT_TOKEN`
 (32–512 characters) and a persistent `SILO_NODE_BINDING_FILE`, a worker may start
 without `DATABASE_URL`, `REDIS_URL` or `SECRET_KEY`. The binding path defaults to
 `/var/lib/silo/node-binding/binding.json` when only the token is supplied.
 Legacy workers and maintenance commands still require their existing bootstrap
 credentials. Other server modes cannot enroll.
+Use a separate worker environment file without the customer variables: a shared
+core `.env` supplying `SECRET_KEY` prevents credential-free worker startup.
 
 Before the database-backed runtime starts, its separate listener exposes
 `GET /api/v1/health` with `status: "unbound"` and the provider's encoding capacity,

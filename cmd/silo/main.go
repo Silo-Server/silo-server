@@ -1313,7 +1313,7 @@ func main() {
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
-		NodeEnrollment:               &nodeenrollment.Client{Bootstrap: nodeenrollment.Binding{DatabaseURL: bc.DatabaseURL, RedisURL: bc.RedisURL, SecretKey: string(bc.SecretKey)}, JWTSecret: cfg.Auth.JWTSecret},
+		NodeEnrollment:               nodeEnrollmentClient(bc, cfg),
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,

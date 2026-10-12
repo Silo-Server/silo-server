@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestBootstrapRejectsInvalidCoreEnrollmentSwitch(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example.invalid/silo")
+	t.Setenv("SECRET_KEY", strings.Repeat("x", 32))
+	t.Setenv("SILO_NODE_ENROLLMENT_ENABLED", "invalid")
+	if _, err := LoadBootstrap(""); err == nil || !strings.Contains(err.Error(), "SILO_NODE_ENROLLMENT_ENABLED") {
+		t.Fatalf("invalid enrollment switch was accepted: %v", err)
+	}
+}
+
 func TestBootstrapProviderTranscodeLimit(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example.invalid/silo")
 	t.Setenv("SECRET_KEY", strings.Repeat("x", 32))

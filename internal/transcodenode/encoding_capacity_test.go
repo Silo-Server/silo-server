@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -63,9 +66,25 @@ func TestWorkerStartReturnsRetryableCapacityFailure(t *testing.T) {
 }
 
 func TestTrickplayCapacityFailureIsRetryable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the FFmpeg fixture uses a POSIX shell")
+	}
+	t.Setenv("PATH", t.TempDir())
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	const script = `#!/bin/sh
+case "$*" in
+  *-filters*) printf '... metadata V->V\n' ;;
+  *-muxers*) exit 0 ;;
+  *" -f concat "*) printf "Impossible to open 'file:/nonexistent/silo-concat-check.mkv'\n" >&2; exit 1 ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	// Warm capability inventory before filling the node so this exercises the
 	// extraction process, rather than failing in capability preflight.
-	if _, err := mediasample.LoadCapabilities(context.Background(), "ffmpeg"); err != nil {
+	if _, err := mediasample.LoadCapabilities(context.Background(), ffmpeg); err != nil {
 		t.Fatal(err)
 	}
 	encodinglimit.Configure(1)
@@ -75,7 +94,7 @@ func TestTrickplayCapacityFailureIsRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	rec := postTrickplay(newTrickplayTestServer(t, "ffmpeg"), sheetsRequestJSON(t, "/media/movie.mkv"))
+	rec := postTrickplay(newTrickplayTestServer(t, ffmpeg), sheetsRequestJSON(t, "/media/movie.mkv"))
 	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("capacity failure is not retryable: %d %s", rec.Code, rec.Body.String())
 	}

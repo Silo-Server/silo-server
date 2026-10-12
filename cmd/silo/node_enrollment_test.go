@@ -16,6 +16,34 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 )
 
+func TestCoreEnrollmentRequiresOperatorOptIn(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://customer.invalid/silo")
+	t.Setenv("REDIS_URL", "redis://customer.invalid/2")
+	t.Setenv("SECRET_KEY", strings.Repeat("s", 48))
+	t.Setenv("MODE", "integrated")
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "customer-jwt-secret"
+	for _, value := range []string{"", "false", "true"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("SILO_NODE_ENROLLMENT_ENABLED", value)
+			bc, err := config.LoadBootstrap("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := nodeEnrollmentClient(bc, cfg)
+			if value != "true" {
+				if client != nil {
+					t.Fatal("application admin can access host secrets without operator opt-in")
+				}
+				return
+			}
+			if client == nil || client.Bootstrap.DatabaseURL != bc.DatabaseURL || client.Bootstrap.RedisURL != bc.RedisURL || client.Bootstrap.SecretKey != string(bc.SecretKey) || client.JWTSecret != cfg.Auth.JWTSecret {
+				t.Fatal("opted-in core cannot hand off customer configuration")
+			}
+		})
+	}
+}
+
 func TestPersistedBindingResumesCustomerStartup(t *testing.T) {
 	b := nodeenrollment.Binding{DatabaseURL: "postgres://customer.invalid/silo", RedisURL: "redis://customer.invalid/2", SecretKey: strings.Repeat("s", 48), NodeURL: "https://worker.example", NodeName: "Customer node"}
 	store := nodeenrollment.Store{Path: filepath.Join(t.TempDir(), "private", "binding.json")}

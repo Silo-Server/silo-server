@@ -15,6 +15,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
+// nodeEnrollmentClient exposes host-owned bootstrap secrets to the admin
+// enrollment flow only when the core operator explicitly permits handoff.
+func nodeEnrollmentClient(bc *config.BootstrapConfig, cfg *config.Config) *nodeenrollment.Client {
+	if !bc.EnrollmentEnabled {
+		return nil
+	}
+	return &nodeenrollment.Client{
+		Bootstrap: nodeenrollment.Binding{DatabaseURL: bc.DatabaseURL, RedisURL: bc.RedisURL, SecretKey: string(bc.SecretKey)},
+		JWTSecret: cfg.Auth.JWTSecret,
+	}
+}
+
 func applyCustomerBinding(bc *config.BootstrapConfig, b nodeenrollment.Binding) error {
 	if (bc.DatabaseURL != "" && bc.DatabaseURL != b.DatabaseURL) || (len(bc.SecretKey) > 0 && string(bc.SecretKey) != b.SecretKey) || (bc.RedisURL != "" && bc.RedisURL != b.RedisURL) {
 		return errors.New("bootstrap conflicts with saved customer binding; provider reset required")

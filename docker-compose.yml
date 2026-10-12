@@ -163,6 +163,9 @@ services:
   #     SILO_TRANSCODE_MAX_JOBS: ${SILO_TRANSCODE_MAX_JOBS:-0}
   #     # For automatic first-connect binding, omit the three customer variables
   #     # below and set these instead. Mount a persistent private binding directory.
+  #     # Use a separate worker env_file without SECRET_KEY/DATABASE_URL/REDIS_URL;
+  #     # a shared core .env supplying SECRET_KEY prevents unbound startup.
+  #     # The core operator must enable SILO_NODE_ENROLLMENT_ENABLED=true on the core.
   #     # SILO_NODE_ENROLLMENT_TOKEN: ${SILO_NODE_ENROLLMENT_TOKEN}
   #     # SILO_NODE_BINDING_FILE: /var/lib/silo/node-binding/binding.json
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
