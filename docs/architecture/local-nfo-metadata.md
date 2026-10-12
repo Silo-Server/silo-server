@@ -539,9 +539,12 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 - **Events.** For file changes from the library monitor and autoscan,
   `scantrigger` resolves an `.nfo` or sidecar image in a video library to a
   subtree scan of its folder (`Request.SidecarFolder`; the scan API still
-  rejects non-media paths). The Jellyfin-compatible autoscan endpoint already
-  scans a rejected file's parent folder. The monitor's quiet window and the
-  scan queue's coalescing debounce bursts.
+  rejects non-media paths). One directly under the library root is not
+  routed, so one edit in a flat library never becomes a full library scan;
+  the next library scan picks it up (see Known limitations). The
+  Jellyfin-compatible autoscan endpoint already scans a rejected file's
+  parent folder. The monitor's quiet window and the scan queue's coalescing
+  debounce bursts.
 - **Scheduled refresh.** `refresh_metadata` checks each item target it visits
   with `CheckLocalSidecarTarget`, from the item's applied files alone, before
   its own refresh, which can move a local item to a new content ID. When the
