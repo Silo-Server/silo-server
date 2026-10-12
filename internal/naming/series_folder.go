@@ -30,7 +30,7 @@ func parseSeriesFolderIdentity(name string) (title string, year, season int, sea
 			if token, ok := parseEpisodeToken(suffix, nil, false); ok {
 				return title, year, token.season, token.seasonKnown
 			}
-			if season, ok := seasonDirectoryNumber(suffix, "", false); ok {
+			if season, ok := seasonDirectoryNumber(suffix, "", false, false); ok {
 				return title, year, season, true
 			}
 		}
@@ -44,7 +44,7 @@ func parseSeriesFolderIdentity(name string) (title string, year, season int, sea
 		prefix := cleanEpisodeSeriesTitle(name[:match[0]])
 		if prefix != "" && !episodeOnlyRe.MatchString(prefix) {
 			title, year = parseTitleYearCandidate(prefix)
-			season, _ = strconv.Atoi(name[match[2]:match[3]])
+			season, _ = strconv.Atoi(name[match[4]:match[5]])
 			return title, year, season, true
 		}
 	}

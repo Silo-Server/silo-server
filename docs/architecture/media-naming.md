@@ -32,6 +32,17 @@ run after this decision; an NFO never changes the type (see
 [local-nfo-metadata.md](local-nfo-metadata.md)).
 `TestEpisodePatternAgreesAcrossClassifiers` keeps the two classifiers' episode detection in step.
 
+## Season folders
+
+Every season-folder check (`deriveSeriesRoot`, `detectSeasonStructure`, episode parsing,
+`IsMisplacedSeriesFile`, `parseSeriesFolderIdentity`) goes through `seasonDirectoryNumber` and the
+label list in `internal/naming/season.go`, so they agree on what a season folder is. `Series`,
+`Serie`, and `Seria` also begin show titles. In a folder directly in the library folder, a bare
+one names a season only when at most a year, provider tag, or release token follows the number:
+`Series 7 Documentary` there is the show. Deeper folders, and names that start with the show
+title, keep the UK form `Series 5 Matt Smith` as season 5. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
+holds these cases.
+
 ## Episode numbers
 
 - `parseEpisodeNumber` (`internal/naming/episode.go`) returns 0 for a digit run longer than

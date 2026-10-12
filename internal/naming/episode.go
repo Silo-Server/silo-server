@@ -77,7 +77,8 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		if len(directories) > 1 {
 			showDirectory = directories[len(directories)-2]
 		}
-		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason)
+		// A lone directory sits directly in the library folder.
+		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, len(directories) == 1)
 		if !hasSeason {
 			showDirectory = parent
 		}
@@ -196,7 +197,7 @@ func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseas
 	if len(directories) > 1 {
 		showDirectory = directories[len(directories)-2]
 	}
-	_, ok := seasonDirectoryNumber(directories[len(directories)-1], showDirectory, allowNumericSeason)
+	_, ok := seasonDirectoryNumber(directories[len(directories)-1], showDirectory, allowNumericSeason, len(directories) == 1)
 	return ok
 }
 

@@ -272,7 +272,7 @@ func detectSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...
 			parent = parts[i-1]
 		}
 		numericSeason := allowNumeric && (i != 0 || len(configuredRoot) == 0 || !configuredRoot[0])
-		if number, ok := seasonDirectoryNumber(parts[i], parent, numericSeason); ok {
+		if number, ok := seasonDirectoryNumber(parts[i], parent, numericSeason, i == 0); ok {
 			return true, number
 		}
 	}
@@ -321,8 +321,9 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 			break
 		}
 		segment := path.Base(current)
-		allowNumeric := (hasEpisodePattern || forceParent) && (libraryRoot == "" || filepath.Clean(path.Dir(current)) != libraryRoot)
-		if _, ok := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric); ok {
+		topLevel := libraryRoot != "" && filepath.Clean(path.Dir(current)) == libraryRoot
+		allowNumeric := (hasEpisodePattern || forceParent) && !topLevel
+		if _, ok := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric, topLevel); ok {
 			rootPath := path.Dir(current)
 			if rootPath == "." || rootPath == "/" || rootPath == "" {
 				return nil, false

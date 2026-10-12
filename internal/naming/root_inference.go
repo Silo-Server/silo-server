@@ -415,7 +415,7 @@ func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 		if i > 0 {
 			parent = parts[i-1]
 		}
-		if _, ok := seasonDirectoryNumber(part, parent, false); ok {
+		if _, ok := seasonDirectoryNumber(part, parent, false, i == 0); ok {
 			return true
 		}
 	}
