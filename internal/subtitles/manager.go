@@ -25,6 +25,9 @@ var (
 	// answers to. It is a client input problem, not an upstream failure, so the
 	// API layer answers 404 instead of 500.
 	ErrUnknownProvider = errors.New("unknown subtitle provider")
+	// ErrInvalidSubtitleID reports a provider result ID that is not in the
+	// shape the provider's search returns; no provider request was made.
+	ErrInvalidSubtitleID = errors.New("invalid subtitle id")
 )
 
 // Manager orchestrates subtitle search and download across providers.

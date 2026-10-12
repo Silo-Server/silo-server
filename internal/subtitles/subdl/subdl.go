@@ -49,7 +49,7 @@ func New(cfg Config) *Provider {
 		dlBase = defaultDLBaseURL
 	}
 	return &Provider{
-		client:    &http.Client{Timeout: 15 * time.Second},
+		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: sameOriginRedirects},
 		baseURL:   base,
 		dlBaseURL: dlBase,
 		apiKey:    cfg.APIKey,
@@ -141,12 +141,13 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 }
 
 func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+	downloadURL, err := p.downloadURL(id)
+	if err != nil {
+		return nil, "", err
+	}
 	if err := p.limiter.Wait(ctx); err != nil {
 		return nil, "", err
 	}
-
-	// id is the relative download URL from search results
-	downloadURL := p.dlBaseURL + id
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
 	if err != nil {
