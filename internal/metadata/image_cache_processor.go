@@ -491,7 +491,7 @@ func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID s
 	// to finish inside its lease; past that, another server could recover it
 	// as abandoned and run it twice. Jobs not started by then go back to the
 	// queue.
-	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart(jobs))
+	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart())
 	defer cancelStart()
 loop:
 	for i, job := range jobs {
@@ -1284,15 +1284,11 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 	}
 }
 
-// latestImageCacheJobStart is the latest time a job of a claimed page can
-// start and still finish, within ImageCacheJobTimeout, before the lease
-// stamped at claim time runs out.
-func latestImageCacheJobStart(jobs []*models.MetadataImageCacheJob) time.Time {
-	claimedAt := time.Now()
-	for _, job := range jobs {
-		if job != nil && job.LockedAt != nil && job.LockedAt.Before(claimedAt) {
-			claimedAt = *job.LockedAt
-		}
-	}
-	return claimedAt.Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
+// latestImageCacheJobStart is the latest time a job of a page claimed just
+// now can start and still finish, within ImageCacheJobTimeout, before its
+// lease runs out. It counts from the page's arrival rather than the
+// database's locked_at, so a clock difference between the server and the
+// database cannot make a fresh page look expired.
+func latestImageCacheJobStart() time.Time {
+	return time.Now().Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
 }

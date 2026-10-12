@@ -349,14 +349,16 @@ func TestCacheTargetArtworkHoldsWorkerBudget(t *testing.T) {
 // go back to the queue instead of waiting for a worker or the budget, so no
 // other server recovers them as abandoned while they wait.
 func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
+	if got, want := time.Until(latestImageCacheJobStart()), ImageCacheLeaseDuration-ImageCacheJobTimeout; got > want || got < want-time.Minute {
+		t.Fatalf("start window = %s, want %s from the page's arrival", got, want)
+	}
+
 	root := t.TempDir()
 	source := "file://" + writeLocalPoster(t, root)
-	claimedAt := time.Now().Add(-ImageCacheLeaseDuration)
 	var claimed []*models.MetadataImageCacheJob
 	for i := int64(1); i <= 3; i++ {
 		job := localArtworkJob(source)
 		job.ID = i
-		job.LockedAt = &claimedAt
 		claimed = append(claimed, job)
 	}
 	jobs := &fakeLocalImageCacheJobs{}
@@ -364,7 +366,11 @@ func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 
-	stats := p.processClaimedJobs(context.Background(), "w1", claimed, 3)
+	// A context whose deadline already passed stands in for a start window
+	// that ran out while the page waited.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	stats := p.processClaimedJobs(ctx, "w1", claimed, 3)
 	if len(cacher.byteReqs) != 0 || stats.Succeeded != 0 {
 		t.Fatalf("copies = %d, stats = %+v; want none past the start deadline", len(cacher.byteReqs), stats)
 	}
@@ -413,4 +419,36 @@ func TestImageCacheProcessorJobsHoldWorkerBudget(t *testing.T) {
 	if stats := <-done; stats.Succeeded != 2 {
 		t.Fatalf("stats = %+v, want both jobs copied", stats)
 	}
+}
+
+// Lowering the budget holds back callers already waiting: none starts until
+// the jobs running before the change have dropped below the new limit.
+func TestImageWorkBudgetLowersForWaitingCallers(t *testing.T) {
+	var budget imageWorkBudget
+	budget.set(2)
+	first, _ := budget.acquire(context.Background())
+	second, _ := budget.acquire(context.Background())
+	waiting := make(chan func())
+	go func() {
+		release, err := budget.acquire(context.Background())
+		if err != nil {
+			t.Errorf("waiting acquire: %v", err)
+		}
+		waiting <- release
+	}()
+	budget.set(1)
+	full := func(what string) {
+		t.Helper()
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := budget.acquire(canceled); !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s: acquire = %v, want the budget full", what, err)
+		}
+	}
+	first()
+	full("one job still running under a limit of one")
+	second()
+	release := <-waiting
+	full("the waiting caller took the only slot")
+	release()
 }
