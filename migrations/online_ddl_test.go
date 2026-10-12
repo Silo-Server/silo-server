@@ -95,7 +95,7 @@ const sqlName = `(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:"[^"]+"|[A-Za-z_][A-
 var (
 	gooseDownRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+down\b`)
 	gooseNoTxRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+no\s+transaction\s*$`)
-	createTableRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+|UNLOGGED\s+)?(?:TABLE|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + sqlName + `)`)
+	createTableRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+|UNLOGGED\s+)?(?:TABLE|MATERIALIZED\s+VIEW)\s+(IF\s+NOT\s+EXISTS\s+)?(` + sqlName + `)`)
 	createIndexRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\b(.*?)\bON\s+(?:ONLY\s+)?(` + sqlName + `)`)
 	alterTableRE     = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(` + sqlName + `)\s+(.*)$`)
 	concurrentlyRE   = regexp.MustCompile(`(?i)\bCONCURRENTLY\b`)
@@ -139,8 +139,10 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 			}
 			hits = append(hits, onlineDDLFinding{Line: st.line, Rule: rule, Detail: detail})
 		}
-		if m := createTableRE.FindStringSubmatch(st.text); m != nil {
-			created[normalizeTableName(m[1])] = true
+		// IF NOT EXISTS does not prove the table is new: it may already exist
+		// and hold rows.
+		if m := createTableRE.FindStringSubmatch(st.text); m != nil && m[1] == "" {
+			created[normalizeTableName(m[2])] = true
 		}
 		if !noTx && concurrentlyRE.MatchString(st.text) && !refreshMatViewRE.MatchString(st.text) {
 			hit(ruleConcurrentlyInTx, "")
@@ -152,12 +154,24 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 		}
 		if m := alterTableRE.FindStringSubmatch(st.text); m != nil && !created[normalizeTableName(m[1])] {
 			table := normalizeTableName(m[1])
-			for _, action := range splitTopLevel(m[2], ',') {
+			actions := splitTopLevel(m[2], ',')
+			validates, others := 0, 0
+			for _, action := range actions {
+				if validateRE.MatchString(strings.TrimSpace(action)) {
+					validates++
+				} else {
+					others++
+				}
+			}
+			// One statement takes the strongest lock any of its actions needs,
+			// even in a NO TRANSACTION file; separate statements share a lock
+			// only inside a transaction.
+			if validates > 0 && (others > 0 || !noTx && altered[table]) {
+				hit(ruleValidateInTx, table)
+			}
+			for _, action := range actions {
 				action = strings.TrimSpace(action)
 				if validateRE.MatchString(action) {
-					if !noTx && altered[table] {
-						hit(ruleValidateInTx, table)
-					}
 					continue
 				}
 				altered[table] = true
@@ -383,15 +397,15 @@ func isIdentByte(b byte) bool {
 
 var dollarTagRE = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$`)
 
-// splitTopLevel splits s on sep outside parentheses.
+// splitTopLevel splits s on sep outside parentheses and brackets.
 func splitTopLevel(s string, sep byte) []string {
 	var parts []string
 	depth, start := 0, 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
-		case '(':
+		case '(', '[':
 			depth++
-		case ')':
+		case ')', ']':
 			depth--
 		case sep:
 			if depth == 0 {
@@ -434,6 +448,10 @@ func TestCheckOnlineDDL(t *testing.T) {
 		{"validate after another change to the table", "ALTER TABLE media_files ADD COLUMN y int;\nALTER TABLE media_files VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
 		{"validate in the same statement", "ALTER TABLE media_files ADD COLUMN y int, VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
 		{"validate an older constraint after adding another", "ALTER TABLE t ADD CONSTRAINT b CHECK (x > 0) NOT VALID;\nALTER TABLE t VALIDATE CONSTRAINT a;", []string{ruleValidateInTx}},
+		{"validate before another action in the statement", "ALTER TABLE media_files VALIDATE CONSTRAINT c, ADD COLUMN y int;", []string{ruleValidateInTx}},
+		{"validate with another action in a NO TRANSACTION file", "-- +goose NO TRANSACTION\nALTER TABLE media_files ADD COLUMN y int, VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
+		{"array literal in an inline check", "ALTER TABLE media_files ADD COLUMN x int[] DEFAULT ARRAY[1,2] CHECK (cardinality(x) > 0);", []string{ruleInlineConstraint}},
+		{"IF NOT EXISTS does not prove the table is new", "CREATE TABLE IF NOT EXISTS public.media_files (id integer);\nCREATE INDEX i ON media_files (id);", []string{ruleCreateIndex}},
 		{"nested block comment", "/* outer /* inner */ still a comment */ CREATE INDEX i ON media_files (x);", []string{ruleCreateIndex}},
 		{"E-string with an escaped quote", "INSERT INTO t VALUES (E'it\\'s');\nCREATE INDEX i ON media_files (x);\nSELECT 'x';", []string{ruleCreateIndex}},
 
@@ -450,7 +468,7 @@ func TestCheckOnlineDDL(t *testing.T) {
 		{"identity is not a stored generated column", "ALTER TABLE t ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;", nil},
 		{"alter column default", "ALTER TABLE t ALTER COLUMN x SET DEFAULT 'TYPE';", nil},
 		{"new table with inline constraints and indexes", `
-CREATE TABLE IF NOT EXISTS public.marker_jobs (
+CREATE TABLE public.marker_jobs (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     file_id integer NOT NULL REFERENCES media_files(id),
     kind text NOT NULL CHECK (kind <> ''),
