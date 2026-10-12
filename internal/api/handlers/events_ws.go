@@ -192,7 +192,8 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
 			authority, active, err := h.sessionRoles.ActiveSession(checkCtx, claims.SessionID)
 			stop()
-			if err == nil && (!active || authority.Role != claims.Role) {
+			// A remote-playback handoff never holds a v1 socket.
+			if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
 				cancel()
 				return
 			}

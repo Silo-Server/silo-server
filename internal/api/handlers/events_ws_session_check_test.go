@@ -17,12 +17,17 @@ import (
 type sessionRoleFixture struct {
 	role    atomic.Value
 	revoked atomic.Bool
+	handoff atomic.Bool
 	checks  atomic.Int64
 }
 
 func (f *sessionRoleFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
 	f.checks.Add(1)
-	return auth.SessionAuthority{Role: f.role.Load().(string), Purpose: models.SessionPurposeAccount}, !f.revoked.Load(), nil
+	authority := auth.SessionAuthority{Role: f.role.Load().(string), Purpose: models.SessionPurposeAccount}
+	if f.handoff.Load() {
+		authority.Purpose, authority.BoundProfileID = models.SessionPurposeRemotePlayback, "profile"
+	}
+	return authority, !f.revoked.Load(), nil
 }
 
 // TestEventsWebSocketV1ClosesWhenSessionChanges covers the v1 socket, which
@@ -36,6 +41,8 @@ func TestEventsWebSocketV1ClosesWhenSessionChanges(t *testing.T) {
 	}{
 		{"role changed", func(f *sessionRoleFixture) { f.role.Store("user") }},
 		{"session revoked", func(f *sessionRoleFixture) { f.revoked.Store(true) }},
+		// The role is left alone so only the handoff binding ends it.
+		{"session bound as a remote-playback handoff", func(f *sessionRoleFixture) { f.handoff.Store(true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := new(sessionRoleFixture)
