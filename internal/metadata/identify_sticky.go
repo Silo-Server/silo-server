@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 
@@ -47,15 +48,19 @@ type localIdentityHint struct {
 }
 
 // collectLocalIdentityHints asks each identity-hint (local) provider in the
-// chain for the IDs its files declare, once.
-func collectLocalIdentityHints(ctx context.Context, chain []Provider, query SearchQuery) []localIdentityHint {
+// chain for the IDs its files declare, once. IDs in stale (recorded 404s) are
+// dropped: a dead ID in a file must not re-match the item or count as a
+// correction of its stored identity.
+func collectLocalIdentityHints(ctx context.Context, chain []Provider, query SearchQuery, stale providerIDValueSet) []localIdentityHint {
 	var out []localIdentityHint
 	for _, p := range chain {
 		hinter, ok := p.(IdentityHintProvider)
 		if !ok {
 			continue
 		}
-		out = append(out, localIdentityHint{provider: p.Slug(), ids: hinter.IdentityHints(ctx, query)})
+		ids := maps.Clone(hinter.IdentityHints(ctx, query))
+		suppressProviderIDValues(ids, stale)
+		out = append(out, localIdentityHint{provider: p.Slug(), ids: ids})
 	}
 	return out
 }
@@ -160,6 +165,7 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 		return false, nil
 	}
 	local := s.localProviderContextForContent(ctx, series.ContentID, folderID)
+	// Only the conflict check reads these hints; it drops dead IDs itself.
 	hints := collectLocalIdentityHints(ctx, chain, SearchQuery{
 		Title:                     series.Title,
 		Year:                      series.Year,
@@ -169,7 +175,7 @@ func (s *MetadataService) seriesChildSkipsLocal(ctx context.Context, series *mod
 		ObservedRootPath:          local.observedRootPath,
 		AllGroupFilePaths:         local.allGroupFilePaths,
 		PrimarySidecarSearchPaths: local.primarySidecarSearchPaths,
-	})
+	}, nil)
 	if len(declaredLocalIDs(hints)) == 0 {
 		return false, nil
 	}
