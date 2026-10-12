@@ -156,6 +156,36 @@ that can hold millions of rows. Keep locks on existing tables short:
 `20260914145000_index_artwork_reference_paths.sql` shows the index pattern, and
 `20260930130041_store_media_search_fields.sql` the batched backfill.
 
+`TestNewMigrationsStayOnline` in `migrations/online_ddl_test.go` checks every
+SQL migration newer than its cutoff. In each Up section it flags these
+statements on tables the file did not create earlier:
+
+- `CREATE INDEX` without `CONCURRENTLY`, and `UNIQUE`, `PRIMARY KEY` or
+  `EXCLUDE` constraints added without `USING INDEX`;
+- `CHECK` and `FOREIGN KEY` constraints added without `NOT VALID`;
+- `VALIDATE CONSTRAINT` after another change to the same table in the same
+  transaction;
+- inline `CHECK`, `REFERENCES`, `UNIQUE` or `PRIMARY KEY` in `ADD COLUMN`;
+- `ALTER COLUMN ... TYPE` and stored generated columns;
+- `CONCURRENTLY` in a file without `-- +goose NO TRANSACTION`.
+
+It does not check Go migrations, DDL inside function bodies or `DO` blocks,
+backfills, `SET NOT NULL`, `DROP INDEX` without `CONCURRENTLY`, or columns
+whose default rewrites the table (volatile defaults, identity, `serial`).
+Review still covers those. A migration created before the cutoff and merged
+after it fails the test until its file name is added to `lateMigrations`,
+which turns the check on for it.
+
+When a lock is genuinely short, such as a `varchar` to `text` change that skips
+the rewrite or a table that holds a handful of rows, add a comment above the
+statement, or at the end of its last line, that names the rule and gives the
+reason:
+
+```sql
+-- online-ddl allow create-index: stream_nodes holds one row per transcode node
+CREATE INDEX stream_nodes_example_idx ON public.stream_nodes (example);
+```
+
 ## Tests and lint
 
 While iterating:
