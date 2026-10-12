@@ -157,7 +157,8 @@ differently. That shuts out:
 
 The checks that do not run behind `RequireAuth` refuse a handoff too: Apple
 notification display tokens and direct-download links an older release minted
-for one, plugin access, and approvals (the approving session must be
+for one, a Watch Together socket ticket minted before the session was bound,
+plugin access, and approvals (the approving session must be
 `purpose = 'account'` while the account is locked).
 
 Stream tokens already in media URLs are not tied to the login session, as for

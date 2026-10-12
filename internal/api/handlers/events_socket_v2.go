@@ -265,6 +265,24 @@ func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, se
 	return h
 }
 
+// refuseRemotePlaybackSocket narrows validate to sessions that are not a
+// remote-playback handoff, for a socket a handoff may not hold. The ticket
+// route is already closed to handoffs, but a ticket minted before the session
+// was bound, or by an older node during a rolling deploy, would otherwise
+// connect and pass every recheck.
+func refuseRemotePlaybackSocket(validate EventsSocketValidator) EventsSocketValidator {
+	if validate == nil {
+		return nil
+	}
+	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
+		validated, claims, err := validate(ctx, identity)
+		if err == nil && claims.IsRemotePlayback() {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		return validated, claims, err
+	}
+}
+
 func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker) EventsSocketValidator {
 	if sessions == nil || users == nil || resolver == nil || primary == nil {
 		return nil

@@ -351,3 +351,22 @@ func TestSocketValidatorBindsRemotePlayback(t *testing.T) {
 		t.Fatalf("admin ticket for a handoff: %v", err)
 	}
 }
+
+// The Watch Together socket refuses a handoff's ticket, at the handshake and
+// on every recheck, even one naming the bound profile that the events socket
+// accepts: one minted before the session was bound, or by an older node.
+func TestWatchTogetherSocketRefusesRemotePlayback(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	primary := func(context.Context, int, string) (bool, bool, error) { return false, true, nil }
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	room := NewWatchTogetherSocketV2(nil, nil, sessions, users, viewer, primary, "")
+	if _, _, err := room.Validate(t.Context(), identity); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("handoff room ticket: %v", err)
+	}
+	sessions.remoteProfile = ""
+	if _, claims, err := room.Validate(t.Context(), identity); err != nil || claims.IsRemotePlayback() {
+		t.Fatalf("ordinary room ticket = %+v, %v", claims, err)
+	}
+}
