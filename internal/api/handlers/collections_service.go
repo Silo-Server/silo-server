@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -28,6 +27,8 @@ type PersonalCollectionCreateCommand struct {
 	// carried no multipart body. It answers http.ErrMissingFile when the
 	// part is absent.
 	PosterFile func() ([]byte, error)
+	// V1Rules: see PersonalCollectionPreviewRequest.
+	V1Rules bool
 }
 
 const (
@@ -39,48 +40,57 @@ const (
 	collectionFilterSeries = "series"
 )
 
-// ListPersonalCollections answers the profile's visible collections and the
-// account's groups, as v1 GET /collections does.
+// ListPersonalCollections answers the collections the profile may see, as
+// v1 GET /collections does: its own in its order, then other profiles' shared
+// collections grouped by owner. Personal collection groups no longer exist,
+// so Groups is always empty.
 func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID int, profileID string) (PersonalCollectionListView, error) {
 	var none PersonalCollectionListView
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-
-	collectionsCh := make(chan []userstore.Collection, 1)
-	groupsCh := make(chan []userstore.CollectionGroup, 1)
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		collections, err := store.ListCollections(egCtx, profileID)
-		if err != nil {
-			return err
-		}
-		collectionsCh <- collections
-		return nil
-	})
-	eg.Go(func() error {
-		groups, err := store.ListCollectionGroups(egCtx)
-		if err != nil {
-			return err
-		}
-		groupsCh <- groups
-		return nil
-	})
-	if err := eg.Wait(); err != nil {
+	collections, err := store.ListCollections(ctx, profileID)
+	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collections")
 	}
-	collections := <-collectionsCh
-	groups := <-groupsCh
+	return PersonalCollectionListView{
+		Collections: h.collectionViews(ctx, store, userID, profileID, collections),
+		Groups:      []CollectionGroupView{},
+	}, nil
+}
 
-	resp := PersonalCollectionListView{
-		Collections: h.collectionViews(ctx, store, userID, collections),
-		Groups:      make([]CollectionGroupView, 0, len(groups)),
+// PersonalCollectionsHoldingItem returns the ids of profileID's own manual
+// collections that hold itemID. It returns none when the request's viewer
+// cannot access the title, so the answer never reveals that a hidden title
+// exists or which collections still hold it.
+func (h *CollectionHandler) PersonalCollectionsHoldingItem(ctx context.Context, userID int, profileID, itemID string) (map[string]bool, error) {
+	if profileID == "" || itemID == "" {
+		return map[string]bool{}, nil
 	}
-	for _, g := range groups {
-		resp.Groups = append(resp.Groups, collectionGroupView(g))
+	if err := h.requireVisibleCollectionItem(ctx, itemID); err != nil {
+		if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status == http.StatusNotFound {
+			return map[string]bool{}, nil
+		}
+		return nil, err
 	}
-	return resp, nil
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	reader, ok := store.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, apiError(http.StatusNotImplemented, "unsupported", "This store cannot report collection membership")
+	}
+	ids, err := reader.ManualCollectionsHolding(ctx, profileID, itemID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to read collection membership")
+	}
+	holding := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		holding[id] = true
+	}
+	return holding, nil
 }
 
 // Capabilities is the additive feature support collection clients detect.
@@ -95,6 +105,7 @@ func (h *CollectionHandler) Capabilities() CollectionCapabilitiesView {
 		CollectionSortPreferences: true,
 		EffectiveCollectionSort:   true,
 		SortPreferenceKinds:       sortPreferenceKinds,
+		PosterCollages:            h.Collages != nil,
 	}
 }
 
@@ -117,15 +128,20 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			return none, err
 		}
 	}
+	if req.Description != "" {
+		if err := collectionFeatureError(store, "description"); err != nil {
+			return none, err
+		}
+	}
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
 	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
 	if collectionType == collectionTypeSmart {
-		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true)
+		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
 	} else if len(req.QueryDefinition) > 0 {
-		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true)
+		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
@@ -142,9 +158,9 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
 		Name:                       req.Name,
+		Description:                req.Description,
 		CollectionType:             collectionType,
 		IsShared:                   req.IsShared,
-		AllowedProfileIDs:          req.AllowedProfileIDs,
 		QueryDefinition:            queryDefinition,
 		SortConfig:                 sortConfig,
 		DisplayQueryDefinition:     displayQueryDefinition,
@@ -163,12 +179,14 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			collection = refreshed
 		}
 	}
-	return h.collectionView(ctx, store, cmd.UserID, *collection), nil
+	h.refreshCollage(ctx, store, cmd.UserID, collection)
+	return h.collectionView(ctx, store, cmd.UserID, cmd.ProfileID, *collection)
 }
 
-// ReorderPersonalCollections replaces the order of one group's collections.
-// orderedIDs must name every collection in scope exactly once.
-func (h *CollectionHandler) ReorderPersonalCollections(ctx context.Context, userID int, profileID string, groupID *string, orderedIDs []string) error {
+// ReorderPersonalCollections replaces the order of the profile's own
+// collections. orderedIDs must name each of them exactly once; another
+// profile's collection, even a shared one, is a validation failure.
+func (h *CollectionHandler) ReorderPersonalCollections(ctx context.Context, userID int, profileID string, orderedIDs []string) error {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -176,12 +194,12 @@ func (h *CollectionHandler) ReorderPersonalCollections(ctx context.Context, user
 	if err := collectionFeatureError(store, "item_reorder"); err != nil {
 		return err
 	}
-	if err := reorderCollectionsWithRevision(ctx, store, profileID, groupID, orderedIDs); err != nil {
+	if err := reorderCollectionsWithRevision(ctx, store, profileID, orderedIDs); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return err
 		}
 		if errors.Is(err, collectionutil.ErrOrderedIDsMismatch) {
-			return fieldError("ordered_ids", "ordered_ids must include every visible collection in the group exactly once")
+			return fieldError("ordered_ids", "ordered_ids must name each of your own collections exactly once")
 		}
 		if strings.Contains(err.Error(), "ordered_ids contains duplicates") {
 			return fieldError("ordered_ids", "ordered_ids contains duplicates")
@@ -293,31 +311,60 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 }
 
 // collectionViews renders stored collections with their posters presigned and
-// item_count set to the members the acting profile can see.
-func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, collections []userstore.Collection) []PersonalCollectionView {
-	var counts map[string]int
+// item_count set to the members profileID can see: for another profile's
+// collection, only those its owner can access too. On /api/v2 a collection
+// without an uploaded or imported poster shows its collage for that profile,
+// once built. A collection whose owner cannot be resolved is left out.
+func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
+	var reads ownedCollectionReads
 	if userstore.HasCatalogSQLState(store) {
-		sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+		sources := make([]ownedCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
-			sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
+			sources = append(sources, ownedCollectionDefinition{
+				PersonalCollectionDefinition: usercollections.CollectionDefinition(c),
+				CreatorProfileID:             c.CreatorProfileID,
+				WantsCollage:                 strings.TrimSpace(c.PosterURL) == "",
+			})
 		}
-		counts = visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
+		reads = ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
-		if n, ok := counts[c.ID]; ok {
+		if reads.unavailable[c.ID] {
+			continue
+		}
+		if n, ok := reads.counts[c.ID]; ok {
 			c.ItemCount = n
 		}
 		resp := toCollectionResponse(c)
-		resp.PosterURL = h.presignUserCollectionPoster(ctx, c.PosterURL)
+		posterPath := c.PosterURL
+		if collage, ok := reads.posters[c.ID]; ok {
+			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
+		}
+		resp.PosterURL = h.presignUserCollectionPoster(ctx, posterPath)
 		views = append(views, resp)
 	}
 	return views
 }
 
-// collectionView renders one stored collection as collectionViews does.
-func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, c userstore.Collection) PersonalCollectionView {
-	return h.collectionViews(ctx, store, userID, []userstore.Collection{c})[0]
+// collagesForRead is the collage service a read of personal collections uses:
+// /api/v2 reads show collages, while the frozen /api/v1 bridge keeps showing
+// only uploaded and imported posters.
+func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCollages) *catalog.PersonalCollectionCollages {
+	if !isNativeAPIV2(ctx) {
+		return nil
+	}
+	return collages
+}
+
+// collectionView renders one stored collection as collectionViews does, and
+// fails when its owner's access cannot be resolved.
+func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, profileID string, c userstore.Collection) (PersonalCollectionView, error) {
+	views := h.collectionViews(ctx, store, userID, profileID, []userstore.Collection{c})
+	if len(views) == 0 {
+		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+	}
+	return views[0], nil
 }
 
 func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {
@@ -345,10 +392,14 @@ func (h *CollectionHandler) PersonalCollectionFeatures(ctx context.Context, user
 	if err != nil {
 		return userstore.CollectionFeatures{}, apiError(500, "internal_error", "Failed to access user store")
 	}
-	if features, ok := store.(userstore.CollectionFeatureProvider); ok {
-		return features.CollectionFeatures(), nil
+	features := userstore.CollectionFeatures{}
+	if provider, ok := store.(userstore.CollectionFeatureProvider); ok {
+		features = provider.CollectionFeatures()
 	}
-	return userstore.CollectionFeatures{}, nil
+	// Without artwork storage no poster can be uploaded or composed, as
+	// server collections report it.
+	features.Artwork = features.Artwork && h.ArtworkStore != nil
+	return features, nil
 }
 
 func collectionFeatureError(store userstore.UserStore, feature string) error {
@@ -367,6 +418,8 @@ func collectionFeatureError(store userstore.UserStore, feature string) error {
 		supported = f.Artwork
 	case "item_reorder":
 		supported = f.ItemReorder
+	case "description":
+		supported = f.Description
 	}
 	if !supported {
 		return apiError(http.StatusNotImplemented, "unsupported", "The acting account does not support collection "+feature)

@@ -33,6 +33,11 @@ interface MatchItemDialogProps {
   item: MatchableItem;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Called with the item's new content ID when applying the match moved it,
+   * so a page showing the old ID can follow it.
+   */
+  onReplaced?: (contentID: string) => void | Promise<void>;
 }
 
 function isVideoMatchType(type: string): boolean {
@@ -53,7 +58,12 @@ function isVideoMatchType(type: string): boolean {
   }
 }
 
-export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemDialogProps) {
+export default function MatchItemDialog({
+  item,
+  open,
+  onOpenChange,
+  onReplaced,
+}: MatchItemDialogProps) {
   const [title, setTitle] = useState(item.title);
   const [year, setYear] = useState(item.year ? String(item.year) : "");
   const [imdbId, setImdbId] = useState("");
@@ -148,14 +158,24 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
   const handleApply = useCallback(() => {
     if (!selectedCandidate) return;
     applyMutation.mutate(
-      { item, providerIds: selectedCandidate.provider_ids },
+      {
+        item,
+        providerIds: selectedCandidate.provider_ids,
+        // Close before following the new ID: the page keys this dialog by
+        // content ID, so it unmounts on navigation and the per-call onSuccess
+        // below never runs, which would leave the page's open state set.
+        onReplaced: (contentID) => {
+          onOpenChange(false);
+          return onReplaced?.(contentID);
+        },
+      },
       {
         onSuccess: () => {
           onOpenChange(false);
         },
       },
     );
-  }, [selectedCandidate, applyMutation, item, onOpenChange]);
+  }, [selectedCandidate, applyMutation, item, onOpenChange, onReplaced]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

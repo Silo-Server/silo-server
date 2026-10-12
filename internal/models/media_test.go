@@ -21,6 +21,18 @@ func TestPersonKindAudiobookRoles(t *testing.T) {
 	}
 }
 
+func TestPersonKindCreator(t *testing.T) {
+	const creator = "Creator"
+	if got := PersonKindCreator.String(); got != creator {
+		t.Errorf("PersonKindCreator.String() = %q, want %q", got, creator)
+	}
+	for _, job := range []string{creator, "creator", " CREATOR "} {
+		if got := PersonKindFromJob(job); got != PersonKindCreator {
+			t.Errorf("PersonKindFromJob(%q) = %v, want PersonKindCreator", job, got)
+		}
+	}
+}
+
 func TestNormalizeVideoBitDepth(t *testing.T) {
 	tests := []struct {
 		name        string

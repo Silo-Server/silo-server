@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	"github.com/go-chi/chi/v5"
 
@@ -90,10 +93,17 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 		return nil, false
 	}
 	valid, err := s.loginSessions.IsValid(r.Context(), claims.SessionID)
-	if err != nil || !valid {
-		if err != nil {
-			slog.WarnContext(r.Context(), "login session check failed", "component", "proxy", "error", err, "playback_session_id", sessionID)
+	if err != nil {
+		// The session could not be checked, which says nothing about the
+		// credential: a retryable 503, never a 401 that signs the client out.
+		if r.Context().Err() == nil {
+			slog.WarnContext(r.Context(), "login session check failed", "component", "proxy", "error", logredact.SanitizeText(err.Error()), "playback_session_id", sessionID)
 		}
+		w.Header().Set("Retry-After", strconv.Itoa(auth.SessionCheckRetryAfterSeconds))
+		writeGrantError(w, http.StatusServiceUnavailable, "service_unavailable", "Sign-in could not be checked right now; try again shortly")
+		return nil, false
+	}
+	if !valid {
 		writeGrantError(w, http.StatusUnauthorized, "unauthorized", "Session is no longer valid")
 		return nil, false
 	}
@@ -224,6 +234,7 @@ func (s *Server) relayGrantToTranscodeNode(w http.ResponseWriter, r *http.Reques
 	// the two grant transcode handlers take, so attaching once here is the
 	// equivalent hook. The proxy→node hop itself stays internal_relay.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	cfg := s.watcher.Config()
 	forwardToken := ""
 	if cfg != nil && cfg.Auth.JWTSecret != "" {

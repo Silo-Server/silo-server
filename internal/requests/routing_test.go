@@ -197,6 +197,132 @@ func TestEverythingElseWithoutA4KServerMakesNoCopy(t *testing.T) {
 	}
 }
 
+// Everything else with no HD server makes no HD copy when the title's 4K copy
+// goes to a server, and leaves HD undecided when it does not.
+func TestDecideRoutesSkipsHDWithoutAnHDServer(t *testing.T) {
+	movie := Request{MediaType: MediaTypeMovie, RoutingFacts: capturedFacts(RoutingFacts{})}
+	anime := Request{MediaType: MediaTypeMovie, RoutingFacts: capturedFacts(RoutingFacts{Anime: true})}
+	both := []Quality{Quality1080p, Quality2160p}
+	fourKOnly := func() []Route {
+		routes := testRoutes()
+		routes[0].HD = RouteDestination{}
+		return routes
+	}
+	noServers := fourKOnly()
+	noServers[0].UHD = RouteDestination{}
+	animeTo4K := slices.Clone(noServers)
+	animeTo4K[1].HD, animeTo4K[1].UHD = RouteDestination{}, RouteDestination{IntegrationID: "radarr-4k"}
+
+	for _, tc := range []struct {
+		name      string
+		routes    []Route
+		req       Request
+		qualities []Quality
+		// wantRoute is the route that decided HD, "" when nothing did.
+		wantRoute string
+		wantSkip  bool
+		// wantStep is what Everything else did for HD.
+		wantStep RouteStep
+	}{
+		{"4K goes out", fourKOnly(), movie, both, "fallback", true, RouteStepSkips},
+		{"requester without 4K", fourKOnly(), movie, []Quality{Quality1080p}, "", false, RouteStepPasses},
+		{"4K skipped too", noServers, movie, both, "", false, RouteStepPasses},
+		{"a rule sends HD", fourKOnly(), anime, both, "anime", false, RouteStepDecided},
+		{"a rule sends 4K", animeTo4K, anime, both, "fallback", true, RouteStepSkips},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decisions, traces := traceRoutes(tc.routes, tc.req, tc.qualities)
+			hd, ok := decisions[Quality1080p]
+			if ok != (tc.wantRoute != "") || hd.RouteID != tc.wantRoute || hd.Skip != tc.wantSkip {
+				t.Fatalf("HD = %+v (decided %v), want route %q skip %v", hd, ok, tc.wantRoute, tc.wantSkip)
+			}
+			if got := traces[len(traces)-1].Steps[Quality1080p]; got != tc.wantStep {
+				t.Fatalf("Everything else HD step = %q, want %q", got, tc.wantStep)
+			}
+		})
+	}
+}
+
+// A media type whose servers are all marked 4K gets its 4K copy and no failed
+// HD target.
+func TestSubmitRoutedSkipsHDWithoutAnHDServer(t *testing.T) {
+	store := routingStore(capturedFacts(RoutingFacts{}))
+	store.routes[0].HD = RouteDestination{}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+
+	req, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(router.fulfillLog) != 1 || router.fulfillLog[0].conns[0].ID != "radarr-4k" {
+		t.Fatalf("fulfill calls = %+v, want only the 4K tier to the fallback's 4K server", router.fulfillLog)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 || targets[0].Quality != Quality2160p || targets[0].Status == StatusFailed {
+		t.Fatalf("targets = %+v, want only the 4K copy", targets)
+	}
+	if req.Outcome == OutcomeFailed {
+		t.Fatalf("request = %+v, want it not failed", req)
+	}
+}
+
+// A request that failed its HD tier before HD was skipped clears on Retry,
+// next to its finished 4K copy.
+func TestRetryDropsTheFailedHDTargetWithoutAnHDServer(t *testing.T) {
+	store := routingStore(capturedFacts(RoutingFacts{}))
+	store.routes[0].HD = RouteDestination{}
+	store.requests["r1"].Status, store.requests["r1"].Outcome = StatusQueued, OutcomeFailed
+	store.targets = map[string][]Target{"r1": {
+		{ID: 1, RequestID: "r1", Quality: Quality1080p, Status: StatusFailed, LastError: "no routing rule sends HD for this title"},
+		{ID: 2, RequestID: "r1", IntegrationID: "radarr-4k", Quality: Quality2160p, Status: StatusCompleted},
+	}}
+	store.targetSeq = 2
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+
+	req, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1")
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %d, want 0 (nothing left to send)", router.fulfillCalls)
+	}
+	if req.Status != StatusCompleted || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want completed/active", req.Status, req.Outcome)
+	}
+	if targets, _ := store.ListTargets(context.Background(), "r1"); len(targets) != 1 || targets[0].Quality != Quality2160p {
+		t.Fatalf("targets = %+v, want only the 4K target", targets)
+	}
+}
+
+// A requester without 4K has nothing to receive when no server takes HD, so
+// the HD tier still fails and says why.
+func TestSubmitRoutedFailsHDForARequesterWithout4K(t *testing.T) {
+	store := routingStore(capturedFacts(RoutingFacts{}))
+	store.routes[0].HD = RouteDestination{}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
+
+	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %+v, want none", router.fulfillLog)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 || targets[0].Quality != Quality1080p || targets[0].Status != StatusFailed ||
+		targets[0].LastError != "no routing rule sends HD for this title" {
+		t.Fatalf("targets = %+v, want a failed HD target naming the missing rule", targets)
+	}
+}
+
 // A route whose server is disabled or not set up is an admin-fixable problem:
 // with nothing sent yet, the submission retries instead of failing.
 func TestSubmitRoutedRetriesWhenTheServerIsUnusable(t *testing.T) {

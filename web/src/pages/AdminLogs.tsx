@@ -78,6 +78,10 @@ function AdminLogsPage() {
   const level = normalizeLogFilterParam(searchParams.get("level") ?? "");
   const component = searchParams.get("component") ?? "";
   const method = searchParams.get("method") ?? "";
+  const action = searchParams.get("action") ?? "";
+  const actor = searchParams.get("actor_user_id") ?? "";
+  const targetID = searchParams.get("target_id") ?? "";
+  const targetType = searchParams.get("target_type") ?? "";
   const clientIP = searchParams.get("client_ip") ?? "";
   const playbackSessionID = searchParams.get("playback_session_id") ?? "";
   const [selectedEntry, setSelectedEntry] = useState<OperationalLogEntry | null>(null);
@@ -109,12 +113,16 @@ function AdminLogsPage() {
   );
   const auditParams = useMemo(
     () => ({
+      action: action || undefined,
+      actor_user_id: actor || undefined,
+      target_id: targetID || undefined,
+      target_type: targetType || undefined,
       request_id: requestID || undefined,
       method: method || undefined,
       client_ip: clientIP || undefined,
       playback_session_id: playbackSessionID || undefined,
     }),
-    [requestID, method, clientIP, playbackSessionID],
+    [requestID, method, clientIP, playbackSessionID, action, actor, targetID, targetType],
   );
 
   const appLogs = useAdminLogStream("app", operationalParams, tab === "app" && !browsingHistory);
@@ -312,6 +320,35 @@ function AdminLogsPage() {
               onChange={(e) => updateSearchParam("client_ip", e.target.value)}
               className="max-w-xs font-mono"
             />
+            <Input
+              aria-label="Audit action"
+              placeholder="Action, e.g. user.updated"
+              value={action}
+              onChange={(e) => updateSearchParam("action", e.target.value)}
+              className="max-w-xs"
+            />
+            <Input
+              aria-label="Audit actor account"
+              placeholder="Actor account ID"
+              inputMode="numeric"
+              value={actor}
+              onChange={(e) => updateSearchParam("actor_user_id", e.target.value)}
+              className="max-w-[180px]"
+            />
+            <Input
+              aria-label="Audit target type"
+              placeholder="Target type, e.g. user"
+              value={targetType}
+              onChange={(e) => updateSearchParam("target_type", e.target.value)}
+              className="max-w-xs"
+            />
+            <Input
+              aria-label="Audit target ID"
+              placeholder="Target ID"
+              value={targetID}
+              onChange={(e) => updateSearchParam("target_id", e.target.value)}
+              className="max-w-[180px]"
+            />
           </div>
           <LogTable
             rows={auditRows}
@@ -329,11 +366,13 @@ function AdminLogsPage() {
             header={
               <TableRow>
                 <TableHead>Time</TableHead>
+                <TableHead>Action / changes</TableHead>
+                <TableHead>Target</TableHead>
                 <TableHead>Method</TableHead>
                 <TableHead>Path</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Client</TableHead>
-                <TableHead>User</TableHead>
+                <TableHead>Actor</TableHead>
                 <TableHead>Session</TableHead>
                 <TableHead>Playback</TableHead>
                 <TableHead>Request</TableHead>
@@ -524,11 +563,45 @@ const OperationalLogRow = memo(function OperationalLogRow({
   );
 });
 
+function auditChangeValue(value: string | undefined, targetType?: string, field?: string): string {
+  if (value === undefined) return "absent";
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed === null) {
+      if (field === "access_group_id") return "none";
+      if (targetType === "access_group") {
+        if (field === "library_ids") return "all libraries";
+        if (field === "allowed_permissions") return "all assignable";
+        return "unset";
+      }
+      return "inherit";
+    }
+    if (Array.isArray(parsed)) return parsed.length ? parsed.join(", ") : "none";
+    return typeof parsed === "object" ? JSON.stringify(parsed) : String(parsed);
+  } catch {
+    return value;
+  }
+}
+
 const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry }) {
   useDateTimeFormat();
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap">{formatDateTime(entry.timestamp)}</TableCell>
+      <TableCell className="max-w-[520px] min-w-[240px]">
+        <div className="font-medium">{entry.action || "HTTP request"}</div>
+        {entry.changes?.map((change) => (
+          <div key={change.field} className="text-muted-foreground text-xs break-words">
+            <span className="font-medium">{change.field.replaceAll("_", " ")}</span>:{" "}
+            {change.before === undefined && change.after === undefined
+              ? "changed"
+              : `${auditChangeValue(change.before, entry.target_type, change.field)} → ${auditChangeValue(change.after, entry.target_type, change.field)}`}
+          </div>
+        ))}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        {entry.target_type ? `${entry.target_type} #${entry.target_id}` : "-"}
+      </TableCell>
       <TableCell>{entry.method}</TableCell>
       <TableCell>
         <div className="max-w-[420px] truncate font-mono text-xs" title={entry.path}>
@@ -537,7 +610,13 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
       </TableCell>
       <TableCell>{entry.status_code}</TableCell>
       <TableCell className="font-mono text-xs">{formatClientIP(entry.client_ip)}</TableCell>
-      <TableCell>{entry.user_id ? `#${entry.user_id}` : "-"}</TableCell>
+      <TableCell>
+        {entry.impersonator_user_id
+          ? `#${entry.impersonator_user_id} (as #${entry.user_id})`
+          : entry.user_id
+            ? `#${entry.user_id}`
+            : "-"}
+      </TableCell>
       <TableCell className="font-mono text-xs">{entry.session_id || "-"}</TableCell>
       <TableCell className="font-mono text-xs">{entry.playback_session_id || "-"}</TableCell>
       <TableCell className="font-mono text-xs">{entry.request_id || "-"}</TableCell>

@@ -9,7 +9,14 @@ import { setProfileId } from "@/api/client";
 import { createEmptyQueryDefinition } from "@/api/types";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
-import { fetchCatalogFacetSearch, fetchCatalogFilters, fetchCatalogPage } from "./catalog";
+import {
+  createCatalogSearchState,
+  fetchCatalogFacetSearch,
+  fetchCatalogFilters,
+  fetchCatalogItems,
+  fetchCatalogPage,
+  MAX_CATALOG_PAGE,
+} from "./catalog";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -88,7 +95,12 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(url.searchParams.get("facet")).toBe("author");
     expect(url.searchParams.get("q")).toBe("fra");
     expect(url.searchParams.get("limit")).toBe("10");
-    expect(result).toEqual({ matches: ["Frank Herbert"], has_more: true });
+    expect(result).toEqual({
+      matches: ["Frank Herbert"],
+      has_more: true,
+      values: [{ value: "Frank Herbert", count: 6 }],
+      values_has_more: true,
+    });
   });
 
   it("posts structured filters, query cap and explicit sorting without bracket parameters", async () => {
@@ -122,6 +134,43 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(result.snapshot).toBe("opaque-window");
     expect(result.items[0]?.poster_url).toBe("");
     expect(result.items[0]?.rating_imdb).toBeNull();
+  });
+
+  it("reads a collection's items a page at a time within the query's limit maximum", async () => {
+    const item = queryCatalogItemsOk.items[0];
+    const pageOf = (n: number, offset: number, next?: string) => ({
+      ...queryCatalogItemsOk,
+      items: Array.from({ length: n }, (_, i) => ({ ...item, content_id: `c-${offset + i}` })),
+      page: { has_more: Boolean(next), next_cursor: next ?? "" },
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 0, "p2")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 100, "p3")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(30, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+    const state = createCatalogSearchState("library_collection", { collection_id: "c1" });
+
+    const all = await fetchCatalogItems(state);
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+    expect(all).toHaveLength(230);
+    expect(bodies.map((body) => body.limit)).toEqual([100, 100, 100]);
+    expect(bodies.map((body) => body.cursor)).toEqual([undefined, "p2", "p3"]);
+    expect(bodies.every((body) => body.limit <= MAX_CATALOG_PAGE)).toBe(true);
+
+    // A capped read keeps one limit for every page, since the cursor is bound
+    // to it, even when a page comes back short with more to follow.
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(pageOf(50, 0, "p2")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 50, "p3")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 150, "p4")));
+    const capped = await fetchCatalogItems(state, { max: 150 });
+    expect(capped).toHaveLength(150);
+    expect(capped.at(-1)?.content_id).toBe("c-149");
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).limit)).toEqual([
+      100, 100,
+    ]);
   });
 
   it.each([undefined, ""])(

@@ -266,11 +266,19 @@ func mediaSourceIDsEqual(a, b string) bool {
 	return errA == nil && errB == nil && ua == ub
 }
 
-// DecodeID unpacks a compat UUID into its original numeric value.
+// DecodeID unpacks a compat UUID made by EncodeNumericID into its kind and
+// numeric value. Any other UUID is an error.
 func DecodeID(raw string) (DecodedID, error) {
 	parsed, err := uuid.Parse(raw)
 	if err != nil {
 		return DecodedID{}, fmt.Errorf("parse uuid: %w", err)
+	}
+	// Only EncodeNumericID leaves bytes 1..7 zero: a hashed id is a SHA1 v5
+	// UUID with its version in byte 6, and a packed content_id has a non-zero
+	// format tag in byte 1. Reading any other UUID as a number would turn one
+	// hashed id in 256 per kind into a garbage numeric id of that kind.
+	if !zeroUUIDBytes(parsed[1:8]) {
+		return DecodedID{}, fmt.Errorf("compat id %q is not a numeric id", raw)
 	}
 
 	return DecodedID{

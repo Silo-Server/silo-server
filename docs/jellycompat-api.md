@@ -12,6 +12,13 @@ version, `12.1.0` on new installs.
 advertise Chromecast receiver applications; the empty array lets Jellyfin Web
 initialize playback preferences without attempting to iterate a missing field.
 
+`GET` and `POST /System/Ping` return the product name as a JSON string
+(`"Jellyfin Server"`), as Jellyfin does; `HEAD` answers 200 for reachability
+probes. `/Branding/Css` and `/Branding/Css.css` return 200 with an empty
+`text/css` body. Jellyfin Web 10.10 and earlier fetch it at startup. Silo has no
+Jellyfin Web custom CSS: its own custom CSS styles Silo's web client, so it is
+not served here.
+
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.
@@ -36,7 +43,10 @@ reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
 uses its child episodes. Parent reads and mutation responses derive `Played`,
 `PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
-parent's favorite status; an empty parent remains unplayed. A combined
+parent's favorite status; an empty parent remains unplayed. As in Jellyfin,
+reads derive `PlayedPercentage` from the resume position, so a watched movie or
+episode with no resume point omits it, while a played series or season reports
+100. A combined
 played/favorite update commits the child progress and history together with the
 series or season's favorite status; a storage failure rolls back the entire
 update. Marking played or unplayed clears the resume position unless the request
@@ -51,6 +61,14 @@ mode into Silo's canonical profile settings. Field names are case-insensitive;
 duplicate casing variants of the same field return 400. Other declared
 presentation preferences round-trip for clients. Storage failures produce
 errors instead of success responses.
+
+`/UserViews` lists libraries in the profile's native `ui.library_order`, then
+the server's library order. `OrderedViews` then applies Jellyfin's rule: views
+it lists come first in that order, and the rest keep the order above. IDs match
+regardless of case and dashes, and unknown IDs are ignored. `OrderedViews` is
+stored only in the Jellyfin configuration and is not written to
+`ui.library_order`, so once a Jellyfin client saves it, a later reorder in a
+Silo app moves only the views it doesn't list.
 
 `SubtitleMode` sets both `playback.subtitle_mode` and
 `playback.show_forced_subtitles`, so it reads back unchanged and native clients
@@ -167,7 +185,12 @@ requests list the members.
 real detail are hydrated from the catalog; list responses no longer invent
 media-source IDs or person IDs from titles. When `Fields` requests
 `MediaSourceCount`, library, Latest, and NextUp lists report the number of
-present, accessible versions of each movie or episode.
+present, accessible versions of each movie or episode. When it requests
+`Width`, `Height`, or `IsHD`, the same lists report the first video track of
+the version the item's detail response lists first (the widest), so a client
+can show quality across a library without fetching each item. `IsHD` means
+720 lines and up, on lists and detail alike, as in Jellyfin; series and seasons
+carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
@@ -178,6 +201,24 @@ Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 or to the series poster when the season has none; both are removed when the
 request disables Primary images.
 
+### Extended artwork
+
+Movies and series that have a banner, landscape thumb, clear art or disc art
+list it in `ImageTags` under Jellyfin's image types `Banner`, `Thumb`, `Art` and
+`Disc`, on lists and detail alike. `BackdropImageTags` lists every backdrop,
+the primary first, and is empty when the item has no primary backdrop.
+
+| Route | Serves |
+|---|---|
+| `GET /Items/{id}/Images/Banner` | The banner; 404 without one. |
+| `GET /Items/{id}/Images/Thumb` | The landscape thumb. Without one it serves the backdrop, then the poster, as before. |
+| `GET /Items/{id}/Images/Art` | The clear art; 404 without one. |
+| `GET /Items/{id}/Images/Disc` | The disc art; 404 without one. |
+| `GET /Items/{id}/Images/Backdrop/{index}` | Index 0 (or no index) is the primary backdrop; index `i` is the item's `i`-th backdrop after it, 404 past the last. Other image types ignore the index. |
+
+An episode's `ParentThumbImageTag` still names its series' backdrop; the series'
+`Thumb` route serves its landscape thumb when it has one.
+
 | Routes | Behavior |
 |---|---|
 | `GET /Items/{id}/Ancestors` | Visible episode/season/series/library ancestry. When an item belongs to multiple libraries, chooses its first visible library parent. |
@@ -187,7 +228,7 @@ request disables Primary images.
 | `GET /Shows/Upcoming` | Scoped episodes dated from yesterday in UTC onward, with paging. |
 | `GET /Items/{id}/ThemeMedia` | `ThemeSongsResult` and `ThemeVideosResult` envelopes after validating the owner. |
 | `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
-| `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
+| `GET /Persons`, `/Persons/{name}` | People with a credit on a movie, series, or episode visible to the current profile, under the native person-detail rule: an episode credit counts when the profile can see the parent series. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library, movie, series, or episode `ParentId`; a series parent includes its episodes' guest stars, a library parent includes the guest stars of its series, and other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
 `/Library/VirtualFolders` reports `LibraryOptions.EnableRealtimeMonitor` from
 Silo's configuration: `true` only while both the server-wide
@@ -222,6 +263,15 @@ source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
 
+PlaybackInfo never offers a version whose file ffprobe rejected with no usable
+stream data recorded (the native API marks it unreadable). Files that have not
+been probed yet are still offered. When no version the request can use is
+readable, including a `MediaSourceId` that names an unreadable one,
+PlaybackInfo answers as Jellyfin does when nothing can play: `200` with an
+empty `MediaSources` list and `ErrorCode: "NoCompatibleStream"`, which Jellyfin
+Web shows as a playback error instead of trying to play. `GET /Items/{id}`
+still lists such a version, and `Static=true` direct play does not check it.
+
 Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
 the item id. Some clients therefore send a media-source id where an item id
 belongs. `PlaybackInfo`, `GET /Items/{id}`, `MediaSegments`, `Download`, static
@@ -232,6 +282,29 @@ unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
+
+`GET` and `HEAD /Items/{id}/Download` serve the original file through the
+native direct download, the same service as `/api/v2/direct-download`, so they
+follow its rules. Both answer `403` when **Allow downloads** is off, the
+account's download permission is off, or the policy engine refuses the
+download, and `404` for a file outside the viewer's library or quality scope.
+The server and per-user download bandwidth limits pace the transfer. Like
+native downloads, each API server process applies them on its own, to its
+native and Jellyfin downloads together. As with the native
+direct download, these requests create no download record and do not count
+toward the concurrent or per-period download limits: a Jellyfin client
+registers nothing with the server, so there is no download to list, count, or
+revoke. Stream bitrate limits apply to playback, not downloads, as on the
+native API. The response carries the same `ETag` as a `Static=true` stream of
+the file, for clients that resume with `If-Range`.
+
+Every playable item reports `CanDownload: true`, and every account's policy
+reports `EnableContentDownloading: true`, whatever the account may download.
+Infuse refuses Direct Play of an item it believes it cannot download, so the
+download rules act on the `Download` route alone, and a client may offer a
+download that the route then refuses. A client that saves a file
+from a `Static=true` stream URL looks the same as playback and follows the
+playback rules.
 
 Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
 member on single-item reads and on list reads that request the field and
@@ -327,10 +400,11 @@ gain this Dolby Vision-preserving route. Original-file direct play is unchanged.
 When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
 an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
 accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
-RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does, and removes a profile 7
+enhancement layer's NAL units with `filter_units`. The client receives the
 HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
 tone mapping. The strip runs only where the remux routing policy allows: on
-the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+the API server when its FFmpeg has both filters (FFmpeg 7.1 or later), or on a
 transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.
@@ -345,10 +419,17 @@ advertised as playable.
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` | VTT/SRT conversion, Jellyfin `.js` track-event JSON, and requested timing windows; raw ASS when compatible with the request. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/{startPositionTicks}/stream.{format}` | Path start position, with query `StartPositionTicks` taking precedence. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Attachments/{index}` | Actual embedded font bytes by original container stream index, with item/source access checks. |
-| `GET /Playback/BitrateTest` | Returns the requested bounded byte count; default 102,400 bytes. |
+| `GET /Playback/BitrateTest` | Returns `Size` random bytes, 1 to 100,000,000; default 102,400. Random bytes keep a compressing proxy from shrinking the probe and inflating the measured bandwidth. |
 
 Text subtitles support `EndPositionTicks`, `CopyTimestamps`, and
-`AddVttTimeMap`. JSON track events apply the same clipping and timestamp
+`AddVttTimeMap`. The VTT time map follows the segment container of the play
+session's HLS route. MPEG-TS segments (encoded H.264, `remux-ts-v1`, and
+copied MPEG-2 video) carry the muxer's shift of twice `-max_delay` (10 s): with
+`CopyTimestamps=true` the map is `MPEGTS:900000`, as in Jellyfin, and otherwise
+the start position plus that shift. fMP4 segments (`remux-v1`, `remux-dv-v1`,
+`hevc-v1`, and other copied-video routes) keep the source clock, so the map is
+`MPEGTS:0` or the start position. Direct play and progressive remux have no
+HLS segments and get the same map as fMP4. JSON track events apply the same clipping and timestamp
 rebasing; an empty timing window returns `TrackEvents: []`. Raw ASS requests requiring conversion or time-window rewriting
 return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter
@@ -380,6 +461,30 @@ Sign-in refuses an account holding a temporary password with `401` and a message
 sign in to Silo first: Jellyfin clients cannot run the password change it requires
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
+
+### Quick Connect
+
+Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
+([device-login.md](architecture/device-login.md#jellyfin-quick-connect)). It
+needs no Silo password, so it also serves accounts that sign in only through an
+external provider, and it picks the profile without the `username#profile`
+syntax.
+
+| Route | Behavior |
+|---|---|
+| `GET /QuickConnect/Enabled` | `true` whenever device sign-in is wired. |
+| `POST /QuickConnect/Initiate` (and `GET`, for Jellyfin 10.8 apps) | Opens a request and answers Jellyfin's `QuickConnectResult`: a six-digit `Code` without a leading zero, a 64-character hex `Secret`, and `DeviceName`, `AppName`, `DeviceId` and `AppVersion` from the MediaBrowser authorization header. |
+| `GET /QuickConnect/Connect?secret=` | `Authenticated: false` while pending, `true` once approved or collected, with the same `Code` on every poll. A denied, expired or unknown request is `404`, so the app stops polling. The secret parameter matches in any case. |
+| `POST /QuickConnect/Authorize?code=` | From an app already signed in here: approves the code for the session's own account and profile and answers `true`. An API key is refused; `userId`, if given, must be the session's own user (`403`). An unknown or finished code is `404`, a code another approver already approved is `409`, and a spent code budget is `429` with `Retry-After`. |
+| `POST /Users/AuthenticateWithQuickConnect` | Exchanges the secret of an approved request for a session answered like `AuthenticateByName`. Asking again with the same secret while the request lives returns the same session, as Jellyfin does, so an app that lost the answer can still sign in; once the app signs out, it is `404`. Its user name is what password sign-in accepts for the same profile: `username#profile`, or the bare account name for the profile named after the account. A secret that is not approved is `404`. |
+
+A person approves the code on `/activate` or in a Silo app, choosing one of the
+account's profiles (a PIN profile needs its PIN), or from a signed-in Jellyfin
+app with `Authorize`. The request expires, is held open by approver lookups,
+and survives a node restart exactly as a device sign-in request does. Jellyfin
+has no route for an app to withdraw its own request; an abandoned code expires.
+Authorize also spends the account's Quick Connect code budget; the
+per-address budgets are listed under [Rate limiting](#rate-limiting).
 
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
@@ -432,6 +537,36 @@ acknowledgements. Connections are bounded and periodically revalidate login/API
 credentials. Remote-control capabilities are false; accepting a socket does not
 claim remote-control command support.
 
+## Rate limiting
+
+The listener uses the native API's rate limiter instance, so the admin
+rate-limit settings, their hot reloads, and the counters (in memory or Redis)
+are shared with the native API. Budgets key on the resolved client IP, after
+trusted-proxy resolution and ingress-token stripping, as on the native API.
+
+- `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
+  the global budget, like native `POST /api/v1/auth/login`. Both routes count
+  against the same per-IP `login` counter.
+- The Quick Connect routes spend the native device sign-in budgets, as the
+  native device operations do: Initiate spends `device_start`, Connect and
+  `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize
+  spends `device_lookup` in place of the generic limiter.
+- Authenticated routes, media and HLS included, run the generic limiter
+  (global and per-IP) after authentication, as the native authenticated routes
+  and v2 playback delivery do. Unauthenticated requests are refused before they
+  spend budget. Compat auth sets no native API-key claims, so the per-API-key
+  tier budget does not apply here.
+- Anonymous routes are not limited: item and user images, `/api/v2/artwork/*`,
+  `/web/*`, and the public `/System/*`, `/Branding/Configuration`,
+  `/QuickConnect/Enabled`, and `/Users/Public` reads. Native artwork and public
+  server reads are not limited either.
+
+A limited request answers 429 with `Retry-After` and the `X-RateLimit-*`
+headers, in the listener's error envelope:
+`{"Error":"TooManyRequests","Message":"..."}`. With rate limiting disabled the
+listener applies no request limit. Profile PIN attempts keep their separate
+per-profile budget (see [auth-api.md](auth-api.md)).
+
 ## Scope and deployment
 
 Migration `20260905013651_jellycompat_device_profiles.sql` creates the shared
@@ -458,9 +593,8 @@ probed `original` disposition in the native track model), the
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 remembered per-item subtitle selections, and `Accept-Language` localization.
-`/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay group operations
-are not served. `/SyncPlay/List` only provides the empty discovery response
-described above.
+`/Devices`, `/Playlists`, and SyncPlay group operations are not served.
+`/SyncPlay/List` only provides the empty discovery response described above.
 
 The compatibility surface does not add audio-library playback, Live TV, IPTV,
 DVR, or `.strm` support. See `docs/non-goals.md` for permanent product boundaries.

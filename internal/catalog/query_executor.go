@@ -205,6 +205,9 @@ type previewPagePlan struct {
 	maxResults            int
 	limitArgIdx           int
 	deferEpisodeHydration bool
+	// titleKey is the scope's title sort key, which title order sorts by and
+	// the letter index files items under. It binds no arguments.
+	titleKey string
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -310,14 +313,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		return previewPagePlan{}, err
 	}
 
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
+	libraryIDs, libraryScopeEmpty := access.LibraryScope(def.LibraryIDs)
 
 	// Scope can be set externally (e.g. catalog resolver pre-fills it from
 	// the request) or implied by the query definition's MediaScope (e.g.
@@ -408,7 +404,8 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
-	} else if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+	}
+	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")
 	}
 	if access.AllowedContentIDs != nil {
@@ -526,6 +523,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		titleKey:        builder.normalizedTitleExpr(),
 		// Keep non-episode relations, sort joins, history CTEs and source-ordered
 		// plans on their existing paths. Only the built-in episode relation
 		// guarantees the unique IDs and simple, deterministic title sort required
@@ -585,7 +583,12 @@ func (e *QueryExecutor) buildPreviewPageSQL(
 // escapePrefixForLike lower-cases the prefix and escapes %, _, and \ so the
 // resulting string is safe to use as a LIKE pattern with ESCAPE '\'.
 func escapePrefixForLike(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
+	return escapeLikeLiteral(strings.ToLower(strings.TrimSpace(s)))
+}
+
+// escapeLikeLiteral escapes LIKE wildcards and the escape character itself
+// for use with ESCAPE '\', leaving case to the database.
+func escapeLikeLiteral(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)

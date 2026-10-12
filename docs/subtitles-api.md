@@ -21,6 +21,18 @@ provider settings remains on the bridge until guarded configuration updates and
 live application across nodes are implemented. No native provider-administration
 consumer or Jellyfin counterpart is changed by these inspection operations.
 
+## Profile header on media-file operations
+
+`X-Profile-Id` is optional on the subtitle operations, as on the bridge API,
+with one narrowing. The operations that act on one media file or stored
+subtitle (stored-track listing, search, download, upload, AI job creation,
+reads and cancellation, sync and timing, and the stored-subtitle metadata read
+and delete) refuse a request without the header when any profile on the account
+is PIN-protected or access-restricted. The refusal is `422 validation_failed`
+with an error at `header.x-profile-id`, as on profile-required operations. An
+empty header counts as absent; API keys are exempt. The capability probes, the
+account quota and language detection keep account scope.
+
 ## Subtitle AI state
 
 GET `/api/v2/subtitles/ai/jobs?media_file_id=<string ID>` returns `jobs[]` for up to
@@ -110,8 +122,8 @@ string and `languages` as an array, and returns `results` and `warnings`. Search
 is read-only and can be retried; a retry makes a fresh query and can return
 different provider results. The request allows at most 100 languages.
 
-Both operations require the same account and optional-profile access as the
-capability probes. They authorize the file and its parent item before accessing
+Both operations require an authenticated account and follow the profile-header
+rule above. They authorize the file and its parent item before accessing
 stored tracks or contacting providers. Missing and inaccessible files return
 404. Missing subtitle dependencies return 503. Invalid identifiers return 422.
 

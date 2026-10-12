@@ -800,6 +800,11 @@ var traitOnlyRules = []authRule{
 	{marker: "meterEgress", trait: "egress_metered"},
 	{marker: "cors.Handler", trait: "cors"},
 	{marker: "optionalProfileViewerAccess", trait: traitOptionalView},
+	// apimw.HouseholdProfileGate on the v1 profile-optional viewer reads:
+	// refuses a request without X-Profile-Id when the account has a
+	// PIN-protected or access-restricted profile. It narrows viewer access
+	// and never grants authorization, so it adds a trait, not a class.
+	{marker: "householdProfileGate", trait: "household_profile_gate"},
 	// router.go builds `passwordChangeMiddlewares` for POST
 	// /api/v1/auth/account/password: optionalProfileViewerAccess plus, when a
 	// limiter is configured, RateLimitMW.AuthEndpointHandler("password_change").

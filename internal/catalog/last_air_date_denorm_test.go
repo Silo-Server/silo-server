@@ -34,8 +34,8 @@ func TestEffectiveLastAirDateExpr_NonSeriesFallsBackToFirstAirDate(t *testing.T)
 
 // TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm pins the invariant that
 // no production code path deletes from `episodes`. The denormalized
-// media_items.last_air_date_at column is currently maintained only on
-// Upsert/BulkUpsert (see updateSeriesLastAirDateSQL / batchUpdateSeriesLastAirDateSQL).
+// media_items.last_air_date_at column is maintained on Upsert/BulkUpsert and
+// by the due-series sweep (see refreshSeriesAirDatesSQL).
 // If a future PR adds an episode-delete code path, last_air_date_at will
 // drift unless that path also recomputes the parent series' value.
 //

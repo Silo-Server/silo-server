@@ -96,6 +96,9 @@ type System struct {
 
 	pool   *pgxpool.Pool
 	stores userstore.UserStoreProvider
+	// scopes resolves a recipient's current access before a delivery that
+	// names a catalog item is created.
+	scopes ScopeResolver
 	users  UserLister
 	images ImageURLResolver
 	logger *slog.Logger
@@ -205,7 +208,7 @@ func NewSystem(
 	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
-	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, multiDispatcher)
+	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, scopes, multiDispatcher)
 	if webhookRepo != nil {
 		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
 	}
@@ -255,6 +258,7 @@ func NewSystem(
 		dispatcher:          multiDispatcher,
 		pool:                pool,
 		stores:              stores,
+		scopes:              scopes,
 		users:               users,
 		logger:              slog.Default().With("component", "notifications.system"),
 	}

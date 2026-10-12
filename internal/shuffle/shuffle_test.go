@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -129,7 +131,18 @@ func seed(t *testing.T) *fixture {
 	f.movieOK = movie("movie-pg13", &pg, true)
 	f.movieR = movie("movie-r", &r, true)
 	f.movieOff = movie("movie-missing", &pg, false)
+	setSampleIDRange(t, fmt.Sprintf(`SELECT min(id) AS lo, max(id) AS hi FROM media_files WHERE media_folder_id IN (%d, %d)`, f.tvLibrary, f.movies))
 	return f
+}
+
+// setSampleIDRange replaces sampleIDRange for the rest of the test. seed
+// narrows it to the fixture's own files, so library picks in every test
+// exercise sampling rather than only the full read.
+func setSampleIDRange(t *testing.T, sql string) {
+	t.Helper()
+	previous := sampleIDRange
+	sampleIDRange = sql
+	t.Cleanup(func() { sampleIDRange = previous })
 }
 
 func (f *fixture) library(id int) Scope { return Scope{Kind: ScopeLibrary, ID: strconv.Itoa(id)} }
@@ -605,5 +618,104 @@ func TestRepeatedAdvanceChecksAccessFirst(t *testing.T) {
 	}
 	if _, err := svc.Skip(ctx, f.owner, lost, s.ID, "not-the-next-item"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale skip without access: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A library pick reaches the same items whether it samples or reads the whole
+// library: every item the viewer may play, and never one whose file is
+// missing or that is over the viewer's limits.
+func TestLibraryPicksSampleAndFullReadAgree(t *testing.T) {
+	f := seed(t)
+	ctx := t.Context()
+	limited := catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
+	cases := []struct {
+		name   string
+		pool   pool
+		filter catalog.AccessFilter
+		want   []string
+	}{
+		{"episodes", pool{episodes: true, libraryID: f.tvLibrary}, catalog.AccessFilter{}, f.allEpisodes()},
+		{"limited movies", pool{movies: true, libraryID: f.movies}, limited, []string{f.movieOK}},
+	}
+	for _, c := range cases {
+		for _, draws := range []int{1024, 0} {
+			seen := map[string]bool{}
+			for range 200 {
+				id, err := pickFrom(ctx, f.pool, c.pool, c.filter, "", nil, draws)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if id == "" {
+					t.Fatalf("%s, draws=%d: no pick from a library with playable items", c.name, draws)
+				}
+				seen[id] = true
+			}
+			if got := slices.Collect(maps.Keys(seen)); !sameSet(got, c.want) {
+				t.Fatalf("%s, draws=%d picked %v, want exactly %v", c.name, draws, got, c.want)
+			}
+		}
+	}
+}
+
+// When no sample finds a playable item, a library pick reads the whole
+// library, and only that read reports that nothing is left.
+func TestLibraryPickFallsBackWhenSamplesFindNothing(t *testing.T) {
+	f := seed(t)
+	ctx := t.Context()
+	setSampleIDRange(t, `SELECT NULL::bigint AS lo, NULL::bigint AS hi`)
+	p := pool{episodes: true, libraryID: f.tvLibrary}
+
+	id, err := pick(ctx, f.pool, p, catalog.AccessFilter{}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.allEpisodes(), id) {
+		t.Fatalf("pick = %q, want one of %v", id, f.allEpisodes())
+	}
+	id, err = pick(ctx, f.pool, p, catalog.AccessFilter{}, "", f.allEpisodes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "" {
+		t.Fatalf("pick with every episode excluded = %q, want none", id)
+	}
+}
+
+// An episode with several files in the library is no likelier to be sampled
+// than one with a single file.
+func TestSampledPickCountsEachItemOnce(t *testing.T) {
+	f := seed(t)
+	ctx := t.Context()
+	favored := f.season1[0]
+	for i := range 2 {
+		if _, err := f.pool.Exec(ctx, `INSERT INTO media_files (episode_id, content_id, media_folder_id, file_path) VALUES ($1, $2, $3, $4)`,
+			favored, f.series, f.tvLibrary, fmt.Sprintf("/tv/%s-version-%d.mkv", favored, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := pool{episodes: true, libraryID: f.tvLibrary}
+	// One draw per pick, so each pick is the item of a single random file.
+	// The library holds five playable episodes, one of them in three files:
+	// counted per file it would win 3 picks in 7, counted per item 1 in 5.
+	const want = 500
+	picks, favoredPicks := 0, 0
+	for attempt := 0; picks < want && attempt < 100*want; attempt++ {
+		id, err := pickFrom(ctx, f.pool, p, catalog.AccessFilter{}, "", nil, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "" {
+			continue
+		}
+		picks++
+		if id == favored {
+			favoredPicks++
+		}
+	}
+	if picks < want {
+		t.Fatalf("only %d of %d single-draw picks found an item", picks, want)
+	}
+	if share := float64(favoredPicks) / float64(picks); share > 0.3 {
+		t.Fatalf("the episode with three files won %.0f%% of picks, want about 20%%", share*100)
 	}
 }
