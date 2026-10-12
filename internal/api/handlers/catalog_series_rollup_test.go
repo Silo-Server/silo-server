@@ -323,12 +323,12 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 		t.Helper()
 		res := result{counts: map[string][2]int64{}}
 		var err error
-		statements, rows := tracer.measure(func() { res.seriesDetail, err = h.ItemDetail(ctx, viewer, series) })
+		statements, rows := tracer.measure(func() { res.seriesDetail, err = h.ItemDetail(ctx, viewer, series, false) })
 		if err != nil {
 			t.Fatalf("series detail: %v", err)
 		}
 		res.counts["series detail"] = [2]int64{int64(statements), rows}
-		statements, rows = tracer.measure(func() { res.seasonDetail, err = h.ItemDetail(ctx, viewer, seasonID(3)) })
+		statements, rows = tracer.measure(func() { res.seasonDetail, err = h.ItemDetail(ctx, viewer, seasonID(3), false) })
 		if err != nil {
 			t.Fatalf("season detail: %v", err)
 		}

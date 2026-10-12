@@ -22949,6 +22949,10 @@
             "description": "searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q",
             "type": "boolean"
           },
+          "item_detail_prefetch": {
+            "description": "getCatalogItem accepts prefetch=true for speculative reads that neither queue a metadata refresh nor promote a watchlist entry",
+            "type": "boolean"
+          },
           "max_sessions_per_account": {
             "description": "Oldest ranking sessions expire when this retention bound is exceeded",
             "format": "int64",
@@ -133804,6 +133808,17 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
+            "explode": false,
+            "in": "query",
+            "name": "prefetch",
+            "schema": {
+              "default": false,
+              "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -133913,7 +133928,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The detail page of one item, with the viewer's state.",
+        "summary": "The detail page of one item, with the viewer's state; viewing queues a metadata refresh when one is due and promotes a matching watchlist entry, unless the read is a prefetch.",
         "tags": [
           "catalog"
         ],

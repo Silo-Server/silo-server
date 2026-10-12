@@ -283,7 +283,7 @@ func (reg *Registry) shuffleOf(ctx context.Context, viewer handlers.ItemViewer, 
 }
 
 func (reg *Registry) shuffleCard(ctx context.Context, viewer handlers.ItemViewer, contentID string) (CatalogItem, *Problem) {
-	detail, err := reg.deps.CatalogItems.ItemDetail(ctx, viewer, contentID)
+	detail, err := reg.deps.CatalogItems.ItemDetail(ctx, viewer, contentID, false)
 	if err != nil {
 		return CatalogItem{}, serviceProblem(err)
 	}

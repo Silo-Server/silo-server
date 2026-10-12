@@ -1093,7 +1093,7 @@ type CatalogBrowseService interface {
 // CatalogItemService is the slice of *handlers.CatalogResourceHandler the
 // item, season, and episode reads use.
 type CatalogItemService interface {
-	ItemDetail(ctx context.Context, v handlers.ItemViewer, id string) (*mediacatalog.ItemDetail, error)
+	ItemDetail(ctx context.Context, v handlers.ItemViewer, id string, prefetch bool) (*mediacatalog.ItemDetail, error)
 	ItemVersions(ctx context.Context, v handlers.ItemViewer, id string) ([]mediacatalog.FileVersion, error)
 	MangaFiles(ctx context.Context, v handlers.ItemViewer, id string) (*mediacatalog.MangaSeriesFiles, error)
 	ItemEpisodes(ctx context.Context, v handlers.ItemViewer, id string) ([]handlers.EpisodeView, error)

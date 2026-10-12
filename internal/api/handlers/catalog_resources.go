@@ -47,7 +47,7 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
-	view, err := h.ItemDetail(r.Context(), viewerFromRequest(r, filter), id)
+	view, err := h.ItemDetail(r.Context(), viewerFromRequest(r, filter), id, false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -252,7 +252,7 @@ func parseSyntheticSeasonID(contentID string) (string, int, bool) {
 	return catalog.ParseSyntheticSeasonID(contentID)
 }
 
-func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {
+func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, prefetch bool) {
 	if detail == nil {
 		return
 	}
@@ -298,10 +298,10 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 		detail.FolderPaths = nil
 	}
 
-	h.enrichViewerState(ctx, v, detail)
+	h.enrichViewerState(ctx, v, detail, prefetch)
 }
 
-func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {
+func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, prefetch bool) {
 	store, profileID, ok := h.items.viewerUserStore(ctx, v.ProfileID)
 	if !ok || detail == nil {
 		return
@@ -311,7 +311,7 @@ func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemVi
 	if err != nil {
 		return
 	}
-	if h.watchlistPromoter != nil && (detail.Type == "movie" || detail.Type == "series") {
+	if !prefetch && h.watchlistPromoter != nil && (detail.Type == "movie" || detail.Type == "series") {
 		promoteAccess := v.Access
 		promoteAccess.UserID, promoteAccess.ProfileID = apimw.GetUserID(ctx), profileID
 		h.watchlistPromoter.PromoteWatchlistItem(ctx, promoteAccess, detail.ContentID)

@@ -23,6 +23,7 @@ type fakeCatalog struct {
 	err                error
 	lastReq            catalogpkg.CatalogRequest
 	lastViewer         handlers.ItemViewer
+	lastPrefetch       bool
 	lastGroup          bool
 	lastGroups         catalogpkg.AudiobookGroupsQuery
 }
@@ -126,7 +127,8 @@ func notFoundItem() error {
 	return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 }
 
-func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id string) (*catalogpkg.ItemDetail, error) {
+func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id string, prefetch bool) (*catalogpkg.ItemDetail, error) {
+	f.lastPrefetch = prefetch
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -528,6 +530,12 @@ func TestGetCatalogItem(t *testing.T) {
 	}
 	if fake.lastViewer.Access.PresentationLibraryID == nil || *fake.lastViewer.Access.PresentationLibraryID != 2 || fake.lastViewer.Access.SelectedFileID != 120 || fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
+	}
+	if fake.lastPrefetch {
+		t.Fatal("a plain read reached the service as a prefetch")
+	}
+	if rec := do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?prefetch=true", "", viewerHeaders()); rec.Code != 200 || !fake.lastPrefetch {
+		t.Fatalf("prefetch read: code %d, prefetch reached service %v", rec.Code, fake.lastPrefetch)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:nope", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?file_id=abc", "", viewerHeaders()), TypeValidationFailed)
