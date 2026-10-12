@@ -250,22 +250,30 @@ func TestOnlyVisibleLocalArtworkGoesToTheCopier(t *testing.T) {
 }
 
 // A folder that does not answer in time makes its sidecars unseen, without
-// looking the files up, and each folder is probed once.
+// looking the files up; one that denies listing still has its files looked
+// up. Each folder is probed once, under one deadline for the whole batch.
 func TestVisibleLocalSidecarsProbesEachFolderOnce(t *testing.T) {
-	answering := t.TempDir()
+	answering, unlisted := t.TempDir(), t.TempDir()
 	writeTestBytes(t, filepath.Join(answering, "poster.jpg"))
+	writeTestBytes(t, filepath.Join(unlisted, "poster.jpg"))
 	stalled := filepath.Join(t.TempDir(), "stalled-share")
 	src := func(dir, name string) EnqueueImageCacheJobInput {
 		return EnqueueImageCacheJobInput{SourcePath: "file://" + filepath.Join(dir, name) + "?v=1-1"}
 	}
 	var probed []string
-	probe := func(_ context.Context, paths []string, _ time.Duration) []rootcheck.Result {
+	probe := func(ctx context.Context, paths []string, _ time.Duration) []rootcheck.Result {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > rootcheck.DefaultProbeTimeout {
+			t.Errorf("probe deadline = %v, %v; want one batch deadline within %s", deadline, ok, rootcheck.DefaultProbeTimeout)
+		}
 		probed = append(probed, paths...)
 		results := make([]rootcheck.Result, len(paths))
 		for i, p := range paths {
-			if p == answering {
+			switch p {
+			case answering:
 				results[i] = rootcheck.Result{Reachable: true}
-			} else {
+			case unlisted:
+				results[i] = rootcheck.Result{ErrorCode: rootcheck.ErrCodePermissionDenied}
+			default:
 				results[i] = rootcheck.Result{ErrorCode: rootcheck.ErrCodeTimeout}
 			}
 		}
@@ -273,11 +281,12 @@ func TestVisibleLocalSidecarsProbesEachFolderOnce(t *testing.T) {
 	}
 	got := visibleLocalSidecars(context.Background(), []EnqueueImageCacheJobInput{
 		src(answering, "poster.jpg"), src(answering, "fanart.jpg"), src(stalled, "poster.jpg"), src(stalled, "fanart.jpg"),
+		src(unlisted, "poster.jpg"),
 	}, probe)
-	if want := []bool{true, false, false, false}; !slices.Equal(got, want) {
+	if want := []bool{true, false, false, false, true}; !slices.Equal(got, want) {
 		t.Fatalf("visible = %v, want %v", got, want)
 	}
-	if len(probed) != 2 {
+	if len(probed) != 3 {
 		t.Fatalf("probed %v, want each folder once", probed)
 	}
 }

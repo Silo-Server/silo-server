@@ -57,9 +57,11 @@ type folderProber func(ctx context.Context, paths []string, timeout time.Duratio
 
 // visibleLocalSidecars reports, for each local input, whether the file it
 // names exists on this server. Each folder is probed first, once, through
-// probe with rootcheck's timeout and coalescing, so a share that does not
-// answer costs the refresh at most that timeout and counts as unseen; the
-// file is looked up only in a folder that answered.
+// probe with rootcheck's coalescing and one deadline for the whole batch, so
+// shares that do not answer cost the refresh at most that timeout and count
+// as unseen; the file is looked up only in a folder that answered, including
+// one that denies listing (the NFO finder reads known names from such a
+// folder).
 func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput, probe folderProber) []bool {
 	paths := make([]string, len(local))
 	folderOf := make([]int, len(local)) // index into folders, -1 when not local
@@ -84,9 +86,14 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 	if len(folders) == 0 {
 		return visible
 	}
-	probes := probe(ctx, folders, rootcheck.DefaultProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, rootcheck.DefaultProbeTimeout)
+	defer cancel()
+	probes := probe(probeCtx, folders, rootcheck.DefaultProbeTimeout)
 	for i, path := range paths {
-		if folderOf[i] < 0 || !probes[folderOf[i]].Reachable {
+		if folderOf[i] < 0 {
+			continue
+		}
+		if folder := probes[folderOf[i]]; !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodePermissionDenied {
 			continue
 		}
 		_, err := os.Lstat(path)
