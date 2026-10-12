@@ -136,7 +136,7 @@ func TestImageTypeFromKindMapsExtraKinds(t *testing.T) {
 	}
 }
 
-func TestSettleItemOnlyArtwork(t *testing.T) {
+func TestDropGoneItemOnlyArtwork(t *testing.T) {
 	searched := withLocalArtworkSearched(context.Background(), localArtworkItem)
 	stored := func(banner string) *models.MediaItem {
 		return &models.MediaItem{
@@ -144,70 +144,98 @@ func TestSettleItemOnlyArtwork(t *testing.T) {
 			BannerSourcePath: banner, BannerThumbhash: "bt",
 		}
 	}
-	rebuilt := func(existing *models.MediaItem) *models.MediaItem {
-		item := &models.MediaItem{ContentID: existing.ContentID, LockedFields: existing.LockedFields}
-		carryItemOnlyArtwork(item, existing)
-		return item
-	}
 	cleared := func(t *testing.T, item *models.MediaItem) {
 		t.Helper()
 		if item.BannerPath != "" || item.BannerSourcePath != "" || item.BannerThumbhash != "" {
 			t.Fatalf("banner = %q/%q/%q, want cleared", item.BannerPath, item.BannerSourcePath, item.BannerThumbhash)
 		}
 	}
-	kept := func(t *testing.T, item, existing *models.MediaItem) {
+	kept := func(t *testing.T, item *models.MediaItem, source string) {
 		t.Helper()
-		if item.BannerPath != existing.BannerPath || item.BannerSourcePath != existing.BannerSourcePath || item.BannerThumbhash != "bt" {
+		if item.BannerPath == "" || item.BannerSourcePath != source || item.BannerThumbhash != "bt" {
 			t.Fatalf("banner = %q/%q/%q, want kept", item.BannerPath, item.BannerSourcePath, item.BannerThumbhash)
 		}
 	}
 
 	t.Run("a searched refresh clears a sidecar missing from an answering folder", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
-		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
-		item := rebuilt(existing)
-		settleItemOnlyArtwork(itemRetention(searched), item, existing, []RemoteImage{{URL: localSource(filepath.Join(dir, "poster.jpg")), Type: ImagePoster}})
+		item := stored(localSource(filepath.Join(dir, "banner.jpg")))
+		dropGoneItemOnlyArtwork(itemRetention(searched), item, []RemoteImage{{URL: localSource(filepath.Join(dir, "poster.jpg")), Type: ImagePoster}})
 		cleared(t, item)
 	})
 	t.Run("a searched refresh clears a sidecar it passed over", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "banner.jpg")
-		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
-		item := rebuilt(existing)
-		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
+		item := stored(localSource(filepath.Join(dir, "banner.jpg")))
+		dropGoneItemOnlyArtwork(itemRetention(searched), item, nil)
 		cleared(t, item)
 	})
 	t.Run("a searched refresh keeps the slot while the folder does not answer", func(t *testing.T) {
-		existing := stored(localSource(filepath.Join(t.TempDir(), "unmounted", "banner.jpg")))
-		item := rebuilt(existing)
-		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
-		kept(t, item, existing)
+		source := localSource(filepath.Join(t.TempDir(), "unmounted", "banner.jpg"))
+		item := stored(source)
+		dropGoneItemOnlyArtwork(itemRetention(searched), item, nil)
+		kept(t, item, source)
 	})
 	t.Run("a refresh that did not search keeps the slot", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
-		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
-		item := rebuilt(existing)
-		settleItemOnlyArtwork(itemRetention(context.Background()), item, existing, []RemoteImage{{URL: "https://img.example/p.jpg", Type: ImagePoster, Rating: 5}})
-		kept(t, item, existing)
+		source := localSource(filepath.Join(dir, "banner.jpg"))
+		item := stored(source)
+		dropGoneItemOnlyArtwork(itemRetention(context.Background()), item, []RemoteImage{{URL: "https://img.example/p.jpg", Type: ImagePoster, Rating: 5}})
+		kept(t, item, source)
+	})
+	t.Run("a candidate this refresh keeps the slot", func(t *testing.T) {
+		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
+		source := localSource(filepath.Join(dir, "banner.jpg"))
+		item := stored(source)
+		dropGoneItemOnlyArtwork(itemRetention(searched), item, []RemoteImage{{URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 1}})
+		kept(t, item, source)
 	})
 	t.Run("locked artwork keeps the slot", func(t *testing.T) {
 		dir := writeSidecars(t, t.TempDir(), "poster.jpg")
-		existing := stored(localSource(filepath.Join(dir, "banner.jpg")))
-		existing.LockedFields = []int{int(FieldImages)}
-		item := rebuilt(existing)
-		settleItemOnlyArtwork(itemRetention(searched), item, existing, nil)
-		kept(t, item, existing)
+		source := localSource(filepath.Join(dir, "banner.jpg"))
+		item := stored(source)
+		item.LockedFields = []int{int(FieldImages)}
+		dropGoneItemOnlyArtwork(itemRetention(searched), item, nil)
+		kept(t, item, source)
 	})
-	t.Run("a new sidecar drops the old thumbhash", func(t *testing.T) {
-		dir := writeSidecars(t, t.TempDir(), "banner.jpg")
-		existing := stored(localSource(filepath.Join(dir, "old-banner.jpg")))
-		item := rebuilt(existing)
-		images := []RemoteImage{{URL: localSource(filepath.Join(dir, "banner.jpg")), Type: ImageBanner}}
-		applyBestImages(item, images, MergeFillEmpty, "en")
-		settleItemOnlyArtwork(itemRetention(searched), item, existing, images)
-		if item.BannerPath != images[0].URL || item.BannerThumbhash != "" {
-			t.Fatalf("banner = %q/%q, want the new source and no thumbhash yet", item.BannerPath, item.BannerThumbhash)
-		}
-	})
+}
+
+// A removed sidecar must leave the stored item: queue preparation keeps a
+// slot's cached copy when the refresh offered nothing, so the drop has to
+// survive it.
+func TestMergeAndPersistDropsRemovedSidecarArtwork(t *testing.T) {
+	h := newTestHarness()
+	ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
+	dir := writeSidecars(t, t.TempDir(), "poster.jpg", "landscape.jpg")
+	stored := &models.MediaItem{
+		ContentID: "movie-drop", Type: "movie", Title: "Film", Year: 2020, Status: "matched",
+		DefaultMetadataLanguage: "en",
+		BannerPath:              "local/movies/movie-drop/aa/banner/original.r.webp",
+		BannerSourcePath:        localSource(filepath.Join(dir, "banner.jpg")), BannerThumbhash: "bt",
+		ThumbPath:       "local/movies/movie-drop/bb/thumb/original.r.webp",
+		ThumbSourcePath: localSource(filepath.Join(dir, "landscape.jpg")), ThumbThumbhash: "tt",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}
+	if err := h.itemRepo.Upsert(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	images := []RemoteImage{
+		{ProviderID: "nfo", URL: localSource(filepath.Join(dir, "poster.jpg")), Type: ImagePoster},
+		{ProviderID: "nfo", URL: stored.ThumbSourcePath, Type: ImageThumb},
+	}
+	if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: "movie-drop", Mode: ModeScheduledRefresh, Language: "en"},
+		&MetadataResult{HasMetadata: true, Title: "Film", Year: 2020, ProviderIDs: map[string]string{}}, images, nil, nil, "movie"); err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+	got, err := h.itemRepo.GetByID(ctx, "movie-drop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BannerPath != "" || got.BannerSourcePath != "" || got.BannerThumbhash != "" {
+		t.Fatalf("banner = %q/%q/%q, want dropped", got.BannerPath, got.BannerSourcePath, got.BannerThumbhash)
+	}
+	if got.ThumbPath != stored.ThumbPath || got.ThumbSourcePath != stored.ThumbSourcePath || got.ThumbThumbhash != "tt" {
+		t.Fatalf("thumb = %q/%q/%q, want the rediscovered one kept", got.ThumbPath, got.ThumbSourcePath, got.ThumbThumbhash)
+	}
 }
 
 func TestPlanExtraBackdrops(t *testing.T) {

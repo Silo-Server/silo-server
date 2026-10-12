@@ -2827,7 +2827,6 @@ func (s *MetadataService) mergeAndPersist(
 	if handleArtwork {
 		localArt = newLocalArtworkRetention(ctx, contentID, localArtworkItem)
 		applyBestImages(item, images, mergeMode, req.Language)
-		settleItemOnlyArtwork(localArt, item, existingItem, images)
 		keepUnconfirmedLocalItemArtwork(localArt, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
@@ -2845,6 +2844,7 @@ func (s *MetadataService) mergeAndPersist(
 
 	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem)
+		dropGoneItemOnlyArtwork(localArt, item, images)
 	}
 
 	if isNew && contentID == "" {

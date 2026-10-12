@@ -54,33 +54,24 @@ func carryItemOnlyArtwork(item, existing *models.MediaItem) {
 	}
 }
 
-// settleItemOnlyArtwork runs after applyBestImages with the item level's
-// retention. When the refresh searched the item level for sidecars
-// (withLocalArtworkSearched), a banner, thumb, clear art or disc slot that
-// holds a local sidecar the search did not return is cleared once the
-// sidecar's folder answers (sidecarGone), and kept while it does not. A
-// refresh that did not search leaves the slots as stored. Then the thumbhash
-// follows the path, as for the poster and backdrop.
-func settleItemOnlyArtwork(retention *localArtworkRetention, item, existing *models.MediaItem, images []RemoteImage) {
-	if item == nil {
+// dropGoneItemOnlyArtwork runs after prepareItemImagesForQueue, which keeps a
+// slot's cached copy whenever the refresh offered nothing for it. When the
+// refresh searched the item level for sidecars (withLocalArtworkSearched), a
+// banner, thumb, clear art or disc slot that holds a local sidecar the search
+// did not return is cleared once the sidecar's folder answers (sidecarGone),
+// and kept while it does not. A refresh that did not search leaves the slots
+// as stored.
+func dropGoneItemOnlyArtwork(retention *localArtworkRetention, item *models.MediaItem, images []RemoteImage) {
+	if item == nil || !retention.searched || artworkLocked(item) {
 		return
 	}
-	if retention.searched && !artworkLocked(item) {
-		for _, field := range itemOnlyArtworkFields(item) {
-			if hasImageOfType(images, field.imageType) || !isLocalImageSourcePath(*field.source) || !retention.sidecarGone(*field.source) {
-				continue
-			}
-			*field.path, *field.source = "", ""
-		}
-	}
 	for _, field := range itemOnlyArtworkFields(item) {
+		if hasImageOfType(images, field.imageType) || !isLocalImageSourcePath(*field.source) || !retention.sidecarGone(*field.source) {
+			continue
+		}
+		*field.path, *field.source = "", ""
 		if field.thumbhash != nil {
-			*field.thumbhash = mergedImageThumbhash(
-				existingImagePath(existing, field.imageType),
-				existingImageThumbhash(existing, field.imageType),
-				*field.path,
-				"",
-			)
+			*field.thumbhash = ""
 		}
 	}
 }
