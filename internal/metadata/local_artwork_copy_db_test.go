@@ -387,7 +387,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 			t.Fatalf("claim = %d jobs, %v; want 1", len(jobs), err)
 		}
 		p, _, _ := newLocalArtworkDBProcessor(pool, roots)
-		p.processClaimedJobs(ctx, "mountless-server", jobs, 1)
+		p.processClaimedJobs(ctx, "mountless-server", jobs, 1, time.Now())
 		return readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster)
 	}
 	enqueue := func(t *testing.T, source string) string {
@@ -454,7 +454,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 			t.Fatalf("discovery claim of the deferred job = %+v, %v", job, err)
 		}
 		p, _, _ := newLocalArtworkDBProcessor(pool, []string{root})
-		p.processClaimedJobs(ctx, "mountless-copy", []*models.MetadataImageCacheJob{job}, 1)
+		p.processClaimedJobs(ctx, "mountless-copy", []*models.MetadataImageCacheJob{job}, 1, time.Now())
 		if got := readLocalArtworkJob(t, pool, ImageCacheTargetItem, contentID, ImageCacheImagePoster); got.status != ImageCacheStatusQueued ||
 			got.attempts != 0 || got.nextAttemptIn > before+time.Minute {
 			t.Fatalf("after a discovery copy = %+v, want queued with its wait (%s) kept", got, before)

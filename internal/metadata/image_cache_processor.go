@@ -337,6 +337,7 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 		concurrency = 4
 	}
 
+	claimStarted := time.Now()
 	jobs, err := claim(ctx, workerID, claimLimit)
 	if err != nil {
 		return stats, err
@@ -345,7 +346,7 @@ func (p *ImageCacheProcessor) RunOnce(ctx context.Context, workerID string, clai
 		p.cleanupSucceeded(ctx, &stats)
 		return stats, nil
 	}
-	stats = p.processClaimedJobs(ctx, workerID, jobs, concurrency)
+	stats = p.processClaimedJobs(ctx, workerID, jobs, concurrency, claimStarted)
 	p.cleanupSucceeded(ctx, &stats)
 	return stats, nil
 }
@@ -407,12 +408,13 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 		// Re-read each round: once caching is turned off, remote jobs must not
 		// be claimed only to be handed straight back.
 		localOnly := !p.enabled.Load()
+		claimStarted := time.Now()
 		jobs, err := store.claimDueForTarget(ctx, workerID, targetContentID, localOnly, immediateImageCacheClaimLimit)
 		if err != nil {
 			return err
 		}
 		if len(jobs) > 0 {
-			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, true)
+			stats := p.runClaimedJobs(ctx, workerID, jobs, immediateImageCacheConcurrency, claimStarted, true)
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -480,13 +482,14 @@ func (p *ImageCacheProcessor) CacheTargetArtwork(ctx context.Context, targetCont
 // processClaimedJobs processes claimed jobs with up to concurrency at once,
 // each also holding a slot of the process's artwork budget, which drains,
 // manual refreshes and discovery copies share (see imageWorkBudget).
-func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int) ImageCacheRunStats {
-	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, false)
+// claimStarted is when the claim that returned jobs began.
+func (p *ImageCacheProcessor) processClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, claimStarted time.Time) ImageCacheRunStats {
+	return p.runClaimedJobs(ctx, workerID, jobs, concurrency, claimStarted, false)
 }
 
 // runClaimedJobs is processClaimedJobs for a manual refresh when interactive
 // is set: its jobs wait for budget slots ahead of background work.
-func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, interactive bool) ImageCacheRunStats {
+func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID string, jobs []*models.MetadataImageCacheJob, concurrency int, claimStarted time.Time, interactive bool) ImageCacheRunStats {
 	stats := ImageCacheRunStats{Claimed: len(jobs)}
 	if len(jobs) == 0 {
 		return stats
@@ -508,7 +511,7 @@ func (p *ImageCacheProcessor) runClaimedJobs(ctx context.Context, workerID strin
 	// to finish inside its lease; past that, another server could recover it
 	// as abandoned and run it twice. Jobs not started by then go back to the
 	// queue.
-	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart())
+	startCtx, cancelStart := context.WithDeadline(ctx, latestImageCacheJobStart(claimStarted))
 	defer cancelStart()
 loop:
 	for i, job := range jobs {
@@ -1301,11 +1304,12 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 	}
 }
 
-// latestImageCacheJobStart is the latest time a job of a page claimed just
-// now can start and still finish, within ImageCacheJobTimeout, before its
-// lease runs out. It counts from the page's arrival rather than the
-// database's locked_at, so a clock difference between the server and the
-// database cannot make a fresh page look expired.
-func latestImageCacheJobStart() time.Time {
-	return time.Now().Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
+// latestImageCacheJobStart is the latest time a job of a page whose claim
+// began at claimStarted can start and still finish, within
+// ImageCacheJobTimeout, before its lease runs out. The lease starts during
+// the claim, so counting from the claim's start on this server's clock keeps
+// the job inside it without comparing that clock with the database's
+// locked_at.
+func latestImageCacheJobStart(claimStarted time.Time) time.Time {
+	return claimStarted.Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
 }

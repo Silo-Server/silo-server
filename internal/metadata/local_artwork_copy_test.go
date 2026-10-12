@@ -78,7 +78,7 @@ func TestImageCacheProcessorKeepsLocalJobsWhenCachingTurnsOff(t *testing.T) {
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 	p.SetEnabled(false)
 
-	stats := p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{remote, local}, 1)
+	stats := p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{remote, local}, 1, time.Now())
 	if stats.Succeeded != 1 || jobs.succeededID != local.ID {
 		t.Fatalf("stats=%+v succeeded=%d, want the local job processed", stats, jobs.succeededID)
 	}
@@ -382,7 +382,7 @@ func TestImageCacheProcessorWaitsForWorkerBudget(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	stats := p.processClaimedJobs(ctx, "w1", claimed, 3)
+	stats := p.processClaimedJobs(ctx, "w1", claimed, 3, time.Now())
 	if len(cacher.byteReqs) != 0 || stats.Succeeded != 0 {
 		t.Fatalf("copies = %d, stats = %+v; want none while the budget is taken", len(cacher.byteReqs), stats)
 	}
@@ -420,8 +420,9 @@ func TestCacheTargetArtworkHoldsWorkerBudget(t *testing.T) {
 // go back to the queue instead of waiting for a worker or the budget, so no
 // other server recovers them as abandoned while they wait.
 func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
-	if got, want := time.Until(latestImageCacheJobStart()), ImageCacheLeaseDuration-ImageCacheJobTimeout; got > want || got < want-time.Minute {
-		t.Fatalf("start window = %s, want %s from the page's arrival", got, want)
+	claimStarted := time.Now()
+	if got, want := latestImageCacheJobStart(claimStarted).Sub(claimStarted), ImageCacheLeaseDuration-ImageCacheJobTimeout; got != want {
+		t.Fatalf("start window = %s, want %s from the claim's start", got, want)
 	}
 
 	root := t.TempDir()
@@ -437,11 +438,10 @@ func TestClaimedJobsPastTheirStartDeadlineGoBackToTheQueue(t *testing.T) {
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: []string{root}})
 
-	// A context whose deadline already passed stands in for a start window
-	// that ran out while the page waited.
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-	stats := p.processClaimedJobs(ctx, "w1", claimed, 3)
+	// A claim that began a full start window ago: the window ran out while
+	// the claim and the page waited.
+	stats := p.processClaimedJobs(context.Background(), "w1", claimed, 3,
+		time.Now().Add(-(ImageCacheLeaseDuration-ImageCacheJobTimeout)-time.Second))
 	if len(cacher.byteReqs) != 0 || stats.Succeeded != 0 {
 		t.Fatalf("copies = %d, stats = %+v; want none past the start deadline", len(cacher.byteReqs), stats)
 	}
@@ -477,7 +477,7 @@ func TestImageCacheProcessorJobsHoldWorkerBudget(t *testing.T) {
 
 	done := make(chan ImageCacheRunStats)
 	go func() {
-		done <- p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{first, second}, 2)
+		done <- p.processClaimedJobs(context.Background(), "w1", []*models.MetadataImageCacheJob{first, second}, 2, time.Now())
 	}()
 	<-cacher.entered
 	canceled, cancel := context.WithCancel(context.Background())
