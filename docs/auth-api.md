@@ -379,7 +379,7 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `POST /auth/device/poll` (`pollDeviceLogin`) | device code | `opened: true` once an approver has looked a pending request up. A pending answer carries the current `expires_at`, which lookups can move later; the device moves its local deadline there. `approved` carries the token pair exactly once. |
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. |
 | `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name` and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
-| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key or an impersonation session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
+| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
 | `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval. |
 
 `status` gains `canceled` on lookup and poll. Start, poll and cancel spend the
@@ -392,6 +392,31 @@ it is spent; see
 frozen v1 routes never see a Quick Connect request, have no cancel
 operation, report a canceled request as `denied`, keep the 10-minute
 `?token=` start answer, and never mark a request opened.
+
+### Remote-playback sessions
+
+Collecting an approved `remote_playback` request answers as before: `tokens`
+with an access and a refresh token, `profile_id`, `profile_token`,
+`temporary: true` and `session_expires_at`. The session it opens is bound to
+that profile and ends at `session_expires_at`, 24 hours after collection at
+most. [device-login.md](architecture/device-login.md#remote-playback-handoff)
+has the full rules; what a client sees:
+
+- `POST /auth/refresh` keeps issuing both tokens until the session ends, but
+  never moves the session past `session_expires_at`. The access and refresh
+  tokens expire no later than that, and `expires_in` counts down to it when it
+  is sooner than the usual access lifetime. After it, refresh answers 401.
+- A request without `X-Profile-Id` acts as the bound profile. A request naming
+  another profile answers 403 `permission_denied`. `GET /profiles` lists only
+  the bound profile.
+- The session has the account role `user` on every account, though `GET
+  /account/me` still reports the account's own role. It reaches only
+  the routes a TV needs to play and browse as that profile (listed in
+  `internal/api/middleware/remote_playback.go`). Every other v2 route, admin
+  and account or household management included, answers 403
+  `permission_denied`, and every v1 route except refresh answers 403
+  `forbidden`.
+- It cannot approve or deny a device request, Quick Connect included.
 
 ## External sign-in
 

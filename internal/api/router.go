@@ -4909,11 +4909,13 @@ func resolveOptionalPluginAccessUser(
 	// Plugin launch tokens copy the role of the access token they were minted
 	// from, and a role change keeps the session, so admin access follows the
 	// account's current role rather than the token's.
-	role, active, err := sessionRepo.ActiveSessionRole(r.Context(), claims.SessionID)
-	if err != nil || !active {
+	// A remote-playback handoff only plays on its device; plugins are not
+	// part of that.
+	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID)
+	if err != nil || !active || authority.IsRemotePlayback() {
 		return false, false, 0, ""
 	}
-	return true, role == "admin", claims.UserID, claims.ProfileID
+	return true, authority.Role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.

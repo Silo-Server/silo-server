@@ -255,7 +255,7 @@ func originMatches(origin *url.URL, expected string) bool {
 }
 
 type eventsSessionValidator interface {
-	IsValid(context.Context, string) (bool, error)
+	ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error)
 }
 
 // NewEventsSocketV2 reuses the current account, session and viewer authorities.
@@ -279,15 +279,22 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		// the credential. A changed role, scope or profile verification under
 		// a valid session is an access change the client can recover from by
 		// refetching and reconnecting.
-		valid, err := sessions.IsValid(checkCtx, identity.SessionID)
+		// A remote-playback session's ticket names its bound profile; its
+		// role is "user" whatever the account's role is.
+		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID)
 		if err != nil || !valid {
 			return ctx, nil, evt.ErrSocketTicket
+		}
+		if authority.IsRemotePlayback() && identity.ProfileID != authority.BoundProfileID {
+			// An older release minted it without the bound profile; the
+			// client fetches a new ticket.
+			return ctx, nil, errSocketAccessChanged
 		}
 		user, err := users.GetByID(checkCtx, identity.UserID)
 		if err != nil || user == nil || !user.Enabled {
 			return ctx, nil, evt.ErrSocketTicket
 		}
-		if user.Role != identity.Role {
+		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
 		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
@@ -302,7 +309,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && !scope.PreferencesDegraded && identity.AccessFingerprint != eventsScopeFingerprint(scope) {
 			return ctx, nil, errSocketAccessChanged
 		}
-		role := user.Role
+		role := authority.Role
 		if role == eventsAdminRole && identity.ProfileID != "" {
 			isPrimary, found, err := primary(checkCtx, identity.UserID, identity.ProfileID)
 			if err != nil || !found {
@@ -316,6 +323,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 			return ctx, nil, errSocketAccessChanged
 		}
 		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)
 		ctx = access.SetScope(ctx, scope)

@@ -25,13 +25,14 @@ type contextKey string
 const claimsKey contextKey = "claims"
 
 // SessionValidator checks a login session on every access-token request.
-// ActiveSessionRole reports whether the session is still active (not revoked
-// or expired) and the current role of the account it belongs to, in one
+// ActiveSession reports whether the session is still active (not revoked or
+// expired) and its authority: the current role of the account it belongs to
+// and, for a remote-playback handoff, the profile it is bound to. It is one
 // lookup; auth.SessionRepository implements it. It answers active=false with
 // no error for a missing, revoked or expired session; an error means the
 // session could not be checked, and the caller must not treat it as ended.
 type SessionValidator interface {
-	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // TokenValidator validates a JWT token string and returns the parsed claims.
@@ -166,7 +167,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
 			if err != nil {
 				writeCredentialCheckUnavailable(w, r, err)
 				return
@@ -175,7 +176,14 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
-			if role != claims.Role {
+			if authority.IsRemotePlayback() {
+				// The session row, not the token, says what a handoff
+				// may do; see remote_playback.go.
+				if !narrowRemotePlayback(r, claims, authority) {
+					writeForbidden(w, "A remote-playback session can only play on its approved profile")
+					return
+				}
+			} else if authority.Role != claims.Role {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
@@ -236,8 +244,15 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 		claims.PasswordChangeRequired {
 		return nil
 	}
-	role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
-	if err != nil || !active || role != claims.Role {
+	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+	if err != nil || !active {
+		return nil
+	}
+	if authority.IsRemotePlayback() {
+		// Public routes take no profile and no allowlist; the narrowed
+		// claims are not the account's own login session.
+		authority.Narrow(claims)
+	} else if authority.Role != claims.Role {
 		return nil
 	}
 	am.sessionLastSeen.Touch(claims.SessionID)

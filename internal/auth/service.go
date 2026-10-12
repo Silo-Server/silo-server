@@ -1080,6 +1080,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
 		return nil, ErrSessionRevoked
 	}
+	if session.IsRemotePlayback() && (session.BoundProfileID == "" || session.AbsoluteExpiresAt == nil) {
+		// The schema refuses such a row; fail closed rather than refresh a
+		// handoff that names no profile or no end.
+		return nil, ErrSessionRevoked
+	}
 
 	user, err := s.users.GetByID(ctx, session.UserID)
 	if err != nil {
@@ -1138,6 +1143,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 			newExpiry = session.ExpiresAt
 		}
 	}
+	// A session with an absolute end (a remote-playback handoff) never
+	// slides past it; the database trigger holds the same limit for every
+	// other writer.
+	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
+		newExpiry = *session.AbsoluteExpiresAt
+	}
 	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
 		switch {
 		case !IsSessionNotFound(err):
@@ -1151,13 +1162,17 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 
 	// An impersonating administrator is not the one who must change the
 	// password, so only the account's own sessions are restricted.
-	return s.generateTokenPair(Claims{
+	refreshed := Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              session.ID,
 		ImpersonatorUserID:     session.ImpersonatorUserID,
 		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
-	})
+	}
+	if session.IsRemotePlayback() {
+		refreshed = remotePlaybackClaims(refreshed, session)
+	}
+	return s.generateTokenPair(refreshed)
 }
 
 func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {
@@ -1308,7 +1323,7 @@ func (s *Service) generateTokenPair(claims Claims) (*TokenPair, error) {
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		ExpiresIn:    s.jwt.accessExpiresIn(claims),
 		SessionID:    claims.SessionID,
 	}, nil
 }

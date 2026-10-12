@@ -885,6 +885,13 @@ acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refres
 admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
 This is the same critical bridge fix.
 
+A remote-playback handoff session is narrower still: it acts only as its bound profile, with
+the account role `user`, on the v2 routes a TV needs to play and browse, and ends at its
+`session_expires_at` however often it refreshes. Every other route answers the existing 403
+(v2 `permission_denied`, v1 `forbidden`). The rules are in
+[device sign-in](device-login.md#remote-playback-handoff); the v1 change is a critical bridge
+fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is

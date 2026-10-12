@@ -9,9 +9,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// sessionRoleFixture answers ActiveSessionRole from values a test changes
+// sessionRoleFixture answers ActiveSession from values a test changes
 // while the connection is open.
 type sessionRoleFixture struct {
 	role    atomic.Value
@@ -19,9 +20,9 @@ type sessionRoleFixture struct {
 	checks  atomic.Int64
 }
 
-func (f *sessionRoleFixture) ActiveSessionRole(context.Context, string) (string, bool, error) {
+func (f *sessionRoleFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
 	f.checks.Add(1)
-	return f.role.Load().(string), !f.revoked.Load(), nil
+	return auth.SessionAuthority{Role: f.role.Load().(string), Purpose: models.SessionPurposeAccount}, !f.revoked.Load(), nil
 }
 
 // TestEventsWebSocketV1ClosesWhenSessionChanges covers the v1 socket, which

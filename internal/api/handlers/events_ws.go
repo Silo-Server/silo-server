@@ -87,10 +87,11 @@ type EventsHandler struct {
 	sessionCheckInterval time.Duration
 }
 
-// sessionRoleChecker reports whether a login session is still active and the
-// current role of its account; auth.SessionRepository implements it.
+// sessionRoleChecker reports whether a login session is still active and its
+// authority, including the current role of its account;
+// auth.SessionRepository implements it.
 type sessionRoleChecker interface {
-	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // SetSessionRoles makes the v1 events socket recheck its login session. The
@@ -189,9 +190,9 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 			return
 		case <-ticker.C:
 			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-			role, active, err := h.sessionRoles.ActiveSessionRole(checkCtx, claims.SessionID)
+			authority, active, err := h.sessionRoles.ActiveSession(checkCtx, claims.SessionID)
 			stop()
-			if err == nil && (!active || role != claims.Role) {
+			if err == nil && (!active || authority.Role != claims.Role) {
 				cancel()
 				return
 			}
