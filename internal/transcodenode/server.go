@@ -1561,7 +1561,7 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		if errors.Is(err, encodinglimit.ErrAtCapacity) {
 			w.Header().Set("Retry-After", "1")
-			writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", "node is at encoding capacity")
+			writeChapterThumbnailError(w, http.StatusServiceUnavailable, "transcode_node_capacity_exhausted", "node is at encoding capacity")
 			return
 		}
 		writeChapterThumbnailError(w, http.StatusUnprocessableEntity, reason, err.Error())
