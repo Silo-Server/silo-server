@@ -56,7 +56,11 @@ func compatTrackPreferenceKey(detail *upstreamItemDetail) string {
 // is written once; a failed write is logged, not retried on every report. The
 // viewer's RememberAudioSelections and RememberSubtitleSelections settings
 // turn either half off, as in Jellyfin.
-func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Session, playSession *PlaybackSession, req sessionReportRequest) {
+//
+// A replica's copy of the play can be a few seconds stale, so a Progress report
+// it judges unchanged is rechecked on the next report. A Stopped report is the
+// last chance, so it is judged against the stored play instead.
+func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Session, playSession *PlaybackSession, req sessionReportRequest, stop bool) {
 	// A terminal play's stop was already handled; a retried or late Stopped
 	// report must not replace a choice made since.
 	if playSession.PreferenceKey == "" || playSession.Terminal || session.ProfileID == "" {
@@ -70,14 +74,14 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	defer cancel()
 	var audio, subtitle *int
 	if req.AudioStreamIndex != nil && h.AudioPreferences != nil {
-		if index := int(*req.AudioStreamIndex); compatAudioStreamChanged(*source, index) && isValidCompatAudioStreamIndex(source.Version, index) {
+		if index := int(*req.AudioStreamIndex); (stop || compatAudioStreamChanged(*source, index)) && isValidCompatAudioStreamIndex(source.Version, index) {
 			audio = &index
 		}
 	}
 	var subtitlePref userstore.SubtitlePreference
 	if req.SubtitleStreamIndex != nil && h.SubtitlePreferences != nil {
 		index := int(*req.SubtitleStreamIndex)
-		if index >= compatSubtitleOff && index != compatRememberedSubtitleStreamIndex(*source) {
+		if index >= compatSubtitleOff && (stop || index != compatRememberedSubtitleStreamIndex(*source)) {
 			// An index that names no track is not recorded either, so it
 			// cannot become the play's baseline.
 			var ok bool
@@ -92,13 +96,13 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 
 	// Claim the change on the play before writing it, so overlapping reports
 	// (a retry, a Stopped beside a Progress, another replica) write it once.
-	audio, subtitle, err := h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle)
-	if err != nil {
-		// A play that ended meanwhile is not a failure either.
-		if !errors.Is(err, errCompatTracksUnchanged) && !errors.Is(err, ErrSessionNotFound) {
-			slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
-				"play_session_id", playSession.ID, "error", err)
-		}
+	audio, subtitle, err := h.claimCompatTrackChange(playSession.ID, source.ID, audio, subtitle, stop)
+	// A play that ended meanwhile is not a failure either.
+	if err != nil && !errors.Is(err, errCompatTracksUnchanged) && !errors.Is(err, ErrSessionNotFound) {
+		slog.WarnContext(ctx, "jellycompat could not record the remembered tracks on the play", "component", "jellycompat",
+			"play_session_id", playSession.ID, "error", err)
+	}
+	if err != nil || (audio == nil && subtitle == nil) {
 		return
 	}
 	saved := compatSavedConfiguration(ctx, h.storeProvider, session)
@@ -161,10 +165,17 @@ var errCompatTracksUnchanged = errors.New("remembered tracks unchanged")
 
 // claimCompatTrackChange records the reported tracks on the play's source
 // under the store's lock, rechecking each against the current row, and
-// returns the ones this report changed.
-func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int) (claimedAudio, claimedSubtitle *int, err error) {
+// returns the ones this report changed. The durable store runs the callback on
+// its cached copy before the stored row and stops at the first error, so an
+// authoritative claim reports "unchanged" as no claim rather than as an error,
+// letting the stored row decide.
+func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string, audio, subtitle *int, authoritative bool) (claimedAudio, claimedSubtitle *int, err error) {
 	err = h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		claimedAudio, claimedSubtitle = nil, nil
+		// The stored row can be terminal while a replica's copy is not.
+		if current.Terminal {
+			return ErrSessionNotFound
+		}
 		for i := range current.MediaSources {
 			source := &current.MediaSources[i]
 			if !mediaSourceIDsEqual(source.ID, sourceID) {
@@ -179,7 +190,7 @@ func (h *PlaybackHandler) claimCompatTrackChange(playSessionID, sourceID string,
 				claimedSubtitle = subtitle
 			}
 		}
-		if claimedAudio == nil && claimedSubtitle == nil {
+		if claimedAudio == nil && claimedSubtitle == nil && !authoritative {
 			return errCompatTracksUnchanged
 		}
 		return nil
