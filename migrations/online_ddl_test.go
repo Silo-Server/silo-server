@@ -108,9 +108,10 @@ var (
 	notValidRE       = regexp.MustCompile(`(?i)\bNOT\s+VALID$`)
 	inlineConstRE    = regexp.MustCompile(`(?i)\b(?:CHECK|REFERENCES|UNIQUE|PRIMARY\s+KEY)\b`)
 	storedGenRE      = regexp.MustCompile(`(?i)\bGENERATED\s+ALWAYS\s+AS\s*\(.*\bSTORED\b`)
+	renameTableRE    = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(` + sqlName + `)\s+RENAME\s+TO\s+(` + sqlName + `)$`)
 	validateRE       = regexp.MustCompile(`(?i)^VALIDATE\s+CONSTRAINT\b`)
 	alterTypeRE      = regexp.MustCompile(`(?i)^ALTER\s+(?:COLUMN\s+)?` + sqlName + `\s+(?:SET\s+DATA\s+)?TYPE\b`)
-	quotedIdentRE    = regexp.MustCompile(`"[^"]*"`)
+	quotedIdentRE    = regexp.MustCompile(`"(?:[^"]|"")*"`)
 	allowRE          = regexp.MustCompile(`^online-ddl\s+allow\b\s*([a-z-]*)\s*(:?)\s*(.*)$`)
 )
 
@@ -144,11 +145,11 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 		if m := createTableRE.FindStringSubmatch(st.text); m != nil && m[1] == "" {
 			created[normalizeTableName(m[2])] = true
 		}
-		if !noTx && concurrentlyRE.MatchString(st.text) && !refreshMatViewRE.MatchString(st.text) {
+		if !noTx && hasKeyword(concurrentlyRE, st.text) && !refreshMatViewRE.MatchString(st.text) {
 			hit(ruleConcurrentlyInTx, "")
 		}
 		if m := createIndexRE.FindStringSubmatch(st.text); m != nil {
-			if table := normalizeTableName(m[2]); !created[table] && !concurrentlyRE.MatchString(m[1]) {
+			if table := normalizeTableName(m[2]); !created[table] && !hasKeyword(concurrentlyRE, m[1]) {
 				hit(ruleCreateIndex, table)
 			}
 		}
@@ -179,6 +180,12 @@ func checkOnlineDDL(src string) []onlineDDLFinding {
 					hit(rule, table)
 				}
 			}
+		}
+		// The renamed table keeps what this file knows about it, including the
+		// lock the rename takes.
+		if m := renameTableRE.FindStringSubmatch(st.text); m != nil {
+			from, to := normalizeTableName(m[1]), normalizeTableName(m[2])
+			created[to], altered[to] = created[from], altered[from]
 		}
 		findings = append(findings, applyAllowances(st, hits)...)
 	}
@@ -248,9 +255,28 @@ func applyAllowances(st sqlStatement, hits []onlineDDLFinding) []onlineDDLFindin
 	return out
 }
 
+// normalizeTableName folds unquoted name parts to lower case, as PostgreSQL
+// does, keeps quoted parts as written, and drops the public schema.
 func normalizeTableName(name string) string {
-	name = strings.ToLower(strings.ReplaceAll(name, `"`, ""))
-	return strings.TrimPrefix(name, "public.")
+	var parts []string
+	for _, p := range namePartRE.FindAllString(name, -1) {
+		if strings.HasPrefix(p, `"`) {
+			parts = append(parts, strings.ReplaceAll(p[1:len(p)-1], `""`, `"`))
+		} else {
+			parts = append(parts, strings.ToLower(p))
+		}
+	}
+	if len(parts) == 2 && parts[0] == "public" {
+		parts = parts[1:]
+	}
+	return strings.Join(parts, ".")
+}
+
+var namePartRE = regexp.MustCompile(`"(?:[^"]|"")*"|[^."]+`)
+
+// hasKeyword reports whether re matches s outside double-quoted identifiers.
+func hasKeyword(re *regexp.Regexp, s string) bool {
+	return re.MatchString(quotedIdentRE.ReplaceAllString(s, "x"))
 }
 
 type sqlStatement struct {
@@ -397,12 +423,21 @@ func isIdentByte(b byte) bool {
 
 var dollarTagRE = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$`)
 
-// splitTopLevel splits s on sep outside parentheses and brackets.
+// splitTopLevel splits s on sep outside parentheses, brackets and quoted
+// identifiers.
 func splitTopLevel(s string, sep byte) []string {
 	var parts []string
 	depth, start := 0, 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
+		case '"':
+			// Quoted identifiers may contain brackets or commas; "" is an
+			// escaped quote and keeps the identifier open.
+			for i++; i < len(s) && (s[i] != '"' || i+1 < len(s) && s[i+1] == '"'); i++ {
+				if s[i] == '"' {
+					i++
+				}
+			}
 		case '(', '[':
 			depth++
 		case ')', ']':
@@ -452,6 +487,10 @@ func TestCheckOnlineDDL(t *testing.T) {
 		{"validate with another action in a NO TRANSACTION file", "-- +goose NO TRANSACTION\nALTER TABLE media_files ADD COLUMN y int, VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
 		{"array literal in an inline check", "ALTER TABLE media_files ADD COLUMN x int[] DEFAULT ARRAY[1,2] CHECK (cardinality(x) > 0);", []string{ruleInlineConstraint}},
 		{"IF NOT EXISTS does not prove the table is new", "CREATE TABLE IF NOT EXISTS public.media_files (id integer);\nCREATE INDEX i ON media_files (id);", []string{ruleCreateIndex}},
+		{"comma after a quoted identifier with a bracket", `ALTER TABLE t ADD COLUMN "x[" int, ALTER COLUMN y TYPE bigint;`, []string{ruleAlterColumnType}},
+		{"quoted mixed-case table is not the new lower-case one", "CREATE TABLE t (x int);\nCREATE INDEX i ON \"T\" (x);", []string{ruleCreateIndex}},
+		{"index named concurrently", "-- +goose NO TRANSACTION\nCREATE INDEX \"concurrently\" ON media_files (x);", []string{ruleCreateIndex}},
+		{"validate after a rename", "ALTER TABLE old_t RENAME TO new_t;\nALTER TABLE new_t VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
 		{"nested block comment", "/* outer /* inner */ still a comment */ CREATE INDEX i ON media_files (x);", []string{ruleCreateIndex}},
 		{"E-string with an escaped quote", "INSERT INTO t VALUES (E'it\\'s');\nCREATE INDEX i ON media_files (x);\nSELECT 'x';", []string{ruleCreateIndex}},
 
@@ -478,6 +517,8 @@ CREATE INDEX marker_jobs_file_idx ON marker_jobs (file_id);
 ALTER TABLE marker_jobs ADD COLUMN note text CHECK (note <> ''), ALTER COLUMN kind TYPE varchar(20);
 ALTER TABLE public.marker_jobs ADD CONSTRAINT one CHECK (id > 0);`, nil},
 		{"allow on a statement about a new table", "CREATE TABLE t (x int);\n-- online-ddl allow create-index: stale\nALTER TABLE t ADD CHECK (x > 0);", []string{ruleAllowComment}},
+		{"renamed new table stays new", "CREATE TABLE a (x int);\nALTER TABLE a RENAME TO b;\nCREATE INDEX i ON public.b (x);", nil},
+		{"quoted and unquoted lower-case names match", "CREATE TABLE \"jobs\" (x int);\nCREATE INDEX i ON public.jobs (x);", nil},
 		{"new materialized view", "CREATE MATERIALIZED VIEW mv AS SELECT 1 AS x;\nCREATE UNIQUE INDEX mv_x ON mv (x);\nREFRESH MATERIALIZED VIEW CONCURRENTLY mv;", nil},
 		{"DDL in comments and strings", "-- CREATE INDEX i ON t (x);\n/* ALTER TABLE t ADD CHECK (x > 0); */\nINSERT INTO notes VALUES ('CREATE INDEX i ON t (x); ALTER TABLE t ALTER COLUMN x TYPE int');", nil},
 		{"DDL in a function body", "-- +goose StatementBegin\nCREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $fn$\nBEGIN\n  EXECUTE 'CREATE INDEX i ON t (x)';\n  CREATE INDEX j ON t (y);\nEND $fn$;\n-- +goose StatementEnd", nil},

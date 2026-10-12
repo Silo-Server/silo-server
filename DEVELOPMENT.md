@@ -161,8 +161,9 @@ SQL migration newer than its cutoff. In each Up section it flags these
 statements on tables the file did not create earlier with a plain
 `CREATE TABLE` (`IF NOT EXISTS` does not count, since the table may exist):
 
-- `CREATE INDEX` without `CONCURRENTLY`, and `UNIQUE`, `PRIMARY KEY` or
-  `EXCLUDE` constraints added without `USING INDEX`;
+- `CREATE INDEX` without `CONCURRENTLY`, `UNIQUE` and `PRIMARY KEY`
+  constraints added without `USING INDEX`, and `EXCLUDE` constraints, which
+  always build their index under the lock;
 - `CHECK` and `FOREIGN KEY` constraints added without `NOT VALID`;
 - `VALIDATE CONSTRAINT` in the same statement as another action, or after
   another change to the same table in the same transaction;
