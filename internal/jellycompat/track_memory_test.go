@@ -529,3 +529,70 @@ func TestClaimCompatTrackChangeRejectsATerminalStoredRow(t *testing.T) {
 		t.Fatalf("write attempts = %d for a play the stored row has finished, want 0", prefs.attempts)
 	}
 }
+
+type failingUserStoreProvider struct{}
+
+func (failingUserStoreProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
+	return nil, errors.New("user store unavailable")
+}
+
+func (failingUserStoreProvider) Close() error { return nil }
+
+// TestPlaybackReportSkipsWhenRememberSettingsCannotBeRead covers a viewer who
+// may have turned RememberSubtitleSelections off: when the setting cannot be
+// read nothing is claimed or written, and the next report tries again.
+func TestPlaybackReportSkipsWhenRememberSettingsCannotBeRead(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	working := handler.storeProvider
+	handler.storeProvider = failingUserStoreProvider{}
+
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+	if prefs.attempts != 0 {
+		t.Fatalf("write attempts = %d without readable settings, want 0", prefs.attempts)
+	}
+
+	handler.storeProvider = working
+	postTrackReport(t, handler, "/Sessions/Playing/Progress", sourceID, trackMemoryJapaneseAudio, -1)
+	if len(prefs.subtitles) != 1 || prefs.subtitles[0].SubtitleMode != profileSubtitleOff {
+		t.Fatalf("subtitle saves = %+v, want the off choice on the next report", prefs.subtitles)
+	}
+}
+
+// TestRememberCompatTracksLeavesTheLatestClaimAfterManyInterleavedWrites
+// covers an early report whose every write lands after a newer report's: it
+// keeps reading the latest claim back until its write matches.
+func TestRememberCompatTracksLeavesTheLatestClaimAfterManyInterleavedWrites(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	report := func(index int) {
+		current, ok := handler.playbackStore.Get("play-1")
+		if !ok {
+			t.Fatal("play-1 missing")
+		}
+		value := compatIntValue(index)
+		handler.rememberCompatTracks(t.Context(), session, current,
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
+	}
+	// Each of the first report's writes is overtaken by a newer choice.
+	newer := []int{4, trackMemoryForcedSubtitle, trackMemorySDHSubtitle, -1}
+	var overtake func()
+	overtake = func() {
+		next := newer[0]
+		newer = newer[1:]
+		report(next)
+		if len(newer) > 0 {
+			prefs.beforeSubtitleWrite = overtake
+		}
+	}
+	prefs.beforeSubtitleWrite = overtake
+
+	report(trackMemorySDHSubtitle)
+
+	if len(newer) != 0 {
+		t.Fatalf("%d newer choices never ran", len(newer))
+	}
+	last := prefs.subtitles[len(prefs.subtitles)-1]
+	if last.SubtitleMode != profileSubtitleOff {
+		t.Fatalf("last subtitle write = %+v, want the newest off choice", last)
+	}
+}
