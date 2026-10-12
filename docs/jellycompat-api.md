@@ -126,10 +126,17 @@ nothing; neither does the audio track the viewer's preferences select when
 client that plays a different track from the one offered has it saved. Plays
 that skip `PlaybackInfo` (static direct play), an audio switch the server
 refused, and repeated or late Stopped reports for a finished play save
-nothing. A failed write is logged and
-not retried. `RememberAudioSelections` or `RememberSubtitleSelections` set to
-`false` in the user configuration turns either half off. Jellyfin remembers
-choices per item; Silo remembers them per series, as its own clients do.
+nothing. A failed write is logged and not retried. `RememberAudioSelections`
+or `RememberSubtitleSelections` set to `false` in the user configuration turns
+either half off. Jellyfin remembers choices per item; Silo remembers them per
+series, as its own clients do.
+
+Each change is claimed on the play before it is written. After writing, the
+report reads the play's latest claim back and writes it again until the two
+match, so overlapping reports leave the newest choice. Known gap: a write that
+stalls until after a later Stopped report has finished the play and its record
+is removed has nothing to read back, so the older choice can remain. Closing it
+would need ordering on the stored preference itself.
 
 ## Browse and response fields
 
