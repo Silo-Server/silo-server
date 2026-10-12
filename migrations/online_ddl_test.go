@@ -90,14 +90,14 @@ func TestNewMigrationsStayOnline(t *testing.T) {
 	}
 }
 
-const sqlName = `(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*))?`
+const sqlName = `(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*))?`
 
 var (
 	gooseDownRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+down\b`)
 	gooseNoTxRE      = regexp.MustCompile(`(?im)^\s*--\s*\+goose\s+no\s+transaction\s*$`)
 	createTableRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:(?:GLOBAL\s+|LOCAL\s+)?(TEMP|TEMPORARY)\s+|UNLOGGED\s+)?(?:TABLE|MATERIALIZED\s+VIEW)\s+(IF\s+NOT\s+EXISTS\s+)?(` + sqlName + `)`)
 	createIndexRE    = regexp.MustCompile(`(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\b((?:"(?:[^"]|"")*"|[^"])*?)\bON\s+(?:ONLY\s+)?(` + sqlName + `)`)
-	alterTableRE     = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(` + sqlName + `)\s+(.*)$`)
+	alterTableRE     = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(` + sqlName + `)(?:\s*\*)?\s+(.*)$`)
 	concurrentlyRE   = regexp.MustCompile(`(?i)\bCONCURRENTLY\b`)
 	refreshMatViewRE = regexp.MustCompile(`(?i)^REFRESH\s+MATERIALIZED\s+VIEW\b`)
 	addCheckOrFKRE   = regexp.MustCompile(`(?i)^ADD\s+(?:CONSTRAINT\s+` + sqlName + `\s+)?(?:CHECK|FOREIGN\s+KEY)\b`)
@@ -512,6 +512,8 @@ func TestCheckOnlineDDL(t *testing.T) {
 		{"rename keeps the schema", "ALTER TABLE archive.t RENAME TO u;\nALTER TABLE archive.u VALIDATE CONSTRAINT c;", []string{ruleValidateInTx}},
 		{"renamed new table in another schema does not exempt public", "CREATE TABLE archive.t (x int);\nALTER TABLE archive.t RENAME TO u;\nCREATE INDEX i ON u (x);", []string{ruleCreateIndex}},
 		{"temporary table does not exempt the public table", "CREATE TEMP TABLE media_files (x int);\nCREATE INDEX i ON public.media_files (x);", []string{ruleCreateIndex}},
+		{"constraint name with an escaped quote", `ALTER TABLE media_files ADD CONSTRAINT "shape""check" CHECK (x > 0);`, []string{ruleConstraintNotValid}},
+		{"table name followed by the inheritance marker", "ALTER TABLE media_files * ADD CONSTRAINT c CHECK (x > 0);", []string{ruleConstraintNotValid}},
 		{"nested block comment", "/* outer /* inner */ still a comment */ CREATE INDEX i ON media_files (x);", []string{ruleCreateIndex}},
 		{"E-string with an escaped quote", "INSERT INTO t VALUES (E'it\\'s');\nCREATE INDEX i ON media_files (x);\nSELECT 'x';", []string{ruleCreateIndex}},
 
