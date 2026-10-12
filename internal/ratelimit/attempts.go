@@ -34,6 +34,13 @@ func ProfilePINKey(userID int, profileID string) string {
 	return "profile_pin:" + strconv.Itoa(userID) + ":" + profileID
 }
 
+// QuickConnectCodePolicy bounds how many six-digit Jellyfin Quick Connect
+// codes one account may try: ten lookups or decisions, then fifteen minutes
+// locked. The window is at least a request's fifteen-minute life, so an
+// account gets a handful of guesses at any one code. The device sign-in
+// service keys it per account (auth.DeviceLoginService).
+var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
+
 // AttemptLimiter counts attempts at a secret per key under an AttemptPolicy.
 // The Redis backend shares the count across every node of a cluster; the
 // memory backend is per process and serves Redis-less single-node
@@ -68,10 +75,21 @@ func NewRedisAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimit
 // rate limiting is enabled, and process-local only on a Redis-less (single
 // node) deployment.
 func NewProfilePINAttemptLimiter(client *redis.Client) *AttemptLimiter {
+	return newSharedAttemptLimiter(client, ProfilePINPolicy)
+}
+
+// NewQuickConnectCodeAttemptLimiter returns the per-account Quick Connect
+// code limiter, shared through Redis on the same terms as the profile PIN
+// limiter.
+func NewQuickConnectCodeAttemptLimiter(client *redis.Client) *AttemptLimiter {
+	return newSharedAttemptLimiter(client, QuickConnectCodePolicy)
+}
+
+func newSharedAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimiter {
 	if client != nil {
-		return NewRedisAttemptLimiter(client, ProfilePINPolicy)
+		return NewRedisAttemptLimiter(client, p)
 	}
-	return NewMemoryAttemptLimiter(ProfilePINPolicy)
+	return NewMemoryAttemptLimiter(p)
 }
 
 // Reserve counts one attempt for key. It reports false with the time left on
