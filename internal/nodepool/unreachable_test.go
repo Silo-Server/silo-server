@@ -284,3 +284,35 @@ func TestRecheckRefreshesCapabilitiesOfANodeThatCameBackChanged(t *testing.T) {
 		t.Fatalf("capability fetches = %d, want 1 after the node came back with a new hash", got)
 	}
 }
+
+// The node configuration reconciliation replaces the pool with database rows
+// every few seconds, and those carry the last sweep's verdict.
+func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
+	row := func() []*Node {
+		return []*Node{{ID: 3, URL: "http://node:8080/", Type: NodeTypeTranscode, Enabled: true, Healthy: true}}
+	}
+	pool := NewTranscodePool()
+	pool.SetNodes(row())
+	planner := NewPlanner(NewProxyPool(), pool)
+
+	if !pool.MarkUnreachable("http://node:8080") {
+		t.Fatal("mark did not flip a healthy node")
+	}
+	pool.SetNodes(row())
+	if planner.TranscodeNodeHealthy("http://node:8080") {
+		t.Fatal("a pool reload from stale rows undid the mark")
+	}
+
+	pool.ApplyHealth(3, "http://node:8080", true, 0, 0, "", nil, nil, time.Now())
+	pool.SetNodes(row())
+	if !planner.TranscodeNodeHealthy("http://node:8080") {
+		t.Fatal("a successful health check did not clear the mark")
+	}
+
+	pool.MarkUnreachable("http://node:8080")
+	pool.SetNodes(nil)
+	pool.SetNodes(row())
+	if !planner.TranscodeNodeHealthy("http://node:8080") {
+		t.Fatal("the mark outlived the node leaving the pool")
+	}
+}

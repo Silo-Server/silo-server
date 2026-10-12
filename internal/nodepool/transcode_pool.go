@@ -14,6 +14,12 @@ import (
 type TranscodePool struct {
 	nodes []*Node
 	mu    sync.RWMutex
+	// unreachable holds the normalized URLs of nodes marked unreachable by
+	// MarkUnreachable. The mark has to outlive SetNodes, which the node
+	// configuration reconciliation calls every few seconds with the database
+	// rows, and those still carry the last sweep's verdict. A successful
+	// health result for the node, or the node leaving the pool, clears it.
+	unreachable map[string]struct{}
 }
 
 // NewTranscodePool creates an empty transcode pool.
@@ -30,10 +36,20 @@ func NewTranscodePool() *TranscodePool {
 func (p *TranscodePool) SetNodes(nodes []*Node) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	present := make(map[string]struct{}, len(nodes))
 	for _, n := range nodes {
 		if n != nil {
 			n.URL = normalizeNodeURL(n.URL)
 			applyPhysicalGPUKeys(n)
+			present[n.URL] = struct{}{}
+			if _, marked := p.unreachable[n.URL]; marked {
+				n.Healthy = false
+			}
+		}
+	}
+	for url := range p.unreachable {
+		if _, ok := present[url]; !ok {
+			delete(p.unreachable, url)
 		}
 	}
 	p.nodes = nodes
@@ -92,6 +108,9 @@ func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, act
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
+	if healthy {
+		delete(p.unreachable, normalizeNodeURL(checkedURL))
+	}
 }
 
 // ApplyCapabilities records a freshly fetched capability report by swapping the

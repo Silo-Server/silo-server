@@ -48,7 +48,10 @@ acknowledging. These do not count:
 
 The report marks the node unhealthy in this process's pool, so the planner skips it
 for new sessions and replans at once. The database row and the admin node list
-keep the last sweep's result until the next sweep.
+keep the last sweep's result until the next sweep. The node configuration
+reconciliation rebuilds the pool from those rows every few seconds, so the pool
+keeps its own set of marked URLs and applies it to every rebuild; a successful
+health result for the node, or the node leaving the pool, clears its entry.
 
 A mark must not keep a healthy node out for a whole sweep interval. The health
 checker rechecks a marked node right away, then up to twice more five seconds
@@ -76,9 +79,6 @@ ignores a report about a node it marked itself during the recheck window
 
 ## Known gaps
 
-- Reloading the node pool (`node_pool_changed`) replaces the pool with the
-  database rows, which still carry the last sweep's result. A marked node comes
-  back until a call fails on it again.
 - A sweep that checked a node just before it died can publish it healthy after a
   failed call marked it. The next failed call marks it again.
 - A node that is alive but too loaded to accept a connection within the bound is

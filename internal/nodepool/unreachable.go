@@ -96,8 +96,8 @@ func (p *Planner) SetUnreachableHandler(fn func(nodeURL string) bool) {
 	p.unreachable.Store(&fn)
 }
 
-// MarkUnreachable publishes the node at url as unhealthy. The next health
-// result for the node replaces the mark. Reports whether a healthy node was
+// MarkUnreachable publishes the node at url as unhealthy until a health check
+// finds it answering, across pool reloads. Reports whether a healthy node was
 // marked.
 func (p *TranscodePool) MarkUnreachable(url string) bool {
 	p.mu.Lock()
@@ -106,6 +106,10 @@ func (p *TranscodePool) MarkUnreachable(url string) bool {
 		if n == nil || !sameNodeURL(n.URL, url) {
 			continue
 		}
+		if p.unreachable == nil {
+			p.unreachable = make(map[string]struct{})
+		}
+		p.unreachable[n.URL] = struct{}{}
 		if !n.Healthy {
 			return false
 		}
