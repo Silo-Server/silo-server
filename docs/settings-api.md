@@ -1020,8 +1020,9 @@ Selecting `s3` without a configured `s3.public_bucket`, or clearing the bucket
 while `s3` is selected, is rejected as `invalid_settings`.
 
 `metadata.image_workers` sizes the pool that downloads and encodes provider
-artwork, in parallel encodes, and the same per-server limit covers manual
-refreshes and copies of local artwork found next to media files. `0`, the default, runs one encode per CPU core.
+artwork in parallel. The same per-server limit also covers manual refreshes
+and copies of local artwork found next to media files. `0`, the default, runs
+one encode per CPU core.
 Each encode is single-threaded in libvips, so the pool is the only source of
 parallelism; a lower value keeps a shared household server responsive during a
 first scan, a higher one finishes the backlog sooner. The value is capped by the
