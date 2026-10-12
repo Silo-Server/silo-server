@@ -152,7 +152,7 @@ func (r *ImageCacheJobRepository) targetHasDeferredLocalJobs(ctx context.Context
 			WHERE `+imageCacheTargetScope("$1")+`
 			  AND status = 'queued'
 			  AND next_attempt_at > NOW()
-			  AND last_error LIKE $2 || '%'
+			  AND starts_with(last_error, $2)
 		)
 	`, strings.TrimSpace(targetContentID), localImageStorageUnavailable).Scan(&deferred); err != nil {
 		return false, fmt.Errorf("checking deferred local image cache jobs: %w", err)

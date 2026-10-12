@@ -741,7 +741,9 @@ func (r *ImageCacheJobRepository) RequeueClaimed(ctx context.Context, ids []int6
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
-			next_attempt_at = NOW(),
+			-- A job claimed before it was due (a held discovery or a
+			-- deferral) keeps its wait.
+			next_attempt_at = GREATEST(next_attempt_at, NOW()),
 			locked_at = NULL,
 			locked_by = '',
 			updated_at = NOW()

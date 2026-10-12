@@ -393,7 +393,8 @@ Caching and refresh:
   a claimed job that cannot start in time to finish inside its lease goes back
   to the queue.
   Refreshes never wait for a copy, and a manual refresh claims its own held
-  discoveries without making them due for other servers. A slot that does not fit the in-memory backlog
+  discoveries without making them due for other servers, handing back any it
+  cannot start still held. A slot that does not fit the in-memory backlog
   waits out the hold, after which any drain copies it.
 - The queue keeps local jobs for retries, and any server may claim one. The
   processor confines each read to the owning library's `media_folders` roots:
@@ -403,7 +404,8 @@ Caching and refresh:
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
   folder, searching no higher than the library root: unless it lists entries
-  or exists but denies listing, the storage is not mounted on this server (an
+  or exists but denies listing (or is reached through a symlink out of the
+  library, so the path escapes it), the storage is not mounted on this server (an
   empty or missing mount point, also for a share nested inside a present
   root, or a folder that fails to read or does not answer in time). A folder
   removed under mounted storage is therefore a stable failure, not a deferral. A
@@ -420,7 +422,8 @@ Caching and refresh:
   nothing cached, it serves the best remote image the refresh found: for items
   the best remote candidate by the `applyBestImages` rules, for seasons and
   episodes the first remote poster or still that the local one displaced while
-  provider results merged. The slot's source stays the local file, so the
+  provider results merged, or, when the refresh kept a local source it could
+  not see, the remote one it chose. The slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update. Locked artwork
   gets no stand-in.
 - `metadata.cache_images` governs remote artwork only. With it off, local art

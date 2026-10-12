@@ -5459,9 +5459,16 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			providerSeason = mergedSeason
 		}
 		if !imagesLocked && providerSeason.PosterPath == "" {
-			providerSeason.PosterPath = localArtworkFallbackPath("", providerSeason.PosterSourcePath, season.remotePosterPath)
+			// The stand-in is the remote poster local art displaced or, when
+			// retention kept a local source this refresh could not see, the
+			// remote poster the refresh chose.
+			fallback, fallbackThumbhash := season.remotePosterPath, season.remotePosterThumbhash
+			if fallback == "" {
+				fallback, fallbackThumbhash = season.PosterPath, season.PosterThumbhash
+			}
+			providerSeason.PosterPath = localArtworkFallbackPath("", providerSeason.PosterSourcePath, fallback)
 			if providerSeason.PosterPath != "" {
-				providerSeason.PosterThumbhash = season.remotePosterThumbhash
+				providerSeason.PosterThumbhash = fallbackThumbhash
 			}
 		}
 		dbSeason := &models.Season{
@@ -5864,7 +5871,9 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				providerEpisode = mergedEpisode
 			}
 			if !imagesLocked {
-				providerEpisode.StillPath = localArtworkFallbackPath(providerEpisode.StillPath, providerEpisode.StillSourcePath, ep.stillFallback)
+				// As for season posters, ep.StillPath stands in when retention
+				// kept a local source.
+				providerEpisode.StillPath = localArtworkFallbackPath(providerEpisode.StillPath, providerEpisode.StillSourcePath, firstNonEmpty(ep.stillFallback, ep.StillPath))
 			}
 			dbEp := &models.Episode{
 				SeriesID:                seriesID,

@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -194,12 +195,17 @@ func (p *ImageCacheProcessor) deferLocalJobWithoutStorage(ctx context.Context, j
 
 // nearestExistingFolderListsEntries walks up from dir to the first folder that
 // exists, going no higher than roots, and reports whether it shows the storage
-// is mounted: it lists entries, or it exists but cannot be listed.
+// is mounted: it lists entries, or it exists but cannot be listed. A folder
+// reached through a symlink out of roots says nothing about their storage, and
+// the path escapes them, so it counts as mounted and the job fails.
 func nearestExistingFolderListsEntries(ctx context.Context, dir string, roots []string) bool {
 	for {
 		probe := rootcheck.ProbeWithTimeout(ctx, dir, rootcheck.DefaultProbeTimeout)
 		switch {
 		case probe.Reachable:
+			if _, err := localImagePathResolvedWithinRoots(dir, roots); errors.Is(err, errLocalImageOutsideRoots) {
+				return true
+			}
 			return !probe.Empty
 		// A folder that exists but cannot be listed, or is not a folder,
 		// shows the storage is there; the failure is the file's.

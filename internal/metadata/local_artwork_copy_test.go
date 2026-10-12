@@ -630,16 +630,39 @@ func TestRefreshWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 }
 
 // Seasons and episodes keep a pending local source and its stand-in the same
-// way, also when the refresh offers no artwork at all.
+// way, also when the refresh offers no artwork at all. A slot with no stand-in
+// yet takes the remote artwork this refresh chose as one.
 func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *testing.T) {
 	const (
 		seriesID      = "series:tvdb:123"
 		seasonStandIn = "https://img.example/season-stand-in.jpg"
 		stillStandIn  = "https://img.example/still-stand-in.jpg"
+		remoteSeason  = "tvdb://remote-season.jpg"
+		remoteStill   = "tvdb://remote-still.jpg"
 	)
-	for _, tc := range []struct{ name, remoteSeason, remoteStill string }{
-		{name: "remote artwork offered", remoteSeason: "tvdb://remote-season.jpg", remoteStill: "tvdb://remote-still.jpg"},
-		{name: "no artwork offered"},
+	type slot struct{ path, thumbhash string }
+	for _, tc := range []struct {
+		name                      string
+		storedSeason, storedStill slot
+		remoteSeason, remoteStill string
+		wantSeason, wantStill     slot
+	}{
+		{
+			name:         "serving stand-ins, remote artwork offered",
+			storedSeason: slot{seasonStandIn, "season-thumb"}, storedStill: slot{stillStandIn, "still-thumb"},
+			remoteSeason: remoteSeason, remoteStill: remoteStill,
+			wantSeason: slot{seasonStandIn, "season-thumb"}, wantStill: slot{stillStandIn, "still-thumb"},
+		},
+		{
+			name:         "serving stand-ins, no artwork offered",
+			storedSeason: slot{seasonStandIn, "season-thumb"}, storedStill: slot{stillStandIn, "still-thumb"},
+			wantSeason: slot{seasonStandIn, "season-thumb"}, wantStill: slot{stillStandIn, "still-thumb"},
+		},
+		{
+			name:         "serving nothing yet",
+			remoteSeason: remoteSeason, remoteStill: remoteStill,
+			wantSeason: slot{remoteSeason, "remote-season-thumb"}, wantStill: slot{remoteStill, ""},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			folder := filepath.Join(t.TempDir(), "missing-mount", "Show", "Season 01")
@@ -650,17 +673,21 @@ func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *tes
 			service.SetImageCacheJobEnqueuer(enqueuer)
 			seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
 				ContentID: "season-1", SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1",
-				PosterPath: seasonStandIn, PosterSourcePath: seasonSource, PosterThumbhash: "season-thumb",
+				PosterPath: tc.storedSeason.path, PosterSourcePath: seasonSource, PosterThumbhash: tc.storedSeason.thumbhash,
 			}
 			episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
 				ContentID: "episode-1", SeriesID: seriesID, SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 1,
-				Title: "Pilot", StillPath: stillStandIn, StillSourcePath: stillSource, StillThumbhash: "still-thumb",
+				Title: "Pilot", StillPath: tc.storedStill.path, StillSourcePath: stillSource, StillThumbhash: tc.storedStill.thumbhash,
+			}
+			remoteSeasonThumbhash := ""
+			if tc.remoteSeason != "" {
+				remoteSeasonThumbhash = "remote-season-thumb"
 			}
 
 			service.persistSeasonsAndEpisodes(withLocalArtworkSearched(context.Background(), localArtworkSeason|localArtworkEpisode),
 				&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
 				map[string]string{"tvdb": "123"}, "en", "en",
-				[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: tc.remoteSeason}},
+				[]SeasonResult{{SeasonNumber: 1, Title: "Season 1", PosterPath: tc.remoteSeason, PosterThumbhash: remoteSeasonThumbhash}},
 				[]EpisodeResult{{
 					ProviderIDs: map[string]string{"tvdb": "ep-1"}, SeasonNumber: 1, EpisodeNumber: 1,
 					Title: "Pilot", StillPath: tc.remoteStill,
@@ -669,17 +696,15 @@ func TestPersistSeasonsAndEpisodesWithoutTheMountKeepsPendingLocalArtwork(t *tes
 			)
 
 			season := seasonRepo.seasons[seasonKey(seriesID, 1)]
-			if season.PosterPath != seasonStandIn || season.PosterSourcePath != seasonSource || season.PosterThumbhash != "season-thumb" {
-				t.Fatalf("season poster = path %q source %q thumb %q, want the stand-in and the local source kept",
-					season.PosterPath, season.PosterSourcePath, season.PosterThumbhash)
+			if got := (slot{season.PosterPath, season.PosterThumbhash}); got != tc.wantSeason || season.PosterSourcePath != seasonSource {
+				t.Fatalf("season poster = %+v source %q, want %+v and the local source kept", got, season.PosterSourcePath, tc.wantSeason)
 			}
 			episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
-			if episode.StillPath != stillStandIn || episode.StillSourcePath != stillSource || episode.StillThumbhash != "still-thumb" {
-				t.Fatalf("episode still = path %q source %q thumb %q, want the stand-in and the local source kept",
-					episode.StillPath, episode.StillSourcePath, episode.StillThumbhash)
+			if got := (slot{episode.StillPath, episode.StillThumbhash}); got != tc.wantStill || episode.StillSourcePath != stillSource {
+				t.Fatalf("episode still = %+v source %q, want %+v and the local source kept", got, episode.StillSourcePath, tc.wantStill)
 			}
 			for _, job := range enqueuer.inputs {
-				if job.SourcePath == tc.remoteSeason || job.SourcePath == tc.remoteStill {
+				if job.SourcePath == remoteSeason || job.SourcePath == remoteStill {
 					t.Fatalf("queued remote artwork over pending local artwork: %+v", job)
 				}
 			}

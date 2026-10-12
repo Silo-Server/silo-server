@@ -234,9 +234,15 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		if err := repo.RequeueClaimed(ctx, []int64{jobs[0].ID}, "refreshing-server"); err != nil {
 			t.Fatalf("requeue: %v", err)
 		}
+		assertHeld(t, "handed back unstarted by the refresh")
 
 		// A job already waiting and due (another server deferred it for
 		// missing storage) is held again when this server rediscovers it.
+		if _, err := pool.Exec(ctx, `
+			UPDATE metadata_image_cache_jobs SET next_attempt_at = NOW() WHERE target_content_id = $1
+		`, seriesID); err != nil {
+			t.Fatalf("make job due: %v", err)
+		}
 		if queued, err := repo.enqueueHeldLocalJobs(ctx, inputs[:1]); err != nil || len(queued) != 1 {
 			t.Fatalf("re-enqueue = %d queued, %v; want 1", len(queued), err)
 		}
@@ -458,6 +464,13 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 			t.Fatalf("symlink: %v", err)
 		}
 		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Film", "poster.jpg")+"?v=12-1700000000"), "outside library roots")
+
+		// A file missing behind a link to an empty folder outside the root
+		// fails too: that folder says nothing about the library's storage.
+		if err := os.Symlink(t.TempDir(), filepath.Join(root, "Art")); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Art", "poster.jpg")+"?v=12-1700000000"), "local image missing")
 	})
 }
 
