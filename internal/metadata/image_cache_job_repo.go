@@ -784,25 +784,61 @@ func itemArtworkSourceColumn(imageType string) (string, bool) {
 	}
 }
 
-// itemOnlyArtworkImageTypes are the item slots without a localized
-// counterpart, in the order the provider-artwork backfill walks them.
-var itemOnlyArtworkImageTypes = [...]string{ImageCacheImageBanner, ImageCacheImageThumb, ImageCacheImageClearArt, ImageCacheImageDisc}
+// itemOnlyArtworkSlot is an item image slot that localizations do not carry.
+type itemOnlyArtworkSlot struct {
+	imageType    string
+	sourceColumn string
+	pathColumn   string
+}
+
+// itemOnlyArtworkSlots lists those slots in the order the provider-artwork
+// backfill walks them.
+var itemOnlyArtworkSlots = [...]itemOnlyArtworkSlot{
+	{ImageCacheImageBanner, "banner_source_path", "banner_path"},
+	{ImageCacheImageThumb, "thumb_source_path", "thumb_path"},
+	{ImageCacheImageClearArt, "clearart_source_path", "clearart_path"},
+	{ImageCacheImageDisc, "disc_source_path", "disc_path"},
+}
 
 // itemOnlyArtworkSourceColumn names the source column of the item slots that
 // localizations do not carry.
 func itemOnlyArtworkSourceColumn(imageType string) (string, bool) {
-	switch imageType {
-	case ImageCacheImageBanner:
-		return "banner_source_path", true
-	case ImageCacheImageThumb:
-		return "thumb_source_path", true
-	case ImageCacheImageClearArt:
-		return "clearart_source_path", true
-	case ImageCacheImageDisc:
-		return "disc_source_path", true
-	default:
-		return "", false
+	for _, slot := range itemOnlyArtworkSlots {
+		if slot.imageType == imageType {
+			return slot.sourceColumn, true
+		}
 	}
+	return "", false
+}
+
+// itemOnlyArtworkRepairBranches adds the item-only slots to
+// enqueueArtworkRepair's candidates, one branch per slot as for the other
+// columns, so a repair by path can use each slot's partial path index.
+func itemOnlyArtworkRepairBranches() string {
+	var b strings.Builder
+	for _, slot := range itemOnlyArtworkSlots {
+		fmt.Fprintf(&b, `
+			UNION ALL
+			SELECT
+				'%[1]s'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.%[2]s,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.%[2]s LIKE '%%://%%'
+			  AND lower(mi.%[2]s) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.%[3]s LIKE '%%://%%' OR mi.%[3]s = '')) OR (mi.%[3]s = ANY($2) AND mi.%[3]s <> ''))`,
+			slot.imageType, slot.sourceColumn, slot.pathColumn)
+	}
+	return b.String()
 }
 
 func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error) {
@@ -1111,11 +1147,9 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 			) p
 		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
 	case 10, 11, 12, 13:
-		// Banner, thumb, clear art and disc art follow the older surfaces so a
-		// stored cursor keeps pointing at the surface it was on.
-		imageType := itemOnlyArtworkImageTypes[cursor.Surface-10]
-		sourceColumn, _ := itemOnlyArtworkSourceColumn(imageType)
-		return itemQuery(imageType, sourceColumn, strings.TrimSuffix(sourceColumn, "source_path")+"path")
+		// Banner, thumb, clear art and disc art, one surface each like 0-2.
+		slot := itemOnlyArtworkSlots[cursor.Surface-10]
+		return itemQuery(slot.imageType, slot.sourceColumn, slot.pathColumn)
 	default:
 		return `SELECT NULL WHERE false`, []any{limit}
 	}
@@ -1638,32 +1672,7 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
-			UNION ALL
-			-- Banner, thumb, clear art and disc art in one pass over media_items.
-			SELECT
-				slot.image_type,
-				'item'::text,
-				mi.content_id,
-				''::text,
-				mi.content_id,
-				slot.source_path,
-				mi.type,
-				NULL::integer,
-				NULL::integer,
-				mi.tmdb_id,
-				mi.tvdb_id,
-				mi.imdb_id
-			FROM media_items mi
-			CROSS JOIN LATERAL (VALUES
-				('banner'::text, mi.banner_source_path, mi.banner_path),
-				('thumb'::text, mi.thumb_source_path, mi.thumb_path),
-				('clearart'::text, mi.clearart_source_path, mi.clearart_path),
-				('disc'::text, mi.disc_source_path, mi.disc_path)
-			) AS slot(image_type, source_path, path)
-			WHERE slot.source_path LIKE '%://%'
-			  AND lower(slot.source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (slot.path LIKE '%://%' OR slot.path = '')) OR slot.path = ANY($2))
+			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))@itemOnlyArtworkBranches
 		),
 		candidates AS (
 			SELECT ac.*
@@ -1689,7 +1698,8 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	`, "@itemOnlyArtworkBranches", itemOnlyArtworkRepairBranches())
+	query = strings.ReplaceAll(query, "@nonProviderSchemes", nonProviderImageSchemesSQL)
 	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)

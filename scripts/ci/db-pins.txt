@@ -178,6 +178,10 @@
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
 
+# Artwork reference check (revision GC and storage sweep): every sweep surface
+# whose path column has an index uses it under a generic plan.
+./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
+
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB

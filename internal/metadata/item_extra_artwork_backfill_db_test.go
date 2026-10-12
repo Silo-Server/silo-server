@@ -25,7 +25,9 @@ func TestItemOnlyArtworkBackfillAndRepairDB(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	const missingClearArt = "local/movies/item/aa/clearart/w500.r.webp"
+	// Repair callers pass the original key of a missing revision.
+	const missingClearArt = "local/movies/item/aa/clearart/original.r.webp"
+	const missingSidecarThumb = "local/movies/item/bb/thumb/original.r.webp"
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, tmdb_id,
 			banner_source_path, banner_path,
@@ -34,9 +36,9 @@ func TestItemOnlyArtworkBackfillAndRepairDB(t *testing.T) {
 			disc_source_path, disc_path)
 		VALUES ($1, 'movie', $1, '10378',
 			'https://image.example.test/banner.jpg', '',
-			'file:///media/Movie/landscape.jpg', '',
+			'file:///media/Movie/landscape.jpg', $3,
 			'https://image.example.test/clearart.png', $2,
-			'https://image.example.test/disc.png', 'https://image.example.test/disc.png')`, item, missingClearArt); err != nil {
+			'https://image.example.test/disc.png', 'https://image.example.test/disc.png')`, item, missingClearArt, missingSidecarThumb); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
 	queued := func(t *testing.T) map[string]string {
@@ -74,7 +76,8 @@ func TestItemOnlyArtworkBackfillAndRepairDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, item); err != nil {
 		t.Fatalf("clear jobs: %v", err)
 	}
-	n, err := repo.EnqueueArtworkRepair(ctx, []string{missingClearArt}, 10)
+	// The sidecar thumb is missing too, but its recovery is the refresh.
+	n, err := repo.EnqueueArtworkRepair(ctx, []string{missingClearArt, missingSidecarThumb}, 10)
 	if err != nil {
 		t.Fatalf("repair: %v", err)
 	}
