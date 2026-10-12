@@ -2349,6 +2349,9 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	}
 	audioTrackIndex := 0
 	audioRestarted := false
+	// remembered is the report the series' remembered tracks follow; an audio
+	// switch the server refused leaves out its audio.
+	remembered := req
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
@@ -2362,6 +2365,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			playSession = updatedPlaySession
 		}
 		if selectionErr != nil {
+			remembered.AudioStreamIndex = nil
 			slog.WarnContext(r.Context(), "jellycompat audio selection update failed", "component", "jellycompat",
 				"play_session_id", playSession.ID,
 				"audio_stream_index", selectedAudioStreamIndex,
@@ -2382,7 +2386,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if !stop || !unidentified {
-		h.rememberCompatTracks(r.Context(), session, playSession, req)
+		h.rememberCompatTracks(r.Context(), session, playSession, remembered)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(

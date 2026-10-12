@@ -121,9 +121,12 @@ signature and v3 combined index in mode `always`; or mode `off` with no track
 for `SubtitleStreamIndex: -1`, which later plays offer as `OnlyForced` or
 `None` depending on the forced-subtitle setting. Reports cannot tell a pick
 from a client's automatic choice, so a report of the offered defaults saves
-nothing; a client that plays a different track from the one offered has it
-saved. Plays that skip `PlaybackInfo` (static direct play) and repeated or late
-Stopped reports for a finished play save nothing. A failed write is logged and
+nothing; neither does the audio track the viewer's preferences select when
+`PlaybackInfo` offered a device fallback in its place (AC3 for TrueHD). A
+client that plays a different track from the one offered has it saved. Plays
+that skip `PlaybackInfo` (static direct play), an audio switch the server
+refused, and repeated or late Stopped reports for a finished play save
+nothing. A failed write is logged and
 not retried. `RememberAudioSelections` or `RememberSubtitleSelections` set to
 `false` in the user configuration turns either half off. Jellyfin remembers
 choices per item; Silo remembers them per series, as its own clients do.
