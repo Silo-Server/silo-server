@@ -121,6 +121,9 @@ type sidecarFinder struct {
 	// name can map to several entries that differ only in case. A directory
 	// that exists but cannot be listed maps to nil.
 	listings map[string]map[string][]string
+	// realDirs maps a folder to its path with symlinks resolved, or "" when
+	// it cannot be resolved (see realDir).
+	realDirs map[string]string
 }
 
 func newSidecarFinder(ctx context.Context) *sidecarFinder {

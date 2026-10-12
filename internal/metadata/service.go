@@ -1929,6 +1929,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	// enrichedBy lists the enrichment-only providers that answered, so the bulk
 	// enrichment pass does not look the item up with them again.
 	var enrichedBy []string
+	// localMetadataUnreadable marks the levels where a fill-empty pass went on
+	// without a local sidecar it could not read (withLocalMetadataUnreadable).
+	var localMetadataUnreadable localArtworkLevel
 	for _, p := range itemChain {
 		mp, ok := p.(MetadataProvider)
 		if !ok {
@@ -1956,6 +1959,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		})
 		if keepStoredValuesOnLocalReadError(req.Mode, err) {
 			return nil, fmt.Errorf("metadata: %s: %w", p.Slug(), err)
+		}
+		if isIdentityHinter && errors.Is(err, ErrLocalMetadataUnavailable) {
+			localMetadataUnreadable |= localArtworkItem
 		}
 		if err != nil {
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
@@ -2138,6 +2144,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					continue
 				}
 				// A fill-empty pass keeps the seasons the local provider could read.
+				localMetadataUnreadable |= localArtworkSeason
 			}
 			if !s.localArtworkUsable() {
 				dropLocalSeasonArtwork(seasons)
@@ -2207,6 +2214,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 							continue
 						}
 						// A fill-empty pass keeps the episodes the local provider could read.
+						localMetadataUnreadable |= localArtworkEpisode
 					}
 					if !s.localArtworkUsable() {
 						dropLocalEpisodeArtwork(episodes)
@@ -2243,6 +2251,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	if s.localArtworkUsable() {
 		ctx = withLocalArtworkSearched(ctx, localArtworkSearched)
+		ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {

@@ -59,7 +59,7 @@ func TestLocalPersonPhotoClaims(t *testing.T) {
 			if gotClaim := len(claims) == 1; gotClaim != tt.wantClaim {
 				t.Fatalf("claims = %#v, want claim %v", claims, tt.wantClaim)
 			}
-			if tt.wantClaim && claims[0] != (catalog.PersonPhotoSourceClaim{ID: 1, Expected: tt.stored.Source, Source: tt.wanted}) {
+			if tt.wantClaim && claims[0] != (catalog.PersonPhotoSourceClaim{ID: 1, Expected: tt.stored, Source: tt.wanted}) {
 				t.Errorf("claim = %#v", claims[0])
 			}
 			if gotQueue := len(queue) == 1; gotQueue != tt.wantQueue {
@@ -133,9 +133,9 @@ func TestLocalPersonPhotoJobs(t *testing.T) {
 	jobs := localPersonPhotoJobs(context.Background(), repo, "movie-1", people)
 
 	wantClaims := []catalog.PersonPhotoSourceClaim{
-		{ID: 1, Expected: "", Source: local},
-		{ID: 2, Expected: "", Source: remote},
-		{ID: 4, Expected: "", Source: "file:///media/Movies/Film/.actors/Raced.jpg"},
+		{ID: 1, Expected: catalog.PersonPhotoState{Path: "-"}, Source: local},
+		{ID: 2, Source: remote},
+		{ID: 4, Source: "file:///media/Movies/Film/.actors/Raced.jpg"},
 	}
 	if !reflect.DeepEqual(repo.claims, wantClaims) {
 		t.Errorf("claims = %#v\nwant %#v", repo.claims, wantClaims)
@@ -268,5 +268,21 @@ func TestMergePeopleMatchesIDsAcrossCastKinds(t *testing.T) {
 	}, MergeFillEmpty)
 	if len(target) != 1 || target[0].PhotoPath != tmdbPhotoURL {
 		t.Fatalf("credits = %#v, want one cast credit enriched with the photo", target)
+	}
+
+	// An NFO actor without ids matches the provider's guest star by name, so
+	// the provider's id joins the credit that carries the NFO's photo.
+	target = []models.ItemPerson{{Person: models.Person{Name: "Jane Doe"}, Kind: models.PersonKindActor, LocalPhotoSource: "file:///media/Show/.actors/Jane_Doe.jpg"}}
+	mergePeople(&target, []models.ItemPerson{
+		{Person: models.Person{Name: "Jane Doe", TmdbID: "88"}, Kind: models.PersonKindGuestStar},
+	}, MergeFillEmpty)
+	if len(target) != 1 || target[0].TmdbID != "88" || target[0].LocalPhotoSource == "" {
+		t.Fatalf("credits = %#v, want one cast credit with the provider's id and the NFO's photo", target)
+	}
+
+	// A crew credit with the same name stays its own credit.
+	mergePeople(&target, []models.ItemPerson{{Person: models.Person{Name: "Jane Doe"}, Kind: models.PersonKindDirector}}, MergeFillEmpty)
+	if len(target) != 2 {
+		t.Fatalf("credits = %#v, want the director credit kept apart", target)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -113,5 +114,15 @@ func TestImageCacheTargetScopeLeavesOutPersonJobs(t *testing.T) {
 	scope := imageCacheTargetScope("$1")
 	if !strings.Contains(scope, "target_content_id = $1") || !strings.Contains(scope, "target_type <> 'person'") {
 		t.Fatalf("scope = %q", scope)
+	}
+}
+
+// Copies of NFO-named URLs are keyed under the provider id they are credited
+// to, which artworkkey must count as library artwork.
+func TestLocalMetadataURLCopiesCountAsLibraryArtwork(t *testing.T) {
+	t.Parallel()
+
+	if key := localMetadataURLProviderID + "/movies/1/poster/original.webp"; !artworkkey.IsLocal(key) {
+		t.Fatalf("artworkkey.IsLocal(%q) = false", key)
 	}
 }

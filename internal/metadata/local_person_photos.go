@@ -114,7 +114,7 @@ func localPersonPhotoClaims(ids []int64, wanted map[int64]string, stored map[int
 		case state.Source == source:
 			queue = append(queue, id)
 		case hasNoPhoto(state) || sameLocalPhotoFolder(state.Source, source):
-			claims = append(claims, catalog.PersonPhotoSourceClaim{ID: id, Expected: state.Source, Source: source})
+			claims = append(claims, catalog.PersonPhotoSourceClaim{ID: id, Expected: state, Source: source})
 		}
 	}
 	return claims, queue

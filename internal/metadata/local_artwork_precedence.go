@@ -87,6 +87,24 @@ func localArtworkSearchedLevels(ctx context.Context) localArtworkLevel {
 	return levels
 }
 
+type localMetadataUnreadableKey struct{}
+
+// withLocalMetadataUnreadable marks ctx as serving a fill-empty refresh that
+// went on without a local sidecar (an NFO) it could not read at levels. An
+// image URL that NFO names cannot be confirmed gone there, so its cached copy
+// stays (see sidecarGone).
+func withLocalMetadataUnreadable(ctx context.Context, levels localArtworkLevel) context.Context {
+	if levels == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, localMetadataUnreadableKey{}, localMetadataUnreadableLevels(ctx)|levels)
+}
+
+func localMetadataUnreadableLevels(ctx context.Context) localArtworkLevel {
+	levels, _ := ctx.Value(localMetadataUnreadableKey{}).(localArtworkLevel)
+	return levels
+}
+
 // localArtworkRetention keeps cached local artwork through a refresh that did
 // not rediscover it. A library mount that is down, or a sidecar that is
 // briefly unreadable, yields no local candidate; without this, rated remote
@@ -99,6 +117,9 @@ type localArtworkRetention struct {
 	// at this retention's level (withLocalArtworkSearched); otherwise nothing
 	// is kept.
 	searched bool
+	// metadataUnreadable is set when the refresh could not read the local
+	// metadata at this level (withLocalMetadataUnreadable).
+	metadataUnreadable bool
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe. Retentions made with atLevel share it.
 	probes map[string]rootcheck.Result
@@ -107,7 +128,8 @@ type localArtworkRetention struct {
 func newLocalArtworkRetention(ctx context.Context, contentID string, level localArtworkLevel) *localArtworkRetention {
 	return &localArtworkRetention{
 		ctx: ctx, contentID: contentID, searched: localArtworkSearchedLevels(ctx)&level != 0,
-		probes: make(map[string]rootcheck.Result),
+		metadataUnreadable: localMetadataUnreadableLevels(ctx)&level != 0,
+		probes:             make(map[string]rootcheck.Result),
 	}
 }
 
@@ -117,6 +139,7 @@ func newLocalArtworkRetention(ctx context.Context, contentID string, level local
 func (r *localArtworkRetention) atLevel(level localArtworkLevel) *localArtworkRetention {
 	other := *r
 	other.searched = localArtworkSearchedLevels(r.ctx)&level != 0
+	other.metadataUnreadable = localMetadataUnreadableLevels(r.ctx)&level != 0
 	return &other
 }
 
@@ -171,6 +194,12 @@ func keepUnconfirmedLocalItemArtwork(ctx context.Context, item, existing *models
 // those cases the local copy stays. The folder is probed through rootcheck,
 // with its timeout, before the file itself is looked up.
 func (r *localArtworkRetention) sidecarGone(source string) bool {
+	if _, ok := localMetadataImageURL(source); ok {
+		// An image URL an NFO names is gone once the refresh read the NFO and
+		// it no longer offers the URL; an NFO it could not read confirms
+		// nothing.
+		return !r.metadataUnreadable
+	}
 	path, ok := localImageSourceFilePath(source)
 	if !ok || !filepath.IsAbs(path) {
 		return true

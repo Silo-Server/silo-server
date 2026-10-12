@@ -209,9 +209,9 @@ it rejects silently counts as "no NFO".
 - People: `<actor>` with `<order>` (or Jellyfin's `<sortorder>`), `<type>`
   (GuestStar, Director, ...), and the `<tmdbid>`/`<imdbid>`/`<tvdbid>`
   tinyMediaManager writes; its `<thumb>` is described below. Merging credits
-  matches a provider ID within one role group (the cast, actors and guest
-  stars together, or one crew kind), so a person credited as both actor and
-  director keeps both credits.
+  matches a provider ID, else a name, within one role group (the cast, actors
+  and guest stars together, or one crew kind), so a person credited as both
+  actor and director keeps both credits.
 - Episodes: `<uniqueid>`s become the episode's provider ids, unless the file
   describes several episodes, serves several (one NFO beside a
   multi-episode video), or declares numbers other than the filename's. The
@@ -434,8 +434,12 @@ reference is a path relative to the NFO or an http(s) URL:
   refresh or the ladder backfill, not by the provider-artwork sweeps. Its
   copy is attributed to the `nfo` provider and keyed like a provider's
   (`nfo/{contentType}/{contentID}/{imageType}/...`); only `file://` copies
-  use the content-hashed `local/` keys, so a refresh that no longer finds the
-  URL in the NFO lets remote art take the slot instead of keeping the copy.
+  use the content-hashed `local/` keys. `artworkkey.IsLocal` counts both as
+  library artwork, so a viewer's localized provider art does not replace
+  either. A refresh keeps the copy until it reads the NFO and the NFO no
+  longer names the URL: a fill-empty refresh that could not read the NFO
+  (`withLocalMetadataUnreadable`) keeps it, as it keeps a sidecar copy on a
+  share that does not answer.
 
 Banner, clear art, disc, key art, and landscape references are parsed with no
 slot to fill: `nfoArtImageTypes` is where a new slot connects.

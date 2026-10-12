@@ -16,9 +16,15 @@ const OriginalVariant = "original"
 // metadata provider.
 const LocalPrefix = "local/"
 
-// IsLocal reports whether objectPath is a cached copy of library artwork.
+// NFOPrefix starts the key of a cached copy of an image URL a library's NFO
+// file names. The NFO provider's copies are keyed like a provider's, under its
+// slug, but the library chose them, so they count as library artwork.
+const NFOPrefix = "nfo/"
+
+// IsLocal reports whether objectPath is a cached copy of library artwork: a
+// file Silo read from the library or an image URL a library NFO names.
 func IsLocal(objectPath string) bool {
-	return strings.HasPrefix(objectPath, LocalPrefix)
+	return strings.HasPrefix(objectPath, LocalPrefix) || strings.HasPrefix(objectPath, NFOPrefix)
 }
 
 // Image types the variant ladder is keyed by. These name the directory segment

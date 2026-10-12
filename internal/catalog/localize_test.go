@@ -197,3 +197,19 @@ func TestApplySeasonLocalizationKeepsLocalSidecarPoster(t *testing.T) {
 		t.Errorf("localized poster replaced local art: %+v", got)
 	}
 }
+
+// A cached copy of an image URL the item's NFO names is library artwork too:
+// the library chose it, so a viewer in another language keeps it.
+func TestApplyItemLocalizationKeepsNFONamedArtwork(t *testing.T) {
+	item := baseItem()
+	item.PosterPath = "nfo/movies/c1/poster/original.webp"
+	item.PosterSourcePath = "nfo+https://img.example.org/poster.jpg"
+	loc := &models.MediaItemLocalization{
+		PosterPath:       "posters/fr.jpg",
+		PosterSourcePath: "tmdb://fr-poster.jpg",
+	}
+	got := applyItemLocalization(item, loc)
+	if got.PosterPath != item.PosterPath || got.PosterSourcePath != item.PosterSourcePath {
+		t.Errorf("localized poster replaced the NFO's: path %q source %q", got.PosterPath, got.PosterSourcePath)
+	}
+}

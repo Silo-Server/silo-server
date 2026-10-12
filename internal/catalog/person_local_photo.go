@@ -38,37 +38,41 @@ func (r *PersonRepository) PhotoStates(ctx context.Context, ids []int64) (map[in
 }
 
 // PersonPhotoSourceClaim points a person's photo source at Source, provided
-// the stored source still equals Expected.
+// the stored photo still equals Expected, the state the claim was decided on.
 type PersonPhotoSourceClaim struct {
 	ID       int64
-	Expected string
+	Expected PersonPhotoState
 	Source   string
 }
 
 // ClaimPhotoSources sets each claimed person's photo_source_path to Source
-// when it still holds Expected, so a concurrent writer that moved it first
-// wins. photo_path and its thumbhash keep serving the current photo until the
-// image cache stores the new source's copy (UpdatePhotoIfSourceMatches). It
-// returns the ids it updated.
+// when the stored photo path and source still hold Expected, so a concurrent
+// writer that changed either first wins: provider enrichment can set
+// photo_path to a provider photo and leave the source empty. photo_path and
+// its thumbhash keep serving the current photo until the image cache stores
+// the new source's copy (UpdatePhotoIfSourceMatches). It returns the ids it
+// updated.
 func (r *PersonRepository) ClaimPhotoSources(ctx context.Context, claims []PersonPhotoSourceClaim) ([]int64, error) {
 	if len(claims) == 0 {
 		return nil, nil
 	}
 	ids := make([]int64, len(claims))
-	expected := make([]string, len(claims))
+	expectedPaths := make([]string, len(claims))
+	expectedSources := make([]string, len(claims))
 	sources := make([]string, len(claims))
 	for i, claim := range claims {
-		ids[i], expected[i], sources[i] = claim.ID, claim.Expected, claim.Source
+		ids[i], expectedPaths[i], expectedSources[i], sources[i] = claim.ID, claim.Expected.Path, claim.Expected.Source, claim.Source
 	}
 	rows, err := r.pool.Query(ctx, `
 		UPDATE people
 		SET photo_source_path = t.source,
 			updated_at = NOW()
-		FROM UNNEST($1::bigint[], $2::text[], $3::text[]) AS t(id, expected, source)
+		FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[]) AS t(id, expected_path, expected_source, source)
 		WHERE people.id = t.id
-		  AND COALESCE(people.photo_source_path, '') = t.expected
+		  AND COALESCE(people.photo_path, '') = t.expected_path
+		  AND COALESCE(people.photo_source_path, '') = t.expected_source
 		  AND people.photo_source_path IS DISTINCT FROM t.source
-		RETURNING people.id`, ids, expected, sources)
+		RETURNING people.id`, ids, expectedPaths, expectedSources, sources)
 	if err != nil {
 		return nil, fmt.Errorf("claiming person photo sources: %w", err)
 	}

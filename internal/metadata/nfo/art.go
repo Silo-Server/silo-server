@@ -152,12 +152,10 @@ type artResolver struct {
 	finder  *sidecarFinder
 	nfoDir  string
 	folders []string
-	// resolved holds folders with symlinks resolved, filled on first use.
-	resolved *[]string
 }
 
 func newArtResolver(finder *sidecarFinder, nfoPath string, folders []string) artResolver {
-	return artResolver{finder: finder, nfoDir: filepath.Dir(nfoPath), folders: compactNFOPaths(folders), resolved: new([]string)}
+	return artResolver{finder: finder, nfoDir: filepath.Dir(nfoPath), folders: compactNFOPaths(folders)}
 }
 
 // source returns the image source for ref: an http(s) URL as a
@@ -198,22 +196,27 @@ func (r artResolver) contains(path string) bool {
 	if err != nil {
 		return false
 	}
-	return slices.ContainsFunc(r.resolvedFolders(), func(folder string) bool { return pathWithin(resolved, folder) })
+	return slices.ContainsFunc(r.folders, func(folder string) bool {
+		real, ok := r.finder.realDir(folder)
+		return ok && pathWithin(resolved, real)
+	})
 }
 
-// resolvedFolders returns the folders with symlinks resolved, resolving them
-// once per resolver. A folder that cannot be resolved is left out.
-func (r artResolver) resolvedFolders() []string {
-	if *r.resolved == nil {
-		folders := make([]string, 0, len(r.folders))
-		for _, folder := range r.folders {
-			if resolved, err := filepath.EvalSymlinks(folder); err == nil {
-				folders = append(folders, resolved)
-			}
+// realDir returns dir with symlinks resolved, resolving each folder once per
+// request: every episode's resolver checks against the same series roots.
+// ok is false when dir cannot be resolved.
+func (f *sidecarFinder) realDir(dir string) (string, bool) {
+	real, seen := f.realDirs[dir]
+	if !seen {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			real = resolved
 		}
-		*r.resolved = folders
+		if f.realDirs == nil {
+			f.realDirs = make(map[string]string)
+		}
+		f.realDirs[dir] = real
 	}
-	return *r.resolved
+	return real, real != ""
 }
 
 // maxArtURLBytes caps a remote artwork URL an NFO names.
