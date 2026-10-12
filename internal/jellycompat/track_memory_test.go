@@ -22,6 +22,9 @@ type recordingTrackPreferences struct {
 	subtitles []userstore.SubtitlePreference
 	attempts  int
 	fail      error
+	// beforeSubtitleWrite runs once inside the next subtitle write, before it
+	// lands, to interleave another report.
+	beforeSubtitleWrite func()
 }
 
 func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID int, pref userstore.AudioPreference) error {
@@ -37,6 +40,10 @@ func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID
 }
 
 func (r *recordingTrackPreferences) SetSubtitlePreferenceCanonical(_ context.Context, userID int, pref userstore.SubtitlePreference) error {
+	if before := r.beforeSubtitleWrite; before != nil {
+		r.beforeSubtitleWrite = nil
+		before()
+	}
 	r.attempts++
 	if userID != 1 {
 		return fmt.Errorf("user %d, want 1", userID)
@@ -427,5 +434,31 @@ func TestCompatReportedSourceFollowsTheStreamedVersion(t *testing.T) {
 	}
 	if source := compatReportedSource(play, "a"); source == nil || source.ID != "a" {
 		t.Fatalf("source = %+v, want the named version a", source)
+	}
+}
+
+// TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave covers a
+// later report that claims and saves another track while an earlier report is
+// still writing, so the earlier write lands last: the earlier report reads the
+// play's latest claim back and saves it again.
+func TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave(t *testing.T) {
+	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	report := func(index int) {
+		current, ok := handler.playbackStore.Get("play-1")
+		if !ok {
+			t.Fatal("play-1 missing")
+		}
+		value := compatIntValue(index)
+		handler.rememberCompatTracks(t.Context(), session, current,
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value})
+	}
+	prefs.beforeSubtitleWrite = func() { report(-1) }
+
+	report(trackMemorySDHSubtitle)
+
+	last := prefs.subtitles[len(prefs.subtitles)-1]
+	if last.SubtitleMode != profileSubtitleOff {
+		t.Fatalf("last subtitle write = %+v (all: %d), want the later off choice", last, len(prefs.subtitles))
 	}
 }
