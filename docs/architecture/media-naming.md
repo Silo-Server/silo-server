@@ -37,11 +37,14 @@ run after this decision; an NFO never changes the type (see
 Every season-folder check (`deriveSeriesRoot`, `detectSeasonStructure`, episode parsing,
 `IsMisplacedSeriesFile`, `parseSeriesFolderIdentity`) goes through `seasonDirectoryNumber` and the
 label list in `internal/naming/season.go`, so they agree on what a season folder is. `Series`,
-`Serie`, and `Seria` also begin show titles. In a folder directly in the library folder, a bare
-one names a season only when at most a year, provider tag, or release token follows the number:
-`Series 7 Documentary` there is the show. Deeper folders, and names that start with the show
-title, keep the UK form `Series 5 Matt Smith` as season 5. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
-holds these cases.
+`Serie`, and `Seria` also begin show titles. In a folder directly in a configured library
+folder, a bare one names a season only when at most a year, provider tag, or release token
+follows the number: `Series 7 Documentary` there is the show. The folder is still a season when
+the file name carries a different series title (`Doctor Who S05E03` in a library folder that is
+one show). Deeper folders, and names that start with the show title, keep the UK form
+`Series 5 Matt Smith` as season 5. A file name that repeats the whole show folder name
+(`La Série 2/La Série 2 S01E03.mkv`) keeps the label as part of the title. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
+and `TestWordSeasonLabelsKeepShowContext` hold these cases.
 
 ## Episode numbers
 

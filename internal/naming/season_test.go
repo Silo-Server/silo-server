@@ -295,3 +295,36 @@ func TestSeriesTitledLikeASeasonIsTheShow(t *testing.T) {
 		t.Fatalf("parseSeriesFolderIdentity = %q season %d; want Example Show season 5", title, season)
 	}
 }
+
+func TestWordSeasonLabelsKeepShowContext(t *testing.T) {
+	// A library folder that is one show keeps its UK season folders when the
+	// file name names that show.
+	ctx := ResolvePathContext("/tv/Doctor Who/Series 5 Matt Smith/Doctor Who S05E03.mkv", "series", "/tv/Doctor Who")
+	if ctx.Title != "Doctor Who" || ctx.SeasonNum != 5 || !ctx.SeasonKnown {
+		t.Fatalf("single-show library = %q S%d known %v; want Doctor Who S5", ctx.Title, ctx.SeasonNum, ctx.SeasonKnown)
+	}
+	// Without a configured library folder, no folder is taken for the show.
+	ctx = ResolvePathContext("Series 5 Matt Smith/03-04.mkv", "mixed")
+	if ctx.Type != "series" || ctx.SeasonNum != 5 || ctx.EpisodeNum != 3 {
+		t.Fatalf("rootless = %s S%dE%d; want series S5E3", ctx.Type, ctx.SeasonNum, ctx.EpisodeNum)
+	}
+	if !IsMisplacedSeriesFile("Series 5 Matt Smith/03-04.mkv") {
+		t.Fatal("rootless IsMisplacedSeriesFile lost the season folder")
+	}
+	if hints := ParseVariantHints("Series 5 Matt Smith/03-04.mkv", "mixed"); hints.PresentationKind != "multi_episode" {
+		t.Fatalf("rootless ParseVariantHints = %q; want multi_episode", hints.PresentationKind)
+	}
+	// A show title that contains a season label stays whole when the file
+	// name repeats it.
+	for _, title := range []string{"La Série 2", "La Series 2"} {
+		path := "/tv/" + title + "/" + title + " S01E03.mkv"
+		ctx = ResolvePathContext(path, "series", "/tv")
+		if ctx.Title != title || ctx.SeasonNum != 1 {
+			t.Fatalf("%s = %q S%d; want the whole title, S1", title, ctx.Title, ctx.SeasonNum)
+		}
+		_, assignments := InferRootAssignments([]string{path}, "series", 1, nil, "/tv")
+		if got := assignments[path].Title; got != title {
+			t.Fatalf("%s InferRootAssignments title = %q", title, got)
+		}
+	}
+}

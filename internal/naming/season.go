@@ -53,6 +53,18 @@ func startsWithMatch(re *regexp.Regexp, value string) bool {
 	return match != nil && match[0] == 0
 }
 
+// mayBeShowFolder reports whether segment, a folder directly in a configured
+// library folder, may be the show itself rather than a season folder. A file
+// name that carries a different series title (Doctor Who S05E03 inside
+// Series 5 Matt Smith) shows the folder is a season of a single-show library.
+func mayBeShowFolder(segment, fileStem string) bool {
+	if fileStem == "" {
+		return true
+	}
+	token, ok := parseEpisodeToken(fileStem, nil, false, false)
+	return !ok || token.seriesTitle == "" || normalizeComparableTitle(token.seriesTitle) == normalizeComparableTitle(segment)
+}
+
 // seasonDirectoryNumber recognizes a season directory without borrowing numbers
 // from a show title. A title before the season label must match the parent show
 // directory, as in Show/Show.S02.1080p; Season 2 needs no parent evidence.
