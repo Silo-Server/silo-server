@@ -67,10 +67,12 @@ func (s *MetadataService) canonicalizeLocalContentID(
 // <uniqueid> in an NFO, whose item was anchored to the wrong provider id). Both
 // must hold the provider-dedup lock so the target id cannot be claimed
 // underneath us. When ids do not derive a provider-anchored id, or it equals
-// `from`, this is a no-op. With markIdentity (an Identify) the move also
-// records the admin's choice on the moved item in the same transaction: the
-// identity write that follows commits separately, and if it fails the item
-// must not sit at the chosen anchor unmarked.
+// `from`, this is a no-op. With markIdentity (an Identify), a merge onto the
+// row already at the target records the admin's choice on it in the merge's
+// transaction: that row holds the chosen provider IDs, so the mark commits
+// with them even if the identity write that follows fails. A rename moves only
+// the content id, leaving the old provider IDs until that identity write, so
+// the mark waits for it.
 func (s *MetadataService) reanchorContentID(
 	ctx context.Context,
 	from string,
@@ -115,7 +117,7 @@ func (s *MetadataService) reanchorContentID(
 	// Target free: pure value-move. A provider-anchored series takes the
 	// season and episode ids composed from its old anchor along with it, so
 	// the show that anchor names can claim them when it is scanned in.
-	if err := s.renameContentID(ctx, from, target, normalizeItemTypeForContentID(itemType) == matchContentTypeSeries, markIdentity); err != nil {
+	if err := s.renameContentID(ctx, from, target, normalizeItemTypeForContentID(itemType) == matchContentTypeSeries); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -126,9 +128,8 @@ func (s *MetadataService) reanchorContentID(
 // series' season and episode ids that were composed from `from` to the same
 // composition under `to` (see seriesChildRenames). FK children follow via ON
 // UPDATE CASCADE; silo_rename_content_ids also sweeps the unconstrained soft
-// references. Everything moves in one transaction, with the Identify mark on
-// `to` when markIdentity is set.
-func (s *MetadataService) renameContentID(ctx context.Context, from, to string, withSeriesChildren, markIdentity bool) error {
+// references. Everything moves in one transaction.
+func (s *MetadataService) renameContentID(ctx context.Context, from, to string, withSeriesChildren bool) error {
 	if s.dbPool == nil {
 		return fmt.Errorf("rename content id requires database pool")
 	}
@@ -160,11 +161,6 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, from, to); err != nil {
 		return fmt.Errorf("enqueue catalog search rename %s -> %s: %w", from, to, err)
-	}
-	if markIdentity {
-		if err := catalog.MarkIdentityChosenTx(ctx, tx, to); err != nil {
-			return err
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit content_id rename transaction: %w", err)

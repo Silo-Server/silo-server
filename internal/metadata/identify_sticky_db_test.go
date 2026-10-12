@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -100,21 +102,16 @@ func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
 	}
 }
 
-// An Identify that moves the item before writing its identity, by re-anchor
-// rename, by merge onto an existing row, or by merge onto the item that owns
-// its provider IDs, records the choice in the move's own transaction, so a
-// failed identity write after it cannot leave the moved item unmarked. Other
-// moves leave no mark.
+// An Identify that merges the item, before writing its identity, onto the
+// item that already holds the chosen identity (the row at the chosen anchor,
+// or the owner of the chosen provider IDs) records the choice in the merge's
+// own transaction, so a failed identity write after it cannot leave that item
+// unmarked. Other merges leave no mark.
 func TestIdentifyMoveMarksTheMovedItemPostgres(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	svc := identifyMoveService(pool)
 	ctx := context.Background()
 
-	t.Run("rename", func(t *testing.T) {
-		checkIdentifyMoveMarks(t, pool, false, func(from, to, _ string, markIdentity bool) error {
-			return svc.renameContentID(ctx, from, to, false, markIdentity)
-		})
-	})
 	t.Run("merge", func(t *testing.T) {
 		checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
 			return svc.rebindItemOnto(ctx, from, to, true, markIdentity)
@@ -129,6 +126,39 @@ func TestIdentifyMoveMarksTheMovedItemPostgres(t *testing.T) {
 			return err
 		})
 	})
+}
+
+// A re-anchor rename moves only the content id: the item keeps its old
+// provider IDs until the identity write, so an Identify's mark waits for that
+// write rather than protecting the identity being replaced.
+func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	svc := identifyMoveService(pool)
+	ctx := context.Background()
+	itemRepo := catalog.NewItemRepository(pool)
+
+	ids := contentid.ProviderIDs{Tmdb: fmt.Sprintf("7%09d", time.Now().UnixNano()%1_000_000_000)}
+	target, err := deriveLogicalContentID("movie", ids, "")
+	if err != nil {
+		t.Fatalf("derive target: %v", err)
+	}
+	from := "identity-rename-from-" + uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, target})
+	})
+	if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: from, Type: "movie", Title: from, SortTitle: from, Status: "matched"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := svc.reanchorContentID(ctx, from, ids, "movie", true)
+	if err != nil {
+		t.Fatalf("reanchor: %v", err)
+	}
+	if got != target {
+		t.Fatalf("reanchored to %q, want %q", got, target)
+	}
+	if chosen, err := itemRepo.IdentityChosen(ctx, target); err != nil || chosen {
+		t.Errorf("renamed item marked = %v, %v; want unmarked until the identity write", chosen, err)
+	}
 }
 
 // The provider-ID conflict merge records an Identify choice on the survivor

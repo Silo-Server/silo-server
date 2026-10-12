@@ -23,9 +23,11 @@ import (
 // manual refresh lets the file's IDs re-match the item, the recovery path for
 // a corrected NFO, unless an admin chose the stored identity with Identify.
 // Identify marks the item in the transaction that writes the identity it
-// chose, and in any move or merge that commits before that write; renames and
-// merges carry the mark along. The choice outranks the file in every mode: any
-// declared IDs that do not confirm the stored identity count as a conflict.
+// chose, and in a merge that commits before that write onto the item already
+// holding the chosen IDs; a rename, which keeps the old IDs until that write,
+// leaves the mark to it. Renames and merges carry the mark along. The choice
+// outranks the file in every mode: any declared IDs that do not confirm the
+// stored identity count as a conflict.
 // A stored ID already recorded as dead (404) is no identity to keep, so the
 // file may name its replacement.
 

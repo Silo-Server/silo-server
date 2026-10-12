@@ -7589,7 +7589,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 			}
 			return canonicalID, nil
 		}
-		canonicalID, err := s.canonicalizeProviderIDDuplicate(ctx, sourceContentID, existing.ContentID, allowMatchedSource, markIdentity)
+		canonicalID, err := s.canonicalizeProviderIDDuplicate(ctx, sourceContentID, existing.ContentID, allowMatchedSource)
 		if err != nil {
 			return "", err
 		}

@@ -242,3 +242,4 @@
 ./internal/metadata TestCanonicalizeKeepsIdentityChoicePostgres
 ./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
+./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
