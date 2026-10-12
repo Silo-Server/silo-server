@@ -73,6 +73,12 @@ func (r recordingEpisodeTargets) UpdateStillIfSourceMatches(_ context.Context, c
 	return r.record(ImageCacheTargetEpisode+":"+contentID+":"+ImageCacheImageStill, cachedPath)
 }
 
+type recordingItemBackdropTargets struct{ *recordingArtworkTargets }
+
+func (r recordingItemBackdropTargets) UpdateArtworkIfSourceMatches(_ context.Context, id int64, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetItemBackdrop+":"+strconv.FormatInt(id, 10)+":"+ImageCacheImageBackdrop, cachedPath)
+}
+
 type recordingPersonTargets struct{ *recordingArtworkTargets }
 
 func (r recordingPersonTargets) UpdatePhotoIfSourceMatches(_ context.Context, personID int64, _, cachedPath, _ string) (bool, error) {
@@ -107,10 +113,11 @@ func newLocalArtworkDBProcessor(pool *pgxpool.Pool, roots []string) (*ImageCache
 	targets := newRecordingArtworkTargets()
 	cacher := &syncByteImageCacher{}
 	p := NewImageCacheProcessorWithTargets(localArtworkTestStore{NewImageCacheJobRepository(pool)}, cacher, nil, ImageCacheProcessorTargets{
-		Items:    recordingItemTargets{targets},
-		Seasons:  recordingSeasonTargets{targets},
-		Episodes: recordingEpisodeTargets{targets},
-		People:   recordingPersonTargets{targets},
+		Items:         recordingItemTargets{targets},
+		ItemBackdrops: recordingItemBackdropTargets{targets},
+		Seasons:       recordingSeasonTargets{targets},
+		Episodes:      recordingEpisodeTargets{targets},
+		People:        recordingPersonTargets{targets},
 	})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: roots})
 	return p, targets, cacher
@@ -163,17 +170,21 @@ func writeSidecar(t *testing.T, path string) string {
 }
 
 // TestLocalArtworkCopiedOnDiscoveryDB pins copy on discovery: the process
-// that discovered item, season, episode and person artwork copies it, other
-// drains cannot take the jobs during the discovery hold, and every job ends
-// succeeded with the cached copy written to its slot.
+// that discovered item (poster and banner), extra backdrop, season, episode
+// and person artwork copies it, other drains cannot take the jobs during the
+// discovery hold, and every job ends succeeded with the cached copy written to
+// its slot.
 func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	ctx := context.Background()
 	seriesID := fmt.Sprintf("series:local-copy-%d", time.Now().UnixNano())
 	cleanupLocalArtworkJobs(t, pool, seriesID)
-	const personID = "987654321"
+	const personID, backdropID = "987654321", "876543219"
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM metadata_image_cache_jobs WHERE target_type = 'person' AND target_content_id = $1`, personID)
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM metadata_image_cache_jobs
+			WHERE (target_type = 'person' AND target_content_id = $1) OR (target_type = 'item_backdrop' AND target_content_id = $2)
+		`, personID, backdropID)
 	})
 
 	root := t.TempDir()
@@ -192,6 +203,11 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 		// content whose library roots confine the read.
 		{TargetType: ImageCacheTargetPerson, TargetContentID: personID, SeriesID: seriesID, ContentType: "person",
 			ImageType: ImageCacheImageProfile, SourcePath: writeSidecar(t, filepath.Join(show, ".actors", "Jane_Doe.jpg"))},
+		{TargetType: ImageCacheTargetItem, TargetContentID: seriesID, SeriesID: seriesID, ContentType: "series",
+			ImageType: ImageCacheImageBanner, SourcePath: writeSidecar(t, filepath.Join(show, "banner.jpg"))},
+		// A backdrop after the primary targets its media_item_backdrops row.
+		{TargetType: ImageCacheTargetItemBackdrop, TargetContentID: backdropID, SeriesID: seriesID, ContentType: "series",
+			ImageType: ImageCacheImageBackdrop, SourcePath: writeSidecar(t, filepath.Join(show, "extrafanart", "one.jpg"))},
 	}
 	for i := range inputs {
 		inputs[i].ProviderID = imageCacheLocalProviderID
