@@ -1,3 +1,4 @@
+import KbnavHarness from "./__kbnavHarness";
 import {
   lazy,
   Suspense,
@@ -463,6 +464,7 @@ function UICustomizedLayout({ children }: { children: ReactNode }) {
 function AppRoutes() {
   return (
     <Routes>
+      <Route path="/__kbnav" element={<KbnavHarness />} />
       <Route path="/login" element={<Login />} />
       <Route path="/login/oauth-complete" element={<OAuthComplete />} />
       <Route path="/activate" element={<ActivateDevice />} />

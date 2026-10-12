@@ -164,7 +164,7 @@ describe("MediaCarousel windowing", () => {
     const { container } = renderRow();
 
     act(() => {
-      (container.querySelector(".embla__viewport") as HTMLElement).focus();
+      screen.getByRole("link", { name: "Title 1" }).focus();
     });
 
     expect(screen.getAllByRole("link")).toHaveLength(30);

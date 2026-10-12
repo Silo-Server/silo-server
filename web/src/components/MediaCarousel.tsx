@@ -4,11 +4,14 @@ import {
   memo,
   startTransition,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, FocusEvent, KeyboardEvent, ReactNode } from "react";
+import { flushSync } from "react-dom";
+import type { EmblaCarouselType } from "embla-carousel";
 import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +23,7 @@ import {
   CAROUSEL_WINDOW_IDLE_BATCH,
   scheduleCarouselIdleTask,
 } from "@/lib/carouselWindow";
+import { focusableAt, rovingIndexOf, rovingKeyFor, useRovingTabIndex } from "@/lib/rovingFocus";
 
 /**
  * Mounts only the first `initialCount` slides in the first commit. The rest
@@ -86,14 +90,34 @@ function collectSlides(children: ReactNode): CarouselSlide[] {
   return slides;
 }
 
+/** Scrolls Embla to the snap holding `slide` unless the slide is fully in view. */
+function revealSlide(api: EmblaCarouselType | undefined, slide: HTMLElement, index: number) {
+  if (!api) return;
+  const viewport = api.rootNode().getBoundingClientRect();
+  const rect = slide.getBoundingClientRect();
+  if (rect.left >= viewport.left && rect.right <= viewport.right) return;
+  const snap = api.internalEngine().slideRegistry.findIndex((group) => group.includes(index));
+  if (snap >= 0) api.scrollTo(snap);
+}
+
+/**
+ * The row is one Tab stop: only the last focused card's controls are in the
+ * Tab order (the first card's until one is focused), so Tab past them leaves
+ * the row. Left and Right (flipped right-to-left) move card to card, Home and
+ * End go to the ends, and Embla scrolls the focused card into view.
+ */
 const CarouselSlideList = memo(function CarouselSlideList({
   slides,
   className,
+  labelledBy,
+  emblaApi,
   windowInitialCount,
   windowPlaceholderClassName,
 }: {
   slides: CarouselSlide[];
   className: string;
+  labelledBy: string;
+  emblaApi?: EmblaCarouselType;
   windowInitialCount?: number;
   windowPlaceholderClassName?: string;
 }) {
@@ -105,6 +129,14 @@ const CarouselSlideList = memo(function CarouselSlideList({
   const total = slides.length;
   const limit = windowed ? mountedCount : total;
   const filling = limit < total;
+  // Tracked by slide key, so when the row changes the Tab stop falls back to
+  // the first card instead of passing to whichever card took the old position.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const activeIndex = Math.max(
+    0,
+    slides.findIndex((slide) => slide.key === activeKey),
+  );
+  useRovingTabIndex(listRef, activeIndex);
 
   useEffect(() => {
     if (!filling) return;
@@ -118,8 +150,8 @@ const CarouselSlideList = memo(function CarouselSlideList({
     const viewport = list?.parentElement;
     if (!filling || !list || !viewport) return;
 
-    // Keyboard and TV users tab through every card, so a row they enter is
-    // filled before the next Tab can skip past an empty slide.
+    // Keyboard users arrow through every card and screen readers read the
+    // whole row, so a row focus enters is filled at once.
     const mountAll = () => setMountedCount(Number.POSITIVE_INFINITY);
     viewport.addEventListener("focusin", mountAll);
 
@@ -153,11 +185,45 @@ const CarouselSlideList = memo(function CarouselSlideList({
     };
   }, [filling, total]);
 
+  const handleFocus = (event: FocusEvent<HTMLUListElement>) => {
+    const index = rovingIndexOf(event.currentTarget, event.target);
+    if (index !== null) setActiveKey(slides[index]?.key ?? null);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    const list = event.currentTarget;
+    const key = rovingKeyFor(event, list);
+    if (key !== "prev" && key !== "next" && key !== "home" && key !== "end") return;
+    const current = rovingIndexOf(list, event.target);
+    if (current === null) return;
+    event.preventDefault();
+    // A card that has not mounted yet has nothing to focus; mount the rest
+    // of the row in this commit so the target exists before focus moves.
+    if (filling) flushSync(() => setMountedCount(Number.POSITIVE_INFINITY));
+    const step = key === "prev" || key === "end" ? -1 : 1;
+    const start = key === "home" ? 0 : key === "end" ? total - 1 : current + step;
+    // Skip any slide without a focusable control.
+    for (let index = start; index >= 0 && index < total && index !== current; index += step) {
+      const target = focusableAt(list, index);
+      if (!target) continue;
+      target.control.focus({ preventScroll: true });
+      revealSlide(emblaApi, target.item, index);
+      return;
+    }
+  };
+
   return (
-    <ul ref={listRef} role="list" className={className}>
+    <ul
+      ref={listRef}
+      role="list"
+      aria-labelledby={labelledBy}
+      className={className}
+      onFocus={handleFocus}
+      onKeyDown={handleKeyDown}
+    >
       {slides.map((slide, index) =>
         index < limit ? (
-          <li key={slide.key} className="embla__slide shrink-0">
+          <li key={slide.key} className="embla__slide shrink-0" data-roving-index={index}>
             {slide.node}
           </li>
         ) : (
@@ -166,6 +232,7 @@ const CarouselSlideList = memo(function CarouselSlideList({
             className="embla__slide shrink-0"
             aria-hidden="true"
             data-carousel-slide-index={index}
+            data-roving-index={index}
           >
             <div className={windowPlaceholderClassName} />
           </li>
@@ -191,7 +258,9 @@ export default function MediaCarousel({
 }: MediaCarouselProps) {
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  const titleId = useId();
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
@@ -237,14 +306,16 @@ export default function MediaCarousel({
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
               <h2 className={titleClass}>
-                {title}
+                <span id={titleId}>{title}</span>
                 <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
                   View
                 </span>
               </h2>
             </Link>
           ) : (
-            <h2 className={titleClass}>{title}</h2>
+            <h2 id={titleId} className={titleClass}>
+              {title}
+            </h2>
           )}
           {headerActions}
         </div>
@@ -281,22 +352,12 @@ export default function MediaCarousel({
           </button>
         )}
 
-        <div
-          ref={emblaRef}
-          className={`embla__viewport -mt-1 overflow-hidden pt-1${viewportPadX}`}
-          tabIndex={0}
-          aria-label="Media carousel"
-          onKeyDown={(e) => {
-            if (e.key === "ArrowLeft") {
-              scrollPrev();
-            } else if (e.key === "ArrowRight") {
-              scrollNext();
-            }
-          }}
-        >
+        <div ref={emblaRef} className={`embla__viewport -mt-1 overflow-hidden pt-1${viewportPadX}`}>
           <CarouselSlideList
             slides={slides}
             className={listClassName}
+            labelledBy={titleId}
+            emblaApi={emblaApi}
             windowInitialCount={windowing?.initialCount}
             windowPlaceholderClassName={windowing?.placeholderClassName}
           />

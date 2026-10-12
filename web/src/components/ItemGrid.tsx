@@ -1,4 +1,13 @@
-import { useEffect, useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -7,6 +16,13 @@ import { useGridLayout } from "@/hooks/useGridLayout";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { cardGridClasses, cardTextAreaHeight } from "@/lib/uiCustomization";
+import {
+  focusableAt,
+  rovingIndexOf,
+  rovingKeyFor,
+  useRovingTabIndex,
+  type RovingKey,
+} from "@/lib/rovingFocus";
 
 interface SharedItemGridProps {
   loading?: boolean;
@@ -40,6 +56,49 @@ type ItemGridProps = WindowedItemGridProps | StaticItemGridProps;
 
 function hasStaticItems(props: ItemGridProps): props is StaticItemGridProps {
   return Array.isArray((props as StaticItemGridProps).items);
+}
+
+/** Where a grid key moves from `index`, or null when it would leave the grid. */
+function gridTarget(
+  key: RovingKey,
+  index: number,
+  columnCount: number,
+  totalItems: number,
+): number | null {
+  const rowStart = index - (index % columnCount);
+  let target: number;
+  switch (key) {
+    case "prev":
+      target = index - 1;
+      break;
+    case "next":
+      target = index + 1;
+      break;
+    case "up":
+      target = index - columnCount;
+      break;
+    case "down":
+      target = index + columnCount;
+      break;
+    case "home":
+      target = rowStart;
+      break;
+    case "end":
+      target = Math.min(rowStart + columnCount, totalItems) - 1;
+      break;
+    case "first":
+      target = 0;
+      break;
+    case "last":
+      target = totalItems - 1;
+      break;
+  }
+  return target >= 0 && target < totalItems ? target : null;
+}
+
+function focusCard(control: HTMLElement) {
+  control.focus({ preventScroll: true });
+  control.scrollIntoView?.({ block: "nearest" });
 }
 
 export default function ItemGrid(props: ItemGridProps) {
@@ -180,6 +239,73 @@ export default function ItemGrid(props: ItemGridProps) {
     onVisibleRangeChange(start, Math.max(end, 0));
   }, [firstRow, lastRow, columnCount, totalItems, onVisibleRangeChange]);
 
+  // Roving focus: the grid is one Tab stop, on the last focused card while it
+  // is rendered and otherwise on the first visible one. Arrows move by column
+  // and row, Home and End to the row's ends, Ctrl+Home and Ctrl+End to the
+  // list's ends.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  // A card a key moved to that was not rendered yet (outside the virtualized
+  // range, or a page still loading); focused once it renders.
+  const pendingFocusRef = useRef<number | null>(null);
+  const activeRow = activeIndex === null ? -1 : Math.floor(activeIndex / columnCount);
+  const activeRendered =
+    activeIndex !== null &&
+    activeIndex < totalItems &&
+    activeRow >= firstRow &&
+    activeRow <= lastRow;
+  const firstVisibleRow = virtualizer.range?.startIndex ?? firstRow;
+  const tabTargetIndex = activeRendered ? activeIndex : firstVisibleRow * columnCount;
+  useRovingTabIndex(containerRef, tabTargetIndex, showsItems);
+
+  useLayoutEffect(() => {
+    const index = pendingFocusRef.current;
+    const grid = containerRef.current;
+    if (index === null || !grid) return;
+    // Focus moved somewhere else while the card loaded; don't pull it back.
+    if (document.activeElement !== grid) {
+      pendingFocusRef.current = null;
+      return;
+    }
+    const target = focusableAt(grid, index);
+    if (!target) return;
+    pendingFocusRef.current = null;
+    focusCard(target.control);
+  });
+
+  const handleFocus = (event: FocusEvent<HTMLDivElement>) => {
+    const index = rovingIndexOf(event.currentTarget, event.target);
+    if (index !== null) setActiveIndex(index);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const grid = event.currentTarget;
+    const key = rovingKeyFor(event, grid);
+    if (key === null) return;
+    // While a move waits for its card, focus sits on the grid itself.
+    const current =
+      rovingIndexOf(grid, event.target) ?? (event.target === grid ? pendingFocusRef.current : null);
+    if (current === null) return;
+    const target = gridTarget(key, current, columnCount, totalItems);
+    // In the first or last row, Up and Down fall through to scroll the page.
+    // Every other key stays in the grid even with nowhere to go: Home and End
+    // would otherwise scroll the window and unmount the focused card.
+    if (target === null && (key === "up" || key === "down")) return;
+    event.preventDefault();
+    if (target === null || target === current) return;
+    pendingFocusRef.current = null;
+    const rendered = focusableAt(grid, target);
+    if (rendered) {
+      focusCard(rendered.control);
+      return;
+    }
+    // Not rendered yet. Scrolling can unmount the focused card, so hold focus
+    // on the grid, then focus the card once it renders. The Tab stop moves
+    // only when it does.
+    pendingFocusRef.current = target;
+    grid.focus({ preventScroll: true });
+    virtualizer.scrollToIndex(Math.floor(target / columnCount), { align: "auto" });
+  };
+
   const getItem = useCallback(
     (globalIndex: number): BrowseItem | undefined => {
       const pageIndex = Math.floor(globalIndex / pageSize);
@@ -220,7 +346,10 @@ export default function ItemGrid(props: ItemGridProps) {
           <div
             ref={containerRef}
             role="list"
-            className={gridClasses}
+            tabIndex={-1}
+            className={`${gridClasses} outline-none`}
+            onFocus={handleFocus}
+            onKeyDown={handleKeyDown}
             style={{
               position: "absolute",
               top: 0,
@@ -243,14 +372,26 @@ export default function ItemGrid(props: ItemGridProps) {
 
                 if (!item) {
                   cells.push(
-                    <div key={`skeleton-${globalIndex}`} role="listitem">
+                    <div
+                      key={`skeleton-${globalIndex}`}
+                      role="listitem"
+                      aria-posinset={globalIndex + 1}
+                      aria-setsize={totalItems}
+                      data-roving-index={globalIndex}
+                    >
                       <Skeleton className="aspect-[2/3] rounded-lg" />
                       <Skeleton className="mt-2 h-4 w-3/4" />
                     </div>,
                   );
                 } else {
                   cells.push(
-                    <div key={`${item.content_id}-${globalIndex}`} role="listitem">
+                    <div
+                      key={`${item.content_id}-${globalIndex}`}
+                      role="listitem"
+                      aria-posinset={globalIndex + 1}
+                      aria-setsize={totalItems}
+                      data-roving-index={globalIndex}
+                    >
                       <ItemCard
                         item={item}
                         libraryId={libraryId}
