@@ -12,7 +12,15 @@ import { useBranding } from "@/hooks/useBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { formatRelativeTime } from "@/lib/date";
 import { buildDeviceDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
-import { compactDeviceCode, formatDeviceCode, spokenDeviceCode } from "@/lib/deviceCode";
+import {
+  QUICK_CONNECT_CODE_LENGTH,
+  compactDeviceCode,
+  displayDeviceCode,
+  formatDeviceCode,
+  isCompleteDeviceCode,
+  spokenDeviceCode,
+} from "@/lib/deviceCode";
+import { QuickConnectApproval } from "@/components/auth/QuickConnectApproval";
 import { Smartphone } from "lucide-react";
 
 type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
@@ -49,7 +57,7 @@ export default function ActivateDevice() {
 }
 
 function ActivateDeviceRequest() {
-  const { user, loading, setupLoading, logoutOfSiloOnly, isImpersonating } = useAuth();
+  const { user, loading, setupLoading, logoutOfSiloOnly, isImpersonating, profile } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [codeInput, setCodeInput] = useState(formatDeviceCode(searchParams.get("code") ?? ""));
@@ -59,6 +67,7 @@ function ActivateDeviceRequest() {
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [approvedHere, setApprovedHere] = useState(false);
+  const [approvedProfile, setApprovedProfile] = useState<string | null>(null);
   // Counts watch lookups, so a failed one (details unchanged) still
   // schedules the next.
   const [watchTick, setWatchTick] = useState(0);
@@ -71,6 +80,10 @@ function ActivateDeviceRequest() {
 
   const token = searchParams.get("token") ?? "";
   const code = compactDeviceCode(searchParams.get("code") ?? "");
+  // A six-digit Jellyfin Quick Connect code is found only for a signed-in
+  // account, so it is looked up once someone is signed in.
+  const needsAccount = !token && code.length === QUICK_CONNECT_CODE_LENGTH;
+  const lookupAccount = needsAccount ? (user?.username ?? null) : null;
 
   const redirectTarget = useMemo(() => {
     const query = searchParams.toString();
@@ -82,7 +95,7 @@ function ActivateDeviceRequest() {
   // fails, for the reloads after a decision and while watching.
   const loadDetails = useCallback(
     async (keepOnError = false) => {
-      if (!token && !code) {
+      if ((!token && !code) || (needsAccount && lookupAccount === null)) {
         setDetails(null);
         setLoadError(null);
         return;
@@ -103,7 +116,7 @@ function ActivateDeviceRequest() {
         );
       }
     },
-    [code, token],
+    [code, token, needsAccount, lookupAccount],
   );
 
   useEffect(() => {
@@ -114,8 +127,11 @@ function ActivateDeviceRequest() {
   // Once approved here, follow the request until it settles. The server
   // answers expired once expires_at passes, so this always ends.
   const status = details?.status;
+  // Every Quick Connect lookup spends the account's code budget, so a Quick
+  // Connect approval is not watched.
+  const isQuickConnect = details?.client_purpose === "jellyfin_quick_connect";
   useEffect(() => {
-    if (!approvedHere || status !== "approved") {
+    if (!approvedHere || status !== "approved" || isQuickConnect) {
       return;
     }
     watchStarted.current ??= Date.now();
@@ -127,7 +143,7 @@ function ActivateDeviceRequest() {
       void loadDetails(true).finally(() => setWatchTick((tick) => tick + 1));
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [approvedHere, status, details, watchTick, loadDetails]);
+  }, [approvedHere, status, isQuickConnect, details, watchTick, loadDetails]);
 
   // After a decision the focused button is gone; move focus to the result.
   useEffect(() => {
@@ -178,14 +194,26 @@ function ActivateDeviceRequest() {
   function handleCodeSubmit(e: FormEvent) {
     e.preventDefault();
     const compact = compactDeviceCode(codeInput);
-    if (compact.length !== 8) {
+    if (!isCompleteDeviceCode(compact)) {
       return;
     }
     setSearchParams({ code: compact });
   }
 
+  function quickConnectApproved(profileName: string) {
+    setDetails((current) => (current ? { ...current, status: "approved" } : current));
+    setApprovedHere(true);
+    setApprovedProfile(profileName);
+    setFocusResult(true);
+  }
+
+  function quickConnectMoved() {
+    void loadDetails(true).finally(() => setFocusResult(true));
+  }
+
   function enterAnotherCode() {
     setApprovedHere(false);
+    setApprovedProfile(null);
     watchStarted.current = null;
     setFocusResult(false);
     setActionError(null);
@@ -212,7 +240,8 @@ function ActivateDeviceRequest() {
       : null;
   const serverHost = window.location.host;
   const deviceName = details?.device_name || "this device";
-  const shownCode = formatDeviceCode(details?.user_code || code);
+  const shownCode = displayDeviceCode(details?.user_code || code);
+  const screen = isQuickConnect ? "app" : "TV";
   const requestedAgo = formatRelativeTime(details?.requested_at);
   const deviceLine = [
     details?.device_platform ? platformLabel(details.device_platform) : "",
@@ -222,7 +251,24 @@ function ActivateDeviceRequest() {
     .join(" · ");
 
   let resultMessage = "";
-  switch (details?.status) {
+  switch (isQuickConnect ? details?.status : undefined) {
+    case "approved":
+      resultMessage =
+        approvedHere && approvedProfile
+          ? `Done. ${deviceName} is signing in as ${approvedProfile}.`
+          : "This device was approved and is finishing sign-in.";
+      break;
+    case "consumed":
+      resultMessage = "That device is signed in.";
+      break;
+    case "denied":
+      resultMessage = "This sign-in was declined.";
+      break;
+    case "expired":
+      resultMessage = "This code expired. Start Quick Connect again in the app.";
+      break;
+  }
+  switch (isQuickConnect ? undefined : details?.status) {
     case "approved":
       resultMessage = approvedHere
         ? "Done. Your TV is signing in."
@@ -257,7 +303,7 @@ function ActivateDeviceRequest() {
           {!token && !code ? (
             <form onSubmit={handleCodeSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="device-code">Enter the code on your TV</Label>
+                <Label htmlFor="device-code">Enter the code on your TV or app</Label>
                 <Input
                   id="device-code"
                   value={codeInput}
@@ -272,13 +318,25 @@ function ActivateDeviceRequest() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={compactDeviceCode(codeInput).length !== 8}
+                disabled={!isCompleteDeviceCode(compactDeviceCode(codeInput))}
               >
                 Continue
               </Button>
             </form>
           ) : loadingDetails || loading || setupLoading ? (
             <div className="text-muted-foreground text-sm">Looking up the code...</div>
+          ) : needsAccount && !user ? (
+            <div className="space-y-3">
+              <p className="text-sm">
+                Sign in to {serverName} to approve code {code} from your Jellyfin app.
+              </p>
+              <Button asChild className="w-full">
+                <Link to={loginHref}>Sign in to approve</Link>
+              </Button>
+              <Button type="button" variant="outline" className="w-full" onClick={enterAnotherCode}>
+                Enter another code
+              </Button>
+            </div>
           ) : loadError ? (
             <div className="space-y-4">
               <p className="text-sm" role="alert">
@@ -304,7 +362,9 @@ function ActivateDeviceRequest() {
 
               {details.status === "pending" && shownCode ? (
                 <div className="border-border/60 bg-background/50 rounded-md border p-4">
-                  <div className="text-muted-foreground text-sm">Check that your TV shows</div>
+                  <div className="text-muted-foreground text-sm">
+                    Check that your {screen} shows
+                  </div>
                   <div
                     className="mt-1 font-mono text-3xl font-semibold tracking-[0.12em]"
                     aria-hidden="true"
@@ -312,7 +372,7 @@ function ActivateDeviceRequest() {
                     {shownCode}
                   </div>
                   <span className="sr-only">{spokenDeviceCode(shownCode)}</span>
-                  {details.match_code ? (
+                  {details.match_code && !isQuickConnect ? (
                     // TV apps released before user codes show only these
                     // words. Remove once both TV apps show the user code.
                     <div className="text-muted-foreground mt-2 text-xs">
@@ -354,12 +414,15 @@ function ActivateDeviceRequest() {
                         Not you? Switch account
                       </button>
                     </p>
-                    <p className="text-muted-foreground text-sm">
-                      Anyone using this TV can pick from your profiles. Profiles with a PIN stay
-                      locked.
-                    </p>
+                    {isQuickConnect ? null : (
+                      <p className="text-muted-foreground text-sm">
+                        Anyone using this TV can pick from your profiles. Profiles with a PIN stay
+                        locked.
+                      </p>
+                    )}
                     <p className="text-sm font-medium">
-                      Only approve a TV that&apos;s in front of you right now.
+                      Only approve a {isQuickConnect ? "device" : "TV"} that&apos;s in front of you
+                      right now.
                     </p>
                     {details.ip_address_hint ? (
                       <p className="text-muted-foreground text-xs">
@@ -371,23 +434,35 @@ function ActivateDeviceRequest() {
                         {actionError}
                       </p>
                     ) : null}
-                    <div className="space-y-3">
-                      <Button
-                        className="w-full"
-                        disabled={acting}
-                        onClick={() => void handleDecision("approve")}
-                      >
-                        {acting ? "Signing in..." : "Sign in TV"}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        disabled={acting}
-                        onClick={() => void handleDecision("deny")}
-                      >
-                        Not now
-                      </Button>
-                    </div>
+                    {isQuickConnect ? (
+                      <QuickConnectApproval
+                        code={details.user_code || code}
+                        deviceName={deviceName}
+                        activeProfileId={profile?.id ?? null}
+                        busy={acting}
+                        onApproved={quickConnectApproved}
+                        onMoved={quickConnectMoved}
+                        onDeny={() => void handleDecision("deny")}
+                      />
+                    ) : (
+                      <div className="space-y-3">
+                        <Button
+                          className="w-full"
+                          disabled={acting}
+                          onClick={() => void handleDecision("approve")}
+                        >
+                          {acting ? "Signing in..." : "Sign in TV"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          disabled={acting}
+                          onClick={() => void handleDecision("deny")}
+                        >
+                          Not now
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )
               ) : null}

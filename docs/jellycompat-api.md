@@ -429,6 +429,31 @@ sign in to Silo first: Jellyfin clients cannot run the password change it requir
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
 
+### Quick Connect
+
+Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
+([device-login.md](architecture/device-login.md#jellyfin-quick-connect)). It
+needs no Silo password, so it also serves accounts that sign in only through an
+external provider, and it picks the profile without the `username#profile`
+syntax.
+
+| Route | Behavior |
+|---|---|
+| `GET /QuickConnect/Enabled` | `true` whenever device sign-in is wired. |
+| `POST /QuickConnect/Initiate` (and `GET`, for Jellyfin 10.8 apps) | Opens a request and answers Jellyfin's `QuickConnectResult`: a six-digit `Code` without a leading zero, a 64-character hex `Secret`, and `DeviceName`, `AppName`, `DeviceId` and `AppVersion` from the MediaBrowser authorization header. |
+| `GET /QuickConnect/Connect?secret=` | `Authenticated: false` while pending, `true` once approved or collected, with the same `Code` on every poll. A denied, expired or unknown request is `404`, so the app stops polling. The secret parameter matches in any case. |
+| `POST /QuickConnect/Authorize?code=` | From an app already signed in here: approves the code for the session's own account and profile and answers `true`. An API key is refused; `userId`, if given, must be the session's own user (`403`). An unknown or finished code is `404`; a spent code budget is `429` with `Retry-After`. |
+| `POST /Users/AuthenticateWithQuickConnect` | Exchanges the secret of an approved request, once, for a session answered like `AuthenticateByName`. Its user name is the `username#profile` form password sign-in accepts. A secret that is not approved and uncollected is `404`. |
+
+A person approves the code on `/activate` or in a Silo app, choosing one of the
+account's profiles (a PIN profile needs its PIN), or from a signed-in Jellyfin
+app with `Authorize`. The request expires, is held open by approver lookups,
+and survives a node restart exactly as a device sign-in request does. Jellyfin
+has no route for an app to withdraw its own request; an abandoned code expires.
+Initiate spends the `device_start` budget, Connect and the exchange spend
+`device_poll`, and Authorize spends `device_lookup`, each keyed by client
+address, plus the account's Quick Connect code budget for Authorize.
+
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
 apply to the returned list. Current native play state is included when locally
@@ -506,8 +531,7 @@ probed `original` disposition in the native track model), the
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 remembered per-item subtitle selections, and `Accept-Language` localization.
-`/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay group operations
-are not served. `/SyncPlay/List` only provides the empty discovery response
+`/Devices`, `/Playlists`, and SyncPlay group operations are not served. `/SyncPlay/List` only provides the empty discovery response
 described above.
 
 The compatibility surface does not add audio-library playback, Live TV, IPTV,

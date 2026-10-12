@@ -21,6 +21,9 @@ var compatPathSegments = map[string]string{
 	"configuration":      "Configuration",
 	"quickconnect":       "QuickConnect",
 	"enabled":            "Enabled",
+	"initiate":           "Initiate",
+	"connect":            "Connect",
+	"authorize":          "Authorize",
 	"users":              "Users",
 	"authenticatebyname": "AuthenticateByName",
 	"me":                 "Me",
@@ -81,6 +84,8 @@ var compatPathSegments = map[string]string{
 	"library":            "Library",
 	"virtualfolders":     "VirtualFolders",
 	"socket":             "socket",
+
+	"authenticatewithquickconnect": "AuthenticateWithQuickConnect",
 }
 
 func normalizeCompatPathMiddleware(next http.Handler) http.Handler {

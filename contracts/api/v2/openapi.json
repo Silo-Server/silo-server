@@ -26067,7 +26067,7 @@
         "additionalProperties": false,
         "properties": {
           "client_purpose": {
-            "description": "Purpose the request was opened with",
+            "description": "Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff",
             "examples": [
               "device_login"
             ],
@@ -26158,7 +26158,7 @@
             "type": "boolean"
           },
           "user_code": {
-            "description": "User code; empty once the request is no longer decidable",
+            "description": "User code: eight digits as 4821-7730, or six digits for a Jellyfin Quick Connect request; empty once the request is no longer decidable",
             "examples": [
               "4821-7730"
             ],
@@ -26215,6 +26215,13 @@
             ],
             "type": "boolean"
           },
+          "jellyfin_quick_connect": {
+            "description": "Whether a signed-in approver can look up six-digit Jellyfin Quick Connect codes and approve them for a profile through approve-handoff",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "opened_signal": {
             "description": "Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved",
             "examples": [
@@ -26259,6 +26266,7 @@
         },
         "required": [
           "remote_playback_handoff",
+          "jellyfin_quick_connect",
           "protocol_versions",
           "cancel",
           "opened_signal",
@@ -126761,6 +126769,7 @@
     },
     "/api/v2/auth/device": {
       "get": {
+        "description": "A six-digit Jellyfin Quick Connect code is found only for a signed-in login session: send its bearer token. Each such lookup also spends the account's Quick Connect code budget.",
         "operationId": "getDeviceLogin",
         "parameters": [
           {
@@ -126777,12 +126786,12 @@
             }
           },
           {
-            "description": "User code from the verification link or typed by the person",
+            "description": "User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token",
             "explode": false,
             "in": "query",
             "name": "code",
             "schema": {
-              "description": "User code from the verification link or typed by the person",
+              "description": "User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token",
               "examples": [
                 "48217730"
               ],
@@ -126840,6 +126849,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -127246,7 +127265,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Approve a remote-playback pairing request for the caller's verified profile.",
+        "summary": "Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.",
         "tags": [
           "device-login"
         ],

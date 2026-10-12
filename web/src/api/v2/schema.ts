@@ -5696,7 +5696,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Describe a pairing request to the person approving it. */
+    /**
+     * Describe a pairing request to the person approving it.
+     * @description A six-digit Jellyfin Quick Connect code is found only for a signed-in login session: send its bearer token. Each such lookup also spends the account's Quick Connect code budget.
+     */
     get: operations["getDeviceLogin"];
     put?: never;
     post?: never;
@@ -5736,7 +5739,7 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Approve a remote-playback pairing request for the caller's verified profile.
+     * Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.
      * @description Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.
      */
     post: operations["approveDeviceHandoff"];
@@ -21702,7 +21705,7 @@ export interface components {
     };
     DeviceLogin: {
       /**
-       * @description Purpose the request was opened with
+       * @description Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff
        * @example device_login
        */
       client_purpose: string;
@@ -21760,7 +21763,7 @@ export interface components {
        */
       temporary: boolean;
       /**
-       * @description User code; empty once the request is no longer decidable
+       * @description User code: eight digits as 4821-7730, or six digits for a Jellyfin Quick Connect request; empty once the request is no longer decidable
        * @example 4821-7730
        */
       user_code: string;
@@ -21781,6 +21784,11 @@ export interface components {
        * @example true
        */
       cancel: boolean;
+      /**
+       * @description Whether a signed-in approver can look up six-digit Jellyfin Quick Connect codes and approve them for a profile through approve-handoff
+       * @example true
+       */
+      jellyfin_quick_connect: boolean;
       /**
        * @description Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved
        * @example true
@@ -83615,7 +83623,7 @@ export interface operations {
   getDeviceLogin: {
     parameters: {
       query?: {
-        /** @description User code from the verification link or typed by the person */
+        /** @description User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token */
         code?: string;
         /** @description Browser code from a verification link issued before user codes moved into the link */
         token?: string;
@@ -83664,6 +83672,15 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
         headers: {
           [name: string]: unknown;
         };

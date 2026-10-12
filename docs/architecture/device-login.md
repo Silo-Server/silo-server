@@ -6,6 +6,8 @@ Silo phone app. The device never handles a password. The state machine lives in
 `internal/auth/device_login.go`; the operations are in
 `internal/apiv2/device_login.go` and, frozen, in `internal/api/handlers/auth_device.go`.
 The operation contract is in [auth-api.md](../auth-api.md#device-sign-in).
+Jellyfin apps reach the same requests through Quick Connect; see
+[Jellyfin Quick Connect](#jellyfin-quick-connect).
 
 ## Codes
 
@@ -102,7 +104,9 @@ and v2 they spend one shared per-IP budget, `device_lookup` (60 per minute,
 burst 20 by default), in place of the generic authenticated limiter. A
 guesser therefore gets about 60 x 15 = 900 guesses over a code's 15-minute
 life, at most about 1,800 over the 30-minute cap, against 10^8 codes; a hit
-only lets them approve a stranger's TV into their own account. The budget is
+only lets them approve a stranger's TV into their own account. Six-digit Quick
+Connect codes have their own rules; see
+[Jellyfin Quick Connect](#jellyfin-quick-connect). The budget is
 loose enough for a household behind one NAT: an approval is one lookup, one
 decision and at most 20 watch lookups a minute. Start, poll and cancel use the
 `device_start` and `device_poll` budgets. The limits apply only while rate
@@ -151,6 +155,58 @@ Every Silo server is independent; there is no Silo-run service between them.
   way to mint a refreshable login session from an API key, and it adds no
   new v1 value: the refusal is v1's existing 403 with its existing
   `forbidden` error code.
+
+## Jellyfin Quick Connect
+
+A Jellyfin app on the Jellyfin-compatible API signs in with Quick Connect
+([jellycompat-api.md](../jellycompat-api.md#quick-connect)). Its request is a
+device sign-in request with `client_purpose = 'jellyfin_quick_connect'`, so it
+keeps every rule above (lifetimes, opened hold, states, who decides, clusters)
+except these:
+
+- **Code:** six digits without a leading zero, the form Jellyfin apps show,
+  ungrouped. It is derived one-way from the request's secret
+  (`auth.QuickConnectCode`) instead of being drawn beside it, because Jellyfin
+  apps redraw the code from every `Connect` poll while the server stores codes
+  only as hashes. A clash with a stored code draws a fresh secret.
+- **Secret:** the device code, in Jellyfin's form: 32 random bytes as 64
+  uppercase hex digits.
+- **Profile:** a Jellyfin session belongs to one profile, so the approval names
+  it. Approvers use `approve-handoff`, whose profile is the request's verified
+  `X-Profile-Id` (a PIN profile needs its `X-Profile-Token`), or a signed-in
+  Jellyfin app's `/QuickConnect/Authorize`, which approves for that session's
+  own profile. `approve` refuses a Quick Connect request with 409.
+- **Collection:** only `/Users/AuthenticateWithQuickConnect` collects it, into a
+  compat session for the approved profile; the native poll answers 404 for its
+  secret, because a native session could pick any profile. An account that
+  must replace a temporary password is refused, as in Jellyfin password
+  sign-in.
+- **Not temporary:** the session lasts like any sign-in.
+- **No device cancel:** Jellyfin has no route for an app to withdraw its
+  request; an abandoned code expires. Approvers can still decline it.
+
+Six digits are 100 times fewer than eight, so a Quick Connect code is found
+only for a signed-in account:
+
+- An anonymous lookup of a six-digit code answers not found, whether or not
+  the request exists. `getDeviceLogin` stays public; it reads a bearer token
+  when one is sent (`AttachSession`) and uses it only when it belongs to an
+  active login session. The frozen v1 routes never pass an account, so they
+  never see a Quick Connect request.
+- Every lookup or decision with a six-digit code by an account spends one
+  attempt of that account's budget, `ratelimit.QuickConnectCodePolicy`: ten
+  attempts, then 15 minutes locked, answered 429 `rate_limited` with
+  `Retry-After`. Every attempt counts, a hit included, and nothing resets the
+  count, so an account cannot reset it by looking up a request it opened
+  itself. The budget lives in Redis when the server has Redis, shared by every
+  node and by the native routes and Jellyfin's `Authorize`, and in process
+  memory otherwise.
+- The per-address `device_lookup` budget still applies on top.
+
+An account therefore gets at most about 20 guesses at a code over its
+30-minute cap, against 9 x 10^5 codes. Eight-digit codes are not counted
+against the account. The approval page does not watch a Quick Connect request
+after approving it, since each lookup would spend the budget.
 
 ## Clusters
 

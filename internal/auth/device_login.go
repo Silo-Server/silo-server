@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -170,7 +171,9 @@ type QuickConnectStart struct {
 
 // QuickConnectState is a Quick Connect request as its app polls it.
 type QuickConnectState struct {
-	Status     string
+	Status string
+	// Code is the request's code, derived from the secret (QuickConnectCode).
+	Code       string
 	DeviceName string
 	AppName    string
 	CreatedAt  time.Time
@@ -248,10 +251,11 @@ type DeviceLoginService struct {
 	// quickConnectAttempts is the per-account budget for six-digit Quick
 	// Connect codes. Nil allows every attempt.
 	quickConnectAttempts AttemptReserver
-	// newUserCode and newQuickConnectCode draw user codes; tests replace
-	// them to force a collision.
-	newUserCode         func() (string, error)
-	newQuickConnectCode func() (string, error)
+	// newUserCode draws a user code and newQuickConnectSecret a Quick
+	// Connect secret, which fixes its code; tests replace them to force a
+	// collision.
+	newUserCode           func() (string, error)
+	newQuickConnectSecret func() (string, error)
 }
 
 const deviceLoginSelectColumns = `
@@ -276,14 +280,14 @@ func NewDeviceLoginService(
 		return nil
 	}
 	return &DeviceLoginService{
-		pool:                pool,
-		users:               users,
-		jwt:                 jwt,
-		sessions:            sessions,
-		stores:              stores,
-		profiles:            profiles,
-		newUserCode:         randomUserCode,
-		newQuickConnectCode: randomQuickConnectCode,
+		pool:                  pool,
+		users:                 users,
+		jwt:                   jwt,
+		sessions:              sessions,
+		stores:                stores,
+		profiles:              profiles,
+		newUserCode:           randomUserCode,
+		newQuickConnectSecret: randomQuickConnectSecret,
 	}
 }
 
@@ -325,7 +329,8 @@ func (s *DeviceLoginService) createWithFreshCodes(
 	ctx context.Context,
 	record deviceLoginRecord,
 	ttl time.Duration,
-	newDeviceCode, newUserCode func() (string, error),
+	newDeviceCode func() (string, error),
+	newUserCode func(deviceCode string) (string, error),
 ) (deviceLoginCodes, deviceLoginRecord, error) {
 	for attempt := 1; ; attempt++ {
 		var (
@@ -341,7 +346,7 @@ func (s *DeviceLoginService) createWithFreshCodes(
 		if codes.browserCode, err = randomToken(browserCodeBytes); err != nil {
 			return codes, record, fmt.Errorf("generate browser code: %w", err)
 		}
-		if codes.userCode, err = newUserCode(); err != nil {
+		if codes.userCode, err = newUserCode(codes.deviceCode); err != nil {
 			return codes, record, fmt.Errorf("generate user code: %w", err)
 		}
 		if codes.matchCode, err = randomMatchCode(); err != nil {
@@ -384,7 +389,7 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
 		ClientPurpose:      purpose,
 		Temporary:          temporary,
-	}, ttl, func() (string, error) { return randomToken(deviceCodeBytes) }, s.newUserCode)
+	}, ttl, func() (string, error) { return randomToken(deviceCodeBytes) }, func(string) (string, error) { return s.newUserCode() })
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +426,7 @@ func (s *DeviceLoginService) StartQuickConnect(ctx context.Context, input QuickC
 		IPAddress:          trimDeviceField(input.IPAddress, 64),
 		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
 		ClientPurpose:      DeviceLoginPurposeQuickConnect,
-	}, deviceLoginTTL, randomQuickConnectSecret, s.newQuickConnectCode)
+	}, deviceLoginTTL, s.newQuickConnectSecret, func(secret string) (string, error) { return QuickConnectCode(secret), nil })
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +458,7 @@ func (s *DeviceLoginService) QuickConnectState(ctx context.Context, secret strin
 	}
 	return &QuickConnectState{
 		Status:     status,
+		Code:       QuickConnectCode(secret),
 		DeviceName: record.DeviceName,
 		AppName:    record.DevicePlatform,
 		CreatedAt:  record.CreatedAt,
@@ -1364,15 +1370,17 @@ func randomUserCode() (string, error) {
 	return formatUserCode(code), nil
 }
 
-// randomQuickConnectCode draws a six-digit code without a leading zero, as
-// Jellyfin does, so an app that reads the code as a number shows all six.
-func randomQuickConnectCode() (string, error) {
-	for {
-		code, err := randomDigits(quickConnectCodeLength)
-		if err != nil || code[0] != '0' {
-			return code, err
-		}
-	}
+// QuickConnectCode is the six-digit code of the Quick Connect request whose
+// secret is secret. The code is derived from the secret rather than drawn
+// beside it, so the app polling with the secret can be told its code again
+// (Jellyfin apps redraw it from every poll) while the server stores the code
+// only as a hash. The derivation is one-way: the code says nothing about the
+// secret. Like Jellyfin's codes, it has no leading zero, so an app that reads
+// it as a number still shows six digits.
+func QuickConnectCode(secret string) string {
+	sum := sha256.Sum256([]byte("silo-quick-connect-code:" + strings.TrimSpace(secret)))
+	n := binary.BigEndian.Uint64(sum[:8]) % 900000
+	return strconv.FormatUint(100000+n, 10)
 }
 
 // randomQuickConnectSecret draws a Quick Connect secret in Jellyfin's form:

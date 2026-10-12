@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -24,7 +25,17 @@ var (
 	ErrProfileHasPIN = errors.New("profile is PIN protected")
 	// ErrInvalidPIN indicates the provided PIN did not match.
 	ErrInvalidPIN = errors.New("invalid profile PIN")
+	// ErrQuickConnectNotAuthorized indicates a Quick Connect secret that is
+	// not an approved, uncollected request.
+	ErrQuickConnectNotAuthorized = errors.New("quick connect request is not authorized")
 )
+
+// quickConnectCollector exchanges an approved Quick Connect secret for a
+// login session of the approving account and names the approved profile
+// (auth.DeviceLoginService.CollectQuickConnect).
+type quickConnectCollector interface {
+	CollectQuickConnect(ctx context.Context, secret string) (*auth.DeviceLoginPollResult, error)
+}
 
 // LoginResolver performs username#profile login resolution against Silo.
 type LoginResolver struct {
@@ -37,6 +48,9 @@ type LoginResolver struct {
 	// guesses here count against the same per-profile budget. Nil allows
 	// every attempt.
 	pinAttempts *ratelimit.AttemptLimiter
+	// quickConnect collects approved Quick Connect requests. Nil refuses
+	// every Quick Connect sign-in.
+	quickConnect quickConnectCollector
 }
 
 // NewLoginResolver creates a new login resolver using direct auth service.
@@ -59,6 +73,12 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 // WithPINAttempts sets the per-profile PIN attempt limiter and returns r.
 func (r *LoginResolver) WithPINAttempts(l *ratelimit.AttemptLimiter) *LoginResolver {
 	r.pinAttempts = l
+	return r
+}
+
+// WithQuickConnect sets the Quick Connect collector and returns r.
+func (r *LoginResolver) WithQuickConnect(c quickConnectCollector) *LoginResolver {
+	r.quickConnect = c
 	return r
 }
 
@@ -135,14 +155,65 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
+	return r.putSession(combinedUsername, user, tokenPair, profile.ID, profile.Name)
+}
+
+// ResolveQuickConnect exchanges an approved Quick Connect secret for a compat
+// session bound to the profile the approver chose. The approver already
+// verified that profile, so no PIN is asked here.
+func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) (*Session, error) {
+	if r.quickConnect == nil {
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	result, err := r.quickConnect.CollectQuickConnect(ctx, secret)
+	if errors.Is(err, auth.ErrDeviceLoginNotFound) {
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	if errors.Is(err, auth.ErrDeviceLoginNoProfile) {
+		return nil, ErrProfileNotFound
+	}
+	if err != nil {
+		return nil, mapAuthError(err)
+	}
+	if result.TokenPair == nil || result.User == nil {
+		// Pending, denied, withdrawn, expired or already collected.
+		return nil, ErrQuickConnectNotAuthorized
+	}
+	store, err := r.storeProvider.ForUser(ctx, result.User.ID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	profile, err := store.GetProfile(ctx, result.ProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("load profile: %w", err)
+	}
+	if profile == nil {
+		return nil, ErrProfileNotFound
+	}
+	return r.putSession(quickConnectUsername(result.User.Username, profile.Name), result.User, result.TokenPair, profile.ID, profile.Name)
+}
+
+// quickConnectUsername is the name a Quick Connect session reports: the
+// username#profile form password sign-in accepts for the same profile, or the
+// account name alone when the profile carries it.
+func quickConnectUsername(account, profile string) string {
+	if strings.EqualFold(account, profile) {
+		return account
+	}
+	return account + "#" + profile
+}
+
+// putSession stores a compat session for the account's token pair, bound to
+// one profile.
+func (r *LoginResolver) putSession(username string, user *models.User, tokenPair *auth.TokenPair, profileID, profileName string) (*Session, error) {
 	now := r.now()
 	session := Session{
 		Token:                 r.tokenGenerator(),
-		Username:              combinedUsername,
+		Username:              username,
 		AccountUsername:       user.Username,
-		ProfileID:             profile.ID,
-		ProfileName:           profile.Name,
-		PseudoUserID:          PseudoUserID(user.ID, profile.ID),
+		ProfileID:             profileID,
+		ProfileName:           profileName,
+		PseudoUserID:          PseudoUserID(user.ID, profileID),
 		StreamAppUserID:       user.ID,
 		StreamAppAccessToken:  tokenPair.AccessToken,
 		StreamAppRefreshToken: tokenPair.RefreshToken,
@@ -152,7 +223,6 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	if err := r.sessions.Put(session); err != nil {
 		return nil, err
 	}
-
 	return &session, nil
 }
 

@@ -3556,6 +3556,8 @@ func main() {
 			SubtitlePlaySync: subtitlePlaySync,
 			// One PIN budget per profile across the native and Jellyfin logins.
 			ProfilePINAttempts: deps.ProfilePINAttempts,
+			// One "login" budget per client across native and Jellyfin sign-in.
+			RateLimitMW: deps.RateLimitMW,
 		}
 
 		// Wire direct dependencies when DB is available.
@@ -3651,6 +3653,11 @@ func main() {
 			})
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
+			// Jellyfin Quick Connect runs on the device sign-in requests the
+			// native API approves; profile tokens are only for remote playback.
+			if devices := auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo, compatDeps.UserStoreProvider, nil); devices != nil {
+				compatDeps.DeviceLogin = devices.WithQuickConnectAttempts(deps.QuickConnectCodeAttempts)
+			}
 			if authProviderRegistry != nil {
 				// Directory (LDAP) users sign in with their directory password.
 				compatDeps.AuthService.SetPluginProviderSource(authProviderRegistry)

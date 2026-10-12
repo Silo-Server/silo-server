@@ -377,13 +377,18 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `POST /auth/device/start` (`startDeviceLogin`) | none | `user_code` is eight digits (`4821-7730`); `verification_uri_complete` is `<base>/activate?code=48217730`, where `<base>` is `server.public_url` when configured; `expires_in` is 900. |
 | `POST /auth/device/poll` (`pollDeviceLogin`) | device code | `opened: true` once an approver has looked a pending request up. A pending answer carries the current `expires_at`, which lookups can move later; the device moves its local deadline there. `approved` carries the token pair exactly once. |
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. |
-| `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none | Adds `requested_at`, `server_name` and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. |
-| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key or an impersonation session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. |
-| `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions. |
+| `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name` and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is found only with a valid login session's token; without one it answers 404. |
+| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key or an impersonation session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
+| `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval. |
 
 `status` gains `canceled` on lookup and poll. Start, poll and cancel spend the
 device rate-limit buckets; the lookup and all three decisions take a user code
-and share the `device_lookup` bucket. The frozen v1 routes have no cancel
+and share the `device_lookup` bucket. A lookup or decision with a six-digit
+Quick Connect code also spends the account's Quick Connect code budget, ten
+attempts per 15 minutes, and answers 429 `rate_limited` with `Retry-After` once
+it is spent; see
+[device-login.md](architecture/device-login.md#jellyfin-quick-connect). The
+frozen v1 routes never see a Quick Connect request, have no cancel
 operation, report a canceled request as `denied`, keep the 10-minute
 `?token=` start answer, and never mark a request opened.
 

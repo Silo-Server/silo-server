@@ -209,9 +209,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/System/Ping", systemHandler.HandlePing)
 	r.Get("/System/Endpoint", systemHandler.HandleEndpoint)
 	r.Get("/Branding/Configuration", systemHandler.HandleBrandingConfiguration)
-	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
 	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
+	registerQuickConnectRoutes(r, deps, authHandler)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
@@ -557,8 +557,12 @@ func withDefaults(deps Dependencies) Dependencies {
 		if pinAttempts == nil {
 			pinAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
 		}
-		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
+		resolver := NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
 			WithPINAttempts(pinAttempts)
+		if deps.DeviceLogin != nil {
+			resolver.WithQuickConnect(deps.DeviceLogin)
+		}
+		deps.LoginResolver = resolver
 	}
 
 	if deps.Authenticator == nil && deps.SessionStore != nil {
@@ -583,4 +587,32 @@ func stripSlashesExceptWeb(next http.Handler) http.Handler {
 		}
 		stripped.ServeHTTP(w, r)
 	})
+}
+
+// registerQuickConnectRoutes serves Jellyfin Quick Connect. The routes spend
+// the native device sign-in budgets, keyed by client address: opening a
+// request spends device_start, polling and collecting spend device_poll, and
+// approving a code spends device_lookup, like the native operations that do
+// the same.
+func registerQuickConnectRoutes(r chi.Router, deps Dependencies, authHandler *AuthHandler) {
+	handler := NewQuickConnectHandler(deps.DeviceLogin)
+	limited := func(bucket string, h http.HandlerFunc) http.Handler {
+		if deps.RateLimitMW == nil {
+			return h
+		}
+		return deps.RateLimitMW.AuthEndpointHandler(bucket)(h)
+	}
+	r.Get("/QuickConnect/Enabled", handler.HandleEnabled)
+	initiate := limited("device_start", handler.HandleInitiate)
+	r.Method(http.MethodPost, "/QuickConnect/Initiate", initiate)
+	// Jellyfin 10.8 opened requests with GET; later servers keep it.
+	r.Method(http.MethodGet, "/QuickConnect/Initiate", initiate)
+	r.Method(http.MethodGet, "/QuickConnect/Connect", limited("device_poll", handler.HandleConnect))
+	r.Method(http.MethodPost, "/Users/AuthenticateWithQuickConnect", limited("device_poll", authHandler.HandleAuthenticateWithQuickConnect))
+	if deps.Authenticator != nil {
+		// Only a signed-in session approves, never an API key: an approval
+		// gives the device a login session of the account.
+		r.With(deps.Authenticator.RequireSession).
+			Method(http.MethodPost, "/QuickConnect/Authorize", limited("device_lookup", handler.HandleAuthorize))
+	}
 }

@@ -72,8 +72,13 @@ type Dependencies struct {
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	Authenticator      *Authenticator
-	WebFS              fs.FS
+	// RateLimitMW is the native API's request limiter, shared so
+	// AuthenticateByName spends the same per-client "login" budget as native
+	// sign-in. Nil (rate limiting disabled) leaves sign-in unlimited, as on
+	// the native API.
+	RateLimitMW   *ratelimit.Middleware
+	Authenticator *Authenticator
+	WebFS         fs.FS
 	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.
@@ -84,6 +89,10 @@ type Dependencies struct {
 	ContentService  ContentService
 	UserDataService UserDataService
 	AuthService     *auth.Service
+	// DeviceLogin serves Jellyfin Quick Connect on Silo's device sign-in
+	// (auth.DeviceLoginService). Nil turns Quick Connect off:
+	// /QuickConnect/Enabled answers false.
+	DeviceLogin QuickConnectService
 
 	// WatchCompletionObserver is notified when a Jellyfin-compat mark-played
 	// completes a watch, so fully-watched items leave the watchlist. Optional.
