@@ -134,14 +134,56 @@ it("discards a prefetch read that a write overlapped", async () => {
   releaseRead();
   heldReads.until = null;
   await waitFor(() =>
-    expect(queryClient.getQueryState(catalogKeys.itemDetail("movie-1"))?.status).toBe("error"),
+    expect(queryClient.getQueryState(catalogKeys.itemDetail("movie-1"))).toBeUndefined(),
   );
-  expect(queryClient.getQueryData(catalogKeys.itemDetail("movie-1"))).toBeUndefined();
 
   act(() => result.current("movie-2"));
   await act(async () => {});
   expect(reads.map((read) => read.id)).toEqual(["movie-1"]);
 
+  finishWrite();
+  await writing;
+});
+
+it("still reads a prefetched title as a view after a cache patch replaces the detail", async () => {
+  const queryClient = client(true);
+  const wrapper = wrapperFor(queryClient);
+  const prefetch = renderHook(() => usePrefetchCatalogItemDetail(), { wrapper });
+  act(() => prefetch.result.current("movie-1"));
+  await waitFor(() =>
+    expect(queryClient.getQueryData(catalogKeys.itemDetail("movie-1"))).toBeDefined(),
+  );
+  queryClient.setQueryData(catalogKeys.itemDetail("movie-1"), (detail: object) => ({
+    ...detail,
+    patched: true,
+  }));
+
+  renderHook(() => useCatalogItemDetailView("movie-1"), { wrapper });
+
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(reads[1]).toEqual({ id: "movie-1", query: {}, fail: false });
+});
+
+it("gives a page that opened during a discarded prefetch an ordinary read", async () => {
+  const queryClient = client(true);
+  const wrapper = wrapperFor(queryClient);
+  const prefetch = renderHook(() => usePrefetchCatalogItemDetail(), { wrapper });
+  let finishWrite = () => {};
+  const write = queryClient.getMutationCache().build(queryClient, {
+    mutationFn: () => new Promise<void>((resolve) => (finishWrite = resolve)),
+  });
+  let releaseRead = () => {};
+  heldReads.until = new Promise<void>((resolve) => (releaseRead = resolve));
+
+  act(() => prefetch.result.current("movie-1"));
+  await act(async () => {});
+  const view = renderHook(() => useCatalogItemDetailView("movie-1"), { wrapper });
+  const writing = write.execute(undefined);
+  releaseRead();
+  heldReads.until = null;
+
+  await waitFor(() => expect(view.result.current.status).toBe("success"));
+  expect(reads.map((read) => read.query)).toEqual([{ prefetch: true }, {}]);
   finishWrite();
   await writing;
 });

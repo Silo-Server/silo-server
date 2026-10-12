@@ -22950,7 +22950,7 @@
             "type": "boolean"
           },
           "item_detail_prefetch": {
-            "description": "getCatalogItem accepts prefetch=true for speculative reads that neither queue a metadata refresh nor promote a watchlist entry",
+            "description": "getCatalogItem accepts prefetch=true for speculative reads that do not queue a metadata refresh, repair file probe data, or promote a watchlist entry",
             "type": "boolean"
           },
           "max_sessions_per_account": {
@@ -133810,13 +133810,13 @@
             }
           },
           {
-            "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
+            "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh, repair file probe data, or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
             "explode": false,
             "in": "query",
             "name": "prefetch",
             "schema": {
               "default": false,
-              "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
+              "description": "Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh, repair file probe data, or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first.",
               "type": "boolean"
             }
           }

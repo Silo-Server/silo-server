@@ -348,9 +348,13 @@ func (h *CatalogHandler) AudiobookGroups(ctx context.Context, v ItemViewer, quer
 
 // ItemDetail answers the full detail of one item, a synthetic season
 // included, enriched with the viewer's state. A view also queues a metadata
-// refresh when one is due and promotes a matching watchlist entry; a
-// speculative prefetch does neither, so warming a cache has no side effects.
+// refresh when one is due, promotes a matching watchlist entry, and repairs
+// missing file probe data; a speculative prefetch does none of these, so
+// warming a cache has no side effects.
 func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, id string, prefetch bool) (*catalog.ItemDetail, error) {
+	if prefetch {
+		ctx = catalog.WithSpeculativeRead(ctx)
+	}
 	detail, err := h.items.detailSvc.GetItemDetail(ctx, id, v.Access)
 	if err != nil {
 		if isNotFound(err) {

@@ -346,14 +346,15 @@ picks.
 ## Item detail prefetch
 
 Reading `getCatalogItem` counts as opening the title. When the item's metadata is
-incomplete or stale, the server queues a background refresh, and for a movie or
-series it promotes a matching external watchlist entry onto the profile's library
-watchlist before reporting `user_state.in_watchlist`.
+incomplete or stale, the server queues a background refresh; when a file lacks
+probe data, it probes the file and stores the result; and for a movie or series it
+promotes a matching external watchlist entry onto the profile's library watchlist
+before reporting `user_state.in_watchlist`.
 
 Clients that warm a cache speculatively, such as web prefetching a poster card the
 pointer rests on, pass `prefetch=true`. A prefetch returns the same detail but
-neither queues a refresh nor promotes a watchlist entry, so `in_watchlist` reflects
-the watchlist as it stands. When the user actually opens the title, read it again
+does none of these: file facts stay as last probed, and `in_watchlist` reflects the
+watchlist as it stands. When the user actually opens the title, read it again
 without `prefetch`; the web client renders the prefetched detail at once and sends
 that read in the background.
 

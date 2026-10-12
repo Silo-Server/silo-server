@@ -152,7 +152,7 @@ type CatalogItemDeviceInput struct {
 // CatalogItemReadInput names one item to read as its detail page.
 type CatalogItemReadInput struct {
 	CatalogItemDeviceInput
-	Prefetch bool `query:"prefetch" default:"false" doc:"Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first."`
+	Prefetch bool `query:"prefetch" default:"false" doc:"Marks a speculative read, such as warming a cache when a pointer rests on a card. The read does not queue a metadata refresh, repair file probe data, or promote a watchlist entry; check getCatalogSearchCapabilities.item_detail_prefetch first."`
 }
 
 // CatalogSeriesInput names one series.
