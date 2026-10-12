@@ -139,8 +139,9 @@ the account's role is, and is not the account's own login session. `GET
 only the v2 routes in `remotePlaybackRoutes`
 (`internal/api/middleware/remote_playback.go`): the session itself (`GET
 /account/me`, logout), playback and its control socket and media, next-up
-and browsing reads for the bound profile, its track choices, subtitles, the
-effective settings reads and the events socket. Every other route answers 403
+and browsing reads for the bound profile, its track choices, subtitles and
+their sync and timing, the settings reads the player makes and the events
+socket. Every other route answers 403
 (v2 `permission_denied`), so a route added later stays closed to handoffs
 until it is listed, and so is a path whose encoding the router would read
 differently. That shuts out:

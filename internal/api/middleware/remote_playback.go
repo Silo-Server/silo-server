@@ -43,9 +43,12 @@ var remotePlaybackRoutes = []scopeRoute{
 	{http.MethodPut, regexp.MustCompile(`^/api/v2/(audio|subtitle)-prefs/[^/]+$`)},
 	{http.MethodDelete, regexp.MustCompile(`^/api/v2/(audio|subtitle)-prefs/[^/]+$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/library-playback-prefs$`)},
-	// Subtitles found or made while playing.
+	// Subtitles found or made while playing, and their sync and timing.
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/subtitles/(providers/status|sync/status|ai/(status|quota|jobs(/[^/]+)?)|[0-9]+)$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v2/subtitles/(search|download|detect-language|ai/translate|ai/jobs/[^/]+/cancel)$`)},
+	{http.MethodGet, regexp.MustCompile(`^/api/v2/subtitles/([0-9]+/sync(/[^/]+)?|stored/[^/]+/(sync|metadata))$`)},
+	{http.MethodPost, regexp.MustCompile(`^/api/v2/subtitles/([0-9]+/sync/[^/]+|stored/[^/]+/sync)$`)},
+	{http.MethodPut, regexp.MustCompile(`^/api/v2/subtitles/([0-9]+/sync/[^/]+|stored/[^/]+)/timing$`)},
 	// Next up, and browsing the bound profile's libraries on the device.
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/home/(capabilities|layout|sections(/[^/]+/items)?)$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/catalog(/(filters(/search)?|search/capabilities|people(/[^/]+)?|works/[^/]+|items/[^/]+(/(episodes|versions))?|series/[^/]+/seasons(/[0-9]+(/episodes)?)?))?$`)},
@@ -54,7 +57,7 @@ var remotePlaybackRoutes = []scopeRoute{
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries(/capabilities)?$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/images/capabilities$`)},
 	// Settings the player reads; writes are refused.
-	{http.MethodGet, regexp.MustCompile(`^/api/v2/settings/(contract(/capabilities)?|values/effective|subtitle-appearance/effective)$`)},
+	{http.MethodGet, regexp.MustCompile(`^/api/v2/settings/(contract(/capabilities)?|values/effective|subtitle-appearance/effective|overlay-config)$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v2/settings/values/effective$`)},
 	// The events socket the TV apps keep open.
 	{http.MethodGet, regexp.MustCompile(`^/api/v2/events/capabilities$`)},

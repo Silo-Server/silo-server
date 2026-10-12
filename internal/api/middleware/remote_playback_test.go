@@ -211,6 +211,9 @@ func TestRemotePlaybackRoutesAgainstContract(t *testing.T) {
 		"startPlayback": false, "replanPlayback": false, "updatePlaybackProgress": false, "stopPlayback": false,
 		"reportPlaybackRouteEvent": false, "createPlaybackControlSocketTicket": false, "getWatchState": false,
 		"syncProgress": false, "listHomeSections": false, "createEventsSocketTicket": false,
+		"getOverlayConfig": false, "listSubtitleSync": false, "getSubtitleSync": false, "startSubtitleSync": false,
+		"setSubtitleTiming": false, "getStoredSubtitleSync": false, "syncStoredSubtitle": false,
+		"setStoredSubtitleTiming": false, "getViewerSubtitleMetadata": false,
 	}
 	seen := map[string]bool{}
 	for p, ops := range contract.Paths {
