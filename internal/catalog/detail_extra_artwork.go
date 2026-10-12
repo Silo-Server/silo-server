@@ -13,18 +13,24 @@ type itemBackdropLister interface {
 }
 
 // copyExtraArtwork copies a movie's or series' banner, thumb, clear art and
-// disc art paths and thumbhashes onto its detail. Jellyfin batch detail reads
-// only the paths; presignExtraArtwork resolves the URLs for single-item detail.
+// disc art paths onto its detail, with a thumbhash only beside its path.
+// Jellyfin batch detail reads only the paths; attachExtraBackdrops resolves
+// the URLs for single-item detail.
 func copyExtraArtwork(detail *ItemDetail, item *models.MediaItem) {
 	detail.BannerPath, detail.ThumbPath = item.BannerPath, item.ThumbPath
 	detail.ClearArtPath, detail.DiscPath = item.ClearArtPath, item.DiscPath
-	detail.BannerThumbhash, detail.ThumbThumbhash = item.BannerThumbhash, item.ThumbThumbhash
+	if item.BannerPath != "" {
+		detail.BannerThumbhash = item.BannerThumbhash
+	}
+	if item.ThumbPath != "" {
+		detail.ThumbThumbhash = item.ThumbThumbhash
+	}
 }
 
 // presignExtraArtwork resolves the banner, thumb, clear art and disc art URLs
 // of a detail filled by copyExtraArtwork, keeping a thumbhash only beside its
-// URL. Only single-item detail returns these URLs, so batch reads skip the
-// four lookups per item.
+// URL. Only single-item detail returns these URLs, so attachExtraBackdrops
+// calls this only when it presigns.
 func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDetail, size string) {
 	detail.BannerURL = s.PresignImageURL(ctx, detail.BannerPath, artworkkey.ImageBanner, size)
 	detail.ThumbURL = s.PresignImageURL(ctx, detail.ThumbPath, artworkkey.ImageThumb, size)
@@ -40,10 +46,11 @@ func (s *DetailService) presignExtraArtwork(ctx context.Context, detail *ItemDet
 
 // attachExtraBackdrops gives each movie or series detail the cached paths of
 // its backdrops after the primary, with one query for all of them. With
-// presign it also lists every backdrop URL in display order, the primary
-// (BackdropURL) first; batch reads skip that, since only single-item detail
-// returns the URLs. A backdrop still waiting for the image cache has no path
-// yet and is left out.
+// presign it also resolves the banner, thumb, clear art and disc art URLs
+// (presignExtraArtwork) and lists every backdrop URL in display order, the
+// primary (BackdropURL) first; batch reads skip that, since only single-item
+// detail returns the URLs. A backdrop still waiting for the image cache has no
+// path yet and is left out.
 func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*ItemDetail, size string, presign bool) {
 	ids := make([]string, 0, len(details))
 	for _, detail := range details {
@@ -66,6 +73,7 @@ func (s *DetailService) attachExtraBackdrops(ctx context.Context, details []*Ite
 		if !presign {
 			continue
 		}
+		s.presignExtraArtwork(ctx, detail, size)
 		var urls []string
 		if detail.BackdropURL != "" {
 			urls = append(urls, detail.BackdropURL)

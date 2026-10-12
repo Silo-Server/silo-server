@@ -229,6 +229,10 @@ func TestItemBackdropReplaceWaitsForCacheWriteDB(t *testing.T) {
 	if _, err := worker.Exec(ctx, `UPDATE media_item_backdrops SET path = $2, thumbhash = 'ta' WHERE id = $1`, rows[0].ID, cachedOne); err != nil {
 		t.Fatal(err)
 	}
+	var workerPID int
+	if err := worker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&workerPID); err != nil {
+		t.Fatal(err)
+	}
 
 	// A refresh that read the rows earlier inserts a new first backdrop, so
 	// fanart-1 moves to ordinal 2.
@@ -245,13 +249,13 @@ func TestItemBackdropReplaceWaitsForCacheWriteDB(t *testing.T) {
 		})
 		done <- result{rows, err}
 	}()
-	// Wait until Replace is blocked on the worker's row lock.
+	// Wait until Replace is blocked by the worker's row lock.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var waiting int
 		if err := pool.QueryRow(ctx, `
 			SELECT count(*) FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND query LIKE '%media_item_backdrops%'`).Scan(&waiting); err != nil {
+			WHERE pg_blocking_pids(pid) @> ARRAY[$1::int]`, workerPID).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting > 0 {

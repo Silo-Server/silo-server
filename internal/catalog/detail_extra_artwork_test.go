@@ -55,6 +55,9 @@ func TestPresignExtraArtworkUsesEachTypesLadder(t *testing.T) {
 
 	empty := &ItemDetail{}
 	copyExtraArtwork(empty, &models.MediaItem{BannerThumbhash: "orphan"})
+	if empty.BannerThumbhash != "" {
+		t.Fatalf("copied the thumbhash %q of a banner with no path", empty.BannerThumbhash)
+	}
 	s.presignExtraArtwork(context.Background(), empty, "")
 	if empty.BannerURL != "" || empty.BannerThumbhash != "" {
 		t.Fatalf("an item without a banner got %q/%q", empty.BannerURL, empty.BannerThumbhash)
@@ -72,7 +75,7 @@ func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
 	}
 	resolver := &countingResolver{}
 	s := &DetailService{imageResolver: resolver, backdropRepo: lister}
-	movie := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary"}
+	movie := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary", BannerPath: "local/movies/movie-1/ee/banner/original.r5.webp"}
 	series := &ItemDetail{ContentID: "series-1", Type: "series"}
 	bare := &ItemDetail{ContentID: "movie-2", Type: "movie"}
 	episode := &ItemDetail{ContentID: "movie-1", Type: "episode", BackdropURL: "https://cdn.example/series-backdrop"}
@@ -85,6 +88,9 @@ func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
 	}; !slices.Equal(movie.BackdropURLs, want) {
 		t.Fatalf("movie backdrop URLs = %q, want %q", movie.BackdropURLs, want)
 	}
+	if movie.BannerURL != "https://cdn.example/local/movies/movie-1/ee/banner/w500.r5.webp" {
+		t.Fatalf("movie banner URL = %q, want it presigned with the backdrops", movie.BannerURL)
+	}
 	if want := []string{"local/movies/movie-1/aa-1/backdrop/original.r1.webp", "local/movies/movie-1/cc-3/backdrop/original.r3.webp"}; !slices.Equal(movie.ExtraBackdropPaths, want) {
 		t.Fatalf("movie extra backdrop paths = %q, want %q", movie.ExtraBackdropPaths, want)
 	}
@@ -96,10 +102,10 @@ func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
 	}
 
 	// A batch read carries the paths without presigning anything.
-	batch := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary"}
+	batch := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary", BannerPath: "local/movies/movie-1/ee/banner/original.r5.webp"}
 	resolver.calls = 0
 	s.attachExtraBackdrops(context.Background(), []*ItemDetail{batch}, "", false)
-	if resolver.calls != 0 || batch.BackdropURLs != nil || len(batch.ExtraBackdropPaths) != 2 {
+	if resolver.calls != 0 || batch.BackdropURLs != nil || batch.BannerURL != "" || len(batch.ExtraBackdropPaths) != 2 {
 		t.Fatalf("batch: %d presigns, URLs %q, paths %q", resolver.calls, batch.BackdropURLs, batch.ExtraBackdropPaths)
 	}
 }

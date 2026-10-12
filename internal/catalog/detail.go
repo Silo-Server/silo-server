@@ -1532,7 +1532,6 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err != nil {
 			return nil, err
 		}
-		s.presignExtraArtwork(ctx, detail, string(filter.ImageSize))
 		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, string(filter.ImageSize), true)
 		return detail, nil
 	case target.season != nil:
@@ -1859,11 +1858,13 @@ type fileVersionBatchFetcher interface {
 // batching the shared per-item lookups that GetItemDetail otherwise issues
 // one-at-a-time: row load (GetByIDs), access checks (EnsureAccessibleIDs +
 // presentation-library membership), localization, credits, media files, and
-// work summaries. The detail produced for each id is byte-for-byte identical to
-// calling GetItemDetail(id): the same builder (buildMediaItemDetail) assembles
-// it, only fed pre-resolved inputs via itemDetailPrefetch. Any input building
-// block missing a batch form falls back to its inline per-item lookup, so the
-// output never drifts from the unbatched path.
+// work summaries. The detail produced for each id matches calling
+// GetItemDetail(id): the same builder (buildMediaItemDetail) assembles it, only
+// fed pre-resolved inputs via itemDetailPrefetch. Any input building block
+// missing a batch form falls back to its inline per-item lookup, so the output
+// never drifts from the unbatched path. The one difference is the URLs that only
+// single-item detail returns: the banner, thumb, clear art and disc art URLs and
+// BackdropURLs are left empty, and their paths are set instead.
 //
 // IDs that are not item-typed media (e.g. episodes or seasons — handled by
 // GetEpisodeDetailsForSeries / GetItemDetail respectively), are access-filtered,

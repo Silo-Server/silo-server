@@ -40,6 +40,17 @@ func itemOnlyArtworkFields(item *models.MediaItem) []itemArtworkField {
 	}
 }
 
+// isItemOnlyArtworkType reports whether imageType is one of the item slots
+// that itemOnlyArtworkFields lists.
+func isItemOnlyArtworkType(imageType ImageType) bool {
+	switch imageType {
+	case ImageBanner, ImageThumb, ImageClearArt, ImageDisc:
+		return true
+	default:
+		return false
+	}
+}
+
 // carryItemOnlyArtwork starts the rebuilt item from the stored banner, thumb,
 // clear art and disc slots, as the merge does for the poster, backdrop and
 // logo. Without it, every write would clear them, including localization and

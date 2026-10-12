@@ -148,6 +148,18 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
 		}
 	})
+	t.Run("a poster keeps the old rule", func(t *testing.T) {
+		// Poster, backdrop and logo are not carried over, so an unchanged
+		// pending source that the write offered nothing for is still cleared,
+		// as a localization row whose provider withdrew its poster needs.
+		const remote = "https://img.example/de-poster.jpg"
+		existing := &models.MediaItem{PosterSourcePath: remote}
+		item := &models.MediaItem{PosterSourcePath: remote}
+		prepareItemImagesForQueue(item, existing)
+		if item.PosterSourcePath != "" {
+			t.Fatalf("poster source = %q, want it cleared", item.PosterSourcePath)
+		}
+	})
 	t.Run("locked artwork", func(t *testing.T) {
 		item := &models.MediaItem{BannerSourcePath: pending, LockedFields: []int{int(FieldImages)}}
 		applyBestImages(item, []RemoteImage{{ProviderID: "tmdb", URL: "https://img.example/banner.jpg", Type: ImageBanner, Rating: 9}}, MergeFillEmpty, "en")

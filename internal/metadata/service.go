@@ -8638,9 +8638,11 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
-		// A slot still waiting for its cache job, which this write left as
-		// stored, keeps its source so the queued job still matches it.
-		if *field.path == "" && existingPath == "" && *field.source != "" && *field.source == existingSource {
+		// A banner, thumb, clear art or disc slot is carried over from the
+		// stored item; one still waiting for its cache job keeps its source
+		// so the queued job still matches it.
+		if isItemOnlyArtworkType(field.imageType) && *field.path == "" && existingPath == "" &&
+			*field.source != "" && *field.source == existingSource {
 			continue
 		}
 		currentThumbhash := ""
