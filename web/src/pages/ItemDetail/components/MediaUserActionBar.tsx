@@ -4,6 +4,7 @@ import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
 import { useDeleteRating, useSetRating } from "@/hooks/queries/ratings";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { itemTitleLinks } from "@/lib/titleLinks";
 import { getWatchedActionLabel } from "../watchedState";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
 
@@ -17,7 +18,8 @@ type UserActionProps =
   | "onToggleWatchlist"
   | "inWatchlist"
   | "rating"
-  | "onRatingChange";
+  | "onRatingChange"
+  | "links";
 
 interface MediaUserActionBarProps extends Omit<ActionBarProps, UserActionProps> {
   item: ItemDetail;
@@ -64,6 +66,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
     <ActionBar
       {...props}
       itemTitle={item.title}
+      links={itemTitleLinks(item)}
       watchedLabel={getWatchedActionLabel(item)}
       isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}

@@ -72,11 +72,11 @@ type Dependencies struct {
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	// RateLimitMW is the native API's request limiter, shared so Jellyfin
-	// sign-in routes spend the same per-client budgets as their native
-	// counterparts. Nil (rate limiting disabled) leaves them unlimited, as on
-	// the native API.
-	RateLimitMW   *ratelimit.Middleware
+	// RateLimit is the native API's request rate limiter, shared (not copied)
+	// so admin budget changes reload in place for both listeners and a client
+	// IP spends one set of counters across them. Nil disables rate limiting on
+	// this listener, as on the native API when rate limiting is off.
+	RateLimit     *ratelimit.Middleware
 	Authenticator *Authenticator
 	WebFS         fs.FS
 	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),

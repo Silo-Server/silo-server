@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1483,26 +1485,108 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	if !ok || len(titleTokens) == 0 {
 		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
 	}
+	// Compare without spaces so "Live Stream From Hell" is an exact match for
+	// "Livestream from Hell" and "spiderman" for "Spider-Man".
+	compactTitle, compactQuery := compactFuzzyTokens(titleTokens), compactFuzzyTokens(queryTokens)
 	score := fuzzyTitleScore{
-		exact:       title == query,
-		contiguous:  strings.Contains(title, query),
+		exact:       compactTitle == compactQuery,
+		contiguous:  strings.Contains(compactTitle, compactQuery),
 		extraTokens: absInt(len(titleTokens) - len(queryTokens)),
 	}
-	for _, queryToken := range queryTokens {
-		maxEdits := fuzzyAutoMaxEdits(len(queryToken))
-		best := maxEdits + 1
-		for _, titleToken := range titleTokens {
-			distance := boundedLevenshteinRunes(queryToken, titleToken, maxEdits)
-			if distance < best {
-				best = distance
+	// A query word may also match two adjacent title words joined, and two
+	// adjacent query words joined may match one title word.
+	titleTerms := slices.Concat(titleTokens, joinAdjacentFuzzyTokens(titleTokens))
+	matches := make([]fuzzyTokenMatch, len(queryTokens))
+	for i, token := range queryTokens {
+		matches[i] = bestFuzzyTokenMatch(token, titleTerms)
+	}
+	for i := 0; i < len(queryTokens); i++ {
+		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) && fuzzyTokensJoinable(queryTokens[i], queryTokens[i+1]) {
+			if pair := bestFuzzyPairMatch(queryTokens[i], queryTokens[i+1], titleTerms); pair.ok {
+				score.matchedTokens += 2
+				score.editDistance += pair.distance
+				i++
+				continue
 			}
 		}
-		if best <= maxEdits {
+		if matches[i].ok {
 			score.matchedTokens++
 		}
-		score.editDistance += best
+		score.editDistance += matches[i].distance
 	}
 	return score
+}
+
+type fuzzyTokenMatch struct {
+	distance int
+	ok       bool // distance is within the token's typo allowance
+}
+
+func bestFuzzyTokenMatch(token []rune, terms [][]rune) fuzzyTokenMatch {
+	maxEdits := fuzzyAutoMaxEdits(len(token))
+	best := maxEdits + 1
+	for _, term := range terms {
+		if distance := boundedLevenshteinRunes(token, term, maxEdits); distance < best {
+			best = distance
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= maxEdits}
+}
+
+// bestFuzzyPairMatch matches two adjacent query words against one term split
+// into two parts, each part within its own word's typo allowance. Splitting
+// keeps a short word from being dropped: "ed wood" does not match "Wood", nor
+// "a spider" match "Spider".
+func bestFuzzyPairMatch(first, second []rune, terms [][]rune) fuzzyTokenMatch {
+	firstEdits, secondEdits := fuzzyAutoMaxEdits(len(first)), fuzzyAutoMaxEdits(len(second))
+	best := firstEdits + secondEdits + 1
+	for _, term := range terms {
+		if absInt(len(term)-len(first)-len(second)) > firstEdits+secondEdits {
+			continue
+		}
+		for split := max(0, len(first)-firstEdits); split <= min(len(term), len(first)+firstEdits); split++ {
+			head := boundedLevenshteinRunes(first, term[:split], firstEdits)
+			if head > firstEdits {
+				continue
+			}
+			if tail := boundedLevenshteinRunes(second, term[split:], secondEdits); tail <= secondEdits {
+				best = min(best, head+tail)
+			}
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= firstEdits+secondEdits}
+}
+
+func joinAdjacentFuzzyTokens(tokens [][]rune) [][]rune {
+	if len(tokens) < 2 {
+		return nil
+	}
+	joined := make([][]rune, 0, len(tokens)-1)
+	for i := 0; i+1 < len(tokens); i++ {
+		if fuzzyTokensJoinable(tokens[i], tokens[i+1]) {
+			joined = append(joined, slices.Concat(tokens[i], tokens[i+1]))
+		}
+	}
+	return joined
+}
+
+// compactFuzzyTokens joins tokens without spaces, except between two numbers.
+func compactFuzzyTokens(tokens [][]rune) string {
+	var b strings.Builder
+	for i, token := range tokens {
+		if i > 0 && !fuzzyTokensJoinable(tokens[i-1], token) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(string(token))
+	}
+	return b.String()
+}
+
+// fuzzyTokensJoinable reports whether two adjacent words may be read as one.
+// Normalization turns number words into digits, so joining "1 2" into "12"
+// would make "One Two" an exact match for "Twelve".
+func fuzzyTokensJoinable(left, right []rune) bool {
+	return !unicode.IsDigit(left[len(left)-1]) || !unicode.IsDigit(right[0])
 }
 
 func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {

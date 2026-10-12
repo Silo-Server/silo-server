@@ -102,10 +102,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.seasonNumber = new(n)
 		}
 	}
-	if raw := q.Get("EnableImageTypes"); raw != "" {
+	// Jellyfin Web repeats the parameter once per type, so every value counts.
+	// A list with no types means every type, as in Jellyfin.
+	if kinds := splitCommaValues(q.Values("EnableImageTypes")); len(kinds) > 0 {
 		result.enableImageTypes = map[string]bool{}
-		for kind := range strings.SplitSeq(raw, ",") {
-			result.enableImageTypes[strings.ToLower(strings.TrimSpace(kind))] = true
+		for _, kind := range kinds {
+			result.enableImageTypes[strings.ToLower(kind)] = true
 		}
 	}
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {

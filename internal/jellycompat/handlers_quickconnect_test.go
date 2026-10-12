@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -269,5 +270,39 @@ func TestQuickConnectUsernameMatchesPasswordSignIn(t *testing.T) {
 	}
 	if got := quickConnectUsername("alice", "Kids"); got != "alice#Kids" {
 		t.Fatalf("other profile = %q", got)
+	}
+}
+
+// TestQuickConnectSpendsDeviceBudgets: opening a request spends the native
+// device_start budget per client address, answered with the compat 429.
+func TestQuickConnectSpendsDeviceBudgets(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	mw := newTestRateLimit(t, map[string]string{
+		"ratelimit.auth.device_start.requests_per_minute": "1",
+		"ratelimit.auth.device_start.burst":               "1",
+	})
+	service := &fakeQuickConnect{}
+	store := NewSessionStore(time.Hour, time.Now)
+	router := NewRouter(Dependencies{
+		Config:           cfg,
+		ClientIPResolver: clientip.NewResolver(nil),
+		SessionStore:     store,
+		RateLimit:        mw,
+		DeviceLogin:      service,
+		LoginResolver:    NewLoginResolver(nil, nil, store, nil, nil).WithQuickConnect(service),
+	})
+	const tv, other = "203.0.113.10", "198.51.100.20"
+	if rec := serveFrom(router, tv, http.MethodPost, "/QuickConnect/Initiate", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("first Initiate = %d %s", rec.Code, rec.Body.String())
+	}
+	rec := serveFrom(router, tv, http.MethodPost, "/QuickConnect/Initiate", "", "")
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" || !strings.Contains(rec.Body.String(), "TooManyRequests") {
+		t.Fatalf("Initiate over the budget = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := serveFrom(router, other, http.MethodPost, "/QuickConnect/Initiate", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("Initiate from another address = %d", rec.Code)
 	}
 }

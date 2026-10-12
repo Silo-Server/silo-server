@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
@@ -36,11 +36,12 @@ func (p *Provider) GetSeasons(ctx context.Context, req metadata.SeasonsRequest) 
 	}
 	sort.Ints(seasonNumbers)
 
+	finder := newSidecarFinder(ctx)
 	var seasons []metadata.SeasonResult
 	for _, number := range seasonNumbers {
 		dirs := compactNFOPaths(req.SeasonDirectoryPaths[number])
 		parsed := parseSeasonSidecar(ctx, dirs, number)
-		poster := findSeasonPoster(dirs, seriesRoots, number)
+		poster := finder.findSeasonPoster(dirs, seriesRoots, number)
 		if parsed == nil && poster == "" {
 			continue
 		}
@@ -49,9 +50,7 @@ func (p *Provider) GetSeasons(ctx context.Context, req metadata.SeasonsRequest) 
 			season.Title = parsed.Title
 			season.Overview = parsed.Overview
 		}
-		if poster != "" {
-			season.PosterPath = "file://" + poster
-		}
+		season.PosterPath = poster
 		seasons = append(seasons, season)
 	}
 	return seasons, nil
@@ -82,14 +81,19 @@ func parseSeasonSidecar(ctx context.Context, seasonDirs []string, seasonNumber i
 	return nil
 }
 
-// findSeasonPoster locates season artwork: poster/folder/cover inside the
-// season directory first, then the Kodi-style seasonNN-poster form in the
-// series root.
-func findSeasonPoster(seasonDirs []string, seriesRoots []string, seasonNumber int) string {
+// findSeasonPoster returns the source of a season's artwork: poster, folder,
+// or cover inside the season folder first, then the Kodi-style seasonNN-poster
+// (or season-specials-poster) in the series root. Names match ignoring case.
+// In a flat layout the episodes' folder is the series root itself, whose
+// poster.jpg is the series' own art, so it is not searched as a season folder.
+func (f *sidecarFinder) findSeasonPoster(seasonDirs []string, seriesRoots []string, seasonNumber int) string {
 	for _, name := range []string{"poster", "folder", "cover"} {
 		for _, dir := range seasonDirs {
-			if path := findLocalArtworkFile(dir, name); path != "" {
-				return path
+			if slices.Contains(seriesRoots, dir) {
+				continue
+			}
+			if source := f.find(dir, name); source != "" {
+				return source
 			}
 		}
 	}
@@ -99,17 +103,17 @@ func findSeasonPoster(seasonDirs []string, seriesRoots []string, seasonNumber in
 	}
 	for _, name := range rootNames {
 		for _, dir := range seriesRoots {
-			if path := findLocalArtworkFile(dir, name); path != "" {
-				return path
+			if source := f.find(dir, name); source != "" {
+				return source
 			}
 		}
 	}
 	return ""
 }
 
-// GetEpisodes reads <basename>.nfo and <basename>-thumb sidecars for each
-// episode media file of the requested season. Episodes with neither
-// contribute nothing (synthesized fallback stays in charge of them).
+// GetEpisodes reads <basename>.nfo and <basename>-thumb (or <basename>) image
+// sidecars for each episode media file of the requested season. Episodes with
+// neither contribute nothing (synthesized fallback stays in charge of them).
 func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest) ([]metadata.EpisodeResult, error) {
 	if len(req.EpisodeFilePaths) == 0 {
 		return nil, nil
@@ -120,10 +124,11 @@ func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest
 	}
 	sort.Ints(episodeNumbers)
 
+	finder := newSidecarFinder(ctx)
 	var episodes []metadata.EpisodeResult
 	for _, number := range episodeNumbers {
 		paths := compactNFOPaths(req.EpisodeFilePaths[number])
-		parsed, thumb := findEpisodeSidecars(ctx, paths, req.SeasonNumber, number)
+		parsed, thumb := finder.findEpisodeSidecars(paths, req.SeasonNumber, number)
 		if parsed == nil && thumb == "" {
 			continue
 		}
@@ -143,35 +148,32 @@ func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest
 				RTAudience: parsed.RatingRTAudience,
 			}
 		}
-		if thumb != "" {
-			episode.StillPath = "file://" + thumb
-		}
+		episode.StillPath = thumb
 		episodes = append(episodes, episode)
 	}
 	return episodes, nil
 }
 
-// findEpisodeSidecars locates the episode's <basename>.nfo and
-// <basename>-thumb image across its media file paths. Numbers declared in
-// the NFO are checked against the filename-derived SxxEyy, which wins on
-// conflict (naming owns structure).
-func findEpisodeSidecars(ctx context.Context, mediaPaths []string, seasonNumber, episodeNumber int) (*parsedNFO, string) {
+// findEpisodeSidecars locates the episode's <basename>.nfo and its thumbnail
+// across its media file paths: <basename>-thumb first, then an image named
+// <basename> itself. Numbers declared in the NFO are checked against the
+// filename-derived SxxEyy, which wins on conflict (naming owns structure).
+func (f *sidecarFinder) findEpisodeSidecars(mediaPaths []string, seasonNumber, episodeNumber int) (*parsedNFO, string) {
 	var parsed *parsedNFO
-	thumb := ""
 	for _, mediaPath := range mediaPaths {
-		dir := filepath.Dir(mediaPath)
-		base := strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))
-		if parsed == nil {
-			parsed = parseEpisodeSidecar(ctx, filepath.Join(dir, base+".nfo"), seasonNumber, episodeNumber)
-		}
-		if thumb == "" {
-			thumb = findLocalArtworkFile(dir, base+"-thumb")
-		}
-		if parsed != nil && thumb != "" {
+		parsed = parseEpisodeSidecar(f.ctx, filepath.Join(filepath.Dir(mediaPath), mediaBasename(mediaPath)+".nfo"), seasonNumber, episodeNumber)
+		if parsed != nil {
 			break
 		}
 	}
-	return parsed, thumb
+	for _, suffix := range []string{"-thumb", ""} {
+		for _, mediaPath := range mediaPaths {
+			if thumb := f.find(filepath.Dir(mediaPath), mediaBasename(mediaPath)+suffix); thumb != "" {
+				return parsed, thumb
+			}
+		}
+	}
+	return parsed, ""
 }
 
 func parseEpisodeSidecar(ctx context.Context, path string, seasonNumber, episodeNumber int) *parsedNFO {

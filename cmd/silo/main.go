@@ -3556,8 +3556,9 @@ func main() {
 			SubtitlePlaySync: subtitlePlaySync,
 			// One PIN budget per profile across the native and Jellyfin logins.
 			ProfilePINAttempts: deps.ProfilePINAttempts,
-			// Jellyfin sign-in spends the native per-client budgets.
-			RateLimitMW: deps.RateLimitMW,
+			// The native limiter itself, so budgets, reloads, and counters
+			// are shared with the native API. Nil when rate limiting is off.
+			RateLimit: deps.RateLimitMW,
 		}
 
 		// Wire direct dependencies when DB is available.
