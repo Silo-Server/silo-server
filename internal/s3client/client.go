@@ -762,17 +762,29 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 		}
 
 		deleted += len(batch)
-		if out != nil {
+		if out != nil && len(out.Errors) > 0 {
+			// Name each failure by the key the caller asked for. The key in the
+			// response comes from the backend, like its message, so one that
+			// matches no requested key is never logged or returned.
+			requested := make(map[string]string, len(batch))
+			for _, key := range batch {
+				requested[c.prefixedKey(key)] = key
+			}
 			for _, e := range out.Errors {
 				if isMissingObjectCode(aws.ToString(e.Code)) {
 					continue
 				}
 				deleted--
+				key, ok := requested[aws.ToString(e.Key)]
+				if !ok {
+					key = "unrecognized key"
+				}
+				code := safeErrorCode(aws.ToString(e.Code))
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
-					"key", aws.ToString(e.Key), "code", safeErrorCode(aws.ToString(e.Code)))
+					"key", key, "code", code)
 				// The backend's free-form message is omitted from both the log
 				// and the returned error: it may echo credentials or signed URLs.
-				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, aws.ToString(e.Key), safeErrorCode(aws.ToString(e.Code))))
+				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, key, code))
 			}
 		}
 	}
@@ -822,15 +834,19 @@ func isErrorCodeRune(r rune) bool {
 
 // isBatchDeleteUnsupported reports whether a DeleteObjects error means the
 // endpoint does not accept batch deletes as the SDK sends them, so per-object
-// deletes should be used instead. That includes 400: the SDK sends a CRC32
-// checksum on batch deletes, and S3-compatible backends that still require
-// Content-MD5 (older MinIO releases among them) reject the batch with
-// MissingContentMD5 or InvalidRequest, while single deletes need no checksum.
-// Auth and server errors are returned instead: every per-object delete would
-// fail the same way.
+// deletes should be used instead. Besides an unimplemented operation, that
+// covers the checksum: the SDK sends a CRC32 checksum on batch deletes, and
+// S3-compatible backends that still require Content-MD5 (older MinIO releases
+// among them) reject the batch with one of the codes below, while single
+// deletes need no checksum. Any other error, such as a wrong region, a bad
+// bucket name, or an auth failure, would fail every per-object delete the same
+// way, so it is returned instead.
 func isBatchDeleteUnsupported(err error) bool {
-	if apiErr, ok := errors.AsType[smithy.APIError](err); ok && apiErr.ErrorCode() == "NotImplemented" {
-		return true
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		switch apiErr.ErrorCode() {
+		case "NotImplemented", "MissingContentMD5", "InvalidRequest", "InvalidDigest", "BadDigest":
+			return true
+		}
 	}
 	type httpResponseError interface {
 		HTTPStatusCode() int
@@ -838,7 +854,7 @@ func isBatchDeleteUnsupported(err error) bool {
 	var httpErr httpResponseError
 	if errors.As(err, &httpErr) {
 		switch httpErr.HTTPStatusCode() {
-		case http.StatusBadRequest, http.StatusNotImplemented, http.StatusMethodNotAllowed:
+		case http.StatusNotImplemented, http.StatusMethodNotAllowed:
 			return true
 		}
 	}
