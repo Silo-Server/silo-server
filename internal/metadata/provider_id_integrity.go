@@ -656,12 +656,15 @@ func mergeStepArgs(sql, sourceID, canonicalID string) []any {
 }
 
 var mediaItemMergeSteps = []mediaItemMergeStep{
+	// A provider ID is unique per (provider, provider_id, item_type), so the
+	// source row itself blocks inserting a copy for the canonical item. Move
+	// the rows for providers the canonical item has no ID for instead; the
+	// canonical item keeps its own ID for the rest.
 	{"merge provider ids", `
-			INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
-			SELECT $2, item_type, provider, provider_id, created_at, NOW()
-			FROM media_item_provider_ids
+			UPDATE media_item_provider_ids
+			SET content_id = $2, updated_at = NOW()
 			WHERE content_id = $1
-			ON CONFLICT DO NOTHING`},
+			  AND provider NOT IN (SELECT provider FROM media_item_provider_ids WHERE content_id = $2)`},
 	{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
 	{"merge legacy provider columns", `
 			UPDATE media_items dest
@@ -698,12 +701,12 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    updated_at = NOW()`},
 	{"delete source collection items", `DELETE FROM library_collection_items WHERE media_item_id = $1`},
 	{"merge personal collection items", `
-			INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, position, added_at)
-			SELECT user_id, collection_id, $2, MIN(position), MIN(added_at)
+			INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, sub_item_id, position, added_at)
+			SELECT user_id, collection_id, $2, sub_item_id, MIN(position), MIN(added_at)
 			FROM user_personal_collection_items
 			WHERE media_item_id = $1
-			GROUP BY user_id, collection_id
-			ON CONFLICT (user_id, collection_id, media_item_id) DO UPDATE
+			GROUP BY user_id, collection_id, sub_item_id
+			ON CONFLICT (user_id, collection_id, media_item_id, sub_item_id) DO UPDATE
 			SET position = LEAST(user_personal_collection_items.position, EXCLUDED.position),
 			    added_at = LEAST(user_personal_collection_items.added_at, EXCLUDED.added_at)`},
 	{"delete source personal collection items", `DELETE FROM user_personal_collection_items WHERE media_item_id = $1`},
@@ -768,6 +771,7 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    progress = CASE WHEN EXCLUDED.updated_at >= ebook_reader_progress.updated_at THEN EXCLUDED.progress ELSE ebook_reader_progress.progress END,
 			    updated_at = GREATEST(ebook_reader_progress.updated_at, EXCLUDED.updated_at)`},
 	{"delete source ebook reader progress", `DELETE FROM ebook_reader_progress WHERE content_id = $1`},
+	{"move ebook reader annotations", `UPDATE ebook_reader_annotations SET content_id = $2 WHERE content_id = $1`},
 	{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"merge hidden history", `
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)

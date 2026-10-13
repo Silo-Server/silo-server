@@ -24,6 +24,7 @@ const realtimeOptions = vi.hoisted(() => ({
 const controls = vi.hoisted(() => ({
   current: null as null | {
     currentTime: number;
+    duration: number;
     onSeek: (seconds: number) => void;
     activeSubtitleIndex: number | null;
     subtitleTracks: PlayerSubtitleInfo[];
@@ -144,6 +145,7 @@ vi.mock("./PlayerControls", () => ({
   PlayerControls: vi.fn(
     (props: {
       currentTime: number;
+      duration: number;
       onSeek: (seconds: number) => void;
       activeSubtitleIndex: number | null;
       subtitleTracks: PlayerSubtitleInfo[];
@@ -2245,6 +2247,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2276,6 +2279,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2308,6 +2312,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onPlaybackTransportReady: ready,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2342,6 +2347,7 @@ describe("VideoPlayer plan failure recovery", () => {
       }),
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     const transport = ready.mock.lastCall![0];
     sendRoomMessage.mockClear();
@@ -2382,6 +2388,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 10 });
     act(() => ready.mock.lastCall![0].skipBack());
     expect(reanchor).toHaveBeenLastCalledWith(395);
@@ -2824,6 +2831,7 @@ describe("VideoPlayer intro skip prompt", () => {
     const video = rendered.container.querySelector("video");
     if (!video) throw new Error("expected video element");
 
+    fireEvent.loadedMetadata(video);
     video.currentTime = 12;
     fireFrameTimeUpdate(video);
     await act(async () => Promise.resolve());
@@ -2900,7 +2908,7 @@ describe("VideoPlayer intro skip prompt", () => {
   });
 });
 
-describe("VideoPlayer native HLS timeline", () => {
+describe("VideoPlayer source timeline", () => {
   beforeEach(() => {
     realtimeOptions.current = null;
     controls.current = null;
@@ -2950,6 +2958,157 @@ describe("VideoPlayer native HLS timeline", () => {
     expect(video.currentTime).toBe(7);
     expect(subtitleTimeline.textOffsetSeconds).toBe(0);
     expect(subtitleTimeline.assOffsetSeconds).toBe(0);
+  });
+
+  // Chrome keeps a Matroska file's container start time on its clock, so a
+  // file that starts 30 s in reports currentTime 30 at its first frame.
+  // Subtitle cues, the resume seek, and the reported position all have to
+  // map through that origin or they drift by it.
+  it("maps direct play onto the media timeline when the engine clock starts late", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300, timeline_offset_seconds: 0 },
+    });
+    const { container } = renderPlayer({ plan, initialPosition: 1300 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+
+    expect(video.currentTime).toBeCloseTo(1300 + origin);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-origin));
+    expect(subtitleTimeline.assOffsetSeconds).toBeCloseTo(-origin);
+    fireFrameTimeUpdate(video);
+    expect(controls.current!.currentTime).toBeCloseTo(1300);
+
+    playerSeek.mockClear();
+    act(() => {
+      controls.current!.onSeek(1400);
+    });
+    expect(playerSeek).toHaveBeenCalledWith(expect.closeTo(1400 + origin));
+  });
+
+  // Written to the element before metadata, a seek would become the default
+  // start position and be read back as the clock origin.
+  it("holds a direct-play seek made before metadata until the origin is known", async () => {
+    const origin = 29.977;
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    playerSeek.mockClear();
+    act(() => {
+      controls.current!.onSeek(500);
+    });
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(controls.current!.currentTime).toBe(500);
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(500 + origin);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-origin));
+  });
+
+  // A load queues a timeupdate at position 0. A held seek to 0 must survive it
+  // rather than settle on it and fall back to the resume position.
+  it("keeps a held seek to the start through a load's reset timeupdate", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const { container } = renderPlayer({ plan, initialPosition: 1300 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    act(() => {
+      controls.current!.onSeek(0);
+    });
+    fireEvent.timeUpdate(video);
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(origin);
+  });
+
+  it("publishes direct play's duration on the media timeline", async () => {
+    const origin = 29.977;
+    const { duration_seconds: _omitted, ...source } = directPlan.source;
+    const plan = fixturePlanV3({ ...directPlan, source });
+    const { container } = renderPlayer({ plan });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    // durationchange arrives before loadedmetadata, while the origin is unknown.
+    Object.defineProperty(video, "duration", { configurable: true, value: 1830 });
+    fireEvent.durationChange(video);
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(controls.current!.duration).toBeCloseTo(1830 - origin));
+  });
+
+  // A room command that runs before metadata must judge drift from where
+  // playback is heading, not the unloaded clock, or it can skip a needed seek.
+  it("applies a room pause sent before direct-play metadata", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const command = {
+      command_id: "room-command-1",
+      session_id: "session-1",
+      selection_revision: 1,
+      action: "pause" as const,
+      position_seconds: 0,
+      execute_at: new Date().toISOString(),
+      issued_at: new Date().toISOString(),
+      playback_state: "paused" as const,
+    };
+    const { container } = renderPlayer({
+      plan,
+      initialPosition: 1300,
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: roomConnection({ transportCommand: command }),
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    await waitFor(() => expect(controls.current!.currentTime).toBe(0));
+
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(origin);
+  });
+
+  it("skips from the resume position before direct-play metadata", async () => {
+    const origin = 29.977;
+    const ready = vi.fn();
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const { container } = renderPlayer({
+      plan,
+      initialPosition: 1300,
+      onPlaybackTransportReady: ready,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    // A load's reset timeupdate leaves the shown position at the resume point.
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(1300);
+
+    act(() => ready.mock.lastCall![0].skipForward());
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(1330 + origin);
   });
 
   it("uses native HLS for Dolby Vision when hls.js is also available", async () => {

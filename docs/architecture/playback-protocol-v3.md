@@ -894,6 +894,19 @@ Three shapes exist:
 position, `can_seek_anywhere` is true when the runtime is known, and
 `seek_restoration` is `player_position` — the client seeks locally.
 
+Source positions count from the start of the file: the container's first
+timestamp is position 0. Most files start at timestamp zero, but MPEG-TS
+recordings and files remuxed from them can start seconds (or more) in. Plan positions, playlist time,
+subtitle tracks, and subtitle windows (`?position=&duration=`) are all on this
+container-relative timeline. Encoded HLS segments can still carry the source's
+own timestamps, so place them by playlist time, not by their PTS.
+A direct-play engine may keep the container's own timestamps instead:
+Chrome does for Matroska, reporting `currentTime` equal to the container start
+time at its first frame. Such a client must subtract that origin as part of its
+timeline offset, or subtitles, seeks, and reported positions drift by it. The
+web player reads the origin from `currentTime` at `loadedmetadata`, before it
+seeks to `player_start`.
+
 **Copy remux over HLS** is served from FFmpeg's live, still-growing playlist,
 which starts at the preceding keyframe selected by FFmpeg's input seek.
 For HEVC HDR copy packaging, the frozen plan also controls the sample entry: a

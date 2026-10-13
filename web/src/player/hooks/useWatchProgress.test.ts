@@ -40,6 +40,7 @@ async function reportOnce(error: Error) {
   const onSessionEnded = vi.fn();
   const video = document.createElement("video");
   Object.defineProperty(video, "currentTime", { value: 30 });
+  Object.defineProperty(video, "readyState", { value: HTMLMediaElement.HAVE_METADATA });
   const videoRef = { current: video };
   vi.useFakeTimers();
   const rendered = renderHook(
@@ -67,6 +68,22 @@ describe("useWatchProgress", () => {
     expect(onSessionEnded).toHaveBeenCalledTimes(1);
   });
 
+  // An element without metadata still reads currentTime 0. Reporting that
+  // when the viewer leaves during startup would replace their resume point.
+  it("reports nothing before the element has metadata", async () => {
+    mocks.send.mockReset();
+    mocks.send.mockResolvedValue(undefined);
+    const video = document.createElement("video");
+    const videoRef = { current: video };
+    vi.useFakeTimers();
+    const rendered = renderHook(() => useWatchProgress("session-1", videoRef), { wrapper });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    rendered.unmount();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
   it("keeps playing through other progress failures", async () => {
     for (const error of [
       new PlayerFetchError(404, "Playback session not found", "session_not_found"),
@@ -92,6 +109,7 @@ describe("useWatchProgress", () => {
     const onSessionEnded = vi.fn();
     const video = document.createElement("video");
     Object.defineProperty(video, "currentTime", { value: 30 });
+    Object.defineProperty(video, "readyState", { value: HTMLMediaElement.HAVE_METADATA });
     const videoRef = { current: video };
     vi.useFakeTimers();
     const rendered = renderHook(
