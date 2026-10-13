@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -21,19 +22,26 @@ func TestAdminNodeReloadBulk(t *testing.T) {
 	entered := make(chan string, 2)
 	release := make(chan struct{})
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	node := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-secret" {
+		if r.Method != "POST" || r.URL.Path != "/admin/force-reload" || !nodeauthtest.Signed(r, "synthetic-secret") {
 			t.Error("wrong command authority or method")
 		}
-		entered <- r.URL.Path
+		entered <- r.RequestURI
 		<-release
-		if r.URL.Path == "/first/admin/force-reload" {
+		if r.RequestURI == "/first/admin/force-reload" {
 			w.WriteHeader(204)
 		} else {
 			w.WriteHeader(503)
 		}
-	}))
+	})
+	// Each node sits under its own path prefix, which a reverse proxy strips:
+	// workers serve their routes from the root.
+	gateway := http.NewServeMux()
+	for _, prefix := range []string{"/first", "/second", "/disabled"} {
+		gateway.Handle(prefix+"/", http.StripPrefix(prefix, node))
+	}
+	server := httptest.NewServer(gateway)
 	defer server.Close()
 	repo := &reloadNodeRepo{stubNodeRepository: stubNodeRepository{nodes: []*nodepool.Node{
 		{ID: 1, Name: "First", URL: server.URL + "/first", Enabled: true},
@@ -77,7 +85,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 			defer target.Close()
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
-				if r.Method != "POST" || r.URL.Path != "/admin/force-reload" || r.Header.Get("Authorization") != "Bearer synthetic-secret" {
+				if r.Method != "POST" || r.URL.Path != "/admin/force-reload" || !nodeauthtest.Signed(r, "synthetic-secret") {
 					t.Error("wrong command")
 				}
 				w.Header().Set("Location", target.URL)

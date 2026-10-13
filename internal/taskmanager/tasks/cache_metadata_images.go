@@ -108,6 +108,12 @@ var cacheMetadataImagesConfiguredWorkers atomic.Int64
 // its pool.
 func SetImageWorkers(n int) { cacheMetadataImagesConfiguredWorkers.Store(int64(max(n, 0))) }
 
+// ImageWorkerBudget is the number of artwork jobs one process may run at
+// once: metadata.image_workers, or one per CPU core, capped by memory. The
+// metadata image-cache processor shares it between the queue drain and copies
+// of discovered local artwork.
+func ImageWorkerBudget() int { return cacheMetadataImagesWorkers() }
+
 // cacheMetadataImagesWorkers resolves the pool size for a run.
 func cacheMetadataImagesWorkers() int {
 	return imageCacheWorkerCount(int(cacheMetadataImagesConfiguredWorkers.Load()), runtime.GOMAXPROCS(0), detectImageCacheMemoryBytes())

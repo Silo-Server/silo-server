@@ -116,13 +116,26 @@ func canonicalizeCompatPath(path string) string {
 			parts = append([]string{""}, parts[2:]...)
 		}
 	}
-	// Match discovery routes as whole paths: these words can also be opaque
-	// IDs (for example /DisplayPreferences/list), whose case must not change.
+	// Match these routes as whole paths: their words can also be opaque IDs
+	// or names (for example /DisplayPreferences/list or a genre called
+	// "connect"), whose case must not change.
 	switch strings.ToLower(strings.Join(parts, "/")) {
 	case "/localization/cultures":
 		return "/Localization/Cultures"
 	case "/syncplay/list":
 		return "/SyncPlay/List"
+	case "/branding/css":
+		return "/Branding/Css"
+	case "/branding/css.css":
+		return "/Branding/Css.css"
+	case "/quickconnect/initiate":
+		return "/QuickConnect/Initiate"
+	case "/quickconnect/connect":
+		return "/QuickConnect/Connect"
+	case "/quickconnect/authorize":
+		return "/QuickConnect/Authorize"
+	case "/users/authenticatewithquickconnect":
+		return "/Users/AuthenticateWithQuickConnect"
 	}
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]

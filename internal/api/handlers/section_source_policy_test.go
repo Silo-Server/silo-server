@@ -446,7 +446,8 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 	rules := SectionOverrideWrite{ID: "rules", IsUserAdded: true, UserSectionType: "custom_filter", UserConfig: json.RawMessage(`{"filter":{}}`)}
 	stored := []userstore.SectionOverride{{ID: "picks", IsUserAdded: true, UserSectionType: "admin_curated_list", UserConfig: `{"item_ids":["a"]}`}}
 	profile := apimw.SetClaims(t.Context(), &auth.Claims{Role: "user", UserID: 1})
-	admin := apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1})
+	admin := apimw.SetActingAdminDecider(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}),
+		func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
 
 	cases := []struct {
 		name   string

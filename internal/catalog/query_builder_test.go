@@ -1,9 +1,37 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestBuildSortPlan_EpisodeDateOrder(t *testing.T) {
+	for _, field := range []string{"release_date", "last_air_date"} {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(field+"/"+order, func(t *testing.T) {
+				plan, err := NewQueryBuilder("mi").WithMediaScope("episode").BuildSortPlan(QuerySort{Field: field, Order: order})
+				if err != nil {
+					t.Fatal(err)
+				}
+				direction := strings.ToUpper(order)
+				want := fmt.Sprintf("ORDER BY mi.episode_air_date %[1]s NULLS LAST, mi.episode_series_sort_key ASC, mi.episode_series_id ASC, mi.episode_season_number %[1]s, mi.episode_number %[1]s, mi.content_id ASC", direction)
+				if plan.OrderBy != want {
+					t.Fatalf("order = %q, want %q", plan.OrderBy, want)
+				}
+				kinds := []string{cursorKindDate, cursorKindText, cursorKindText, cursorKindNumber, cursorKindNumber, cursorKindText}
+				if len(plan.terms) != len(kinds) {
+					t.Fatalf("cursor terms = %d, want %d", len(plan.terms), len(kinds))
+				}
+				for index, kind := range kinds {
+					if plan.terms[index].kind != kind {
+						t.Fatalf("cursor term %d kind = %q, want %q", index, plan.terms[index].kind, kind)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestBuildSortClause_LastAirDateUsesNullsLast(t *testing.T) {
 	// Migration 103 denormalized the aired-episode aggregate onto

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -159,7 +160,7 @@ func TestHWCapabilitiesAdvertisesThemeExecutionOnlyWithAuthority(t *testing.T) {
 	features := func() []string {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-		request.Header.Set("Authorization", "Bearer "+testSecret)
+		nodeauthtest.Sign(t, request, testSecret)
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		if recorder.Code == http.StatusServiceUnavailable {

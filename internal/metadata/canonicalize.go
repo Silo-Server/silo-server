@@ -51,11 +51,12 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil || !contentid.IsLocal(from) {
 		return from, nil
 	}
-	return s.reanchorContentID(ctx, from, ids, itemType)
+	return s.reanchorContentID(ctx, from, ids, itemType, markIdentity)
 }
 
 // reanchorContentID moves `from` to the provider-anchored content_id derived
@@ -66,12 +67,18 @@ func (s *MetadataService) canonicalizeLocalContentID(
 // <uniqueid> in an NFO, whose item was anchored to the wrong provider id). Both
 // must hold the provider-dedup lock so the target id cannot be claimed
 // underneath us. When ids do not derive a provider-anchored id, or it equals
-// `from`, this is a no-op.
+// `from`, this is a no-op. With markIdentity (an Identify), a merge onto the
+// row already at the target records the admin's choice on it in the merge's
+// transaction: that row holds the chosen provider IDs, so the mark commits
+// with them even if the identity write that follows fails. A rename moves only
+// the content id, leaving the old provider IDs until that identity write, so
+// the mark waits for it.
 func (s *MetadataService) reanchorContentID(
 	ctx context.Context,
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil {
 		return from, nil
@@ -99,7 +106,7 @@ func (s *MetadataService) reanchorContentID(
 		// local item, so the source row may be 'matched'; we still consolidate it
 		// onto the canonical target rather than orphaning a duplicate. Safe under
 		// the provider-dedup lock the caller holds.
-		if err := s.rebindItemToExistingItem(ctx, from, target, true); err != nil {
+		if err := s.rebindItemOnto(ctx, from, target, true, markIdentity); err != nil {
 			return "", fmt.Errorf("merging local item %s into %s: %w", from, target, err)
 		}
 		return target, nil

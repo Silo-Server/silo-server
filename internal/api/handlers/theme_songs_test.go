@@ -45,8 +45,8 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	}
 	store := &themeFileFixture{file: themesongs.File{Song: themesongs.Song{ID: "7", Container: "mp3"}, OwnerPath: dir, Path: path, Size: info.Size(), Modified: info.ModTime().Truncate(time.Microsecond)}}
 	svc := themesongs.NewService(store, "test secret")
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true}}}
 	h := &ThemeSongsHandler{Service: svc, Sessions: sessions, Users: users, Resolver: viewer}
 	authorization, err := h.Authorize(t.Context(), themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}, "movie", "7", catalog.AccessFilter{}, nil, time.Now().Add(time.Minute))
@@ -167,8 +167,9 @@ func TestThemeAuthorizeRoutesWithoutLocalFileAndGrantsConversionLocally(t *testi
 	}
 	store.file = themesongs.File{Song: themesongs.Song{ID: "7", Container: "ogg"}, AudioCodec: "vorbis", AudioChannels: 2, OwnerPath: dir, Path: path, Size: info.Size(), Modified: info.ModTime().Truncate(time.Microsecond)}
 	h.Router.LocalConversion = func(context.Context) bool { return true }
-	h.Sessions = &socketSessionFixture{valid: true}
-	h.Users = &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
+	users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
+	h.Users = users
+	h.Sessions = &socketSessionFixture{valid: true, account: users}
 	h.Resolver = &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true}}
 	authorization, err = h.Authorize(t.Context(), identity, "movie", "7", catalog.AccessFilter{}, []themesongs.Format{{Container: "m4a", AudioCodec: "aac"}}, time.Now().Add(time.Minute))
 	if err != nil {

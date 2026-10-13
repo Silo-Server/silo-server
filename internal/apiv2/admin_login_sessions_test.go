@@ -35,7 +35,7 @@ func TestAdminLoginSessionsAuthorityAndCursorIsolation(t *testing.T) {
 	f := new(fakeAdminLoginSessions)
 	deps := pilotDeps(nil, nil)
 	deps.AdminLoginSessions = f
-	deps.ActingAdmin = apimw.RequireActingAdmin(func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, nil)
+	deps.ActingAdmin = apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, nil)
 	h := newTestHandler(t, deps)
 	headers := with(bearer(adminToken), "X-Profile-Id", "p-primary")
 	root := Prefix + "/admin/users/7/login-sessions"

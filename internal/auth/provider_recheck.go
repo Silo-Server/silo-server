@@ -1131,9 +1131,12 @@ func sessionProviderChainOf(ctx context.Context, db dbQuerier, sessionID string,
 	if sessionID == "" {
 		return chain, ErrSessionRevoked
 	}
+	// Only an ordinary sign-in approves: a remote-playback handoff session is
+	// refused here whatever its token says, including one issued by an older
+	// release before the session was bound.
 	err := db.QueryRow(ctx, `SELECT identity_id, provider_since FROM auth_sessions
-		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL
-			AND revoked_at IS NULL AND expires_at > NOW() FOR UPDATE`, sessionID, userID).Scan(&chain.identityID, &chain.providerSince)
+		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL AND purpose = $3
+			AND revoked_at IS NULL AND expires_at > NOW() FOR UPDATE`, sessionID, userID, models.SessionPurposeAccount).Scan(&chain.identityID, &chain.providerSince)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sessionProviderChain{}, ErrSessionRevoked
 	}

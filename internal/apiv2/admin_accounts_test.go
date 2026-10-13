@@ -185,6 +185,11 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	if f.create.DefaultProfile.Enabled || f.create.User.LibraryIDs == nil || f.create.User.DownloadAllowed == nil || *f.create.User.DownloadAllowed {
 		t.Fatalf("creation lost explicit values: %+v", f.create)
 	}
+	// An unknown library is named at the member the account body sends.
+	unknown := requireProblem(t, do(t, h, http.MethodPost, path, strings.Replace(body, `"library_ids":[]`, `"library_ids":["9"]`, 1), actingRequestAdmin), TypeValidationFailed)
+	if len(unknown.Errors) != 1 || unknown.Errors[0].Location != locationLibraryIDs {
+		t.Fatalf("unknown library errors = %+v", unknown.Errors)
+	}
 	f.err = auth.ErrDuplicate
 	requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeConflict)
 	f.err = errors.New("storage down")

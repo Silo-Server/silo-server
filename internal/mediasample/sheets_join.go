@@ -30,15 +30,23 @@ import (
 // waited for a log line would stall ffmpeg's exit, and a stand-in Exec that
 // writes all of stdout before its log would deadlock.
 //
+// A filter graph reinit, as a hardware decoder that renews its surfaces
+// causes mid-run, restarts the counter at zero. The old graph has passed on
+// every frame it logged, so the frames still line up and the count goes on.
+//
 // Where a frame goes:
 //
 //   - Sampled lists: the cell of the sample its tag names. A sample that
 //     decodes more than one frame (a keyframe within its short span, or an
 //     all-intra source) keeps the first, which is the frame at or before the
-//     sample time. Untagged frames are dropped.
+//     sample time. Untagged frames are dropped. Each frame's time also
+//     places it back in the input (sourceSeconds), which a repair reads.
 //   - Windows (containers the list cannot seek in, and ReadThrough): each
 //     sample takes the last frame at or before its time, as
 //     pickSampleFrames does for statistics.
+//   - Repairs (see sheet_repair.go): a list over some samples whose frames
+//     are collected as candidates, each sample keeping the frame nearest its
+//     time, and replace what the first run placed.
 //
 // A cell without a frame of its own shows the previous cell's frame, and
 // cells before the first frame show the first; the grid never shifts. A run
@@ -47,9 +55,8 @@ import (
 // than a sheet worth keeping, and a hardware attempt then falls back to
 // software.
 //
-// Sheets are encoded as soon as no later frame can land in them: frames
-// arrive in sample order, so once a frame lands two sheets further on, the
-// earlier sheet is done. At most three canvases are held at a time.
+// Sheets are encoded once the run and its repairs are done, since a repair
+// may replace any cell; a run's sheets are bounded by its caller's chunking.
 
 // maxQueuedFrameBytes bounds the raw frames held while their log lines are
 // behind. The log normally leads, so this only trips when the log parser
@@ -83,11 +90,27 @@ type sheetAssembler struct {
 	sampled bool
 	cells   map[int64]int
 	offset  float64
+	// A sampled list's entries each last span seconds and start at their
+	// sample's time plus inputStart, the input's container start time,
+	// clamped at zero. header reads the list input's start time, by which
+	// ffmpeg shifted every frame's time; with these, sourceSeconds finds a
+	// frame's time in the input. sources holds that time for each cell's
+	// frame, NaN when it is unknown.
+	span       float64
+	inputStart float64
+	header     inputHeaderParser
+	sources    []float64
+	// candidates, when set, collects each sample's nearest frame for a
+	// repair instead of tiling.
+	candidates []sheetCandidate
 
 	logContext string
 	current    *sheetFrameMeta
-	logged     int64
-	metas      []sheetFrameMeta
+	// counter is the frame number the filter logs next; logged counts
+	// every frame logged, across graph reinits.
+	counter int64
+	logged  int64
+	metas   []sheetFrameMeta
 
 	partial     []byte
 	queued      [][]byte
@@ -104,20 +127,22 @@ type sheetAssembler struct {
 	hasPacketTime  bool
 
 	open      map[int]*sheetCanvas
-	furthest  int
 	finalized int
 	carry     []byte
 	sheets    []Sheet
 	decoded   int
 	filled    int
+	// refined counts the cells a repair replaced, each once.
+	refined      int
+	refinedCells map[int]bool
 
 	err error
 }
 
 // newSheetAssembler returns an assembler for the frames of times. A sampled
-// run places frames by their sample tag; a window run by their time plus
-// offset.
-func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset float64) *sheetAssembler {
+// run places frames by their sample tag, its list entries lasting span
+// seconds; a window run by their time plus offset.
+func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset, span float64) *sheetAssembler {
 	a := &sheetAssembler{
 		out:        out,
 		times:      times,
@@ -125,14 +150,17 @@ func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset f
 		perSheet:   out.Columns * out.Rows,
 		sampled:    sampled,
 		offset:     offset,
+		span:       span,
 		logContext: "[" + filterMetadata + "@" + sheetMetadataID + " @ ",
 		open:       map[int]*sheetCanvas{},
-		furthest:   -1,
 	}
 	if sampled {
 		a.cells = make(map[int64]int, len(times))
+		a.refinedCells = map[int]bool{}
+		a.sources = make([]float64, len(times))
 		for i, at := range times {
 			a.cells[sampleKey(at)] = i
+			a.sources[i] = math.NaN()
 		}
 	}
 	return a
@@ -173,10 +201,16 @@ func (a *sheetAssembler) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// line takes one log line, keeping those of the sheets metadata filter.
+// line takes one log line, keeping the input header and the lines of the
+// sheets metadata filter.
 func (a *sheetAssembler) line(line string) {
 	message, ok := filterMessage(line, a.logContext)
 	if !ok {
+		if a.sampled {
+			a.mu.Lock()
+			a.header.line(line)
+			a.mu.Unlock()
+		}
 		return
 	}
 	a.mu.Lock()
@@ -186,13 +220,14 @@ func (a *sheetAssembler) line(line string) {
 	}
 	if match := sheetFramePattern.FindStringSubmatch(message); match != nil {
 		index, err := strconv.ParseInt(match[1], 10, 64)
-		if err != nil || index != a.logged {
-			// A counter that skips or restarts, as after a filter graph
-			// reinit, no longer counts the frames on stdout.
+		// A counter that skips, or restarts anywhere but at zero, no longer
+		// counts the frames on stdout.
+		if err != nil || (index != a.counter && index != 0) {
 			a.err = fmt.Errorf("ffmpeg logged frame %s after %d frames", match[1], a.logged)
 			return
 		}
-		meta := sheetFrameMeta{index: index}
+		a.counter = index + 1
+		meta := sheetFrameMeta{index: a.logged}
 		if seconds, err := strconv.ParseFloat(match[2], 64); err == nil && finite(seconds) {
 			meta.seconds, meta.hasTime = seconds, true
 		}
@@ -285,8 +320,18 @@ func (a *sheetAssembler) drain() {
 func (a *sheetAssembler) place(meta sheetFrameMeta, frame []byte) {
 	if a.sampled {
 		cell, ok := a.cells[sampleKey(meta.sample)]
-		if meta.sample >= 0 && ok && a.setCell(cell, frame) {
+		if meta.sample < 0 || !ok {
+			a.recycle(frame)
+			return
+		}
+		source := a.sourceSeconds(meta, cell)
+		if a.candidates != nil {
+			a.offer(cell, source, frame)
+			return
+		}
+		if a.setCell(cell, frame) {
 			a.decoded++
+			a.sources[cell] = source
 		}
 		a.recycle(frame)
 		return
@@ -311,24 +356,29 @@ func (a *sheetAssembler) assignWindow(limit float64) {
 	}
 }
 
-// setCell copies frame into cell unless the cell already holds one, and
-// reports whether it did. Frames for a sheet already encoded are dropped.
-func (a *sheetAssembler) setCell(cell int, frame []byte) bool {
-	sheet := cell / a.perSheet
-	if sheet < a.finalized {
-		return false
+// sourceSeconds is the input time, counted from the start of the file as
+// sample times are, of a sampled list's frame for cell, NaN when the frame
+// has no time. The list's entry for cell starts cell*span seconds into the
+// list and at its inpoint in the container (see buildConcatListSpan), and
+// ffmpeg shifted every frame by the list input's start time.
+func (a *sheetAssembler) sourceSeconds(meta sheetFrameMeta, cell int) float64 {
+	if !meta.hasTime {
+		return math.NaN()
 	}
-	canvas := a.canvas(sheet)
+	inpoint := math.Max(0, a.times[cell]+a.inputStart)
+	return meta.seconds + a.header.info.StartSeconds - float64(cell)*a.span + inpoint - a.inputStart
+}
+
+// setCell copies frame into cell unless the cell already holds one, and
+// reports whether it did.
+func (a *sheetAssembler) setCell(cell int, frame []byte) bool {
+	canvas := a.canvas(cell / a.perSheet)
 	slot := cell % a.perSheet
 	if canvas.set[slot] {
 		return false
 	}
 	canvas.write(slot, frame)
 	canvas.set[slot] = true
-	if sheet > a.furthest {
-		a.furthest = sheet
-		a.finalizeThrough(sheet - 1)
-	}
 	return true
 }
 
@@ -387,13 +437,13 @@ func (a *sheetAssembler) finalize(sheet int) {
 	a.sheets = append(a.sheets, Sheet{Index: sheet, Thumbnails: count, JPEG: encoded.Bytes()})
 }
 
-// finish checks the run's frames against its log, assigns what the window
-// placement still holds, and encodes the remaining sheets.
-func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
+// close checks the run's frames against its log once ffmpeg has exited and
+// assigns what the window placement still holds.
+func (a *sheetAssembler) close() *AttemptError {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	fail := func(reason Reason, err error) ([]Sheet, SheetFrames, *AttemptError) {
-		return nil, SheetFrames{}, &AttemptError{Reason: reason, Err: err}
+	fail := func(reason Reason, err error) *AttemptError {
+		return &AttemptError{Reason: reason, Err: err}
 	}
 	switch {
 	case a.err != nil:
@@ -409,6 +459,16 @@ func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
 		}
 		a.assignWindow(a.packetEnd + sampleMatchSeconds)
 	}
+	return nil
+}
+
+// finish encodes the sheets of a closed run and its repairs.
+func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	fail := func(reason Reason, err error) ([]Sheet, SheetFrames, *AttemptError) {
+		return nil, SheetFrames{}, &AttemptError{Reason: reason, Err: err}
+	}
 	if a.decoded == 0 {
 		return fail(ReasonEmpty, errors.New("ffmpeg decoded no frame for any sample"))
 	}
@@ -420,7 +480,7 @@ func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
 	if limit := max(1, int(maxFilledShare*float64(len(a.times)))); a.filled > limit {
 		return fail(ReasonEmpty, fmt.Errorf("ffmpeg decoded frames for only %d of %d samples", len(a.times)-a.filled, len(a.times)))
 	}
-	return a.sheets, SheetFrames{Decoded: len(a.times) - a.filled, Filled: a.filled}, nil
+	return a.sheets, SheetFrames{Decoded: len(a.times) - a.filled, Filled: a.filled, Refined: a.refined}, nil
 }
 
 func (a *sheetAssembler) frameBuffer() []byte {

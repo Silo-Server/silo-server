@@ -52,7 +52,7 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 				writeUnauthorized(w, "Invalid or expired token", ReasonInvalidCredential)
 				return
 			}
-			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
 			if err != nil {
 				writeCredentialCheckUnavailable(w, r, err)
 				return
@@ -61,11 +61,17 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
+			// A remote-playback handoff never registers for push; a display
+			// token an older release minted for one is refused.
+			if authority.IsRemotePlayback() {
+				writeForbidden(w, "A remote-playback session cannot read notifications")
+				return
+			}
 			// A display token lives as long as the session and is not
 			// refreshed, so a role change does not refuse it the way it
 			// refuses an access token; the request carries the current role
 			// instead of the one the token was minted with.
-			claims.Role = role
+			claims.Role = authority.Role
 			// Same attribution RequireAuth performs, so display fetches are
 			// not anonymous in the activity and request logs.
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {

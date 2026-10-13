@@ -526,6 +526,10 @@ type fakeFileRepo struct {
 	matchStamps         map[int]time.Time // fileID -> match_attempted_at
 	updateErrors        map[int]error
 	afterUpdate         func(fileID int, contentID string)
+	listErr             error
+	listErrIn           int // when > 0, the listErrIn-th next GetByContentID fails with listErr
+	listHook            func()
+	listHookIn          int // when > 0, the listHookIn-th next GetByContentID runs listHook
 	claimUnmatchedCalls int
 	claimNonSeriesCalls int
 	claimMixedCalls     int
@@ -584,6 +588,22 @@ func (r *fakeFileRepo) FindContentIDByRootPath(_ context.Context, folderID int, 
 func (r *fakeFileRepo) GetByContentID(_ context.Context, contentID string) ([]*models.MediaFile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listHookIn > 0 {
+		r.listHookIn--
+		if r.listHookIn == 0 {
+			r.listHook()
+		}
+	}
+	if r.listErrIn > 0 {
+		r.listErrIn--
+		if r.listErrIn == 0 {
+			err := r.listErr
+			r.listErr = nil
+			return nil, err
+		}
+	} else if r.listErr != nil {
+		return nil, r.listErr
+	}
 	out := make([]*models.MediaFile, 0)
 	for _, files := range r.groupFiles {
 		for _, file := range files {
@@ -1385,6 +1405,14 @@ func TestShouldReanchorProviderContentIDRequiresManualRefreshOrCorrection(t *tes
 		{
 			name:      "scheduled refresh with a corrected identity",
 			contentID: anchoredID, mode: ModeScheduledRefresh, corrected: true,
+		},
+		{
+			name:      "initial match keeping the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch,
+		},
+		{
+			name:      "initial match whose NFO ids replaced the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch, corrected: true, want: true,
 		},
 		{
 			name:      "manual refresh",

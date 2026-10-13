@@ -39,6 +39,12 @@ func (h *Hub) Start(ctx context.Context) error {
 	return h.eventBus.Subscribe(ctx, cache.ChannelEvents, h.handleEventBusMessage)
 }
 
+// SourceID is the ID Publish stamps on envelopes from this node. Envelopes
+// relayed from other nodes keep their own.
+func (h *Hub) SourceID() string {
+	return h.sourceID
+}
+
 func (h *Hub) Subscribe() (<-chan Envelope, func()) {
 	sub := &subscriber{ch: make(chan Envelope, 64)}
 	h.mu.Lock()

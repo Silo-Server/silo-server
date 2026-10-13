@@ -40,6 +40,16 @@ capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
 
+## Watch artwork
+
+`GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
+`backdrop_url`, and `backdrop_thumbhash` for system media controls. Movies
+use their own artwork, episodes use their still as the poster and their
+series' backdrop, and local extras inherit their parent's artwork. URLs use
+the same resolver and `image_size` query as catalog item detail. Missing
+artwork is omitted; clients can retain their catalog-detail fallback.
+The frozen v1 watch response does not gain these fields.
+
 ## Marker ranges
 
 V2 watch detail includes `marker_segments` on each file version, including
@@ -204,7 +214,8 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Equal sequence, same payload | 200 `outcome: "replayed"` |
 | Equal sequence, different payload | 409 `progress_conflict` |
 | Session owned by another profile | 403 |
-| Attempt already stopped or unknown | 404 |
+| Attempt ended by an administrator | 410 `playback_session_ended` |
+| Attempt already stopped otherwise, or unknown | 404 |
 
 An applied sample is persisted through the same writers v1 uses (resume
 position, scrobbles), from the live session when this replica holds it and from
@@ -239,6 +250,15 @@ A session that expires or is aborted server-side is stopped under a
 server-minted `stop_id` (UUID v5 of the session id), so a later client stop
 replays and a start replay reports `session_expired`.
 
+A session an administrator ends without the player confirming it (a stop,
+pause or resume the player did not answer before its deadline, or a
+terminate) is stopped under a different server-minted `stop_id`. Progress and
+replan for that session answer `410 playback_session_ended` instead of `404`.
+A player that gets this answer leaves playback: it must not start a fresh
+session at the same position, which is how it recovers from the `404` of an
+expired session or a server restart. A stop the client made first keeps its
+own receipt.
+
 ## Replan and route events
 
 `replanPlayback` covers failure recovery, seek re-anchor, and track, quality and
@@ -246,8 +266,9 @@ output changes, with the v3 body plus `installation_id`. It runs the same
 application code as the frozen v1 replan route. It is idempotent on `replan_request_id`
 plus the body digest: the same request replays its committed decision; a reused
 id with different input, a superseded plan, or an identical replan still in
-progress is `409`; a session owned by another profile is `403`; an ended
-session is `404`.
+progress is `409`; a session owned by another profile is `403`; a session an
+administrator ended is `410 playback_session_ended`; any other ended session is
+`404`.
 
 Route events take the v3 event plus `installation_id` and a client-minted
 `event_id`. `202` acknowledges queueing, not a durable write. A retry with the

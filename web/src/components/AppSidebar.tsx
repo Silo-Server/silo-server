@@ -20,6 +20,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
+import { useCriticalContentLoaded } from "@/lib/startupPriority";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
@@ -207,8 +208,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const showNotificationsNav = notificationCapability.isError
     ? false
     : (notificationCapability.data?.in_app.enabled ?? true);
+  // The badge waits for the page's first content (see startupPriority).
+  const criticalContentLoaded = useCriticalContentLoaded();
   const { data: unreadNotifications } = useUnreadNotificationCount(
-    Boolean(profile) && showNotificationsNav,
+    Boolean(profile) && showNotificationsNav && criticalContentLoaded,
   );
   const pluginNavLinks = useMemo(() => {
     const installations = pluginSettings?.installations ?? [];

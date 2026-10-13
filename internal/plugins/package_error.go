@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // PackageError is an install or update refused because of the plugin package
@@ -52,9 +53,16 @@ func AsPackageError(err error) (*PackageError, bool) {
 // download. subject names it for the admin, such as "the plugin". An
 // unreachable host, 429, 5xx or a cut-off body is a transient PackageError;
 // an address that isn't a valid http or https link, or any other status, is
-// a permanent one. A canceled ctx returns its own error, not a PackageError.
+// a permanent one. A body that sends nothing for packageFetchReadIdleTimeout
+// counts as cut off. A canceled ctx returns its own error, not a PackageError.
 func fetchPackageResource(ctx context.Context, client *http.Client, rawURL, subject string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	return fetchPackageResourceWithIdle(ctx, client, rawURL, subject, packageFetchReadIdleTimeout)
+}
+
+func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawURL, subject string, readIdle time.Duration) ([]byte, error) {
+	fetchCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, invalidPackageAddressError(fmt.Errorf("build request for %q: %w", rawURL, err), subject)
 	}
@@ -79,10 +87,15 @@ func fetchPackageResource(ctx context.Context, client *http.Client, rawURL, subj
 		}
 		return nil, packageError(statusErr, "Silo couldn't download %s: its host answered HTTP %d.", subject, resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	body := newIdleTimeoutReader(resp.Body, readIdle, cancel)
+	defer body.stop()
+	data, err := io.ReadAll(body)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("read %q: %w", rawURL, ctx.Err())
+		}
+		if cause := context.Cause(fetchCtx); errors.Is(cause, errPackageReadStalled) {
+			err = cause
 		}
 		return nil, transientPackageError(fmt.Errorf("read %q: %w", rawURL, err), "The download of %s was interrupted. Try again.", subject)
 	}

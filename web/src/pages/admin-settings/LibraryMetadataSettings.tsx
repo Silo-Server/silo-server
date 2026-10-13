@@ -199,7 +199,7 @@ export default function LibraryMetadataSettings() {
           <SettingField
             label="Keep provider artwork"
             type="toggle"
-            description="When off, clients load artwork straight from the providers."
+            description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
             value={form.getValue("metadata.cache_images")}
             onChange={(value) => form.setValue("metadata.cache_images", value)}
             restartRequired={restartKeys.has("metadata.cache_images")}
