@@ -696,6 +696,11 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 				return fmt.Errorf("withdrawing provider device sign-in approvals: %w", err)
 			}
+			// A Jellyfin-compatible session does not record the identity it
+			// signed in through, so every one the account holds ends.
+			if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{identity.UserID}); err != nil {
+				return err
+			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,
@@ -1126,9 +1131,12 @@ func sessionProviderChainOf(ctx context.Context, db dbQuerier, sessionID string,
 	if sessionID == "" {
 		return chain, ErrSessionRevoked
 	}
+	// Only an ordinary sign-in approves: a remote-playback handoff session is
+	// refused here whatever its token says, including one issued by an older
+	// release before the session was bound.
 	err := db.QueryRow(ctx, `SELECT identity_id, provider_since FROM auth_sessions
-		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL
-			AND revoked_at IS NULL AND expires_at > NOW() FOR UPDATE`, sessionID, userID).Scan(&chain.identityID, &chain.providerSince)
+		WHERE id = $1 AND user_id = $2 AND impersonator_user_id IS NULL AND purpose = $3
+			AND revoked_at IS NULL AND expires_at > NOW() FOR UPDATE`, sessionID, userID, models.SessionPurposeAccount).Scan(&chain.identityID, &chain.providerSince)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sessionProviderChain{}, ErrSessionRevoked
 	}

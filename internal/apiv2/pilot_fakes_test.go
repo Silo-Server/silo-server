@@ -475,7 +475,6 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.ProfileSections = &fakeProfileSections{rows: fixtureSectionOverrides()}
-	deps.SectionFlags = fakeSectionFlags{allow: true}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -973,14 +972,10 @@ func (f *fakeProfileSections) ResolveProfileSectionSettings(_ context.Context, u
 		return nil, f.err
 	}
 	return []sections.ResolvedSection{
-		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Keep watching", DefaultTitle: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
 		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
 	}, nil
 }
-
-type fakeSectionFlags struct{ allow bool }
-
-func (f fakeSectionFlags) AllowProfileCustomSections(context.Context) bool { return f.allow }
 
 func fixtureSectionOverrides() []userstore.SectionOverride {
 	pos, featured, limit := 2, false, 10
@@ -1041,6 +1036,10 @@ func (f fakeDevices) find(in auth.DeviceLoginLookupInput) (*fakeDeviceRequest, e
 		return r, nil
 	}
 	if r := f.requests[in.UserCode]; r != nil && in.UserCode != "" {
+		// As the service: a Quick Connect code is found only for an account.
+		if r.Purpose == auth.DeviceLoginPurposeQuickConnect && in.AccountID == 0 {
+			return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+		}
 		return r, nil
 	}
 	return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
@@ -1122,7 +1121,7 @@ func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLo
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Authentication required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose == auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeLogin {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1133,7 +1132,7 @@ func (f fakeDevices) ApproveDeviceHandoff(_ context.Context, in auth.DeviceLogin
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 403, Code: "profile_required", Message: "An active verified profile is required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote && r.Purpose != auth.DeviceLoginPurposeQuickConnect {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1162,6 +1161,7 @@ func fixtureDevices() fakeDevices {
 		"dev-approved": approved,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,
+		"482177":       {Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeQuickConnect, ExpiresAt: exp},
 		"br-expired":   {Status: "expired", Purpose: auth.DeviceLoginPurposeLogin},
 		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},

@@ -15,6 +15,7 @@ import (
 // also covers the error being sanitized before it is logged.
 type failingSessionRepo struct {
 	failUpsert bool
+	failUpdate bool
 	failGet    bool
 	failDelete bool
 }
@@ -26,6 +27,13 @@ func (r *failingSessionRepo) storeErr(op, token string) error {
 func (r *failingSessionRepo) Upsert(_ context.Context, session Session) error {
 	if r.failUpsert {
 		return r.storeErr("upsert", session.Token)
+	}
+	return nil
+}
+
+func (r *failingSessionRepo) UpdateByToken(_ context.Context, session Session) error {
+	if r.failUpdate {
+		return r.storeErr("update", session.Token)
 	}
 	return nil
 }
@@ -70,7 +78,7 @@ func TestSessionStoreFailureLogsOmitFullToken(t *testing.T) {
 				if err := store.Put(Session{Token: token, StreamAppUserID: 1}); err != nil {
 					t.Fatalf("Put: %v", err)
 				}
-				repo.failUpsert = true
+				repo.failUpdate = true
 				advance(20 * time.Hour) // past half of the 24h TTL
 				if _, ok := store.Get(token); !ok {
 					t.Fatal("Get dropped a live session when the extend write failed")

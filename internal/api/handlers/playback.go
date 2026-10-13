@@ -186,6 +186,7 @@ type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver            // optional; enables stream_url in responses
 	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
+	DeviceSightings         *DeviceSightings            // optional; registers the device that starts playback
 	WatchScrobbler          PlaybackWatchScrobbler
 	StableIdentityResolver  *watchstate.StableIdentityResolver
 	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
@@ -885,18 +886,6 @@ func (h *PlaybackHandler) loadFileByPreferredID(
 	return nil, nil
 }
 
-func directPlayAudioTrackIndex(file *models.MediaFile) int {
-	if file == nil || len(file.AudioTracks) == 0 {
-		return 0
-	}
-	for i, track := range file.AudioTracks {
-		if track.Default {
-			return i
-		}
-	}
-	return 0
-}
-
 func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if file == nil || len(file.AudioTracks) == 0 {
 		return 0
@@ -904,7 +893,7 @@ func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if audioTrackIndex >= 0 && audioTrackIndex < len(file.AudioTracks) {
 		return audioTrackIndex
 	}
-	return directPlayAudioTrackIndex(file)
+	return playback.SelectAudioTrack(file.AudioTracks, "", nil)
 }
 
 func (h *PlaybackHandler) resolveSeriesID(ctx context.Context, file *models.MediaFile) string {
@@ -2120,6 +2109,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return

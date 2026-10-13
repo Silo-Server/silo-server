@@ -187,7 +187,7 @@ describe("ActionBar primary action", () => {
     expect(request.querySelector("svg")).toHaveClass("animate-spin");
   });
 
-  it("renders secondary glass actions and external links after the primary action", () => {
+  it("renders secondary glass actions after the primary action and external links in their own row", () => {
     const onFollow = vi.fn();
     renderWithPrimary({
       primaryAction: { label: "Approved", disabled: true },
@@ -203,10 +203,13 @@ describe("ActionBar primary action", () => {
     fireEvent.click(follow);
     expect(onFollow).toHaveBeenCalledOnce();
 
-    const link = screen.getByRole("link", { name: "TMDB" });
+    const links = screen.getByRole("list", { name: "External links" });
+    const link = within(links).getByRole("link", { name: "TMDB (opens in a new tab)" });
     expect(link).toHaveAttribute("href", "https://www.themoviedb.org/movie/603");
     expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noreferrer");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    // The links get a row of their own, apart from the actions.
+    expect(follow.parentElement).not.toContainElement(link);
     // Without library props there are no library actions, so no overflow menu.
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });

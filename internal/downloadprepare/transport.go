@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -478,6 +479,38 @@ func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID
 		return responseError(resp, "remote download artifact delete")
 	}
 	return nil
+}
+
+// maxArtifactListingBytes bounds a node's directory listing. A listing entry is
+// about 150 bytes, so this is tens of thousands of prepared files.
+const maxArtifactListingBytes = 16 << 20
+
+// ErrArtifactListingUnsupported means the node predates the listing route.
+var ErrArtifactListingUnsupported = errors.New("node does not list prepared download files")
+
+// ListArtifacts reads a node's prepared-download directory listing.
+func (p HTTPPreparer) ListArtifacts(ctx context.Context, nodeURL, jwtSecret string) (downloadstorage.Listing, error) {
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/artifacts", nil)
+	if err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return downloadstorage.Listing{}, ErrArtifactListingUnsupported
+	default:
+		return downloadstorage.Listing{}, responseError(resp, "remote download artifact listing")
+	}
+	var listing downloadstorage.Listing
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxArtifactListingBytes)).Decode(&listing); err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: decode response: %w", err)
+	}
+	return listing, nil
 }
 
 // Open returns an authenticated streaming response for a GET or HEAD relay.

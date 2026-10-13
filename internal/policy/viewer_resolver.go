@@ -99,6 +99,10 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		}
 	}
 
+	disabledPreference := preferences.DisabledLibraryIDs
+	if input.ContentAccessOnly {
+		disabledPreference = nil
+	}
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
 		UserID:               user.ID,
@@ -108,7 +112,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
+		DisabledLibraryIDs:   disabledPreference,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that

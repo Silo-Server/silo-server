@@ -8,8 +8,14 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
 }));
 
+const addToCollection = vi.hoisted(() => ({
+  props: null as null | { open: boolean; mediaItemId: string; itemTitle?: string },
+}));
 vi.mock("@/components/AddToCollectionDialog", () => ({
-  default: () => null,
+  default: (props: { open: boolean; mediaItemId: string; itemTitle?: string }) => {
+    addToCollection.props = props;
+    return null;
+  },
 }));
 
 const markerMocks = vi.hoisted(() => ({
@@ -18,6 +24,24 @@ const markerMocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useMarkerDetectionKinds: () => markerMocks.detectionKinds,
 }));
+
+describe("ActionBar Add to collection", () => {
+  it("names the title it adds", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="movie-1" itemTitle="Heat" />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add to Collection" }));
+    expect(addToCollection.props).toMatchObject({
+      open: true,
+      mediaItemId: "movie-1",
+      itemTitle: "Heat",
+    });
+  });
+});
 
 describe("ActionBar marker re-detection", () => {
   afterEach(() => {
@@ -232,5 +256,43 @@ describe("ActionBar shuffle", () => {
 
     await userEvent.click(screen.getByTitle("More"));
     expect(screen.queryByRole("menuitem", { name: "Shuffle" })).toBeNull();
+  });
+});
+
+describe("ActionBar collection eligibility", () => {
+  it.each(["movie", "series"])("keeps Add to Collection for %s", async (type) => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId={`${type}-1`} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.getByRole("menuitem", { name: "Add to Collection" })).toBeInTheDocument();
+  });
+
+  it.each(["season", "episode"])("hides Add to Collection for %s", async (type) => {
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId={`${type}-1`}
+          canAddToCollection={false}
+          isAdmin
+          watchedLabel="Mark Watched"
+          onToggleWatched={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.queryByRole("menuitem", { name: "Add to Collection" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark Watched" })).toBeInTheDocument();
+  });
+
+  it("omits an empty overflow menu when collection membership is unavailable", () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="season-1" canAddToCollection={false} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTitle("More")).toBeNull();
   });
 });

@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import {
+  activePreparationCount,
   formatPreparationKind,
   formatRemaining,
   preparationCompactTitle,
@@ -43,7 +44,7 @@ const MAX_ACTIVITY_SCAN_ROWS = 25;
 const MAX_BADGE_COUNT = 99;
 const ACTIVE_SCAN_SNAPSHOT_LIMIT = 500;
 const MAX_ACTIVITY_PREPARATION_ROWS = 3;
-export const PREPARATIONS_ACTIVITY_HREF = "/admin/activity?view=preparations";
+export const PREPARATIONS_HREF = "/admin/downloads?tab=preparation";
 
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
@@ -86,9 +87,7 @@ function useServerActivityData() {
   );
   const preparationCounts = preparations?.counts;
   // Queued jobs count as activity, as queued scans already do.
-  const activePreparations = preparationCounts
-    ? preparationCounts.running + preparationCounts.queued + preparationCounts.retrying
-    : 0;
+  const activePreparations = activePreparationCount(preparationCounts);
 
   const totalActive =
     sessions.length + runningTasks.length + activeScans.length + activePreparations;
@@ -299,7 +298,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                   <ActivitySection
                     title="Preparing downloads"
                     count={activePreparations}
-                    href={PREPARATIONS_ACTIVITY_HREF}
+                    href={PREPARATIONS_HREF}
                     onNavigate={() => setOpen(false)}
                     last
                   >
@@ -511,7 +510,7 @@ function PreparationRow({
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <Link
-          to={PREPARATIONS_ACTIVITY_HREF}
+          to={PREPARATIONS_HREF}
           onClick={onNavigate}
           className="hover:text-primary truncate text-[12px] font-medium transition-colors"
         >

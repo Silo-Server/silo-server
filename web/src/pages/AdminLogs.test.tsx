@@ -135,6 +135,20 @@ describe("admin log history", () => {
     expect(await screen.findByText("No audit logs matched the current filters.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("does not claim an empty result when the live stream failed", () => {
+    vi.mocked(useAdminLogStream).mockReturnValue({
+      rows: [],
+      isConnecting: false,
+      isLive: false,
+      error: "Unable to open log stream.",
+      connectionState: "disconnected",
+      reconnect: vi.fn(),
+    });
+    mount("/admin/logs?tab=audit&method=POST");
+    expect(screen.getByText("Audit logs could not be loaded.")).toBeTruthy();
+    expect(screen.queryByText("No audit logs matched the current filters.")).toBeNull();
+  });
 });
 
 function latestAppStreamParams() {
@@ -234,4 +248,102 @@ describe("admin log level and component filters", () => {
       }
     },
   );
+});
+
+it("shows the actor, affected account and safe permission/password changes", () => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 900,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PUT",
+        path: "/api/v2/admin/users/2",
+        status_code: 204,
+        duration_ms: 1,
+        user_id: 1,
+        action: "user.updated",
+        target_type: "user",
+        target_id: "2",
+        changes: [
+          { field: "permissions", before: "[]", after: '["marker_edit"]' },
+          { field: "password" },
+        ],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit&action=user.updated&actor_user_id=1&target_type=user&target_id=2");
+  expect(screen.getByText("user.updated")).toBeInTheDocument();
+  expect(screen.getByText("user #2")).toBeInTheDocument();
+  expect(screen.getByText(/none → marker_edit/)).toBeInTheDocument();
+  expect(screen.getByText("password").parentElement).toHaveTextContent("password: changed");
+  expect(vi.mocked(useAdminLogStream).mock.calls.at(-1)?.[1]).toMatchObject({
+    action: "user.updated",
+    actor_user_id: "1",
+    target_type: "user",
+    target_id: "2",
+  });
+});
+
+it.each([
+  ["access_group", "library_ids", "[]", "all libraries → none"],
+  ["access_group", "allowed_permissions", "[]", "all assignable → none"],
+  ["user", "access_group_id", "5", "none → 5"],
+  ["user", "max_streams", "3", "inherit → 3"],
+])("shows the meaning of null for %s %s", (targetType, field, after, expected) => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 901,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PUT",
+        path: "/api/v2/admin/users/2",
+        status_code: 204,
+        duration_ms: 1,
+        user_id: 1,
+        action: `${targetType}.updated`,
+        target_type: targetType,
+        target_id: "2",
+        changes: [{ field, before: "null", after }],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText(field.replaceAll("_", " ")).parentElement).toHaveTextContent(expected);
+});
+
+it("shows object change values as JSON", () => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 902,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PUT",
+        path: "/api/v2/admin/users/2",
+        status_code: 204,
+        duration_ms: 1,
+        user_id: 1,
+        action: "user.updated",
+        target_type: "user",
+        target_id: "2",
+        changes: [{ field: "max_streams", before: '{"a":1}', after: "2" }],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText("max streams").parentElement).toHaveTextContent('{"a":1} → 2');
 });

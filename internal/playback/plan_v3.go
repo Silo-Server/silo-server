@@ -214,6 +214,18 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	if file.ProbeRejected() {
 		return terminalPlannerResultV3(TerminalSourceUnreadableV3, TerminalSourceUnreadableMessageV3, false)
 	}
+	// No route plays an audio track FFmpeg cannot decode: conversion has no
+	// decoder, an MP4 or fMP4 copy has no codec tag, and no client can claim
+	// a codec the probe could not name. Default selection skips such tracks,
+	// so this one was chosen explicitly or the file has no other. Retrying
+	// cannot help; choosing another track can.
+	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
+		message := TerminalAudioTrackUndecodableMessageV3
+		if !AnyAudioTrackDecodable(file.AudioTracks, file.CodecAudio) {
+			message = TerminalNoDecodableAudioMessageV3
+		}
+		return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, message, false)
+	}
 	if input.Now.IsZero() {
 		input.Now = time.Now()
 	}
@@ -306,8 +318,8 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// Video-only media has no audio stream to adapt: treating the absence
 		// as an unsupported codec would force a pointless AAC conversion — or
 		// a terminal when conversion is unavailable — on a playable file. An
-		// audio track whose codec merely failed to probe keeps the codec
-		// gate: converting unknown audio is safer than copying it.
+		// audio track the probe could not name never reaches this point: the
+		// decodability gate above refuses it.
 		audioOK = true
 		audioClaims.Reason = "no_audio_track"
 	}
@@ -633,7 +645,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			hlsTranscodeAudio := hlsTranscodeAudio
 			remuxBase := cloneRemuxPlanCandidateV3(base)
 			if dvStrip {
-				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: DV7ToHDR10ClaimsV3()})
+				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: DV7ToHDR10ClaimsV3()})
 				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
 				remuxBase.Claims.Video = VideoClaimsV3{HDR10: true}
 				remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})

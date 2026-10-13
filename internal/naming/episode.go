@@ -44,7 +44,9 @@ type episodeToken struct {
 // evidence. Unlabeled numbers need either a containing season directory or an
 // explicitly declared series library. They never classify files in mixed or
 // movie libraries by themselves.
-func parseEpisodeToken(name string, directories []string, allowNumericSeason bool, allowUnseasoned ...bool) (episodeToken, bool) {
+// rootRelative reports that directories start directly in a configured library
+// folder, so the first one may be the show itself.
+func parseEpisodeToken(name string, directories []string, rootRelative, allowNumericSeason bool, allowUnseasoned ...bool) (episodeToken, bool) {
 	for _, pattern := range []*regexp.Regexp{labeledEpisodeRe, xEpisodeRe} {
 		for _, match := range pattern.FindAllStringSubmatchIndex(name, -1) {
 			season, _ := strconv.Atoi(name[match[2]:match[3]])
@@ -53,7 +55,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 			}
 			// A bare aspect ratio (Movie.Name.16x9) is a coordinate only in a
 			// season folder or a series library.
-			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(directories, allowNumericSeason, allowUnseasoned...) {
+			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(name, directories, rootRelative, allowNumericSeason, allowUnseasoned...) {
 				continue
 			}
 			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
@@ -77,7 +79,8 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		if len(directories) > 1 {
 			showDirectory = directories[len(directories)-2]
 		}
-		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason)
+		topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
+		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
 		if !hasSeason {
 			showDirectory = parent
 		}
@@ -185,7 +188,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 
 // hasSeriesContext reports whether a file sits in a season folder or a
 // declared series library.
-func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseasoned ...bool) bool {
+func hasSeriesContext(name string, directories []string, rootRelative, allowNumericSeason bool, allowUnseasoned ...bool) bool {
 	if len(allowUnseasoned) > 0 && allowUnseasoned[0] {
 		return true
 	}
@@ -196,7 +199,9 @@ func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseas
 	if len(directories) > 1 {
 		showDirectory = directories[len(directories)-2]
 	}
-	_, ok := seasonDirectoryNumber(directories[len(directories)-1], showDirectory, allowNumericSeason)
+	parent := directories[len(directories)-1]
+	topLevel := rootRelative && len(directories) == 1 && mayBeShowFolder(parent, name)
+	_, ok := seasonDirectoryNumber(parent, showDirectory, allowNumericSeason, topLevel)
 	return ok
 }
 
@@ -293,7 +298,7 @@ func technicalMetadataStart(name string) int {
 // hasExplicitEpisodeToken reports a labeled coordinate such as S01E01 or 1x01.
 // Without series context, unlabeled numbers are not episode evidence.
 func hasExplicitEpisodeToken(name string) bool {
-	_, ok := parseEpisodeToken(name, nil, false)
+	_, ok := parseEpisodeToken(name, nil, false, false)
 	return ok
 }
 
@@ -543,11 +548,24 @@ func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
 	libraryRoot := deepestContainingLibraryRoot(filePath, libraryRoots)
 	directories := directorySegmentsWithinRoot(filePath, libraryRoot)
 	allowNumericSeason := libraryRoot == "" || len(directories) > 1
-	token, ok := parseEpisodeToken(stem, directories, allowNumericSeason, true)
+	token, ok := parseEpisodeToken(stem, directories, libraryRoot != "", allowNumericSeason, true)
 	if !ok || token.episode == 0 {
 		return ""
 	}
 	return strings.TrimLeft(stem[token.end:], " ._-")
+}
+
+// AirDateTitleSuffix returns the text following the air date of a by-date
+// episode name. Release-tag cleanup belongs to the caller, as with
+// EpisodeTitleSuffix.
+func AirDateTitleSuffix(filePath string) string {
+	base := filepath.Base(filePath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	match := airDateRe.FindStringSubmatchIndex(stem)
+	if match == nil {
+		return ""
+	}
+	return strings.TrimLeft(stem[match[7]:], " ._-")
 }
 
 func compactEpisodeMatch(name string) []int {

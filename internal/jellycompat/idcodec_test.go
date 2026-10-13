@@ -1,7 +1,10 @@
 package jellycompat
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/contentid"
 )
@@ -46,6 +49,45 @@ func TestLegacyNumericContentIDRoundTrips(t *testing.T) {
 	got, err := NewResourceIDCodec().DecodeStringID(EncodedIDItem, u)
 	if err != nil || got != legacy {
 		t.Fatalf("legacy numeric round trip = (%q, %v), want (%q, nil)", got, err, legacy)
+	}
+}
+
+// hashedItemIDStartingWith returns a content_id that does not pack, so the
+// codec hashes it, whose compat id starts with first, as about one hash in 256
+// does.
+func hashedItemIDStartingWith(t *testing.T, c *ResourceIDCodec, first EncodedIDType) (id, raw string) {
+	t.Helper()
+	for i := 0; i < 100000; i++ {
+		id = fmt.Sprintf("jf12-multi-%d", i)
+		if _, packed := packContentIDUUID(EncodedIDItem, id); packed {
+			t.Fatalf("%q packs; the test needs an id that is hashed", id)
+		}
+		raw = c.EncodeStringID(EncodedIDItem, id)
+		if uuid.MustParse(raw)[0] == byte(first) {
+			return id, raw
+		}
+	}
+	t.Fatalf("no hashed item id starts with byte %d", first)
+	return "", ""
+}
+
+// TestHashedIDStartingWithKindByteDecodes: the numeric decoding must not claim
+// a hashed id that merely starts with a kind's byte. An item id starting with
+// the item byte decodes through the reverse map, and one starting with another
+// numeric kind's byte is not read as that kind, so /Items/{id}, which tries
+// numeric kinds first, reaches the item.
+func TestHashedIDStartingWithKindByteDecodes(t *testing.T) {
+	c := NewResourceIDCodec()
+	id, raw := hashedItemIDStartingWith(t, c, EncodedIDItem)
+	if got, err := c.DecodeStringID(EncodedIDItem, raw); err != nil || got != id {
+		t.Fatalf("DecodeStringID(%q) = (%q, %v), want (%q, nil)", raw, got, err, id)
+	}
+	_, raw = hashedItemIDStartingWith(t, c, EncodedIDLibrary)
+	if got, err := c.DecodeIntID(EncodedIDLibrary, raw); err == nil {
+		t.Fatalf("DecodeIntID(library, %q) = %d, want an error for a hashed item id", raw, got)
+	}
+	if got, err := c.DecodeIntID(EncodedIDLibrary, c.EncodeIntID(EncodedIDLibrary, 42)); err != nil || got != 42 {
+		t.Fatalf("library id round trip = (%d, %v), want (42, nil)", got, err)
 	}
 }
 

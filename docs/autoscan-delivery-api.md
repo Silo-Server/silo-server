@@ -10,8 +10,10 @@ The shared application method resolves the source token before reading at most
 The declared request schema is attached after Huma input registration so its
 decoder does not read or re-encode provider bytes before token resolution.
 HTTP request compression and non-JSON media types are refused. When configured,
-the same `autoscan_webhook` per-endpoint rate-limit bucket as the bridge applies;
-rate-limit problems retain `Retry-After`.
+the same `autoscan_webhook` per-endpoint rate-limit bucket as the bridge applies,
+including the per-connection cap for forwarded clients described in
+[Sign-in rate limits](auth-api.md#sign-in-rate-limits); rate-limit problems retain
+`Retry-After`.
 
 Accepted requests return `202` with `{"status":"accepted"}`. Test events,
 unsupported event types and disabled sources/global autoscan settings return the

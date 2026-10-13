@@ -8,8 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -17,9 +19,9 @@ const jellycompatSessionColumns = `token, username, account_username, profile_id
 
 // errSessionUnreadable marks a compat session row that was read but whose
 // bridged tokens could not be decrypted (a changed encryption key, damaged
-// ciphertext). Retrying cannot fix it, so lookups treat the session as gone
-// and the client signs in again.
-var errSessionUnreadable = errors.New("compat session cannot be decrypted")
+// ciphertext) or name no login session. Retrying cannot fix it, so lookups
+// treat the session as gone and the client signs in again.
+var errSessionUnreadable = errors.New("compat session cannot be read")
 
 // SessionRepository persists compat sessions in PostgreSQL.
 type SessionRepository struct {
@@ -69,25 +71,55 @@ func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 	if session.StreamAppRefreshToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token)); err != nil {
 		return nil, fmt.Errorf("%w: decrypt streamapp refresh token: %w", errSessionUnreadable, err)
 	}
+	// The login session is not a column: the bridged refresh token names
+	// it, and refreshing keeps it, so rows stored before the compat session
+	// tracked it are covered too. Without it the session cannot be checked,
+	// so it fails closed.
+	if session.LoginSessionID, err = auth.StoredRefreshTokenSessionID(session.StreamAppRefreshToken); err != nil {
+		return nil, fmt.Errorf("%w: read login session: %w", errSessionUnreadable, err)
+	}
 	return &session, nil
+}
+
+// encryptTokens encrypts the session's bridged Silo access and refresh
+// tokens for storage (write-path contract).
+func (r *SessionRepository) encryptTokens(session Session) (accessToken, refreshToken string, err error) {
+	accessToken, err = r.cipher.Encrypt(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token))
+	if err != nil {
+		return "", "", fmt.Errorf("encrypt streamapp access token: %w", err)
+	}
+	refreshToken, err = r.cipher.Encrypt(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token))
+	if err != nil {
+		return "", "", fmt.Errorf("encrypt streamapp refresh token: %w", err)
+	}
+	return accessToken, refreshToken, nil
 }
 
 // Upsert inserts or updates a compat session.
 func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
+	return r.upsert(ctx, r.pool, session)
+}
+
+// UpsertTx is Upsert inside tx.
+func (r *SessionRepository) UpsertTx(ctx context.Context, tx pgx.Tx, session Session) error {
+	return r.upsert(ctx, tx, session)
+}
+
+type sessionExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func (r *SessionRepository) upsert(ctx context.Context, db sessionExecer, session Session) error {
 	if session.Token == "" {
 		session.Token = uuid.NewString()
 	}
 
-	accessToken, err := r.cipher.Encrypt(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token))
+	accessToken, refreshToken, err := r.encryptTokens(session)
 	if err != nil {
-		return fmt.Errorf("encrypt streamapp access token: %w", err)
-	}
-	refreshToken, err := r.cipher.Encrypt(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token))
-	if err != nil {
-		return fmt.Errorf("encrypt streamapp refresh token: %w", err)
+		return err
 	}
 
-	_, err = r.pool.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO jellycompat_sessions (
 			token, username, account_username, profile_id, profile_name, pseudo_user_id,
 			streamapp_user_id, streamapp_access_token, streamapp_refresh_token,
@@ -129,6 +161,53 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 	return nil
 }
 
+// UpdateByToken rewrites a stored compat session. It never inserts: when the
+// row is gone (signed out, swept after expiry, or deleted by an account-wide
+// revocation) it returns ErrSessionNotFound, so a sliding extension or token
+// refresh that races a revocation cannot bring the session back.
+func (r *SessionRepository) UpdateByToken(ctx context.Context, session Session) error {
+	accessToken, refreshToken, err := r.encryptTokens(session)
+	if err != nil {
+		return err
+	}
+
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE jellycompat_sessions SET
+			username = $2,
+			account_username = $3,
+			profile_id = $4,
+			profile_name = $5,
+			pseudo_user_id = $6,
+			streamapp_user_id = $7,
+			streamapp_access_token = $8,
+			streamapp_refresh_token = $9,
+			streamapp_token_expiry = $10,
+			created_at = $11,
+			expires_at = $12
+		WHERE token = $1
+	`,
+		session.Token,
+		session.Username,
+		session.AccountUsername,
+		session.ProfileID,
+		session.ProfileName,
+		session.PseudoUserID,
+		session.StreamAppUserID,
+		accessToken,
+		refreshToken,
+		session.StreamAppTokenExpiry,
+		session.CreatedAt,
+		session.ExpiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update compat session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
 // GetByToken loads an active compat session by token.
 func (r *SessionRepository) GetByToken(ctx context.Context, token string, now time.Time) (*Session, error) {
 	return r.scanCompatSession(r.pool.QueryRow(ctx,
@@ -156,15 +235,6 @@ func (r *SessionRepository) DeleteExpired(ctx context.Context, now time.Time) (i
 	tag, err := r.pool.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE expires_at <= $1`, now)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired compat sessions: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
-}
-
-// DeleteByUserID removes all compat sessions for a given Silo user.
-func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID int) (int, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1`, userID)
-	if err != nil {
-		return 0, fmt.Errorf("delete compat sessions by user: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }

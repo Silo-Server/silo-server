@@ -148,6 +148,19 @@ describe("ProfileHomeSections", () => {
     ).toBeInTheDocument();
   });
 
+  it("stores only what changed, so the rows keep the server's titles and limits", async () => {
+    const u = userEvent.setup();
+    const card = renderCard();
+    await u.click(within(card).getByRole("button", { name: "Hide Continue Watching" }));
+
+    const saved = mocks.saveMutate.mock.calls[0]?.[0] as SectionOverride[];
+    const hidden = saved.find((o) => o.section_id === "s-continue");
+    expect(hidden).toMatchObject({ hidden: true });
+    expect(hidden).not.toHaveProperty("title");
+    expect(hidden).not.toHaveProperty("item_limit");
+    expect(hidden).not.toHaveProperty("config");
+  });
+
   it("resets the profile to the default layout after confirming", async () => {
     const u = userEvent.setup();
     const card = renderCard();

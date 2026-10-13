@@ -298,4 +298,8 @@ func TestJellyfinWarningLogErrorDropsResponseBody(t *testing.T) {
 	if got := jellyfinWarningLogError(err); got != "jellyfin http 502" {
 		t.Fatalf("jellyfinWarningLogError = %q, want only the status", got)
 	}
+	err = fmt.Errorf("fetching Emby Items/Resume: %w", &embyHTTPError{StatusCode: http.StatusInternalServerError, Body: body})
+	if got := warningLogError("emby", err); got != "emby http 500" {
+		t.Fatalf("warningLogError(emby) = %q, want only the status", got)
+	}
 }

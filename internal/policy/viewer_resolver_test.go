@@ -727,3 +727,45 @@ func assertZeroScope(t *testing.T, scope access.Scope) {
 }
 
 func ptr[T any](value T) *T { return &value }
+
+// A content-only resolve hands the PDP no hidden libraries, so neither
+// resolver lets the profile's browsing preference shrink its access.
+func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
+	ctx := context.Background()
+	pdp := newViewerResolverTestPDP(t, ctx)
+	cases := []struct {
+		name        string
+		libraries   []int
+		wantAllowed []int
+	}{
+		{"unrestricted account", nil, nil},
+		{"restricted account", []int{1, 2, 3}, []int{1, 2, 3}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			users := viewerResolverUserRepo{user: &models.User{ID: 1, LibraryIDs: tc.libraries, AccessPolicyRevision: 5}}
+			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{
+				profile:       &userstore.Profile{ID: "prof-1", MaxContentRating: "PG", PINHash: "locked"},
+				settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[2,3]`)},
+			}}
+			input := access.ResolveInput{UserID: 1, ProfileID: "prof-1", SkipPINVerification: true, ContentAccessOnly: true}
+			policyScope, err := NewViewerResolver(users, stores, nil, pdp).Resolve(ctx, input)
+			if err != nil {
+				t.Fatalf("Resolve() error: %v", err)
+			}
+			legacyScope, err := access.NewResolver(users, stores, nil).Resolve(ctx, input)
+			if err != nil {
+				t.Fatalf("legacy Resolve() error: %v", err)
+			}
+			if !reflect.DeepEqual(policyScope, legacyScope) {
+				t.Fatalf("scope mismatch\npolicy: %#v\nlegacy: %#v", policyScope, legacyScope)
+			}
+			if !reflect.DeepEqual(policyScope.AllowedLibraryIDs, tc.wantAllowed) || policyScope.DisabledLibraryIDs != nil {
+				t.Fatalf("libraries = allowed %#v disabled %#v, want allowed %#v and none disabled", policyScope.AllowedLibraryIDs, policyScope.DisabledLibraryIDs, tc.wantAllowed)
+			}
+			if policyScope.MaxContentRating != "PG" {
+				t.Fatalf("MaxContentRating = %q, want PG", policyScope.MaxContentRating)
+			}
+		})
+	}
+}

@@ -134,3 +134,65 @@ func TestSingleEpisodeCatalogLibraryIDFailsClosedOutsideAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryExecutorDeniesQueryLibrariesOutsideAllowedLibraries(t *testing.T) {
+	tests := []struct {
+		name      string
+		libraries []int
+		allowed   []int
+		deny      bool
+	}{
+		{name: "disjoint", libraries: []int{7}, allowed: []int{3}, deny: true},
+		{name: "nothing allowed", libraries: nil, allowed: []int{}, deny: true},
+		{name: "nothing allowed with query libraries", libraries: []int{7}, allowed: []int{}, deny: true},
+		{name: "overlap", libraries: []int{3, 7}, allowed: []int{3}},
+		{name: "unrestricted", libraries: []int{7}, allowed: nil},
+	}
+	for _, scope := range []string{"movie", "episode"} {
+		for _, tt := range tests {
+			t.Run(scope+"/"+tt.name, func(t *testing.T) {
+				def := QueryDefinition{Match: "all", LibraryIDs: tt.libraries, MediaScope: scope}
+				sql, _, err := (&QueryExecutor{}).buildPreviewPageSQL(def, AccessFilter{AllowedLibraryIDs: tt.allowed}, 20, 0, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Contains(sql, "1 = 0"); got != tt.deny {
+					t.Fatalf("denies = %t, want %t:\n%s", got, tt.deny, sql)
+				}
+			})
+		}
+	}
+}
+
+// A viewer's allowlist that shares no library with the query admits nothing.
+// The intersection is empty then, and an empty library list would otherwise
+// mean every library: jellycompat BoxSets, collection items and custom rows
+// pass a query's own library_ids straight to the executor.
+func TestQueryExecutorMatchesNothingOutsideTheViewersLibraries(t *testing.T) {
+	disjoint := AccessFilter{AllowedLibraryIDs: []int{1}}
+	noLibraries := AccessFilter{AllowedLibraryIDs: []int{}, DisabledLibraryIDs: []int{3}}
+	for _, tc := range []struct {
+		name   string
+		def    QueryDefinition
+		access AccessFilter
+		empty  bool
+	}{
+		{name: "libraries outside the allowlist", def: QueryDefinition{LibraryIDs: []int{2}}, access: disjoint, empty: true},
+		{name: "episode libraries outside the allowlist", def: QueryDefinition{MediaScope: "episode", LibraryIDs: []int{2}}, access: disjoint, empty: true},
+		{name: "empty allowlist beside a disabled library", def: QueryDefinition{}, access: noLibraries, empty: true},
+		{name: "empty episode allowlist beside a disabled library", def: QueryDefinition{MediaScope: "episode"}, access: noLibraries, empty: true},
+		{name: "overlapping libraries", def: QueryDefinition{LibraryIDs: []int{1, 2}}, access: disjoint},
+		{name: "overlapping episode libraries", def: QueryDefinition{MediaScope: "episode", LibraryIDs: []int{1, 2}}, access: disjoint},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := &QueryExecutor{Scope: tc.def.MediaScope}
+			sql, _, err := executor.buildPreviewPageSQL(tc.def, tc.access, 20, 0, false)
+			if err != nil {
+				t.Fatalf("build preview SQL: %v", err)
+			}
+			if got := strings.Contains(sql, "1 = 0"); got != tc.empty {
+				t.Fatalf("matches nothing = %v, want %v:\n%s", got, tc.empty, sql)
+			}
+		})
+	}
+}

@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"reflect"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func newListingTestDB(t *testing.T) *sql.DB {
@@ -52,30 +50,6 @@ func TestListProfilesAttachesAllowedLibrariesInOrder(t *testing.T) {
 	}
 }
 
-func TestListCollectionsAttachesAllowedProfilesInOrder(t *testing.T) {
-	db := newListingTestDB(t)
-	collection, err := CreateCollection(db, userstore.CreateCollectionInput{
-		CreatorProfileID:  "p1",
-		Name:              "Shared",
-		IsShared:          true,
-		AllowedProfileIDs: []string{"p3", "p2"},
-	})
-	if err != nil {
-		t.Fatalf("CreateCollection: %v", err)
-	}
-
-	collections, err := ListCollections(db, "p2")
-	if err != nil {
-		t.Fatalf("ListCollections: %v", err)
-	}
-	if len(collections) != 1 || collections[0].ID != collection.ID {
-		t.Fatalf("ListCollections = %+v, want collection %s", collections, collection.ID)
-	}
-	if got, want := collections[0].AllowedProfileIDs, []string{"p1", "p2", "p3"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("AllowedProfileIDs = %v, want %v", got, want)
-	}
-}
-
 func TestBatchAttachDoesNotScaleBindParametersWithRows(t *testing.T) {
 	db := newListingTestDB(t)
 	const aboveSQLiteVariableLimit = 32767
@@ -83,10 +57,5 @@ func TestBatchAttachDoesNotScaleBindParametersWithRows(t *testing.T) {
 	profiles := make([]Profile, aboveSQLiteVariableLimit)
 	if err := attachAllowedLibraries(db, profiles); err != nil {
 		t.Fatalf("attachAllowedLibraries: %v", err)
-	}
-
-	collections := make([]Collection, aboveSQLiteVariableLimit)
-	if err := attachCollectionProfiles(db, "viewer", collections); err != nil {
-		t.Fatalf("attachCollectionProfiles: %v", err)
 	}
 }

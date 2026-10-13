@@ -271,6 +271,13 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 			if !slices.Equal(matches.Matches, want) {
 				t.Fatalf("facet search=%v, want %v", matches.Matches, want)
 			}
+			v1, _, err := resolver.SearchFacetV1(t.Context(), req, access, "genre", "HES-", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(v1, want) {
+				t.Fatalf("v1 facet search=%v, want %v", v1, want)
+			}
 		})
 	}
 

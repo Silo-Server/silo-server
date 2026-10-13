@@ -100,29 +100,34 @@ type UpdateProfileMapping struct {
 }
 
 type CanonicalEvent struct {
-	Provider        string
-	ServerName      string
-	OccurredAt      time.Time
-	Action          string
-	EventKind       string
-	UserID          string
-	UserName        string
-	ExternalItemID  string
-	MediaKind       string
-	Completed       bool
-	PositionSeconds float64
-	DurationSeconds float64
-	Record          CanonicalRecord
-	Summary         string
-	Apply           bool
+	Provider       string
+	ServerName     string
+	OccurredAt     time.Time
+	Action         string
+	EventKind      string
+	UserID         string
+	UserName       string
+	ExternalItemID string
+	MediaKind      string
+	Completed      bool
+	// CompletionPerPlayback marks a provider that reports completion once
+	// per playback with no event timestamp of its own (Plex). After a
+	// completion, events count again only once a new playback starts.
+	CompletionPerPlayback bool
+	PositionSeconds       float64
+	DurationSeconds       float64
+	Record                CanonicalRecord
+	Summary               string
+	Apply                 bool
 }
 
 const (
-	ActionImportProgress = "import_progress"
-	ActionMarkUnplayed   = "mark_unplayed"
-	ActionAddFavorite    = "add_favorite"
-	ActionRemoveFavorite = "remove_favorite"
-	ActionToggleFavorite = "toggle_favorite"
+	ActionImportProgress  = "import_progress"
+	ActionPlaybackStarted = "playback_started"
+	ActionMarkUnplayed    = "mark_unplayed"
+	ActionAddFavorite     = "add_favorite"
+	ActionRemoveFavorite  = "remove_favorite"
+	ActionToggleFavorite  = "toggle_favorite"
 )
 
 const (

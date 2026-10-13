@@ -40,9 +40,10 @@ type proxyGrantLookup interface {
 }
 
 // loginSessionValidator reports whether a login session is still active
-// (not revoked, not expired). Implemented by *auth.SessionRepository.
+// (not revoked, not expired) and its authority. Implemented by
+// *auth.SessionRepository.
 type loginSessionValidator interface {
-	IsValid(ctx context.Context, sessionID string) (bool, error)
+	ActiveSession(ctx context.Context, sessionID string) (auth.SessionAuthority, bool, error)
 }
 
 // grantErrorResponse mirrors the API's error body so a client sees one error
@@ -92,7 +93,7 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 		writeGrantError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
 		return nil, false
 	}
-	valid, err := s.loginSessions.IsValid(r.Context(), claims.SessionID)
+	authority, valid, err := s.loginSessions.ActiveSession(r.Context(), claims.SessionID)
 	if err != nil {
 		// The session could not be checked, which says nothing about the
 		// credential: a retryable 503, never a 401 that signs the client out.
@@ -115,6 +116,11 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 	}
 	if card.UserID != claims.UserID {
 		writeGrantError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
+		return nil, false
+	}
+	// A remote-playback handoff plays only its bound profile's sessions.
+	if authority.IsRemotePlayback() && card.ProfileID != authority.BoundProfileID {
+		writeGrantError(w, http.StatusForbidden, "forbidden", "Session belongs to another profile")
 		return nil, false
 	}
 	// The grant outlives the session it describes, so the deny marker is what
@@ -234,6 +240,7 @@ func (s *Server) relayGrantToTranscodeNode(w http.ResponseWriter, r *http.Reques
 	// the two grant transcode handlers take, so attaching once here is the
 	// equivalent hook. The proxy→node hop itself stays internal_relay.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	cfg := s.watcher.Config()
 	forwardToken := ""
 	if cfg != nil && cfg.Auth.JWTSecret != "" {

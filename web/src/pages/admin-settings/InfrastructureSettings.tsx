@@ -43,9 +43,9 @@ import { useAdminTaskJobs } from "@/hooks/queries/admin/taskJobs";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { toast } from "sonner";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 import { USER_DATABASE_BACKEND_OPTIONS } from "./databaseSettingOptions";
 import { cleanPath } from "./settingsPathDefaults";

@@ -102,10 +102,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.seasonNumber = new(n)
 		}
 	}
-	if raw := q.Get("EnableImageTypes"); raw != "" {
+	// Jellyfin Web repeats the parameter once per type, so every value counts.
+	// A list with no types means every type, as in Jellyfin.
+	if kinds := splitCommaValues(q.Values("EnableImageTypes")); len(kinds) > 0 {
 		result.enableImageTypes = map[string]bool{}
-		for kind := range strings.SplitSeq(raw, ",") {
-			result.enableImageTypes[strings.ToLower(strings.TrimSpace(kind))] = true
+		for _, kind := range kinds {
+			result.enableImageTypes[strings.ToLower(kind)] = true
 		}
 	}
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
@@ -744,8 +746,16 @@ func parseRequestedFields(raw string) map[string]bool {
 // (catalog SQL performance overhaul plan §3.2 part b), it can be removed.
 var fieldsRequiringDetail = parseRequestedFields("RemoteTrailers,ProviderIds,People,Chapters,MediaStreams,MediaSources")
 
+// Lowercased Fields keys for the list path's file-backed video size.
+const (
+	fieldWidth  = "width"
+	fieldHeight = "height"
+	fieldIsHD   = "ishd"
+)
+
 // fieldsServedByList enumerates Fields values that mapping.go's itemFromList
-// can populate — gated by `if allFields || fields[X]` blocks. Anything outside
+// can populate — gated by `if allFields || fields[X]` blocks — plus the
+// file-backed ones applyListFileFields fills in afterwards. Anything outside
 // this set AND outside fieldsRequiringDetail is silently dropped from
 // list-path responses (no detail fetch is triggered to fill it).
 //
@@ -762,6 +772,9 @@ var fieldsServedByList = map[string]struct{}{
 	"productionlocations": {},
 	"criticrating":        {},
 	"mediasourcecount":    {},
+	fieldWidth:            {},
+	fieldHeight:           {},
+	fieldIsHD:             {},
 	"providerids":         {},
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/animeids"
@@ -122,6 +123,10 @@ type Dependencies struct {
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
+	// ShuttingDown reports whether this process has begun shutting down.
+	// /api/v1/ready fails once it does, while the server still answers
+	// requests. May be nil.
+	ShuttingDown func() bool
 	// OnConfigChange registers a callback fired after a live config reload
 	// actually changes the config. May be nil when hot reload is not wired.
 	OnConfigChange               func(fn func(old, updated *config.Config))
@@ -192,7 +197,11 @@ type Dependencies struct {
 	// shared with the Jellyfin login so both count against one budget.
 	// Nil gets a process-local limiter.
 	ProfilePINAttempts *ratelimit.AttemptLimiter
-	ClientIPResolver   *clientip.Resolver
+	// QuickConnectCodeAttempts bounds the six-digit Jellyfin Quick Connect
+	// codes each account tries, shared with the Jellyfin-compatible API's
+	// Authorize route. Nil gets a process-local limiter.
+	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
+	ClientIPResolver         *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -257,6 +266,10 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// OnDownloadService receives the configured download service when the
+	// router builds one, so the Jellyfin-compatible listener serves its
+	// downloads under the same policy and bandwidth limiters. Optional.
+	OnDownloadService func(*downloads.Service)
 	// v2Wiring observes the sealed v2 dependency set right before
 	// apiv2.NewHandler consumes it; tests only. It is the one way to assert
 	// that a v1 handler reached the v2 listener, since NewRouter returns a
@@ -272,6 +285,12 @@ type Dependencies struct {
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
+	// PersonalCollectionCollages serves and builds personal collection
+	// collages. main.go builds it beside UserCollectionSync, before scheduled
+	// syncs start, and hands it to both; the router gives it its generator
+	// once the poster signer exists. Nil builds one here when artwork
+	// storage is configured.
+	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
 	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
@@ -410,6 +429,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker, deps.Blobs.Assets)
+	readyHandler.SetShuttingDown(deps.ShuttingDown)
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
@@ -464,13 +484,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Admin authorization for routes: admin role, exercised through the
 	// account's primary household profile.
-	var requireActingAdmin func(http.Handler) http.Handler
+	var actingAdmin apimw.ActingAdminDecider
 	if deps.PolicySystem != nil {
-		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
+		actingAdmin = apimw.NewPolicyActingAdminDecider(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
 	} else {
 		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile, householdRequiresProfile)
+		actingAdmin = apimw.NewActingAdminDecider(checkPrimaryProfile, householdRequiresProfile)
 	}
+	requireActingAdmin := apimw.RequireActingAdminWith(actingAdmin)
+	// Routes outside the admin groups that widen what an admin sees or may do
+	// ask apimw.ActingAdmin, which answers with this same decision.
+	r.Use(apimw.ProvideActingAdmin(actingAdmin))
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
@@ -546,6 +570,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataCurationAccess func(http.Handler) http.Handler
 	var markerEditAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
+	var collectionOwners catalog.PersonalCollectionAccess
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
 	var sessionRepo *auth.SessionRepository
@@ -616,6 +641,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.UserStoreProvider,
 			profileTokenService,
 		)
+		if deviceLoginService != nil {
+			quickConnectAttempts := deps.QuickConnectCodeAttempts
+			if quickConnectAttempts == nil {
+				quickConnectAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.QuickConnectCodePolicy)
+			}
+			deviceLoginService.WithQuickConnectAttempts(quickConnectAttempts)
+		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
 		if accessGroupStore != nil {
@@ -630,6 +662,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
+			// Shared personal collections are limited to their owner's
+			// access, resolved by the same resolver the request gates use.
+			collectionOwners = usercollections.NewOwnerAccess(viewerResolver)
 		}
 		if deps.DB != nil {
 			metadataLibraries := apimw.NewPGMetadataTargetLibraryResolver(deps.DB)
@@ -763,6 +798,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
+	var catalogResolver *catalog.CatalogResolver
 	var shuffleService *shuffle.Service
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
@@ -881,10 +917,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
+		itemsHandler.SetPersonalCollectionAccess(collectionOwners)
 		if deps.MarkerPopulation != nil {
 			itemsHandler.MarkerPopulation = deps.MarkerPopulation
 		}
 		itemsHandler.MarkerFileResolver = deps.FileRepo
+		itemsHandler.MarkerImageURLs = deps.ArtworkResolver
 		itemsHandler.EventsHub = deps.EventsHub
 		itemsHandler.UserRepo = userRepo
 		if accessGroupStore != nil {
@@ -934,11 +972,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
-		catalogResolver := catalog.NewCatalogResolver(browseRepo, itemRepo).
+		catalogResolver = catalog.NewCatalogResolver(browseRepo, itemRepo).
 			WithEpisodeRepository(episodeRepo).
 			WithUserStoreProvider(deps.UserStoreProvider).
 			WithSearchProvider(catalogSearchService.Provider()).
-			WithWatchlistPromoter(watchlistTitles)
+			WithWatchlistPromoter(watchlistTitles).
+			WithPersonalCollectionAccess(collectionOwners)
 		catalogHandler = handlers.NewCatalogHandler(catalogResolver, itemsHandler)
 		shuffleService = shuffle.NewService(deps.DB, catalogResolver)
 		catalogHandler.SetWorkSummaryProvider(literaryRepo)
@@ -1056,6 +1095,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userImportHandler *handlers.UserCollectionImportHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	// One device-sightings recorder for every surface that registers the
+	// request's device (legacy and canonical settings, playback start), so
+	// they share one throttle window per (profile, device).
+	deviceSightings := handlers.NewDeviceSightings()
 	// userPluginSettingsHandler is the plugin handler the user-scoped
 	// /settings/plugins routes are registered on; v2 shares it.
 	var userPluginSettingsHandler *handlers.PluginHandler
@@ -1066,6 +1109,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var libraryPlaybackPrefHandler *handlers.LibraryPlaybackPrefHandler
 	var watchProviderHandler *handlers.WatchProviderHandler
 	var playbackSessionsLoader *handlers.PlaybackSessionsLoader
+	// Personal collections without an uploaded or imported poster show a
+	// collage of their titles; it needs artwork storage and poster signing.
+	var personalCollages *catalog.PersonalCollectionCollages
+	if deps.DB != nil && detailSvc != nil {
+		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, nil); gen != nil {
+			personalCollages = deps.PersonalCollectionCollages
+			if personalCollages == nil {
+				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			}
+			personalCollages.SetCollageGenerator(gen)
+		}
+	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
 	}
@@ -1123,6 +1178,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.ArtworkStore = deps.Blobs.Assets
 		collectionHandler.ArtworkResolver = deps.ArtworkResolver
+		if detailSvc != nil {
+			collectionHandler.ItemPosters = detailSvc
+		}
+		collectionHandler.CollectionOwners = collectionOwners
+		collectionHandler.Collages = personalCollages
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -1139,6 +1199,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			userImportHandler.ArtworkResolver = deps.ArtworkResolver
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
+		settingsHandler.DeviceSightings = deviceSightings
 		settingsHandler.EventsHub = deps.EventsHub
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
@@ -1149,6 +1210,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// which degrades to "no typed settings routes" instead of no server.
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
+			settingValuesHandler.DeviceSightings = deviceSightings
 			settingValuesHandler.EventsHub = deps.EventsHub
 			// Household management: a primary profile acting for another
 			// profile on its own account. Without the token service a
@@ -1272,6 +1334,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
+			playbackHandler.DeviceSightings = deviceSightings
 		}
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		playbackHandler.CompletionObserver = deps.WatchCompletionObserver
@@ -1667,6 +1730,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
 		markersHandler.BaseContext = deps.AppContext
+		if deps.DB != nil {
+			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+		}
+		markersHandler.MarkerImageURLs = deps.ArtworkResolver
+		markersHandler.ThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if deps.MarkerPopulation != nil {
 			markersHandler.MarkerPopulation = deps.MarkerPopulation
 		}
@@ -1753,14 +1821,36 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// OnConfigChange; only the semaphore size (ai.max_concurrent_jobs) is
 	// fixed at construction.
 	var aiClient *llm.Client
+	var chatGPT *chatgpt.Service
+	if store, ok := settingsRepo.(chatgpt.Store); ok && deps.SecretCipher != nil {
+		chatGPT = chatgpt.NewService(store)
+		chatGPT.OnSettingUpdated = func(ctx context.Context, key, value string) {
+			if deps.OnServerSettingUpdated != nil {
+				deps.OnServerSettingUpdated(ctx, key, value)
+			}
+			if deps.EventBus != nil {
+				_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+		}
+	}
+	aiConfig := func(cfg *config.Config) llm.Config {
+		c := llmConfigFromServer(cfg)
+		if chatGPT != nil {
+			c.ChatGPTTokenSource = chatGPT.TokenSource
+			c.ChatGPTTokenRejected = chatGPT.RejectToken
+			c.ChatGPTPlanRejected = chatGPT.RejectPlanToken
+			c.TextConfigSource = chatGPT.TextConfig
+		}
+		return c
+	}
 	var aiSem chan struct{}
 	if deps.Config != nil {
-		aiClient = llm.NewClient(llmConfigFromServer(deps.Config))
+		aiClient = llm.NewClient(aiConfig(deps.Config))
 		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		if deps.OnConfigChange != nil {
 			clientForReload := aiClient
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				clientForReload.UpdateConfig(llmConfigFromServer(updated))
+				clientForReload.UpdateConfig(aiConfig(updated))
 			})
 		}
 	}
@@ -1768,6 +1858,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiCfg := effectiveSubtitleAIConfig(deps.Config)
+		aiCfg.TextConfigSource = aiClient.TextConfig
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -1793,6 +1884,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
 				newCfg := effectiveSubtitleAIConfig(updated)
+				newCfg.TextConfigSource = aiClient.TextConfig
 				aiService.UpdateConfig(newCfg)
 				aiTranslator.SetBatching(updated.SubtitleAI.BatchSize, updated.SubtitleAI.ContextNeighbors)
 				aiTranscriber.SetExtraction(updated.Playback.FFmpegPath, updated.SubtitleAI.ASRChunkSeconds)
@@ -1807,9 +1899,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataAIHandler *handlers.MetadataAIHandler
 	if deps.DB != nil && deps.Config != nil && aiClient != nil {
 		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
+		mtConfig := func(cfg *config.Config) metadatatranslation.Config {
+			c := metadataAIConfigFromServer(cfg)
+			c.TextConfigSource = aiClient.TextConfig
+			return c
+		}
 		mtService := metadatatranslation.NewService(
 			deps.AppContext,
-			metadataAIConfigFromServer(deps.Config),
+			mtConfig(deps.Config),
 			mtRepo,
 			mtRepo,
 			&metadatatranslation.CatalogLocalizationStore{
@@ -1824,7 +1921,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mtService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
-				mtService.UpdateConfig(metadataAIConfigFromServer(updated))
+				mtService.UpdateConfig(mtConfig(updated))
 			})
 		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
@@ -1849,6 +1946,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		sectionBulkHandler = &handlers.SectionBulkHandler{Repo: sectionRepo}
 		sectionFetcher := sections.NewFetcher(deps.DB)
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
+		sectionFetcher.CollectionOwners = collectionOwners
 		if watchlistTitles != nil {
 			sectionFetcher.WatchlistPromoter = watchlistTitles
 		}
@@ -1863,6 +1961,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		sections.InstallRecipeDelegate(sectionFetcher)
 		sectionHandler = handlers.NewSectionHandler(sectionRepo, sectionFetcher)
+		catalogResolver.WithSectionResolver(sectionHandler)
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
 		}
@@ -1883,8 +1982,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			sectionHandler.AccessGroups = accessGroupStore
 		}
 		if settingsRepo != nil {
-			sectionHandler.Settings = settingsRepo
-			sectionSettingsHandler = &handlers.SectionSettingsHandler{Settings: settingsRepo}
+			sectionSettingsHandler = &handlers.SectionSettingsHandler{}
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
@@ -2001,6 +2099,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
 		libraryCollectionHandler.UserCollectionPool = deps.DB
+		libraryCollectionHandler.CollectionOwners = collectionOwners
+		libraryCollectionHandler.PersonalCollages = personalCollages
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
@@ -2067,6 +2167,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
+			recsFetcher.CollectionOwners = collectionOwners
 			if watchlistTitles != nil {
 				recsFetcher.WatchlistPromoter = watchlistTitles
 			}
@@ -2156,6 +2257,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// delete_watched monitors skip episodes the profile has finished.
 			downloadSvc.SetProgressStores(deps.UserStoreProvider)
 		}
+		if deps.OnDownloadService != nil {
+			deps.OnDownloadService(downloadSvc)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 		if jwtService != nil {
 			downloadHandler.SetDirectDownloadLinks(jwtService)
@@ -2202,6 +2306,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		historyImportSvc.SetLocalNetworkAccess(localNetworkAccess)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
+		// Shows hidden from the source's Continue Watching are dropped through
+		// the same tracker as Home dismissals, so interest recomputes.
+		historyImportSvc.SetContinueWatchingStores(
+			notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications),
+			catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider),
+		)
 		if deps.EventsHub != nil {
 			historyImportSvc.AddObserver(evt.NewHistoryImportObserver(deps.EventsHub))
 		}
@@ -2302,7 +2412,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsRepo,
 		compatUsers,
 	)
-	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
+	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, actingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
 	// Server identity is public discovery data, so it reads through the raw
 	// settings repo: a SECRET_KEY rotation must not change who the server is.
@@ -2365,6 +2475,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DownloadSubscriptionSync = downloadSvc
 		v2deps.DownloadCreation = downloadSvc
 		v2deps.AdminAccountDownloads = downloadSvc
+		v2deps.AdminDownloadDevices = downloadSvc
+		v2deps.DownloadPrepareAgain = downloadSvc
 	}
 	if ebookReaderHandler != nil {
 		v2deps.EbookProgress = ebookReaderHandler
@@ -2528,6 +2640,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil && deps.ArtifactManager != nil {
 			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
 			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
+			v2deps.AdminDownloadStorage = deps.ArtifactManager
 		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
@@ -2544,6 +2657,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminSettingsInspection = adminHandler
 		v2deps.AdminSettingsWrite = adminHandler
 		v2deps.AdminSettingsChecks = adminHandler
+		adminHandler.ChatGPT = chatGPT
+	}
+	if chatGPT != nil {
+		v2deps.ChatGPT = chatGPT
 	}
 	if watchTogetherHandler != nil {
 		v2deps.WatchTogetherSuggestions = watchTogetherHandler
@@ -2698,6 +2815,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
+		v2deps.AdminNodeDrain = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
 		// Network access admin operations fan out to every enabled proxy node
 		// over its bearer routes, the same way force-reload does.
@@ -2849,10 +2967,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
 		v2deps.AdminProfileSections = sectionHandler
-	}
-	if sectionSettingsHandler != nil {
-		v2deps.SectionFlags = sectionSettingsHandler
-		v2deps.AdminSectionSettingsWrite = sectionSettingsHandler
 	}
 	if webhookSyncHandler != nil {
 		v2deps.WebhookSync = webhookSyncHandler
@@ -4628,7 +4742,7 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
-		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID))
+		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
 }
 
@@ -4799,11 +4913,13 @@ func resolveOptionalPluginAccessUser(
 	// Plugin launch tokens copy the role of the access token they were minted
 	// from, and a role change keeps the session, so admin access follows the
 	// account's current role rather than the token's.
-	role, active, err := sessionRepo.ActiveSessionRole(r.Context(), claims.SessionID)
-	if err != nil || !active {
+	// A remote-playback handoff only plays on its device; plugins are not
+	// part of that.
+	authority, active, err := sessionRepo.ActiveSession(r.Context(), claims.SessionID)
+	if err != nil || !active || authority.IsRemotePlayback() {
 		return false, false, 0, ""
 	}
-	return true, role == "admin", claims.UserID, claims.ProfileID
+	return true, authority.Role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.
@@ -5079,12 +5195,14 @@ func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list str
 // config. Used at construction and again on every config reload.
 func llmConfigFromServer(cfg *config.Config) llm.Config {
 	return llm.Config{
-		BaseURL:    cfg.AI.BaseURL,
-		APIKey:     cfg.AI.APIKey,
-		ChatModel:  cfg.AI.ChatModel,
-		ASRBaseURL: cfg.AI.ASRBaseURL,
-		ASRAPIKey:  cfg.AI.ASRAPIKey,
-		ASRModel:   cfg.AI.ASRModel,
+		AuthMode:        cfg.AI.AuthMode,
+		ReasoningEffort: cfg.AI.ReasoningEffort,
+		BaseURL:         cfg.AI.BaseURL,
+		APIKey:          cfg.AI.APIKey,
+		ChatModel:       cfg.AI.ChatModel,
+		ASRBaseURL:      cfg.AI.ASRBaseURL,
+		ASRAPIKey:       cfg.AI.ASRAPIKey,
+		ASRModel:        cfg.AI.ASRModel,
 	}
 }
 
@@ -5152,7 +5270,7 @@ func v2Dependencies(
 	deps Dependencies,
 	auth *apimw.AuthMiddleware,
 	viewer *apimw.ViewerAccessMiddleware,
-	actingAdmin func(http.Handler) http.Handler,
+	actingAdmin apimw.ActingAdminDecider,
 	metadataCuration func(http.Handler) http.Handler,
 	markerEdit func(http.Handler) http.Handler,
 	settings catalog.SettingsStore,

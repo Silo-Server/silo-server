@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ type CatalogFiltersInput struct {
 	Scope         string `query:"scope" enum:"home,library"`
 	SectionID     string `query:"section_id"`
 	LibraryID     ID     `query:"library_id" example:"1"`
+	LibraryIDs    []ID   `query:"library_ids,explode" maxItems:"200" doc:"Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section" example:"[\"1\",\"2\"]"`
 	CollectionID  string `query:"collection_id"`
 	PersonID      ID     `query:"person_id"`
 	Type          string `query:"type" doc:"Media scope, as on listCatalogItems; video_with_episodes lists the facets of video" example:"movie"`
@@ -72,8 +74,8 @@ type CatalogFiltersInput struct {
 type CatalogFacetSearchInput struct {
 	CatalogFiltersInput
 	Facet string `query:"facet" required:"true" enum:"genre,studio,network,country,original_language,content_rating,author,narrator,series" doc:"The facet to search" example:"author"`
-	Q     string `query:"q" doc:"Case-insensitive prefix" example:"ste"`
-	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most matches to return; default 20, maximum 100"`
+	Q     string `query:"q" doc:"Case-insensitive search text; see matches and values for how each answers it" example:"ste"`
+	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most values to return in matches and in values; default 20, maximum 100"`
 }
 
 // AudiobookGroupsInput is the listAudiobookGroups query.
@@ -235,10 +237,20 @@ type CatalogFiltersOutput struct {
 	Body CatalogFilters
 }
 
-// CatalogFacetMatches is a facet typeahead answer.
+// CatalogFacetMatches is a facet typeahead answer. matches is the prefix
+// answer every client has read; values is the ranked answer with counts.
 type CatalogFacetMatches struct {
-	Matches []string `json:"matches" doc:"Empty, never null"`
-	HasMore bool     `json:"has_more" doc:"Whether more values matched than limit"`
+	Matches       []string            `json:"matches" doc:"Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null"`
+	HasMore       bool                `json:"has_more" doc:"Whether more values than limit start with q"`
+	Values        []CatalogFacetValue `json:"values" doc:"The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null"`
+	ValuesHasMore bool                `json:"values_has_more" doc:"Whether more values matched than limit for values"`
+}
+
+// CatalogFacetValue is one facet value with the number of titles in the
+// scope that carry it.
+type CatalogFacetValue struct {
+	Value string `json:"value" example:"Warner Bros. Pictures"`
+	Count int    `json:"count" doc:"Titles in the scope with this value; values can lag catalog changes by up to two minutes" example:"42"`
 }
 
 // CatalogFacetMatchesOutput is the searchCatalogFacet response.
@@ -362,6 +374,13 @@ type CatalogItemDetail struct {
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
 	TvdbID                          string                               `json:"tvdb_id,omitempty"`
+	BannerURL                       string                               `json:"banner_url,omitempty" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
+	BannerThumbhash                 string                               `json:"banner_thumbhash,omitempty"`
+	ThumbURL                        string                               `json:"thumb_url,omitempty" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
+	ThumbThumbhash                  string                               `json:"thumb_thumbhash,omitempty"`
+	ClearArtURL                     string                               `json:"clearart_url,omitempty" doc:"Presigned, short-lived. Transparent cut-out art. Movies and series only"`
+	DiscURL                         string                               `json:"disc_url,omitempty" doc:"Presigned, short-lived. Transparent disc art. Movies only"`
+	BackdropURLs                    []string                             `json:"backdrop_urls,omitempty" doc:"Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none"`
 	Cast                            []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
 	Crew                            []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
 	Countries                       []string                             `json:"countries,omitempty"`
@@ -503,21 +522,22 @@ type EpisodeFile struct {
 
 // Episode is one episode row of a season listing.
 type Episode struct {
-	ContentID      string              `json:"content_id" example:"episode:severance-s01e01"`
-	SeasonNumber   int                 `json:"season_number"`
-	EpisodeNumber  int                 `json:"episode_number"`
-	Title          string              `json:"title"`
-	Overview       string              `json:"overview,omitempty"`
-	AirDate        *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	Runtime        int                 `json:"runtime" doc:"Minutes"`
-	ImdbID         string              `json:"imdb_id,omitempty"`
-	TmdbID         string              `json:"tmdb_id,omitempty"`
-	TvdbID         string              `json:"tvdb_id,omitempty"`
-	StillURL       string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
-	StillThumbhash string              `json:"still_thumbhash,omitempty"`
-	UserData       *WatchRollup        `json:"user_data,omitempty"`
-	Files          []EpisodeFile       `json:"files,omitempty"`
-	OverlaySummary *CatalogItemOverlay `json:"overlay_summary,omitempty"`
+	ContentID           string              `json:"content_id" example:"episode:severance-s01e01"`
+	SeasonNumber        int                 `json:"season_number"`
+	EpisodeNumber       int                 `json:"episode_number"`
+	Title               string              `json:"title"`
+	Overview            string              `json:"overview,omitempty"`
+	AirDate             *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	Runtime             int                 `json:"runtime" doc:"Minutes"`
+	ImdbID              string              `json:"imdb_id,omitempty"`
+	TmdbID              string              `json:"tmdb_id,omitempty"`
+	TvdbID              string              `json:"tvdb_id,omitempty"`
+	StillIsEpisodeStill *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
+	StillURL            string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
+	StillThumbhash      string              `json:"still_thumbhash,omitempty"`
+	UserData            *WatchRollup        `json:"user_data,omitempty"`
+	Files               []EpisodeFile       `json:"files,omitempty"`
+	OverlaySummary      *CatalogItemOverlay `json:"overlay_summary,omitempty"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -566,11 +586,13 @@ const (
 	opListCatalogItems     = "listCatalogItems"
 	opQueryCatalogItems    = "queryCatalogItems"
 	locationQueryImageSize = "query.image_size"
+	locationQueryGroups    = "query.groups"
 	opListAudiobookGroups  = "listAudiobookGroups"
 )
 
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
+	registerCatalogLetters(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
@@ -586,7 +608,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
 		"The facet values available in a scope, for filter menus.")), reg.getCatalogFilters)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
-		"Prefix typeahead over one facet of a scope.")), reg.searchCatalogFacet)
+		"Typeahead over one facet of a scope, with title counts.")), reg.searchCatalogFacet)
 	query := humaOp(http.MethodPost, Prefix+"/catalog/query", opQueryCatalogItems, "catalog",
 		"Page the catalog by a JSON rule-group query; the body form of the browse.")
 	query.DefaultStatus = http.StatusOK
@@ -849,11 +871,40 @@ func (in *CatalogFiltersInput) catalogValues() url.Values {
 	return v
 }
 
+// catalogRequest parses the scope and adds library_ids to the libraries it
+// names, sorted and without repeats, so one set of libraries shares one
+// cached facet value list in whatever order a client sends it. The resolver
+// intersects them with the viewer's libraries, so they can narrow a scope
+// but never widen it.
+func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Problem) {
+	req, p := parseCatalogRequest(in.catalogValues())
+	if p != nil || len(in.LibraryIDs) == 0 {
+		return req, p
+	}
+	if req.Source == catalogpkg.CatalogSourceSection {
+		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids does not apply to source=section"})
+	}
+	for _, id := range in.LibraryIDs {
+		n, p := id.positive("query.library_ids")
+		if p != nil {
+			return catalogpkg.CatalogRequest{}, p
+		}
+		req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
+	}
+	slices.Sort(req.Query.LibraryIDs)
+	req.Query.LibraryIDs = slices.Compact(req.Query.LibraryIDs)
+	return req, nil
+}
+
 // parseCatalogRequest runs the shared parser and reports its refusal as a
 // 422 on the query parameter the message names; the source when it names
 // none, since the source decides what the rest must carry.
 func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem) {
-	req, err := catalogpkg.ParseCatalogRequestWithOptions(values, catalogpkg.CatalogRequestOptions{SearchMediaScopes: true})
+	req, err := catalogpkg.ParseCatalogRequestWithOptions(values, catalogpkg.CatalogRequestOptions{
+		SearchMediaScopes: true,
+		ExtendedRules:     true,
+	})
 	if err != nil {
 		location := "query.source"
 		for _, name := range []string{"section_id", "collection_id", "person_id", "library_id", "scope", "groups"} {
@@ -897,19 +948,13 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		decoder := json.NewDecoder(strings.NewReader(in.Groups))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&groups); err != nil || !json.Valid([]byte(in.Groups)) {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
 		}
-		for _, g := range groups {
-			rules := make([]catalogpkg.QueryRule, 0, len(g.Rules))
-			for _, rule := range g.Rules {
-				rules = append(rules, catalogpkg.QueryRule{Field: rule.Field, Op: rule.Op, Value: rule.Value})
-			}
-			req.Query.Groups = append(req.Query.Groups, catalogpkg.QueryGroup{Match: g.Match, Rules: rules})
-		}
+		req.Query.Groups = append(req.Query.Groups, catalogQueryGroups(groups)...)
 		canonical, _ := json.Marshal(groups)
 		values.Set("groups", string(canonical))
 		if err := req.ValidateQueryDefinition(); err != nil {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: err.Error()})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
 		}
 	}
 	operationID := in.operationID
@@ -1049,7 +1094,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1077,7 +1122,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1085,7 +1130,14 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if err != nil {
 		return nil, catalogProblem(err, "query.facet")
 	}
-	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: NonNil(view.Matches), HasMore: view.HasMore}}, nil
+	values := make([]CatalogFacetValue, len(view.Values))
+	for i, v := range view.Values {
+		values[i] = CatalogFacetValue{Value: v.Value, Count: v.Count}
+	}
+	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{
+		Matches: NonNil(view.Matches), HasMore: view.HasMore,
+		Values: values, ValuesHasMore: view.ValuesHasMore,
+	}}, nil
 }
 
 func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {
@@ -1327,6 +1379,12 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 	}
+	if d.Type == themeOwnerEpisode {
+		// An episode detail's poster is its still; the still's ThumbHash is
+		// served even when its URL doesn't resolve.
+		card.PosterIsEpisodeStill = new(d.PosterURL != "" || d.PosterThumbhash != "")
+		card.BackdropIsEpisodeStill = new(false)
+	}
 	if s := d.UserState; s != nil {
 		card.UserState = &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist}
 	}
@@ -1352,6 +1410,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
 		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
+		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
+		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
 		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
@@ -1387,7 +1447,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
-			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,

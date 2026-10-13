@@ -59,6 +59,14 @@ affect work admitted after the first attempt. Operator observation and a new
 explicit decision are required after uncertainty. This description does not change
 the operations API's scheduling, UI or existing worker client behavior.
 
+A draining transcode node ([node-drain.md](node-drain.md)) refuses new work
+with `503`: `POST /transcode/start` answers plain-text `node is draining`
+unless it replaces a session the node runs, and download preparation,
+trickplay extraction, chapter-thumbnail extraction and media sampling answer
+their existing unavailable shapes. Reads, deletes, stops and the traffic of
+running sessions are unaffected. Its health `status` is `draining`, then
+`drained`.
+
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
 Only a nonempty `input_path` is required by the handler; omitted seek/tone-map
@@ -119,6 +127,21 @@ A missing valid identifier succeeds with 204; invalid identifiers return 404.
 Removal can partially succeed before a 500. Deletion is naturally idempotent for
 the exact artifact and does not cancel preparation, remove another node's bytes,
 or revoke a native delivery grant. These descriptions change no worker behavior.
+
+`GET /downloads/artifacts` lists the node's prepared-download directory: a
+`downloadstorage.Listing` with the directory's measurement (`usage`, including
+`dir`) and one `{name, kind, bytes, mod_time}` per file, `kind` being `complete`,
+`partial`, or `other`. The API compares the names with its `download_artifacts`
+rows to find untracked files (see
+[prepared download storage](download-storage.md#reconciliation)). It requires the
+node bearer because it reveals the path. Only one listing runs at a time and the
+route waits at most 15 seconds for it; a second request, an unreadable directory, or
+a timeout answers plain-text `503`. A node that predates the route answers `404`,
+which the API reports as unable to reconcile. The listing only reads.
+
+The node's unauthenticated `/api/v1/health` also carries `artifacts`, the same
+measurement without `dir`, refreshed at most every five minutes. The API stores it in
+the node's `last_stats` (see [admin-api.md](../admin-api.md#last_stats)).
 
 Proxy subtitle and attached-font GET routes retain
 `/stream/subtitles/{token}/{track}` and its `/fonts` suffix. The inventory's

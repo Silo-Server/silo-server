@@ -34,7 +34,7 @@ func IsDuplicate(err error) bool {
 // CheckPassword verifies a plaintext password against the user's bcrypt hash.
 // This is a standalone function, not a repository method.
 func CheckPassword(user *models.User, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	err := comparePasswordHash([]byte(user.PasswordHash), []byte(password))
 	return err == nil
 }
 

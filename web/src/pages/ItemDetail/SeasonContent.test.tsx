@@ -74,6 +74,10 @@ vi.mock("@/hooks/useOnViewTranslation", () => ({
   useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => ({ hideImages: false, hideOverviews: false }),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null }),
 }));
@@ -165,6 +169,18 @@ function makeSeasonItem(
 }
 
 describe("SeasonContent", () => {
+  it("disables collection membership without removing the item identity", () => {
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      contentId: "season-1",
+      canAddToCollection: false,
+    });
+  });
+
   beforeEach(() => {
     mocks.useDetailWatchTogether.mockClear();
     mocks.capturedActionBarProps.value = null;

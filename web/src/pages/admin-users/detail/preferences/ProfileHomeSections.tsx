@@ -13,13 +13,13 @@ import {
   useResetAdminProfileSections,
   useSaveAdminProfileSections,
 } from "@/hooks/queries/admin/profileSections";
-import { fetchRecipeCatalog } from "@/lib/recipes";
 import {
   buildSectionOverrides,
   canMutateSectionSettings,
   createOverrideIdSource,
   hydrateRemovedSystemSections,
-} from "@/lib/sectionOverrides";
+} from "@/lib/homeRows/profileOverrides";
+import { fetchRecipeCatalog } from "@/lib/recipes";
 
 import { DetailCard } from "../ui";
 
@@ -79,6 +79,9 @@ export function ProfileHomeSections({
       savedOverrides: overrides.data,
       newId: newOverrideId.current,
       changedSectionId,
+      // Store only what changed, as the profile's own Home screen settings
+      // do, so rows left alone keep following the server's layout.
+      baseline: settings.data,
     });
     save.mutate(body, {
       onError: (error) => {

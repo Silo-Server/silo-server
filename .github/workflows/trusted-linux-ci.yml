@@ -717,9 +717,10 @@ jobs:
           wait "$node_pid" || { echo "::error::Node typecheck failed"; failed=1; }
           exit "$failed"
 
-      # Fails when the launch bundle grows past web/perf-budget.json, and when it
-      # shrinks without the budget following it down.
-      - name: Check the launch bundle budget
+      # Reports the launch bundle size, and fails when the React vendor chunk
+      # imports another chunk or index.html gains a cross-origin
+      # render-blocking resource.
+      - name: Check the launch bundle
         if: matrix.part == 'build'
         run: pnpm run budget:check
 

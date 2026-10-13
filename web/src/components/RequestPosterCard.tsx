@@ -272,10 +272,9 @@ function ExternalTitleCard({
           <MediaCardArtwork
             src={tmdbImageURL(posterPath)}
             alt={title}
-            fallbackLabel={title}
+            mediaType={mediaType}
             lazy
             dim={dim}
-            fallbackOnError
           />
         </ViewTransitionLink>
         {libraryContentId || badge ? (

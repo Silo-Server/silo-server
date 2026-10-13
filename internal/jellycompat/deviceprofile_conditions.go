@@ -466,13 +466,8 @@ func compatAudioTrack(version catalog.FileVersion, streamIndex *int) models.Audi
 			return version.AudioTracks[audioIndex]
 		}
 	}
-	for _, track := range version.AudioTracks {
-		if track.Default {
-			return track
-		}
-	}
 	if len(version.AudioTracks) > 0 {
-		return version.AudioTracks[0]
+		return version.AudioTracks[playback.SelectAudioTrack(version.AudioTracks, "", nil)]
 	}
 	return models.AudioTrack{Codec: version.CodecAudio}
 }

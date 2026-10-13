@@ -833,7 +833,7 @@ func TestProviderRecheckRemotePlaybackHandoffChainDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := devices.ApproveRemotePlayback(WithClaims(ctx, &Claims{UserID: env.user.ID, SessionID: approver, TokenType: TokenTypeAccess}),
+	if err := devices.ApproveForProfile(WithClaims(ctx, &Claims{UserID: env.user.ID, SessionID: approver, TokenType: TokenTypeAccess}),
 		DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID, profiles[0].ID); err != nil {
 		t.Fatal(err)
 	}
@@ -2035,6 +2035,7 @@ func TestProviderRecheckBreakGlassRefusalKeepsLocalCredentialsDB(t *testing.T) {
 	})
 	providerSession, refresh := env.session(t, true)
 	localSession, _ := env.session(t, false)
+	jellyfin := insertJellyfinSession(t, env.pool, env.user.ID)
 	key, err := NewAPIKeyRepository(env.pool).Create(ctx, env.user.ID, "breakglass", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2046,6 +2047,11 @@ func TestProviderRecheckBreakGlassRefusalKeepsLocalCredentialsDB(t *testing.T) {
 	}
 	if env.sessionRow(t, providerSession).RevokedAt == nil {
 		t.Fatal("the provider session survived the refusal")
+	}
+	// A Jellyfin-compatible session does not record its identity, so the
+	// refusal deletes every one the account holds.
+	if jellyfinSessionExists(t, env.pool, jellyfin) {
+		t.Fatal("the refusal kept the account's Jellyfin-compatible session")
 	}
 	if env.sessionRow(t, localSession).RevokedAt != nil {
 		t.Fatal("the refusal revoked the break-glass account's local session")

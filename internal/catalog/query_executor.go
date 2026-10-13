@@ -44,6 +44,13 @@ type QueryExecutor struct {
 	// this timestamp.  This prevents offset-based pagination drift when new
 	// items are inserted between page fetches (e.g. during a scan).
 	SnapshotAt *time.Time
+	// SeekAnchors, when set, lets SeekCursor start from a cached anchor
+	// instead of numbering every row before the target. Set it only with a
+	// SnapshotAt the caller keeps across requests: anchors are cached per
+	// snapshot.
+	SeekAnchors *seekAnchorCache
+	// LetterIndexes, when set, caches LetterIndex answers per query.
+	LetterIndexes *letterIndexCache
 }
 
 func (e *QueryExecutor) Preview(ctx context.Context, def QueryDefinition, access AccessFilter, limit int) ([]*models.MediaItem, int, error) {
@@ -205,6 +212,9 @@ type previewPagePlan struct {
 	maxResults            int
 	limitArgIdx           int
 	deferEpisodeHydration bool
+	// titleKey is the scope's title sort key, which title order sorts by and
+	// the letter index files items under. It binds no arguments.
+	titleKey string
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -336,7 +346,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		libraryScopeHandledInBaseRelation = handled
 	}
 	if strings.TrimSpace(baseRelation) == "" {
-		baseRelation = "media_items mi"
+		baseRelation = mediaItemsBaseRelation
 	}
 
 	builder := NewQueryBuilder("mi").
@@ -344,6 +354,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		WithUserScope(access.UserID, access.ProfileID).
 		WithMediaScope(effectiveScope).
 		WithLibraryScope(libraryIDs)
+	if baseRelation == mediaItemsBaseRelation {
+		builder.WithMediaItemsRelation()
+	}
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
 		return previewPagePlan{}, err
@@ -520,6 +533,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		titleKey:        builder.normalizedTitleExpr(),
 		// Keep non-episode relations, sort joins, history CTEs and source-ordered
 		// plans on their existing paths. Only the built-in episode relation
 		// guarantees the unique IDs and simple, deterministic title sort required
@@ -579,7 +593,12 @@ func (e *QueryExecutor) buildPreviewPageSQL(
 // escapePrefixForLike lower-cases the prefix and escapes %, _, and \ so the
 // resulting string is safe to use as a LIKE pattern with ESCAPE '\'.
 func escapePrefixForLike(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
+	return escapeLikeLiteral(strings.ToLower(strings.TrimSpace(s)))
+}
+
+// escapeLikeLiteral escapes LIKE wildcards and the escape character itself
+// for use with ESCAPE '\', leaving case to the database.
+func escapeLikeLiteral(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)

@@ -58,7 +58,9 @@ func (h *AdminHandler) CreateItemMetadataRefresh(ctx context.Context, contentID 
 	return job, nil
 }
 
-func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID string, req UpdateItemMetadataRequest) (*catalog.ItemDetail, error) {
+// UpdateCatalogItemMetadata applies req's set fields and NULLs the fields
+// named in cleared (see catalog.ClearableMetadataFields).
+func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID string, req UpdateItemMetadataRequest, cleared []string) (*catalog.ItemDetail, error) {
 	if h == nil || h.DetailSvc == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog metadata is not configured")
 	}
@@ -86,6 +88,7 @@ func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID 
 		ImdbID: req.ImdbID, TmdbID: req.TmdbID, TvdbID: req.TvdbID,
 		SeasonNumber: req.SeasonNumber, EpisodeNumber: req.EpisodeNumber,
 		LockedFields: req.LockedFields,
+		Clear:        cleared,
 	}
 
 	// Try media_items first, then seasons, then episodes.

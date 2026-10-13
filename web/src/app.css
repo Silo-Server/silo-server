@@ -1517,6 +1517,49 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transform: scale(1.06);
   }
 
+  /* Default artwork for a poster, cover or still with no image (DefaultArtwork):
+     a faint glow with a small type mark in the centre. The glows are sized from
+     the box's longer side, so a poster and a still get the same glow, only
+     cropped. Keep in step with the Apple and Android clients. Without container
+     units only the base colour and a 24px mark show. */
+  .default-artwork {
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #16171c;
+  }
+  .default-artwork::before {
+    --side: max(100cqw, 100cqh);
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(
+        circle calc(var(--side) * 0.5) at 70% 30%,
+        rgb(245 11 79 / 0.112),
+        rgb(245 11 79 / 0)
+      ),
+      radial-gradient(
+        circle calc(var(--side) * 0.6) at 100% 100%,
+        rgb(253 116 3 / 0.144),
+        rgb(253 116 3 / 0)
+      ),
+      radial-gradient(
+        circle calc(var(--side) * 0.75) at 0% 0%,
+        rgb(0 52 251 / 0.176),
+        rgb(0 52 251 / 0)
+      );
+  }
+  /* Positioned after ::before in tree order, so it paints above the glow. */
+  .default-artwork-mark {
+    position: relative;
+    width: clamp(14px, 24cqw, 40px);
+    height: clamp(14px, 24cqw, 40px);
+    color: #fff;
+    opacity: 0.13;
+  }
+
   /* ── Episode Row ─────────────────────────────────────────── */
   /* Horizontal episode list item with hover highlight.
      Usage: <div class="episode-row">
@@ -2144,6 +2187,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
+  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
+     height the widget's fixed rows leave it. Below lg the rows are
+     content-sized, so there is no height to take and the plot would measure
+     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  .admin-chart-fill {
+    flex: 1 1 0%;
+    min-height: 10rem;
+  }
+
   /* ── Dashboard Widget Scrollbars ──────────────────────────── */
   /* Widget bodies scroll inside their row, so the default OS bar
      sits right on top of the theme. One rule covers every widget:
@@ -2196,6 +2248,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .admin-widget {
       grid-column: span var(--widget-span) / span var(--widget-span);
       grid-row: span var(--widget-rows) / span var(--widget-rows);
+    }
+
+    .admin-chart-fill {
+      min-height: 0;
     }
   }
 
@@ -2315,6 +2371,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
+    /* How far fixed page chrome (the collection editor's save bar) rises to
+       clear whichever background playback bar shows. usePlaybackBarHeight
+       measures each bar, bottom inset included, on the root while it shows. */
+    --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
   }
   @media (min-width: 64rem) {
     :root[data-app-shell] {

@@ -79,6 +79,9 @@ func LookupLogin(ctx context.Context, users LoginDirectory, identifier string) (
 
 // NewLocalProvider creates a new LocalProvider backed by the given repositories.
 func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *LocalProvider {
+	// Hash the placeholder now so the first sign-in that needs it does not
+	// also pay for creating it.
+	placeholderPasswordHash()
 	return &LocalProvider{
 		users:    users,
 		sessions: sessions,
@@ -95,19 +98,9 @@ func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *Local
 // reaches this check.
 // The username may also be the account's email address (see LookupLogin).
 func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*models.User, error) {
-	user, err := LookupLogin(ctx, p.users, creds.Username)
+	user, err := checkLocalPassword(ctx, p.users, creds)
 	if err != nil {
-		if IsNotFound(err) {
-			return nil, ErrInvalidCredentials
-		}
-		return nil, fmt.Errorf("looking up user: %w", err)
-	}
-	if !user.LocalPasswordLoginEnabled {
-		return nil, ErrInvalidCredentials
-	}
-
-	if !CheckPassword(user, creds.Password) {
-		return nil, ErrInvalidCredentials
+		return nil, err
 	}
 
 	if !user.Enabled {
@@ -135,6 +128,26 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 		}
 	}
 
+	return user, nil
+}
+
+// checkLocalPassword resolves the sign-in name (see LookupLogin) and checks
+// the password against the account's local password. Every rejection costs
+// one bcrypt comparison: a name with no account, or an account without local
+// password sign-in, is checked against placeholderPasswordHash, so the
+// response time does not tell a stranger which names have accounts.
+func checkLocalPassword(ctx context.Context, users LoginDirectory, creds Credentials) (*models.User, error) {
+	user, err := LookupLogin(ctx, users, creds.Username)
+	if err != nil && !IsNotFound(err) {
+		return nil, fmt.Errorf("looking up user: %w", err)
+	}
+	if err != nil || !user.LocalPasswordLoginEnabled {
+		_ = comparePasswordHash(placeholderPasswordHash(), []byte(creds.Password))
+		return nil, ErrInvalidCredentials
+	}
+	if !CheckPassword(user, creds.Password) {
+		return nil, ErrInvalidCredentials
+	}
 	return user, nil
 }
 

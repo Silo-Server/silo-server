@@ -19,6 +19,11 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
+// metaAttachSession marks a public operation whose answer depends on
+// whether a signed-in person asks: after its limiter, the gate chain attaches
+// the claims of a valid login session (AttachSession) and never refuses.
+const metaAttachSession = "silo.attach_session"
+
 // Legacy v1 error codes the gates translate that have no v2 problem type of
 // their own (the others reuse the matching ProblemType's ID).
 const (
@@ -46,6 +51,9 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		}
 		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
 			chain = directDownloadGateChain(deps, chain)
+		}
+		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
+			chain = append(chain, deps.Auth.AttachSession)
 		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
@@ -115,7 +123,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		if deps.ActingAdmin == nil {
 			return nil, "acting admin"
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, deps.ActingAdmin)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, apimw.RequireActingAdminWith(deps.ActingAdmin))
 	case ClassPermissionGated:
 		gate := deps.PermissionGates[permission]
 		if gate == nil {
@@ -274,8 +282,13 @@ func (d *denialWriter) problem() *Problem {
 		}
 	case apimw.CodeServiceUnavailable:
 		// The credential could not be checked (the session store did not
-		// answer). Not a 401: the client keeps its session and retries.
-		p = NewProblem(TypeDependencyUnavailable, "The sign-in could not be checked right now; retry after the Retry-After delay.")
+		// answer), or the viewer's access policy ran out of time. Not a 401
+		// or 403: the client keeps its session and retries.
+		detail := "The sign-in could not be checked right now; retry after the Retry-After delay."
+		if d.reason == apimw.ReasonViewerAccessUnavailable {
+			detail = "The viewer's access could not be resolved right now; retry after the Retry-After delay."
+		}
+		p = NewProblem(TypeDependencyUnavailable, detail)
 		if ra := d.header.Get("Retry-After"); ra != "" {
 			p = p.WithHeader("Retry-After", ra)
 		} else {
