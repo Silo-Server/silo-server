@@ -443,6 +443,23 @@ describe("AISettings", () => {
     expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
   });
 
+  it.each([
+    ["Groq", "https://api.groq.com/openai"],
+    ["OpenRouter", "https://openrouter.ai/api/v1"],
+  ])("does not count %s ready for transcription without a key", (_name, url) => {
+    values["ai.base_url"] = "http://ollama:11434";
+    values["ai.asr_base_url"] = url;
+    values["ai.asr_model"] = "whisper-large-v3";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
+    render(<AISettings />);
+
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeDisabled();
+    // The local text endpoint still runs without one.
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+  });
+
   it("stops counting the default endpoint ready while its key's clear is staged", () => {
     values["ai.base_url"] = "https://api.openai.com";
     values["ai.api_key"] = "";

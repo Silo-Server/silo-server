@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   collections: [] as Array<Record<string, unknown>>,
   catalog: vi.fn(),
   effective: {} as Record<string, unknown>,
+  effectiveError: false,
   setSetting: vi.fn(),
   clearSetting: vi.fn(),
 }));
@@ -39,7 +40,11 @@ vi.mock("@/hooks/queries/libraries", () => {
   return { useUserLibraries: () => ({ data }), useAvailableUserLibraries: () => ({ data }) };
 });
 vi.mock("@/hooks/queries/settingValues", () => ({
-  useEffectiveSettings: () => ({ data: mocks.effective, isLoading: false }),
+  useEffectiveSettings: () => ({
+    data: mocks.effectiveError ? undefined : mocks.effective,
+    isLoading: false,
+    isError: mocks.effectiveError,
+  }),
   useSetSettingValue: () => ({
     mutate: vi.fn(),
     mutateAsync: mocks.setSetting,
@@ -138,6 +143,7 @@ async function release(operation: string) {
 
 beforeEach(() => {
   mocks.effective = {};
+  mocks.effectiveError = false;
   mocks.setSetting.mockReset();
   mocks.clearSetting.mockReset();
   vi.clearAllMocks();
@@ -282,6 +288,13 @@ describe("Settings > Home Screen", () => {
       value: "separate",
       identity: { scope: "profile" },
     });
+  });
+
+  it("locks next up while this profile's current values cannot be read", async () => {
+    mocks.effectiveError = true;
+    await renderPage();
+
+    expect(screen.getByRole("combobox", { name: "Next up episodes" })).toBeDisabled();
   });
 
   it("resets a stored next up choice so it inherits again", async () => {

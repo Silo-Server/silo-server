@@ -10,8 +10,9 @@ appears in it exactly once.
 - **Monitor**: Dashboard, Activity, Logs (Server Log, Client Diagnostics,
   Settings)
 - **Manage**: Libraries (Libraries, Collections, Home Sections, Skip Markers,
-  Subtitle Files, Settings), Requests (Queue, Settings), Users, Playback
-  (Nodes, History, Settings), Downloads (Prepared Files, Settings)
+  Subtitle Files, Settings), Requests (Queue, Settings), Users (Users, Access
+  Groups, Devices, History Import), Playback (Nodes, History, Settings),
+  Downloads (Prepared Files, Settings)
 - **Configure**: Server (General, Appearance, Storage & Database, Scheduled
   Tasks, Maintenance), Sign-in & Security (Sign-in, Security, Network Access,
   API Keys, Policy), Integrations (Plugins, Providers, Watch Providers, AI

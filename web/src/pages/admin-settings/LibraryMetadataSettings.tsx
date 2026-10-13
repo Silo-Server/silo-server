@@ -210,6 +210,9 @@ export default function LibraryMetadataSettings() {
   const syncExecution =
     form.getValue("subtitles.sync_execution") || SUBTITLE_SYNC_EXECUTION_DEFAULT;
   const syncOnNodes = isNodeBackedExecution(syncExecution);
+  // An unsaved capacity stays in view after placement moves off the nodes, so
+  // the save bar never counts a change the admin cannot see.
+  const showSyncCapacity = syncOnNodes || form.isDirty("subtitles.sync_node_capacity");
 
   // Engine choice, Meilisearch connection and tuning share one disclosure
   // with the index status; the status panel is not a setting, so not counted.
@@ -517,7 +520,7 @@ export default function LibraryMetadataSettings() {
           />
           <AdvancedSection
             id="library.subtitle_sync"
-            count={syncOnNodes ? 2 : 1}
+            count={showSyncCapacity ? 2 : 1}
             forceOpen={
               anyDirty(SUBTITLE_SYNC_ADVANCED_KEYS) ||
               // A node-only mode with no node to run on is stranded work;
@@ -542,7 +545,7 @@ export default function LibraryMetadataSettings() {
               onChange={(value) => form.setValue("subtitles.sync_execution", value)}
               restartRequired={restartKeys.has("subtitles.sync_execution")}
             />
-            {syncOnNodes && (
+            {showSyncCapacity && (
               <SettingField
                 label="Concurrent syncs per transcode node"
                 type="number"

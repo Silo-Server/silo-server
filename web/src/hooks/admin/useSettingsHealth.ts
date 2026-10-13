@@ -348,7 +348,7 @@ export function useSettingsAttention(): SettingsHealthItem[] {
 
   return useMemo(() => {
     if (settings == null) return [];
-    return settingsAttentionItems(
+    const items = settingsAttentionItems(
       buildSettingsHealth({
         settings,
         sensitiveConfigured: sensitive?.configured,
@@ -357,5 +357,15 @@ export function useSettingsAttention(): SettingsHealthItem[] {
         search,
       }),
     );
-  }, [branding.storageAvailable, search, sensitive?.configured, serverStatus, settings]);
+    // Branding reports whether storage is available; before it arrives that
+    // reads as false, which is not the same as storage that is not set up.
+    return branding.loaded ? items : items.filter((item) => item.id !== "storage");
+  }, [
+    branding.loaded,
+    branding.storageAvailable,
+    search,
+    sensitive?.configured,
+    serverStatus,
+    settings,
+  ]);
 }

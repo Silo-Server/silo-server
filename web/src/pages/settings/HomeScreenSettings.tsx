@@ -304,7 +304,11 @@ export default function HomeScreenSettings() {
         hideWatched={hideWatchedItems}
         onHideWatchedChange={handleHideWatchedItemsChange}
         disabled={
-          homePreferences.isLoading || saveHomePreference.isPending || nextUpWriter.isSaving
+          homePreferences.isLoading ||
+          // Without the effective values a save cannot tell which row it overrides.
+          homePreferences.isError ||
+          saveHomePreference.isPending ||
+          nextUpWriter.isSaving
         }
       />
 

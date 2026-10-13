@@ -553,6 +553,19 @@ describe("LibraryMetadataSettings subtitle sync", () => {
     expect(nodeOnly.group.getByText("No transcode nodes are connected")).toBeInTheDocument();
   });
 
+  it("keeps an unsaved node capacity in view after sync moves to the local server", () => {
+    expand("library.subtitle_sync");
+    const { group } = renderInteractive({ "subtitles.sync_execution": "local" }, [
+      "subtitles.sync_execution",
+      "subtitles.sync_node_capacity",
+    ]);
+
+    expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toBeInTheDocument();
+    expect(
+      group.getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toBeVisible();
+  });
+
   it("does not warn before the node list has loaded", () => {
     expand("library.subtitle_sync");
     useAdminNodesMock.mockReturnValue({ data: undefined, isSuccess: false });

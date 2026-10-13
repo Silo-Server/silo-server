@@ -139,18 +139,18 @@ const TRANSCRIPTION_PRESETS = [
   },
 ] as const;
 
-/** The server's default text endpoint (`internal/config/admin_settings.go`). */
-const DEFAULT_TEXT_BASE_URL = "https://api.openai.com";
+/** Hosted providers in the presets above; each rejects a request without a key. */
+const KEY_REQUIRED_HOSTS = new Set(["api.openai.com", "api.groq.com", "openrouter.ai"]);
 
 /**
  * Whether an endpoint can be ready without an API key. The server sends no
  * Authorization header when the key is empty, which is how a local provider
- * (Ollama, Speaches) runs, so a missing key is only disqualifying for the
- * built-in OpenAI endpoint a fresh install starts on — that one always needs
- * a key, and treating it as ready is how a fresh install read "Configured".
+ * (Ollama, Speaches) runs, so a missing key only disqualifies the hosted
+ * providers Silo knows require one. Treating the default OpenAI endpoint as
+ * ready is how a fresh install read "Configured".
  */
 function keylessEndpoint(rawURL: string): boolean {
-  return rawURL.trim().replace(/\/+$/, "") !== DEFAULT_TEXT_BASE_URL;
+  return !KEY_REQUIRED_HOSTS.has(hostLabel(rawURL).toLowerCase());
 }
 
 function hostLabel(rawURL: string): string {
