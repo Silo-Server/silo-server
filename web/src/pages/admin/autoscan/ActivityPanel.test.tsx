@@ -1,8 +1,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import type { AutoscanEvent, AutoscanScan, Library } from "@/api/types";
+import type { AutoscanEvent, AutoscanScan, Library, ScanRun } from "@/api/types";
 import type { SourceLabelLookups } from "@/lib/autoscanLabels";
-import { PollEventTable, ScanHistoryTable } from "./ActivityPanel";
+import { AutoscanQueue, PollEventTable, ScanHistoryTable } from "./ActivityPanel";
 
 const lookups: SourceLabelLookups = {
   sourceByID: new Map(),
@@ -311,4 +311,28 @@ it("wraps a long scan error and path inside the scope cell", () => {
   const table = within(desktopTable());
   expect(table.getByText(errorMessage)).toHaveClass("whitespace-normal", "max-w-xl");
   expect(table.getByText(path)).toHaveClass("whitespace-normal", "max-w-xl");
+});
+
+it("wraps a long path inside the autoscan queue's scope cell", () => {
+  const path =
+    "/mnt/tv/A Very Long Series Name (2024)/Season 01/A.Very.Long.Series.Name.S01E01.mkv";
+  const scan: ScanRun = {
+    id: "01QUEUED",
+    library_id: 7,
+    mode: "file",
+    path,
+    trigger: "autoscan",
+    status: "running",
+    started_at: "2026-09-01T00:00:00.000Z",
+  };
+  render(
+    <AutoscanQueue
+      scans={[scan]}
+      statusActiveCount={1}
+      librariesByID={librariesByID}
+      cancellingLibraryID={null}
+      onCancel={() => {}}
+    />,
+  );
+  expect(within(desktopTable()).getByText(path)).toHaveClass("whitespace-normal", "max-w-xl");
 });

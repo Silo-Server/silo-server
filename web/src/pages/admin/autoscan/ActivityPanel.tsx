@@ -612,7 +612,7 @@ function QueueCard({
   );
 }
 
-function AutoscanQueue({
+export function AutoscanQueue({
   scans,
   statusActiveCount,
   librariesByID,
