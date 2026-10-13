@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -173,5 +175,34 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 				t.Fatal("denied writer reached service")
 			}
 		})
+	}
+}
+
+// A group's library list is an integer array no foreign key covers, so an id
+// no library carries is refused before the store, on create and update alike.
+func TestAdminAccessGroupRejectsUnknownLibraries(t *testing.T) {
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests()) // knows libraries 1-4
+	deps.AdminAccessGroups = f
+	h := NewHandler(deps)
+	path := Prefix + "/admin/access-groups/7"
+	for _, rec := range []*httptest.ResponseRecorder{
+		do(t, h, http.MethodPost, Prefix+"/admin/access-groups", `{"name":"New","library_ids":["1","9"]}`, actingRequestAdmin),
+		do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", "*")),
+	} {
+		p := requireProblem(t, rec, TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != locationLibraryIDs || p.Errors[0].Detail != "unknown library identifier: 9" {
+			t.Fatalf("errors = %+v", p.Errors)
+		}
+	}
+	// An editor opened before the library was deleted holds an old ETag: 412
+	// tells it to reload, rather than 422 for a library it no longer lists.
+	requireProblem(t, do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", `"stale"`)), TypePreconditionFailed)
+	if f.writes != 0 {
+		t.Fatal("unknown library reached the store")
+	}
+	saved := do(t, h, http.MethodPut, path, `{"library_ids":["2","1"]}`, with(actingRequestAdmin, "If-Match", "*"))
+	if saved.Code != 200 || f.last.LibraryIDs == nil || !slices.Equal(*f.last.LibraryIDs, []int{2, 1}) {
+		t.Fatal(saved.Code, saved.Body.String(), f.last.LibraryIDs)
 	}
 }

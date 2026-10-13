@@ -104,6 +104,21 @@ clients show where a default comes from without keeping their own copy. The
 values come from the server build. Account capabilities advertise
 `policy_defaults`. Existing `admin:users` keys may use this read.
 
+## Library lists
+
+An account's or access group's `library_ids` is `null` for every library and an
+array for exactly the listed ones, so `[]` allows none. Create and update return
+`422 validation_failed` at `body.library_ids` when the array names a library that
+does not exist; a guarded update checks its precondition first. Whichever API
+writes these lists, and the [invitation](invitations-api.md) lists too, the
+database keeps only libraries that exist, and a write racing a library delete
+waits for it as it would behind a foreign key.
+
+Deleting a library removes its ID from every account, access group and
+invitation in the same transaction. A list left with no IDs stays `[]` and never
+widens to `null`. The edited accounts and groups get new revisions, so an editor
+holding the old ETag gets 412 instead of writing the deleted library back.
+
 ## Passwords
 
 Account editor and list rows carry `password_login` and `password_change_required`.
