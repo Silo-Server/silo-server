@@ -87,11 +87,11 @@ shared `PageHeader` (`web/src/components/page/`): one title size at one
 position, a one-sentence subtitle, and page actions at the right. An admin
 settings page's subtitle is its description from the settings index, which
 `AdminSettingsLayout` provides to `SettingsPageHeader`. No breadcrumb and no
-status strip. Every admin page starts at the layout's gutter instead of
-centering (the admin shell is left-anchored and pages carry no `page-shell`
-box of their own), so the title never moves between pages or window widths.
-There are two widths: settings pages cap their `PageColumn` at a reading
-width, while tables and dashboards use the full shell. A section's title and
+status strip. Every admin page sits in one frame, the admin shell, which
+centers once the window is wider than it; pages carry no `page-shell` box of
+their own, so the title sits at the same place on every admin page. There are
+two widths inside the frame: settings pages cap their `PageColumn` at a
+reading width from its left edge, while tables and dashboards fill it. A section's title and
 description move into a left column only on a desktop-width window with room
 beside the sidebar, so resizing switches each section once. Below the header, settings are
 hairline-ruled rows inside `FieldGroup`s — thin wrappers over the shared
