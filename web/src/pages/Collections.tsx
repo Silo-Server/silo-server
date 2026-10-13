@@ -704,10 +704,11 @@ function ServerCollectionsSection() {
  * answer carries only each library's first 20, so the rest come from the
  * libraries' Collections tabs, which list the same collections in the same
  * order. A picked library loads its rest straight away. The page's default
- * view (All, or a lone library) loads them once the viewer scrolls to the end
- * of the grid, so opening the page costs no more than the one capped request.
- * Every library's first 20 come before any library's rest. If a list fails,
- * that library's first 20 stay with a link to its Collections tab.
+ * view (All, or a lone library) loads them when the end of the grid nears the
+ * viewport or the viewer presses Load more, so opening the page reads only the
+ * capped answer unless the grid is short. Every library's first 20 come before
+ * any library's rest. If a list fails, that library's first 20 stay with a link
+ * to its Collections tab.
  */
 function ServerCollectionsGrid({
   libraries,
@@ -728,12 +729,16 @@ function ServerCollectionsGrid({
   });
   const lists = libraries.map((entry, index) => {
     const query = fullLists[index];
-    const full: LibraryTabCollection[] | undefined = query?.data?.collections;
-    const first = entry.collections.length;
+    // The first 20 always come from the aggregated answer, which is never
+    // older than a cached full list; the full list only adds the rest.
+    const full: LibraryTabCollection[] | undefined = cutShort(entry)
+      ? query?.data?.collections
+      : undefined;
+    const inFirst = new Set(entry.collections.map((collection) => collection.id));
     return {
       entry,
-      first: full ? full.slice(0, first) : entry.collections,
-      rest: full ? full.slice(first) : [],
+      first: entry.collections,
+      rest: full ? full.filter((collection) => !inFirst.has(collection.id)) : [],
       pending: cutShort(entry) && !full && !query?.isError,
       failed: cutShort(entry) && !full && query?.isError === true,
     };
@@ -781,12 +786,12 @@ function ServerCollectionsGrid({
       </ul>
       {pending && loadRest ? <PosterGridSkeleton /> : null}
       {pending && !loadRest ? (
+        // Scrolling near it presses it; it stays for keyboard and screen
+        // reader users, who may read the grid without scrolling.
         <div ref={sentinelRef} className="flex justify-center">
-          {typeof IntersectionObserver === "undefined" ? (
-            <Button variant="outline" size="sm" onClick={() => setReachedEnd(true)}>
-              Load more
-            </Button>
-          ) : null}
+          <Button variant="outline" size="sm" onClick={() => setReachedEnd(true)}>
+            Load more
+          </Button>
         </div>
       ) : null}
       {failed.length > 0 ? (
