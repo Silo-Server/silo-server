@@ -105,9 +105,12 @@ The database fetches at most limit plus one rows. Cursors bind the filter,
 account, acting profile, and operation. The web exposes explicit continuation
 and restart controls for job histories.
 
-`GET /api/v2/admin/jobs/{id}` returns a safe typed job projection. Administrators
-may read all retained jobs; other accounts may read only their own item-refresh
-job. Hidden and missing jobs both return 404. Nonterminal responses supply
+`GET /api/v2/admin/jobs/{id}` returns a safe typed job projection. The acting
+admin (an administrator acting through the account's primary profile; see
+[api-contract.md](architecture/api-contract.md)) may read all retained jobs;
+anyone else, including another profile on an administrator's account, may read
+only an item-refresh job their account started. A declared profile is verified
+like on any profile-scoped operation, with `X-Profile-Token` when it has a PIN. Hidden and missing jobs both return 404. Nonterminal responses supply
 `Retry-After: 5`. The projection keeps library identities, typed result counts,
 and authorized catalog artifact links, while excluding raw request documents,
 storage keys, file paths, and internal error text. Artifact links can expire and

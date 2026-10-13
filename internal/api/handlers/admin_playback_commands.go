@@ -247,7 +247,7 @@ func (h *AdminPlaybackControlHandler) dispatchSequenced(_ context.Context, in Ad
 	command.DeadlineMS = int(deadline / time.Millisecond)
 	fallback := func() {
 		h.playback.forgetRealtimeCommand(in.CommandID)
-		err := h.playback.stopPlaybackSessionByID(context.Background(), in.SessionID, true)
+		err := h.endSessionForAdmin(in.SessionID)
 		// The ledger goes only once the session is gone. A stop that failed
 		// leaves the session live, and its applied-once ordering with it.
 		if err == nil || errors.Is(err, playback.ErrSessionNotFound) {

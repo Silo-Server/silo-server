@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 // A proxy runs ffmpeg for remux recipes, so it gets the same escape hatch a
@@ -19,7 +21,7 @@ func TestProxyReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
 	server.storeCapabilityHash("sha256:stale")
 
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -52,7 +54,7 @@ func TestProxyReprobeCapabilitiesKeepsHashOnIncompleteProbe(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil).WithContext(canceled)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -87,7 +89,7 @@ func TestProxyReprobeCapabilitiesRefusedWhileProbesAreRunning(t *testing.T) {
 	server.countProbesInFlight = func() int { return 1 }
 
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 

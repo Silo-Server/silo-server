@@ -13,6 +13,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
@@ -36,17 +38,22 @@ func (s stubGrantStore) Get(_ context.Context, sessionID string) (*playback.Reci
 
 type stubLoginSessions struct {
 	valid map[string]bool
+	// remote maps a remote-playback login session to its bound profile.
+	remote map[string]string
 }
 
 // loginStoreDown is a login session whose check fails in the store, as when
 // Postgres is unreachable.
 const loginStoreDown = "login-store-down"
 
-func (s stubLoginSessions) IsValid(_ context.Context, sessionID string) (bool, error) {
+func (s stubLoginSessions) ActiveSession(_ context.Context, sessionID string) (auth.SessionAuthority, bool, error) {
 	if sessionID == loginStoreDown {
-		return false, errors.New("dial tcp: connection refused")
+		return auth.SessionAuthority{}, false, errors.New("dial tcp: connection refused")
 	}
-	return s.valid[sessionID], nil
+	if profile, ok := s.remote[sessionID]; ok {
+		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: profile}, true, nil
+	}
+	return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeAccount}, s.valid[sessionID], nil
 }
 
 func newGrantProxyServer(t *testing.T, cards map[string]playback.RecipeCard) *Server {
@@ -56,7 +63,8 @@ func newGrantProxyServer(t *testing.T, cards map[string]playback.RecipeCard) *Se
 	cfg.Auth.JWTSecret = grantTestSecret
 	w.SetConfigForTest(cfg)
 	srv := NewServer(w, nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
-	srv.SetMediaGrantAuthority(stubGrantStore{cards: cards}, stubLoginSessions{valid: map[string]bool{"login-1": true}})
+	srv.SetMediaGrantAuthority(stubGrantStore{cards: cards}, stubLoginSessions{valid: map[string]bool{"login-1": true},
+		remote: map[string]string{"handoff-own": "profile-1", "handoff-other": "profile-2"}})
 	return srv
 }
 
@@ -114,6 +122,8 @@ func TestProxyGrantRoutesRefuseUnauthenticatedAndUnauthorizedCallers(t *testing.
 		{name: "login session store down", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 7, loginStoreDown), wantStatus: http.StatusServiceUnavailable, wantError: "service_unavailable"},
 		{name: "another user's session", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 8, "login-1"), wantStatus: http.StatusForbidden, wantError: "forbidden"},
 		{name: "no grant", path: "/stream/v3/session-missing", bearer: grantAccessToken(t, 7, "login-1"), wantStatus: http.StatusNotFound, wantError: "playback_session_not_found"},
+		// A remote-playback handoff plays only its bound profile's sessions.
+		{name: "handoff bound to another profile", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 7, "handoff-other"), wantStatus: http.StatusForbidden, wantError: "forbidden"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rr := grantRequest(t, srv, http.MethodGet, test.path, test.bearer)
@@ -259,10 +269,11 @@ func TestProxyGrantRoutesEnforceCommittedProxyEgress(t *testing.T) {
 // A transcode grant is relayed to the node exactly like the token route, with
 // the node-facing token minted here — never handed to the client.
 func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
-	var forwarded, authorization, relayPath string
+	var forwarded, relayPath string
+	var signed bool
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		forwarded = r.Header.Get("X-Silo-Stream-Token")
-		authorization = r.Header.Get("Authorization")
+		signed = nodeauthtest.Signed(r, grantTestSecret)
 		relayPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		_, _ = w.Write([]byte("#EXTM3U\nsegment/seg_00001.m4s\n"))
@@ -290,8 +301,8 @@ func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
 	if relayPath != "/transcode/session-hls-plan-a/master.m3u8" {
 		t.Fatalf("relay path = %q, want the plan-scoped transport manifest", relayPath)
 	}
-	if authorization != "Bearer "+grantTestSecret {
-		t.Fatalf("node authorization = %q", authorization)
+	if !signed {
+		t.Fatal("node request was not signed with the shared secret")
 	}
 	claims, err := streamtoken.Verify(forwarded, grantTestSecret)
 	if err != nil {
@@ -368,4 +379,16 @@ func foreignAccessToken(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return token
+}
+
+// A remote-playback handoff streams its own profile's playback session.
+func TestProxyGrantServesAHandoffItsBoundProfile(t *testing.T) {
+	path := writeGrantMedia(t, "0123456789")
+	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-1": {SessionID: "session-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: path},
+	})
+	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "handoff-own"))
+	if rr.Code != http.StatusOK || rr.Body.String() != "0123456789" {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
 }

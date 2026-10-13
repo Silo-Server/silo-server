@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"time"
@@ -75,6 +76,14 @@ func isTerminalEpisodeDebt(reasonMask int64, attemptCount int) bool {
 		hasRefreshDebtReason(reasonMask, RefreshDebtReasonEpisodeIncomplete)
 }
 
+// isParkedEpisodeDebt reports terminal episode-incomplete debt with no other reason, the
+// debt nextRefreshDelay parks on the rare terminal cadence. A row that also carries a
+// still-fixable reason keeps that reason's normal backoff.
+func isParkedEpisodeDebt(reasonMask int64, attemptCount int) bool {
+	return isTerminalEpisodeDebt(reasonMask, attemptCount) &&
+		reasonMask&^RefreshDebtReasonEpisodeIncomplete == 0
+}
+
 // effectiveRefreshDebtPriority demotes terminal episode-incomplete debt off the priority-300
 // band. If the row also carries a still-fixable reason it falls to that reason's band (not
 // the floor), so a series with real core/provider-id debt keeps refreshing at the right
@@ -110,8 +119,7 @@ func nextRefreshDelay(reasonMask int64, attemptCount int) time.Duration {
 	// Only pure episode-incomplete debt is parked on the rare terminal cadence. If the row
 	// also carries a still-fixable reason, that reason keeps driving the normal backoff (the
 	// priority demotion in effectiveRefreshDebtPriority handles the queue ordering).
-	if isTerminalEpisodeDebt(reasonMask, attemptCount) &&
-		reasonMask&^RefreshDebtReasonEpisodeIncomplete == 0 {
+	if isParkedEpisodeDebt(reasonMask, attemptCount) {
 		return refreshDebtTerminalDelay
 	}
 	if hasRefreshDebtReason(reasonMask, RefreshDebtReasonEpisodeIncomplete) {
@@ -151,9 +159,12 @@ func nextRefreshAtForDebt(reasonMask int64, attemptCount int, now time.Time) tim
 // crosses into the terminal give-up state, so the demotion is observable in logs rather
 // than silent. Logging on the exact transition attempt keeps it to a single line per row,
 // so only the sync for the target whose claim or failure set the count may call it;
-// series-wide sweeps that re-sync other rows must not.
-func logRefreshDebtTerminal(targetType, contentID string, reasonMask int64, attemptCount int) {
-	if attemptCount == refreshDebtEpisodeTerminalAttempts &&
+// series-wide sweeps that re-sync other rows must not. attemptCounted says whether that
+// claim or failure counted an attempt: an on-demand or manual refresh that succeeds counts
+// none and leaves the row at the terminal count, so its sync must not report it again.
+func logRefreshDebtTerminal(targetType, contentID string, reasonMask int64, attemptCount int, attemptCounted bool) {
+	if attemptCounted &&
+		attemptCount == refreshDebtEpisodeTerminalAttempts &&
 		isTerminalEpisodeDebt(reasonMask, attemptCount) {
 		slog.Warn("metadata: episode-incomplete refresh debt reached terminal attempts; demoting off top priority",
 			"target_type", NormalizeRefreshTargetType(targetType),
@@ -162,6 +173,22 @@ func logRefreshDebtTerminal(targetType, contentID string, reasonMask int64, atte
 			"reason_mask", reasonMask,
 		)
 	}
+}
+
+// countedRefreshAttemptKey carries the debt target whose claim counted the attempt that
+// the refresh on this context serves. ClaimDue counts the attempt when it claims the row,
+// so the refresh and its debt syncs never count it again themselves.
+type countedRefreshAttemptKey struct{}
+
+// withCountedRefreshAttempt marks ctx as serving a claimed attempt on the target.
+func withCountedRefreshAttempt(ctx context.Context, targetType, contentID string) context.Context {
+	return context.WithValue(ctx, countedRefreshAttemptKey{}, refreshTargetKey(targetType, contentID))
+}
+
+// refreshAttemptCounted reports whether ctx serves a claimed attempt on the target.
+func refreshAttemptCounted(ctx context.Context, targetType, contentID string) bool {
+	key, _ := ctx.Value(countedRefreshAttemptKey{}).(string)
+	return key != "" && key == refreshTargetKey(targetType, contentID)
 }
 
 func refreshDebtReasonsForItem(item *models.MediaItem) int64 {

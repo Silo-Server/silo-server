@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
@@ -58,7 +59,7 @@ func Metrics(next http.Handler) http.Handler {
 		}
 		method := metricMethod(r.Method)
 
-		httpRequestsTotal.WithLabelValues(method, path, strconv.Itoa(wrapped.status)).Inc()
+		httpRequestsTotal.WithLabelValues(method, path, strconv.Itoa(activitylog.RecordedStatus(r, wrapped.status, wrapped.written))).Inc()
 		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
 	})
 }

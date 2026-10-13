@@ -546,6 +546,19 @@ func TestPlanSpeech(t *testing.T) {
 	}
 }
 
+// A track FFmpeg cannot decode (ffprobe names no codec for AVS3 audio) is
+// never sampled while the file has a decodable one.
+func TestPlanSpeechSkipsUndecodableAudio(t *testing.T) {
+	file := &models.MediaFile{Duration: 1800, AudioTracks: []models.AudioTrack{
+		{Language: "zho", Default: true}, {Language: "zho", Codec: "eac3"}, {Language: "eng", Codec: "aac"},
+	}}
+	for language, want := range map[string]int{"zh": 1, "fr": 1, "en": 2} {
+		if plan, err := planSpeech(file, language); err != nil || plan.AudioStream != want {
+			t.Fatalf("planSpeech(%q) stream = %d err %v, want %d", language, plan.AudioStream, err, want)
+		}
+	}
+}
+
 func TestSpeechCodecRoundTrip(t *testing.T) {
 	windows := []mediasample.SpeechLevels{
 		{StartSeconds: 12.5, FrameSeconds: mediasample.SpeechFrameSeconds, Levels: []byte{1, 2, 3}},

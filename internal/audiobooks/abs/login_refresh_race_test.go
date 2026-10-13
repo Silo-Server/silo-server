@@ -40,7 +40,7 @@ func TestHandleRefresh_ConcurrentRotations_OnlyOneSucceeds(t *testing.T) {
 	h := New(Dependencies{Config: cfg, TokenStore: gate, MediaStore: noopMediaStore{}})
 
 	jti := "race-old-jti"
-	refresh, err := IssueRefreshToken(cfg.secret, "race-user", "", jti, 30*24*time.Hour)
+	refresh, err := IssueRefreshToken(cfg.secret, "race-user", "", nil, jti, 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestHandleRefresh_RevokeFailure_OldTokenStillValid(t *testing.T) {
 	})
 
 	jti := "old-refresh-jti"
-	refresh, err := IssueRefreshToken(cfg.secret, "u1", "", jti, 30*24*time.Hour)
+	refresh, err := IssueRefreshToken(cfg.secret, "u1", "", nil, jti, 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("mint refresh: %v", err)
 	}

@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func (f *fakeSubtitleCapabilities) SubtitleProviderStatus() handlers.SubtitlePro
 	f.calls++
 	return handlers.SubtitleProviderStatusView{SchemaVersion: 1, Enabled: true, Providers: []string{"example"}}
 }
-func (f *fakeSubtitleCapabilities) SubtitleAIStatus() handlers.SubtitleAIStatusView {
+func (f *fakeSubtitleCapabilities) SubtitleAIStatus(context.Context) handlers.SubtitleAIStatusView {
 	f.calls++
 	return handlers.SubtitleAIStatusView{Enabled: true, TranscribeEnabled: true}
 }

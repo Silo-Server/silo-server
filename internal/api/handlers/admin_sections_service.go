@@ -111,7 +111,7 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		sec.Scope = adminSectionScopeHome
 	}
 	if sec.ItemLimit <= 0 {
-		sec.ItemLimit = 20
+		sec.ItemLimit = sections.DefaultItemLimit
 	}
 
 	created, err := h.repo.Create(ctx, sec)
@@ -214,7 +214,7 @@ func (h *SectionBulkHandler) BulkCreateAdminSections(ctx context.Context, req Ad
 
 	itemLimit := req.ItemLimit
 	if itemLimit <= 0 {
-		itemLimit = 20
+		itemLimit = sections.DefaultItemLimit
 	}
 
 	// Build the rows to insert.

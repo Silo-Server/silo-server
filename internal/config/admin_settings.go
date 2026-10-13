@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	redisv9 "github.com/redis/go-redis/v9"
@@ -137,6 +138,13 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
 
+// MetadataPersonRefreshPerMinuteSettingKey caps how many background person
+// metadata lookups each API node makes per minute. Every lookup asks each
+// person-capable provider once, so it bounds each provider, and it leaves room
+// on provider limits a scan shares. On-demand lookups (a person page) aren't
+// counted.
+const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
+
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
 // sheets. Changing it makes both again.
@@ -236,8 +244,10 @@ func AuthRefreshTokenExpiry(raw string) time.Duration {
 	return parsed
 }
 
-// ServerSettingsMutationLock names the advisory lock every server_settings
-// mutation holds for its transaction. Writers of state that a setting's
+// ServerSettingsMutationLock names the advisory lock general settings
+// mutations hold for their transaction. Machine-managed credential values,
+// excluded from configuration validation, use their own key-specific lock.
+// Writers of state that a setting's
 // validation reads (such as the break-glass accounts that
 // AuthLocalPasswordLoginSettingKey requires) take it too, so the check and
 // the write cannot interleave.
@@ -302,6 +312,9 @@ var adminSettingDefaults = map[string]string{
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
 
+	// Background person metadata lookups per API node per minute.
+	MetadataPersonRefreshPerMinuteSettingKey: "120",
+
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
 	playbackSegmentRetentionSettingKey:               "600",
@@ -357,6 +370,8 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.diversity_lambda":           "0.7",
 
 	"ai.base_url":                         "https://api.openai.com",
+	"ai.auth_mode":                        "api_key",
+	"ai.reasoning_effort":                 "",
 	"ai.chat_model":                       "gpt-4o-mini",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
@@ -630,6 +645,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100000)
 	case MetadataImageWorkersSettingKey:
 		return normalizeAdminInt(key, value, 0, 256)
+	case MetadataPersonRefreshPerMinuteSettingKey:
+		return normalizeAdminInt(key, value, 1, 6000)
 	case MarkersDetectionWorkersSettingKey:
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
@@ -773,6 +790,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":
 		return normalizeAdminEnum(key, value, "off", "button", "auto")
+	case "ai.auth_mode":
+		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+	case "ai.reasoning_effort":
+		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":
@@ -871,6 +892,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 	}
 
 	effective := EffectiveAdminSettings(values)
+	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
+		return err
+	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {
 		endpoint := strings.TrimSpace(effective[prefix+"_endpoint"])
 		bucket := strings.TrimSpace(effective[prefix+"_bucket"])
