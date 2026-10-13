@@ -736,7 +736,12 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 				return deleted, ctxErr
 			}
 			if !isBatchDeleteUnsupported(err) {
-				return deleted, fmt.Errorf("s3 DeleteObjects %s: %s", bucket, s3ErrorCode(err))
+				// Several callers discard the error, so log it here as the
+				// per-key failures below are.
+				code := s3ErrorCode(err)
+				slog.WarnContext(ctx, "s3 DeleteObjects: batch request failed", "component", "s3client",
+					"keys", len(batch), "code", code)
+				return deleted, fmt.Errorf("s3 DeleteObjects %s: %s", bucket, code)
 			}
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
@@ -787,11 +792,11 @@ func s3ErrorCode(err error) string {
 	return "request failed"
 }
 
+const unrecognizedErrorCode = "unrecognized error code"
+
 // safeErrorCode returns code when it looks like an S3 error code (a short
 // identifier such as "AccessDenied") and a fixed placeholder otherwise. The code
 // comes from the backend, so an unexpected value is never logged or returned.
-const unrecognizedErrorCode = "unrecognized error code"
-
 func safeErrorCode(code string) string {
 	if code == "" || len(code) > 64 {
 		return unrecognizedErrorCode
@@ -816,8 +821,13 @@ func isErrorCodeRune(r rune) bool {
 }
 
 // isBatchDeleteUnsupported reports whether a DeleteObjects error means the
-// endpoint does not implement batch deletes, so per-object deletes should be
-// used instead.
+// endpoint does not accept batch deletes as the SDK sends them, so per-object
+// deletes should be used instead. That includes 400: the SDK sends a CRC32
+// checksum on batch deletes, and S3-compatible backends that still require
+// Content-MD5 (older MinIO releases among them) reject the batch with
+// MissingContentMD5 or InvalidRequest, while single deletes need no checksum.
+// Auth and server errors are returned instead: every per-object delete would
+// fail the same way.
 func isBatchDeleteUnsupported(err error) bool {
 	if apiErr, ok := errors.AsType[smithy.APIError](err); ok && apiErr.ErrorCode() == "NotImplemented" {
 		return true
@@ -828,7 +838,7 @@ func isBatchDeleteUnsupported(err error) bool {
 	var httpErr httpResponseError
 	if errors.As(err, &httpErr) {
 		switch httpErr.HTTPStatusCode() {
-		case http.StatusNotImplemented, http.StatusMethodNotAllowed:
+		case http.StatusBadRequest, http.StatusNotImplemented, http.StatusMethodNotAllowed:
 			return true
 		}
 	}

@@ -311,26 +311,38 @@ func TestDeletePrefixReturnsErrorWhenBatchDeleteFails(t *testing.T) {
 }
 
 func TestDeleteObjectsFallbackReturnsErrorForFailedKeys(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/xml")
-		switch {
-		case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
-			w.WriteHeader(http.StatusNotImplemented)
-			_, _ = io.WriteString(w, "<Error><Code>NotImplemented</Code></Error>")
-		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/denied.webp"):
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
-		case r.Method == http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-		}
-	}))
-	t.Cleanup(server.Close)
-	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
-	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"ok.webp", "denied.webp"})
-	if err == nil || deleted != 1 {
-		t.Fatalf("DeleteObjects() = %d, %v; want 1 and an error", deleted, err)
+	for name, rejection := range map[string]struct {
+		status int
+		body   string
+	}{
+		"not implemented": {http.StatusNotImplemented, "<Error><Code>NotImplemented</Code></Error>"},
+		// The SDK sends a CRC32 checksum on batch deletes; backends that still
+		// require Content-MD5 reject the batch but accept single deletes.
+		"missing content-md5": {http.StatusBadRequest, "<Error><Code>MissingContentMD5</Code></Error>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/xml")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+					w.WriteHeader(rejection.status)
+					_, _ = io.WriteString(w, rejection.body)
+				case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/denied.webp"):
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+				case r.Method == http.MethodDelete:
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+			deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"ok.webp", "denied.webp"})
+			if err == nil || deleted != 1 {
+				t.Fatalf("DeleteObjects() = %d, %v; want 1 and an error", deleted, err)
+			}
+		})
 	}
 }
 
