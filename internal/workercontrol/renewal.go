@@ -121,8 +121,15 @@ func (s *sourceRenewals) revoke(work string, generation uint64) {
 	}
 }
 
-func (s *sourceRenewals) fail(work string, generation uint64) {
+func (s *sourceRenewals) fail(entry *sourceRenewal) {
 	s.mu.Lock()
+	// A completed preparation or replaced source has retired this request.
+	// Check ownership and install the fence under the same retirement lock.
+	if s.entries[entry.handle] != entry {
+		s.mu.Unlock()
+		return
+	}
+	work, generation := entry.source.WorkID, entry.source.Generation
 	if len(s.failed) >= maxFailedSourceScopes && !s.failed[sourceScope{work, generation}] {
 		s.fenced = true
 	} else {
@@ -193,7 +200,7 @@ func (s *sourceRenewals) renewDue(ctx context.Context, now time.Time) {
 			defer cancel()
 			if err := s.runtime.renewSource(requestCtx, entry.source); err != nil {
 				if ctx.Err() == nil {
-					s.fail(entry.source.WorkID, entry.source.Generation)
+					s.fail(entry)
 				}
 				return
 			}
@@ -218,9 +225,10 @@ func (s *sourceRenewals) remove(entry *sourceRenewal) {
 // A prepared artifact no longer needs source authority. Retain its generation
 // for locally verified output grants without retaining source handles/pins.
 func (r *Runtime) completeSourceWork(work string, generation uint64, handles map[string]*workerinput.Handle) {
+	// Retire in-flight source responses before promoting output-only work.
+	r.renewals.revoke(work, generation)
 	r.mu.Lock()
-	pending := r.staged[work][generation]
-	delete(r.staged[work], generation)
+	pending := r.takeStagedLocked(work, generation)
 	if current := r.generations[work]; current <= generation {
 		if current == generation {
 			delete(r.handles, work)
@@ -230,7 +238,6 @@ func (r *Runtime) completeSourceWork(work string, generation uint64, handles map
 	r.mu.Unlock()
 	closeHandles(pending)
 	closeHandles(handles)
-	r.renewals.revoke(work, generation)
 }
 
 func (s *sourceRenewals) prune() {

@@ -1925,6 +1925,7 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	upstreamSession *playback.Session,
 	transcodeNodeURL string,
 ) {
+	deleteRecipe := h.captureNodeRecipeDeletion(ctx, playSession.UpstreamSessionID, transcodeNodeURL)
 	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
 	if h.sessionMgr != nil {
 		// The play is over, so finish rather than stop the native session: its
@@ -1939,14 +1940,7 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
-	if h.RecipeNodeStore != nil {
-		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
-			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.UpstreamSessionID)
-		}
-	}
+	deleteRecipe()
 	// Clients often drop the connection right after reporting a stop, so detach
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
@@ -2647,19 +2641,13 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			transcodeNodeURL = current.TranscodeNodeURL
 			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
 		}
+		deleteRecipe := h.captureNodeRecipeDeletion(ctx, oldUpstreamSessionID, transcodeNodeURL)
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
 		// Method switch discards the old upstream session: drop its node recipe so
 		// the abandoned id cannot reconstruct ffmpeg after a node restart. Best
 		// effort and bounded — never block the new method's start on a store hiccup.
-		if h.RecipeNodeStore != nil {
-			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-			if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
-				slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-					"playback_session_id", oldUpstreamSessionID)
-			}
-			cancel()
-		}
+		deleteRecipe()
 	}
 
 	var session *playback.Session

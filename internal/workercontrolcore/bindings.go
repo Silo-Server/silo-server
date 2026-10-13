@@ -48,11 +48,10 @@ func (s *MemoryStore) InputBindings(ctx context.Context, node int, work string, 
 var bindingsScript = redis.NewScript(`
 local current=redis.call('HGET',KEYS[1],ARGV[1])
 if not current or string.sub(current,1,string.len(ARGV[2])+1)~=ARGV[2]..'\n' then return 0 end
-redis.call('SET',KEYS[2],ARGV[3],'EX',86400);return 1`)
+redis.call('HSET',KEYS[2],ARGV[1]..'\31'..ARGV[2],ARGV[3]);return 1`)
 
-func (s *RedisStore) bindingKey(node int, work string, generation uint64) string {
-	return s.prefix + "{" + strconv.Itoa(node) + "}:input:" + work + ":" + strconv.FormatUint(generation, 10)
-}
+// Private bindings live exactly as long as the candidate/live generation. The
+// generation transitions remove their hash field atomically with ownership.
 func (s *RedisStore) BindInputs(ctx context.Context, node int, work string, generation uint64, bindings map[string]string) error {
 	if s.client == nil {
 		return ErrUnavailable
@@ -61,7 +60,8 @@ func (s *RedisStore) BindInputs(ctx context.Context, node int, work string, gene
 	if err != nil {
 		return err
 	}
-	n, err := bindingsScript.Run(ctx, s.client, []string{s.keys(node)[1], s.bindingKey(node, work, generation)}, work, strconv.FormatUint(generation, 10), string(encoded)).Int()
+	keys := s.keys(node)
+	n, err := bindingsScript.Run(ctx, s.client, []string{keys[1], keys[4]}, work, strconv.FormatUint(generation, 10), string(encoded)).Int()
 	if err != nil {
 		return err
 	}
@@ -70,20 +70,35 @@ func (s *RedisStore) BindInputs(ctx context.Context, node int, work string, gene
 	}
 	return nil
 }
+
+var inputBindingsScript = redis.NewScript(`
+for _,key in ipairs({KEYS[2],KEYS[3]}) do
+ local current=redis.call('HGET',key,ARGV[1])
+ if current and string.sub(current,1,string.len(ARGV[2])+1)==ARGV[2]..'\n' then
+  local value=redis.call('HGET',KEYS[5],ARGV[1]..'\31'..ARGV[2])
+  if not value then return -2 end
+  return value
+ end
+end
+return -1`)
+
 func (s *RedisStore) InputBindings(ctx context.Context, node int, work string, generation uint64) (map[string]string, error) {
-	active, err := s.IsActive(ctx, node, work, generation)
+	if s.client == nil {
+		return nil, ErrUnavailable
+	}
+	value, err := inputBindingsScript.Run(ctx, s.client, s.keys(node), work, strconv.FormatUint(generation, 10)).Result()
 	if err != nil {
 		return nil, err
 	}
-	if !active {
+	if code, ok := value.(int64); ok && code == -1 {
 		return nil, ErrFenced
 	}
-	raw, err := s.client.Get(ctx, s.bindingKey(node, work, generation)).Bytes()
-	if err != nil {
-		return nil, err
+	raw, ok := value.(string)
+	if !ok || raw == "" {
+		return nil, ErrUnavailable
 	}
 	var bindings map[string]string
-	if err = json.Unmarshal(raw, &bindings); err != nil {
+	if err = json.Unmarshal([]byte(raw), &bindings); err != nil {
 		return nil, err
 	}
 	return bindings, nil

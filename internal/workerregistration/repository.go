@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -75,14 +77,39 @@ func (r *Repository) ByID(ctx context.Context, id int) (workercontrolcore.Node, 
 		return node, false, err
 	}
 	node.PublicKey = ed25519.PublicKey(key)
+	if canonical, err := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP); err == nil {
+		node.URL = canonical
+	}
 	return node, true, nil
 }
 func (r *Repository) ByURL(ctx context.Context, rawURL string) (workercontrolcore.Node, bool, error) {
+	canonical, err := workeridentity.ValidateOrigin(rawURL, true)
+	if err != nil {
+		return workercontrolcore.Node{}, false, err
+	}
+	parsed, err := url.Parse(canonical)
+	if err != nil {
+		return workercontrolcore.Node{}, false, err
+	}
+	port := parsed.Port()
+	host := strings.TrimSuffix(parsed.Host, ":"+port)
+	pattern := "^" + regexp.QuoteMeta(parsed.Scheme+"://"+host)
+	if port == "" {
+		port = "443"
+		if parsed.Scheme == "http" {
+			port = "80"
+		}
+		// ValidateOrigin also accepts an empty colon and zero-padded ports.
+		pattern += "(?::(?:0*" + port + ")?)?"
+	} else {
+		pattern += ":0*" + port
+	}
+	pattern += "(?:[/?#]|$)"
 	var id int
 	// Keep an enrolled node classified even if its editable URL acquires an
 	// unsupported path/query. The caller then rejects its origin rather than
 	// falling back to legacy requests containing library paths.
-	err := r.pool.QueryRow(ctx, "SELECT n.id FROM stream_nodes n JOIN worker_http_nodes w ON w.node_id=n.id WHERE substring(n.url from '^(https?://[^/?#]+)')=$1 AND n.type='transcode'", strings.TrimRight(rawURL, "/")).Scan(&id)
+	err = r.pool.QueryRow(ctx, "SELECT n.id FROM stream_nodes n JOIN worker_http_nodes w ON w.node_id=n.id WHERE n.url ~* $1 AND n.type='transcode'", pattern).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workercontrolcore.Node{}, false, nil
 	}
@@ -158,6 +185,9 @@ func (r *Repository) Redeem(ctx context.Context, enrollment Enrollment, key ed25
 	currentURL, err = workeridentity.ValidateOrigin(currentURL, enrollment.AllowHTTP)
 	if err != nil || currentURL != enrollment.NodeURL {
 		return errors.New("worker enrollment node changed")
+	}
+	if _, err := tx.Exec(ctx, "UPDATE stream_nodes SET url=$1 WHERE id=$2", currentURL, nodeID); err != nil {
+		return err
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO worker_http_nodes(node_id,public_key,allow_http) VALUES($1,$2,$3) ON CONFLICT(node_id) DO UPDATE SET public_key=excluded.public_key,allow_http=excluded.allow_http", nodeID, []byte(key), enrollment.AllowHTTP)
 	if err != nil {

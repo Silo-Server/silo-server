@@ -108,6 +108,7 @@ end
 redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
 redis.call("SET", KEYS[2], generation, "PX", ARGV[2])
 redis.call("SET", KEYS[4], ARGV[3], "PX", ARGV[2])
+redis.call("SET", KEYS[5], ARGV[4], "PX", ARGV[2])
 return generation
 `)
 
@@ -250,6 +251,13 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 	if err != nil {
 		return err
 	}
+	var version string
+	if s.prefix == KeyPrefix {
+		version, err = publicationVersion()
+		if err != nil {
+			return err
+		}
+	}
 	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		ttlMillis := max(ttl.Milliseconds(), 1)
 		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
@@ -257,7 +265,11 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 			nodeAuthorityRecordGenerationKey(sessionID),
 			authorityKey,
 			nodeAuthorityRecordDigestKey(sessionID),
-		}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Err()
+			publicationVersionKey(sessionID),
+		}, data, ttlMillis, nodeAuthorityRecordDigest(data), version).Err()
+	}
+	if s.prefix == KeyPrefix {
+		return putPublicationScript.Run(ctx, s.rdb, []string{s.key(sessionID), publicationVersionKey(sessionID), nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID)}, data, max(ttl.Milliseconds(), 1), version).Err()
 	}
 	return s.rdb.Set(ctx, s.key(sessionID), data, ttl).Err()
 }
@@ -426,7 +438,7 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 	}
 	keys := []string{s.key(sessionID)}
 	if s.prefix == KeyPrefix {
-		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID))
+		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID), publicationVersionKey(sessionID))
 	}
 	return s.rdb.Del(ctx, keys...).Err()
 }

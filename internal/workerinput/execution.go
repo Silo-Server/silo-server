@@ -11,6 +11,8 @@ import (
 
 type executionKey struct{}
 
+const admittedMediaFormats = "matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,avi,mpegts,mpeg,mpegvideo,hevc,h264,flac,ogg,mp3,aac,wav,asf,flv"
+
 // WithContext carries the admitted input registry through probes and restarts.
 func WithContext(ctx context.Context, adapter *Adapter) context.Context {
 	return context.WithValue(ctx, executionKey{}, adapter)
@@ -129,7 +131,7 @@ func RestrictArgs(ctx context.Context, args []string) ([]string, error) {
 					return nil, err
 				}
 				if _, remote := Lookup(ctx, input); remote {
-					result = append(result, "-protocol_whitelist", "http,tcp", "-format_whitelist", "matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,avi,mpegts,mpeg,mpegvideo,hevc,h264,flac,ogg,mp3,aac,wav,asf")
+					result = append(result, "-protocol_whitelist", "http,tcp", "-format_whitelist", admittedMediaFormats)
 				}
 			}
 		}
@@ -166,7 +168,7 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	// FFprobe accepts a positional input rather than -i.
 	for _, arg := range args {
 		if _, ok := Lookup(ctx, arg); ok && !containsInputOption(args, arg) {
-			restricted = append([]string{"-protocol_whitelist", "http,tcp", "-format_whitelist", "matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,avi,mpegts,mpeg,mpegvideo,hevc,h264,flac,ogg,mp3,aac,wav,asf"}, restricted...)
+			restricted = append([]string{"-protocol_whitelist", "http,tcp", "-format_whitelist", admittedMediaFormats}, restricted...)
 			break
 		}
 	}

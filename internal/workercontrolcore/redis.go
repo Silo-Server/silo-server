@@ -30,7 +30,7 @@ func NewRedisStore(client redis.UniversalClient, prefix string) *RedisStore {
 }
 func (s *RedisStore) keys(node int) []string {
 	base := s.prefix + "{" + strconv.Itoa(node) + "}:"
-	return []string{base + "generation", base + "candidate", base + "live", base + "leases"}
+	return []string{base + "generation", base + "candidate", base + "live", base + "leases", base + "input-bindings"}
 }
 
 var beginScript = redis.NewScript(`
@@ -45,7 +45,7 @@ local old=tonumber(redis.call('HGET',KEYS[1],ARGV[1]) or '0')
 if old>=9007199254740991 then return -1 end
 local next=redis.call('HINCRBY',KEYS[1],ARGV[1],1)
 local nextString=redis.call('HGET',KEYS[1],ARGV[1])
-local previous=redis.call('HGET',KEYS[2],ARGV[1]);if previous then redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..string.match(previous,'^(%d+)\n')) end
+local previous=redis.call('HGET',KEYS[2],ARGV[1]);if previous then local field=ARGV[1]..'\31'..string.match(previous,'^(%d+)\n');redis.call('HDEL',KEYS[4],field);redis.call('HDEL',KEYS[5],field) end
 redis.call('HSET',KEYS[2],ARGV[1],nextString..'\npending\n'..ARGV[2])
 return next`)
 var completeScript = redis.NewScript(`
@@ -58,7 +58,7 @@ var activateScript = redis.NewScript(`
 local current=redis.call('HGET',KEYS[2],ARGV[1])
 local prefix=ARGV[2]..'\nready\n'
 if not current or redis.call('HGET',KEYS[1],ARGV[1])~=ARGV[2] or string.sub(current,1,string.len(prefix))~=prefix then return 0 end
-local old=redis.call('HGET',KEYS[3],ARGV[1]);if old then redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..string.match(old,'^(%d+)\n')) end
+local old=redis.call('HGET',KEYS[3],ARGV[1]);if old then local field=ARGV[1]..'\31'..string.match(old,'^(%d+)\n');redis.call('HDEL',KEYS[4],field);redis.call('HDEL',KEYS[5],field) end
 redis.call('HSET',KEYS[3],ARGV[1],current)
 redis.call('HDEL',KEYS[2],ARGV[1])
 return 1`)
@@ -66,11 +66,11 @@ var stopScript = redis.NewScript(`
 local old=tonumber(redis.call('HGET',KEYS[1],ARGV[1]) or '0')
 if old>=9007199254740991 then return -1 end
 redis.call('HINCRBY',KEYS[1],ARGV[1],1)
-for _,key in ipairs({KEYS[2],KEYS[3]}) do local old=redis.call('HGET',key,ARGV[1]);if old then redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..string.match(old,'^(%d+)\n')) end;redis.call('HDEL',key,ARGV[1]) end;return 1`)
+for _,key in ipairs({KEYS[2],KEYS[3]}) do local old=redis.call('HGET',key,ARGV[1]);if old then local field=ARGV[1]..'\31'..string.match(old,'^(%d+)\n');redis.call('HDEL',KEYS[4],field);redis.call('HDEL',KEYS[5],field) end;redis.call('HDEL',key,ARGV[1]) end;return 1`)
 var cancelScript = redis.NewScript(`
 local current=redis.call('HGET',KEYS[2],ARGV[1])
 if not current or string.sub(current,1,string.len(ARGV[2])+1)~=ARGV[2]..'\n' then return 0 end
-redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..ARGV[2]);redis.call('HDEL',KEYS[2],ARGV[1]);return 1`)
+redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..ARGV[2]);redis.call('HDEL',KEYS[5],ARGV[1]..'\31'..ARGV[2]);redis.call('HDEL',KEYS[2],ARGV[1]);return 1`)
 
 func (s *RedisStore) Begin(ctx context.Context, a workerwire.Assignment) (workerwire.Assignment, error) {
 	if s.client == nil {

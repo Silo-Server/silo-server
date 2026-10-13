@@ -2838,10 +2838,11 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		nodeURL = transcodeNode.URL
 	}
 	adoptSuccessor := func() {
+		deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+			deletePreviousRecipe()
 		}
 		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
@@ -2850,6 +2851,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		if committed {
 			return nil
 		}
+		deleteTransportRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, nodeURL)
 		if requireCancellation && nodeURL != "" && transportID != "" {
 			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, nodeURL); err != nil {
 				// applySession has already made this the live route. Keep its
@@ -2873,7 +2875,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			releaseReservation()
 			h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
 		}
-		h.deleteNodeRecipeV3(r.Context(), transportID)
+		deleteTransportRecipe()
 		releaseLifecycle()
 		return nil
 	}
@@ -3065,13 +3067,7 @@ func (h *PlaybackHandler) putRequiredNodeRecipeV3(ctx context.Context, transport
 // store's TTL is only the backstop for the paths that never run (a crashed API
 // process); every deliberate teardown deletes here.
 func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID string) {
-	if h == nil || h.NodeRecipeStore == nil || transportID == "" {
-		return
-	}
-	if err := h.NodeRecipeStore.Delete(context.WithoutCancel(ctx), transportID); err != nil {
-		slog.WarnContext(ctx, "failed to drop the node transcode recipe",
-			"component", "api", "transport", transportID, "error", err)
-	}
+	h.captureNodeRecipeDeletionV3(ctx, transportID, "")()
 }
 
 // deleteRequiredProgressiveRemuxAuthorityV3 makes a user-visible stop durable
@@ -3088,7 +3084,11 @@ func (h *PlaybackHandler) deleteRequiredProgressiveRemuxAuthorityV3(ctx context.
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
 	defer cancel()
-	return h.NodeRecipeStore.Delete(deleteCtx, session.TranscodeTransportID)
+	deleteRecipe, err := playback.CaptureNodeRecipeDeletion(deleteCtx, h.NodeRecipeStore, session.TranscodeTransportID, session.TranscodeNodeURL)
+	if err != nil {
+		return err
+	}
+	return deleteRecipe(deleteCtx)
 }
 
 func requiresProgressiveRemuxAuthorityV3(session *playback.Session) bool {
@@ -3928,6 +3928,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			if committed {
 				return nil
 			}
+			deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 			committed = true
 			previous, accepted := h.tm.SwapTranscodeSession(session.ID, ts)
 			if !accepted {
@@ -3948,7 +3949,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			}
 			if previousNodeURL != "" {
 				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-				h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+				deletePreviousRecipe()
 			}
 			ts.SetRestartHook(func(ctx context.Context) {
 				h.maybeStartThrottler(ctx, ts)
@@ -4163,10 +4164,11 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		egressNodeURL = nodePlan.ProxyNode.URL
 	}
 	adoptSuccessor := func() {
+		deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+			deletePreviousRecipe()
 		}
 		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
@@ -4175,6 +4177,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		if committed {
 			return nil
 		}
+		deleteTransportRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, node.URL)
 		if requireCancellation {
 			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, node.URL); err != nil {
 				// Preserve the admitted successor route for a retryable stop. Its
@@ -4189,7 +4192,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 		committed = true
 		// The node job this recipe rebuilds is gone, so the recipe must go too.
-		h.deleteNodeRecipeV3(r.Context(), transportID)
+		deleteTransportRecipe()
 		// The accepted node job is gone; drop the planner reservation too so
 		// repeated failed starts cannot pin the node's max-job or bandwidth
 		// budget until the reservation ages out.

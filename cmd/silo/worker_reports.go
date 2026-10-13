@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
+	"github.com/Silo-Server/silo-server/internal/workeridentity"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
@@ -84,7 +85,7 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		info.MediaItemID = ""
 		info.MediaTitle = ""
 		if card, found := s.recipes.Get(ctx, item.WorkID); found && card != nil {
-			if card.TranscodeNodeURL != node.URL {
+			if !workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) {
 				continue
 			}
 			if info.SessionID != item.WorkID && info.SessionID != card.SessionID {
@@ -140,7 +141,7 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 			continue
 		}
 		card, found := s.recipes.Get(ctx, scope.WorkID)
-		if !found || card == nil || card.SessionID != view.SessionID || card.TranscodeNodeURL != node.URL {
+		if !found || card == nil || card.SessionID != view.SessionID || !workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) {
 			continue
 		}
 		view.Subject = streamtelemetry.Subject{Kind: streamtelemetry.SubjectUser, ID: strconv.Itoa(card.UserID)}

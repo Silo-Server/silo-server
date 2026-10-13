@@ -77,7 +77,10 @@ func TestSourceRenewalFailureStopsActualProducer(t *testing.T) {
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatal("encoder was not alive before renewal failure")
 	}
-	r.renewals.fail("work", 4)
+	r.renewals.mu.Lock()
+	entry := r.renewals.entries[handles["source:media"]]
+	r.renewals.mu.Unlock()
+	r.renewals.fail(entry)
 	if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
 		t.Fatalf("encoder process survived failed renewal: %v", err)
 	}

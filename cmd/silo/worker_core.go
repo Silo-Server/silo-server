@@ -65,6 +65,9 @@ func (r *coreWorkerRegistry) refresh(ctx context.Context) error {
 			return err
 		}
 		node.PublicKey = ed25519.PublicKey(key)
+		if canonical, err := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP); err == nil {
+			node.URL = canonical
+		}
 		nodes[workerRegistryOrigin(node.URL)] = node
 	}
 	if err := rows.Err(); err != nil {
@@ -77,7 +80,7 @@ func (r *coreWorkerRegistry) refresh(ctx context.Context) error {
 }
 func (r *coreWorkerRegistry) ByURL(ctx context.Context, url string) (workercontrolcore.Node, bool, error) {
 	r.mu.RLock()
-	node, ok := r.nodes[strings.TrimRight(url, "/")]
+	node, ok := r.nodes[workerRegistryOrigin(url)]
 	r.mu.RUnlock()
 	if ok {
 		return node, true, nil
@@ -98,7 +101,11 @@ func workerRegistryOrigin(raw string) string {
 	if err != nil || parsed.Host == "" {
 		return strings.TrimRight(raw, "/")
 	}
-	return parsed.Scheme + "://" + parsed.Host
+	origin := parsed.Scheme + "://" + parsed.Host
+	if canonical, err := workeridentity.ValidateOrigin(origin, true); err == nil {
+		return canonical
+	}
+	return origin
 }
 func (r *coreWorkerRegistry) ByID(ctx context.Context, id int) (workercontrolcore.Node, bool, error) {
 	return r.repo.ByID(ctx, id)
@@ -203,7 +210,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		}
 		card, found := recipes.Get(ctx, assignment.WorkID)
 		if found && card != nil {
-			return card.TranscodeNodeURL == node.URL && !deny.Denied(ctx, card.SessionID) && contentAuthority.allowed(ctx, card)
+			return workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) && !deny.Denied(ctx, card.SessionID) && contentAuthority.allowed(ctx, card)
 		}
 		return service != nil && service.HasInFlight(node.ID, assignment.WorkID)
 	}, Report: reportSink.accept,

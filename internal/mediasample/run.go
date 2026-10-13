@@ -123,6 +123,11 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	for _, attempt := range req.attempts() {
 		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap)
 		if attemptErr == nil {
+			// Repairs may keep the initial frames after a decode failure, but
+			// they must not publish those frames after source authority is lost.
+			if err := workerinput.Validate(ctx, req.Input); err != nil {
+				return Result{}, &Error{Reason: ReasonArgs, Attempts: []AttemptError{{Decoder: result.Decoder, Reason: ReasonArgs, Err: err}}}
+			}
 			return result, nil
 		}
 		failure.Attempts = append(failure.Attempts, *attemptErr)

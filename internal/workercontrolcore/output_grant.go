@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -33,7 +32,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		return GrantReply{}, ErrDenied
 	}
 	node, found, err := s.options.Nodes.ByURL(ctx, nodeURL)
-	if err != nil || !found || !node.Enabled || strings.TrimRight(claims.TranscodeNode, "/") != node.URL || claims.RoutingExecutionNodeID != 0 && claims.RoutingExecutionNodeID != node.ID {
+	if err != nil || !found || !node.Enabled || !workeridentity.SameOrigin(claims.TranscodeNode, node.URL, node.AllowHTTP) || !workeridentity.SameOrigin(nodeURL, node.URL, node.AllowHTTP) || claims.RoutingExecutionNodeID != 0 && claims.RoutingExecutionNodeID != node.ID {
 		return GrantReply{}, ErrDenied
 	}
 	if canonical, e := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP); e != nil || canonical != node.URL {
@@ -44,6 +43,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		return GrantReply{}, ErrDenied
 	}
 	copied := *claims
+	copied.TranscodeNode = node.URL
 	copied.OutputSubdir = ""
 	var generation uint64
 	var artifactFingerprint, clientFingerprint string

@@ -91,6 +91,24 @@ func (s *Service) invalidate(node int, work string) {
 	}
 	delete(s.admissions, k)
 }
+
+func (s *Service) invalidateThrough(node int, work string, generation uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := workKey{node, work}
+	s.epoch++
+	for key := range s.authority {
+		if key.workKey == k && key.generation <= generation {
+			delete(s.authority, key)
+		}
+	}
+	if v, ok := s.admissions[k]; ok && v.generation <= generation {
+		if v.stop != nil {
+			v.stop()
+		}
+		delete(s.admissions, k)
+	}
+}
 func (s *Service) invalidateCached(node int, work string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

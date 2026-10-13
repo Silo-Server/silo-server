@@ -20,7 +20,9 @@ database, Redis or object-storage credentials.
 HTTP is an explicit option for trusted local links. HTTPS uses certificate and
 hostname verification. Requests cannot redirect to another origin, use an
 environment proxy or fall back from HTTPS to HTTP. The registered origins are
-exact scheme/host/port origins, without arbitrary URL paths or credentials.
+canonical scheme/host/port origins, without arbitrary URL paths or credentials.
+Host case, an explicit default port and a trailing slash do not change the
+enrolled origin or its normal request routing.
 An enrolled node remains classified as a standalone worker if its stored URL
 is later edited into an invalid origin; dispatch rejects it before transmitting
 a legacy request containing a source path or client token.
@@ -89,6 +91,10 @@ Dispatch acquires short durable admission leases; a candidate becomes live only
 after the expected worker response. A failed candidate preserves the previous
 live authority. Frozen core-only input bindings prevent later recipe edits from
 retargeting an existing generation to different bytes.
+Bindings remain available for the lifetime of their live or pending generation,
+including ready artifacts retained beyond one day. Replacing, cancelling or
+stopping that generation removes its bindings atomically with the authority
+record.
 
 The worker refreshes signed authority snapshots once per second. Their short
 leases fail closed if the core is unreachable. The core re-resolves current
@@ -103,6 +109,10 @@ delayed stop from removing a successor. Worker source handles and producers are
 closed by the exact affected generation. Reconstruction obtains the latest
 core-authorized recipe and fresh source grants; it cannot reconstruct from
 token-carried filesystem paths alone.
+Core recipe publications also have independent opaque versions. Teardown captures
+the version before stopping work and removes only that publication. Publishing
+the same recipe again still creates a new version, so delayed cleanup cannot
+erase a successor's reconstruction recipe.
 
 ## Output delivery
 

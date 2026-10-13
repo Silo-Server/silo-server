@@ -50,9 +50,10 @@ func (s *Service) nodeForRequest(r *http.Request) (Node, bool, error) {
 		return Node{}, false, nil
 	}
 	canonical, err := workeridentity.ValidateOrigin(n.URL, n.AllowHTTP)
-	if err != nil || canonical != base || !n.Enabled || n.ID <= 0 || len(n.PublicKey) != 32 {
+	if err != nil || !workeridentity.SameOrigin(canonical, base, n.AllowHTTP) || !n.Enabled || n.ID <= 0 || len(n.PublicKey) != 32 {
 		return Node{}, false, ErrDenied
 	}
+	n.URL = canonical
 	return n, true, nil
 }
 func requestWork(path string) string {
@@ -489,6 +490,10 @@ func (s *Service) stop(ctx context.Context, node Node, work string) error {
 	return s.stopAt(ctx, node, work, generation)
 }
 func (s *Service) stopAt(ctx context.Context, node Node, work string, generation uint64) error {
+	deleteRecipe, err := s.captureRecipeDeletion(ctx, node, work)
+	if err != nil {
+		return err
+	}
 	old, _, err := s.options.Store.Get(ctx, node.ID, work)
 	if err != nil {
 		return err
@@ -504,9 +509,9 @@ func (s *Service) stopAt(ctx context.Context, node Node, work string, generation
 	if err = generations.StopIfGeneration(ctx, node.ID, work, generation); err != nil {
 		return err
 	}
-	s.invalidate(node.ID, work)
-	if s.options.RecipeStore != nil {
-		if err = s.options.RecipeStore.Delete(ctx, work); err != nil {
+	s.invalidateThrough(node.ID, work, generation)
+	if deleteRecipe != nil {
+		if err = deleteRecipe(ctx); err != nil {
 			return err
 		}
 	}
@@ -585,12 +590,11 @@ func recipeNode(card playback.RecipeCard, node Node) bool {
 		return false
 	}
 	if card.TranscodeNodeURL != "" {
-		u, err := url.Parse(card.TranscodeNodeURL)
-		if err != nil || u.User != nil || u.Path != "" && u.Path != "/" || u.Scheme+"://"+u.Host != node.URL {
+		if !workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) {
 			return false
 		}
 	}
-	return card.RoutingExecutionNodeID == node.ID || strings.TrimRight(card.TranscodeNodeURL, "/") == node.URL
+	return card.RoutingExecutionNodeID == node.ID || workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP)
 }
 func (s *Service) IsActive(ctx context.Context, nodeID int, work string, generation uint64) bool {
 	return s.WorkActive(ctx, nodeID, work, generation)

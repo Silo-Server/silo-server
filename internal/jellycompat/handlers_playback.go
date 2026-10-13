@@ -2073,6 +2073,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		}
 	}
 	nodeRecipeCommitted := recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil
+	var deleteCommittedRecipe func(context.Context) error
 	if nodeRecipeCommitted {
 		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe)
@@ -2080,14 +2081,30 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		if err != nil {
 			return fmt.Errorf("persist node transcode recipe: %w", err)
 		}
+		captureCtx, captureCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		deleteCommittedRecipe, err = playback.CaptureNodeRecipeDeletion(captureCtx, h.RecipeNodeStore, upstreamSessionID, recipe.TranscodeNodeURL)
+		captureCancel()
+		if err != nil {
+			return fmt.Errorf("capture uncommitted node transcode recipe: %w", err)
+		}
 	}
 	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
 	oldNodeRecipeRemoved := false
 	if remoteToLocal {
+		var deletePreviousRecipe func(context.Context) error
+		if h.RecipeNodeStore != nil {
+			captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			var err error
+			deletePreviousRecipe, err = playback.CaptureNodeRecipeDeletion(captureCtx, h.RecipeNodeStore, upstreamSessionID, previousRecipe.TranscodeNodeURL)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("capture replaced node transcode recipe: %w", err)
+			}
+		}
 		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
 		if h.RecipeNodeStore != nil {
 			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			err := h.RecipeNodeStore.Delete(deleteCtx, upstreamSessionID)
+			err := deletePreviousRecipe(deleteCtx)
 			cancel()
 			if err != nil {
 				return fmt.Errorf("delete replaced node transcode recipe: %w", err)
@@ -2110,7 +2127,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 					restoreErr = fmt.Errorf("restore prior node transcode recipe: %w", err)
 				}
 			} else {
-				if err := h.RecipeNodeStore.Delete(restoreCtx, upstreamSessionID); err != nil {
+				if err := deleteCommittedRecipe(restoreCtx); err != nil {
 					restoreErr = fmt.Errorf("remove uncommitted node transcode recipe: %w", err)
 				}
 			}

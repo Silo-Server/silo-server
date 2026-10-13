@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,5 +136,85 @@ func TestDelayedRevocationCannotCloseSuccessorInputs(t *testing.T) {
 	}
 	if _, found := workerinput.Lookup(ctx, old["source:media"].URL()); found {
 		t.Fatal("old generation input survived replacement")
+	}
+}
+
+func TestConcurrentSameGenerationReconstructionKeepsPublishedInput(t *testing.T) {
+	r := raceRuntime(t)
+	if err := r.authority.SetNonce("test-nonce"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.authority.Apply(raceSnapshot(r, 1, 4, 2000), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.inputs.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entered, resume := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	t.Cleanup(release)
+	var calls atomic.Int64
+	adapter, err := workerinput.New(workerinput.Options{
+		Origins: []string{"http://core.example.test"}, AllowHTTP: true,
+		Allowed: func(string, uint64) bool {
+			if calls.Add(1) == 1 {
+				close(entered)
+				<-resume
+			}
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.inputs = adapter
+	type result struct {
+		handles map[string]*workerinput.Handle
+		err     error
+	}
+	slow := make(chan result, 1)
+	go func() {
+		handles, err := r.openSources(raceAssignment(4))
+		slow <- result{handles: handles, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first reconstruction did not enter source admission")
+	}
+	// Both calls passed the first absence check. The second call publishes
+	// while the first still opens redundant sources outside Runtime.mu.
+	first, err := r.openSources(raceAssignment(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := first["source:media"]
+	if !adapter.Allowed(published.URL()) {
+		t.Fatal("first published input is unavailable")
+	}
+	release()
+	var second result
+	select {
+	case second = <-slow:
+	case <-time.After(time.Second):
+		t.Fatal("redundant reconstruction did not finish")
+	}
+	if second.err != nil {
+		t.Fatal(second.err)
+	}
+	if second.handles["source:media"] != published || !adapter.Allowed(published.URL()) {
+		t.Fatal("same-generation reconstruction replaced or closed an input already in use")
+	}
+	r.renewals.prune()
+	r.renewals.mu.Lock()
+	_, tracked := r.renewals.entries[published]
+	count := len(r.renewals.entries)
+	r.renewals.mu.Unlock()
+	if !tracked || count != 1 {
+		t.Fatalf("published source renewal lost or redundant source retained: tracked%v count%d", tracked, count)
+	}
+	r.revoked("work", 4)
+	if adapter.Allowed(published.URL()) {
+		t.Fatal("reused generation survived its revocation")
 	}
 }

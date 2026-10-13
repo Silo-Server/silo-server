@@ -116,9 +116,10 @@ func (h *hop) RoundTrip(request *http.Request) (*http.Response, error) {
 		return nil, errors.New("worker disabled")
 	}
 	canonical, err := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP)
-	if err != nil || canonical != url {
+	if err != nil || !workeridentity.SameOrigin(canonical, url, node.AllowHTTP) {
 		return nil, errors.New("worker transport policy changed")
 	}
+	url = canonical
 	base, err := t.transports.Get(h.base)
 	if err != nil {
 		return nil, err

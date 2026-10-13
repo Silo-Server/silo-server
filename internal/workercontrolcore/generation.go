@@ -61,7 +61,7 @@ var stopIfGenerationScript = redis.NewScript(`
 local current=redis.call('HGET',KEYS[1],ARGV[1]) or '0'
 if current~=ARGV[2] then return 0 end
 if tonumber(current)<9007199254740991 then redis.call('HINCRBY',KEYS[1],ARGV[1],1) end
-for _,key in ipairs({KEYS[2],KEYS[3]}) do local old=redis.call('HGET',key,ARGV[1]);if old then redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..string.match(old,'^(%d+)\n')) end;redis.call('HDEL',key,ARGV[1]) end
+for _,key in ipairs({KEYS[2],KEYS[3]}) do local old=redis.call('HGET',key,ARGV[1]);if old then local field=ARGV[1]..'\31'..string.match(old,'^(%d+)\n');redis.call('HDEL',KEYS[4],field);redis.call('HDEL',KEYS[5],field) end;redis.call('HDEL',key,ARGV[1]) end
 return 1`)
 
 func (s *RedisStore) StopIfGeneration(ctx context.Context, node int, work string, generation uint64) error {

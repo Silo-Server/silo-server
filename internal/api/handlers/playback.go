@@ -1204,6 +1204,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deleteRecipe := h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
 	stopResult := h.recordStopHistory(ctx, session)
@@ -1233,7 +1234,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	// The teardown above stopped the remote job, so its stored recipe must not
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
+	deleteRecipe()
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1281,6 +1282,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deleteRecipe := h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
 	if h.WatchScrobbler != nil && h.fileResolver != nil {
@@ -1312,7 +1314,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	// The teardown above stopped the remote job, so its stored recipe must not
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
+	deleteRecipe()
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}

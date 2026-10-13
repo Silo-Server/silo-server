@@ -282,7 +282,10 @@ func TestSourceRenewalFailureCannotRevokeNewerCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.renewals.fail("work", 4)
+	r.renewals.mu.Lock()
+	entry := r.renewals.entries[old["source:media"]]
+	r.renewals.mu.Unlock()
+	r.renewals.fail(entry)
 	if r.inputs.Allowed(old["source:media"].URL()) || r.workAllowed("work", 4) {
 		t.Fatal("old lease survived renewal failure")
 	}

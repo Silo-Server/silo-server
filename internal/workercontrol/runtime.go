@@ -475,6 +475,14 @@ func (r *Runtime) stageSources(assignment workerwire.Assignment) (map[string]*wo
 		return nil, err
 	}
 	r.mu.Lock()
+	// Another reconstruction may have published this generation while its
+	// redundant handles were opening. Keep the input already used by callers.
+	if r.generations[assignment.WorkID] == assignment.Generation && r.handles[assignment.WorkID] != nil {
+		result := r.handles[assignment.WorkID]
+		r.mu.Unlock()
+		closeHandles(opened)
+		return result, nil
+	}
 	if r.staged[assignment.WorkID] == nil {
 		r.staged[assignment.WorkID] = make(map[uint64]map[string]*workerinput.Handle)
 	}
@@ -487,28 +495,37 @@ func (r *Runtime) stageSources(assignment workerwire.Assignment) (map[string]*wo
 	r.mu.Unlock()
 	return opened, nil
 }
+
+// takeStagedLocked retires only the requested generation and its empty parent.
+// The caller must hold r.mu.
+func (r *Runtime) takeStagedLocked(work string, generation uint64) map[string]*workerinput.Handle {
+	handles := r.staged[work][generation]
+	delete(r.staged[work], generation)
+	if len(r.staged[work]) == 0 {
+		delete(r.staged, work)
+	}
+	return handles
+}
+
 func (r *Runtime) publishStaged(work string, generation uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	handles := r.staged[work][generation]
+	handles := r.takeStagedLocked(work, generation)
 	if handles == nil {
 		return
 	}
 	if current := r.generations[work]; current > generation {
-		delete(r.staged[work], generation)
 		closeHandles(handles)
 		return
 	}
 	old := r.handles[work]
 	r.handles[work] = handles
 	r.generations[work] = generation
-	delete(r.staged[work], generation)
 	closeHandles(old)
 }
 func (r *Runtime) discardStaged(work string, generation uint64) {
 	r.mu.Lock()
-	handles := r.staged[work][generation]
-	delete(r.staged[work], generation)
+	handles := r.takeStagedLocked(work, generation)
 	r.mu.Unlock()
 	closeHandles(handles)
 }
@@ -614,8 +631,7 @@ func (r *Runtime) denied(ctx context.Context, workID string) bool {
 func (r *Runtime) revoked(workID string, generation uint64) {
 	r.renewals.revoke(workID, generation)
 	r.mu.Lock()
-	pending := r.staged[workID][generation]
-	delete(r.staged[workID], generation)
+	pending := r.takeStagedLocked(workID, generation)
 	var active map[string]*workerinput.Handle
 	if r.generations[workID] == generation {
 		active = r.handles[workID]
