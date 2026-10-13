@@ -58,9 +58,9 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
-	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, or an episode's still, sized by image_size; for system media controls"`
+	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls"`
 	PosterThumbhash                 string                  `json:"poster_thumbhash,omitempty"`
-	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, or an episode's series backdrop, sized by image_size"`
+	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
 	BackdropThumbhash               string                  `json:"backdrop_thumbhash,omitempty"`
 }
 

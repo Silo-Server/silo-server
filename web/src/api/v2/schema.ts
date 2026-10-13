@@ -30990,7 +30990,7 @@ export interface components {
     };
     WatchDetail: {
       backdrop_thumbhash?: string;
-      /** @description The item's backdrop, or an episode's series backdrop, sized by image_size */
+      /** @description The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size */
       backdrop_url?: string;
       /** @example movie:heat-1995 */
       content_id: string;
@@ -31013,7 +31013,7 @@ export interface components {
       /** @description Logical watch choices, each spanning one or more ordered parts */
       playback_variants?: components["schemas"]["WatchPlaybackVariant"][];
       poster_thumbhash?: string;
-      /** @description The item's poster, or an episode's still, sized by image_size; for system media controls */
+      /** @description The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls */
       poster_url?: string;
       preview?: components["schemas"]["WatchMarker"];
       recap?: components["schemas"]["WatchMarker"];
