@@ -11,6 +11,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -494,7 +495,7 @@ func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
 
 	for _, config := range tests {
 		t.Run(config, func(t *testing.T) {
-			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config)); !ok {
+			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config), false); !ok {
 				t.Fatalf("validateSectionConfig(%s) rejected config: %s", config, msg)
 			}
 		})
@@ -502,7 +503,7 @@ func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
 }
 
 func TestValidateSectionConfigRejectsUnknownContinueType(t *testing.T) {
-	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`))
+	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`), false)
 	if ok {
 		t.Fatal("validateSectionConfig accepted unknown continue_type")
 	}
@@ -620,17 +621,20 @@ func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	got := libraryDefaultSections(&models.MediaFolder{Type: "series"}, 12)
 
-	if len(got) != 6 {
-		t.Fatalf("expected 6 series default sections, got %d", len(got))
+	if len(got) != 7 {
+		t.Fatalf("expected 7 series default sections, got %d", len(got))
 	}
 	if got[1].Title != "Recently Added TV" {
 		t.Fatalf("section 1 title = %q, want %q", got[1].Title, "Recently Added TV")
 	}
-	if got[2].Title != "Recently Released Episodes" {
-		t.Fatalf("section 2 title = %q, want %q", got[2].Title, "Recently Released Episodes")
+	if got[2].SectionType != sections.SectionReturningShows {
+		t.Fatalf("section 2 type = %q, want %q", got[2].SectionType, sections.SectionReturningShows)
 	}
-	if got[4].SectionType != sections.SectionRecommendedForYou {
-		t.Fatalf("section 4 type = %q, want %q", got[4].SectionType, sections.SectionRecommendedForYou)
+	if got[3].Title != "Recently Released Episodes" {
+		t.Fatalf("section 3 title = %q, want %q", got[3].Title, "Recently Released Episodes")
+	}
+	if got[5].SectionType != sections.SectionRecommendedForYou {
+		t.Fatalf("section 5 type = %q, want %q", got[5].SectionType, sections.SectionRecommendedForYou)
 	}
 }
 
@@ -737,10 +741,9 @@ func TestApplyDiversityFilterAvoidSectionDoesNotShadowItself(t *testing.T) {
 	}
 }
 
-// TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled verifies that
-// a non-admin profile attempting to save a user-added admin_curated_list override
-// gets 403 when the allow_profile_custom_sections setting is disabled (the default).
-func TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled(t *testing.T) {
+// TestSaveProfileOverridesRejectsNewAdminOnlyRecipe verifies that a non-admin
+// profile adding a user-added admin_curated_list override gets 403.
+func TestSaveProfileOverridesRejectsNewAdminOnlyRecipe(t *testing.T) {
 	// StoreProvider is nil so we test the gate in isolation.
 	// The gate runs BEFORE the StoreProvider check, so a 403 is returned before
 	// the nil-StoreProvider 500 path is reached.
@@ -755,6 +758,28 @@ func TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled(t *testin
 	rec := httptest.NewRecorder()
 
 	h.HandleSaveProfileOverrides(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin: a child profile
+// on an admin's account is not the admin an admin-only recipe asks for.
+func TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin(t *testing.T) {
+	h := &SectionHandler{}
+	body := []byte(`{"scope":"home","library_id":"","overrides":[{"is_user_added":true,"user_section_type":"admin_curated_list","user_config":{"item_ids":["a"]}}]}`)
+	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "admin", UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "kid")
+	ctx = access.SetScope(ctx, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
+	ctx = apimw.SetActingAdminDecider(ctx, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	})
+	rec := httptest.NewRecorder()
+
+	h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())

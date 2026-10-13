@@ -78,3 +78,12 @@ it("discards a response after account replacement", async () => {
   ).toBe(true);
   expect(result.current.data).toBeUndefined();
 });
+it("asks for hidden libraries only when the caller opts in", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse({ items: [] }));
+  vi.stubGlobal("fetch", fetch);
+  const { result } = renderHook(() => useAvailableUserLibraries({ includeHidden: true }), {
+    wrapper,
+  });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(String(fetch.mock.calls[0]?.[0])).toBe("/api/v2/user/libraries?include_hidden=true");
+});

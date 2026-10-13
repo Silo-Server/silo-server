@@ -178,7 +178,7 @@ func ParseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
 	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(directories) > 1)
-	if token, ok := parseEpisodeToken(baseNoExt, directories, allowNumericSeason, seriesLibrary); ok && token.episodeEnd > token.episode {
+	if token, ok := parseEpisodeToken(baseNoExt, directories, libraryRoot != "", allowNumericSeason, seriesLibrary); ok && token.episodeEnd > token.episode {
 		hints.PresentationKind = "multi_episode"
 		hints.PresentationGroupKey = normalizePresentationGroup(baseNoExt, baseNoExt[token.start:token.end])
 		hints.MultiEpisodeStart = token.episode

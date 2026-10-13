@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, waitFor } from "@testing-library/react";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { mediaSurfaceKeys, sectionKeys } from "./keys";
+import { libraryKeys, mediaSurfaceKeys, sectionKeys } from "./keys";
 import { storage } from "@/utils/storage";
 import {
   effectiveSettingsQueryKey,
@@ -109,6 +109,23 @@ describe("useSettingValuesRealtime", () => {
       });
     },
   );
+
+  it("refetches the library list when another device hides or shows a library", async () => {
+    const { queryClient, wrapper } = createHarness();
+    const librariesKey = libraryKeys.user("profile-1");
+    queryClient.setQueryData(librariesKey, [{ id: 1 }]);
+    render(<Subscriber />, { wrapper });
+    subscriptions
+      .find((entry) => entry.channel === "user_settings")
+      ?.handlers?.onEvent?.(
+        changedFrame({
+          key: SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+          scope: "profile",
+          profile_id: "profile-1",
+        }),
+      );
+    await waitFor(() => expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true));
+  });
 
   it("refetches a mounted reader when another device changes this profile", async () => {
     const { wrapper } = createHarness();

@@ -83,3 +83,26 @@ func TestAdminAuditLogsCursorAndProjection(t *testing.T) {
 	deps.AdminAuditLogs = nil
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
+
+func TestAdminAuditChangeFiltersAndProjection(t *testing.T) {
+	const action = "user.updated"
+	f := &fakeAuditLogs{result: activitylog.ListResult{Entries: []activitylog.AuditEntry{{ID: 1, Timestamp: time.Now(), Method: "PUT", Path: "/api/v2/admin/users/7", StatusCode: 204, UserID: new(7), ImpersonatorUserID: new(9), Action: action, TargetType: "user", TargetID: "7", Changes: []activitylog.Change{{Field: "permissions", Before: new(`[]`), After: new(`["marker_edit"]`)}, {Field: "password"}}}}}}
+	deps := pilotDeps(nil, nil)
+	deps.AdminAuditLogs = f
+	rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/logs/audit?action=user.updated&actor_user_id=9&target_type=user&target_id=7", "", bearer(adminToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if len(f.calls) != 1 || f.calls[0].Action != action || f.calls[0].ActorUserID == nil || *f.calls[0].ActorUserID != 9 || f.calls[0].TargetID != "7" {
+		t.Fatal(f.calls)
+	}
+	var result struct {
+		Items []AdminAuditLog `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Action != action || result.Items[0].TargetType != "user" || len(result.Items[0].Changes) != 2 || result.Items[0].Changes[1].Before != nil || result.Items[0].Changes[1].After != nil {
+		t.Fatal(rec.Body.String())
+	}
+}

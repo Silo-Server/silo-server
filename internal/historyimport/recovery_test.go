@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -172,6 +174,93 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 		if err != nil || added != (i == 0) {
 			t.Fatalf("watchlist attempt %d=%v %v", i, added, err)
 		}
+	}
+}
+
+func TestImportedWatchDismissesItemsHiddenFromSourceContinueWatching(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	db.SetMaxOpenConns(1)
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := t.Context()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p", Name: "Profile"}); err != nil {
+		t.Fatal(err)
+	}
+	provider := importStoreProvider{store}
+	service := &Service{stores: provider, watchState: watchstate.NewService(provider)}
+	stamp := time.Date(2026, 10, 8, 19, 59, 13, 0, time.UTC)
+	hidden := Record{PositionSeconds: 240, DurationSeconds: 600, UpdatedAt: stamp, LastPlayedAt: new(stamp), HiddenFromResume: true}
+	continueWatching := func() []string {
+		t.Helper()
+		progress, err := store.ListProgress(ctx, "p", "in_progress", 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dismissals, err := store.ListHomeDismissals(ctx, "p", userstore.HomeSurfaceContinueWatching)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, entry := range catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress) {
+			ids = append(ids, entry.MediaItemID)
+		}
+		slices.Sort(ids)
+		return ids
+	}
+
+	// A hidden item keeps its resume point but stays out of Continue Watching.
+	outcome, err := service.applyImportedWatch(ctx, 1, "p", "hidden", hidden)
+	if err != nil || !outcome.ProgressWritten {
+		t.Fatalf("hidden import=%+v %v", outcome, err)
+	}
+	if progress, err := store.GetProgress(ctx, "p", "hidden"); err != nil || progress == nil || progress.PositionSeconds != 240 {
+		t.Fatalf("hidden progress=%+v %v, want position 240", progress, err)
+	}
+
+	// An import from before the item was hidden is repaired by running it again.
+	earlier := hidden
+	earlier.HiddenFromResume = false
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "earlier", earlier); err != nil {
+		t.Fatal(err)
+	}
+	if got := continueWatching(); !slices.Equal(got, []string{"earlier"}) {
+		t.Fatalf("continue watching before re-run = %v, want [earlier]", got)
+	}
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "earlier", hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hidden rewatch of a completed item is hidden too: the row keeps its
+	// completed latch but shows in Continue Watching through its resume point.
+	if err := store.SetProgressAt(ctx, "p", "rewatch", 0, 600, true, stamp.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "rewatch", hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	// Playback in Silo after the import is never hidden, even within the same
+	// second as the imported date.
+	for id, at := range map[string]time.Time{"watched-since": stamp.Add(time.Hour), "same-second": stamp.Add(900 * time.Millisecond)} {
+		if err := store.SetProgressAt(ctx, "p", id, 300, 600, false, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.applyImportedWatch(ctx, 1, "p", id, hidden); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := continueWatching(); !slices.Equal(got, []string{"same-second", "watched-since"}) {
+		t.Fatalf("continue watching = %v, want [same-second watched-since]", got)
 	}
 }
 

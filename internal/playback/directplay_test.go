@@ -594,7 +594,7 @@ func TestDirectPlayEntityTagOmitsUnsupportedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := directPlayEntityTag(file, fileInfoWithoutSystem{FileInfo: info}); got != "" {
+	if got := DirectPlayEntityTag(file, fileInfoWithoutSystem{FileInfo: info}); got != "" {
 		t.Fatalf("ETag without durable revision = %q, want omitted validator", got)
 	}
 }

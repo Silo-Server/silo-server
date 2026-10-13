@@ -22,7 +22,9 @@ type fakeAdminSections struct {
 	reads, updates, deletes, creates, reorders, restores, bulks, previews int
 	mismatch, readMismatch, deleted                                       bool
 	preview                                                               []*models.MediaItem
+	previewPosters                                                        map[string]string
 	previewRequest                                                        handlers.AdminSectionPreviewRequest
+	recipeChecks                                                          []bool
 }
 
 func newFakeAdminSections() *fakeAdminSections {
@@ -54,6 +56,7 @@ func (f *fakeAdminSections) AdminSectionOrder(_ context.Context, scope string, l
 }
 func (f *fakeAdminSections) CreateAdminSection(_ context.Context, in handlers.AdminSectionCreate) (handlers.AdminSection, error) {
 	f.creates++
+	f.recipeChecks = append(f.recipeChecks, in.ValidateRecipe)
 	f.view.Scope = in.Scope
 	f.view.LibraryID = in.LibraryID
 	f.view.Title = in.Title
@@ -62,6 +65,7 @@ func (f *fakeAdminSections) CreateAdminSection(_ context.Context, in handlers.Ad
 }
 func (f *fakeAdminSections) UpdateAdminSection(_ context.Context, _ string, in handlers.AdminSectionUpdate) (handlers.AdminSection, error) {
 	f.updates++
+	f.recipeChecks = append(f.recipeChecks, in.ValidateRecipe)
 	f.revision++
 	f.scopeRevision++
 	if f.mismatch {
@@ -124,7 +128,7 @@ func (f *fakeAdminSections) PreviewAdminSection(_ context.Context, req handlers.
 	if req.LibraryIDs != nil && len(req.LibraryIDs) == 0 {
 		return handlers.AdminSectionPreviewResult{}, nil
 	}
-	return handlers.AdminSectionPreviewResult{Items: f.preview, TotalCount: len(f.preview)}, nil
+	return handlers.AdminSectionPreviewResult{Items: f.preview, TotalCount: len(f.preview), PosterURLs: f.previewPosters}, nil
 }
 func (f *fakeAdminSections) AdminSectionCapabilities(context.Context) handlers.AdminSectionCapabilitiesView {
 	return f.caps
@@ -196,6 +200,24 @@ func TestAdminSectionsDatabaseConflictAndReadRace(t *testing.T) {
 	}
 	f.readMismatch = true
 	requireProblem(t, do(t, h, http.MethodGet, path, "", bearer(adminToken)), TypeConflict)
+}
+
+// v2 writes run the section type's own config check; the shared service skips
+// it for the frozen /api/v1 routes.
+func TestAdminSectionsWritesRunTheRecipeCheck(t *testing.T) {
+	f := newFakeAdminSections()
+	h := adminSectionsTestHandler(t, f)
+	created := do(t, h, http.MethodPost, Prefix+"/admin/sections", `{"scope":"home","section_type":"recently_added","title":"New","config":{}}`, bearer(adminToken))
+	if created.Code != 201 {
+		t.Fatalf("create %d %s", created.Code, created.Body)
+	}
+	updated := do(t, h, http.MethodPatch, Prefix+"/admin/sections/s1", `{"title":"Edited"}`, with(bearer(adminToken), "If-Match", "*"))
+	if updated.Code != 200 {
+		t.Fatalf("update %d %s", updated.Code, updated.Body)
+	}
+	if !slices.Equal(f.recipeChecks, []bool{true, true}) {
+		t.Fatalf("recipe checks requested = %v, want create and update", f.recipeChecks)
+	}
 }
 func TestAdminSectionsNullsScopeAndConfig(t *testing.T) {
 	f := newFakeAdminSections()
@@ -389,5 +411,40 @@ func TestAdminSectionPreviewLeavesAbsentLibraryScopeUnscoped(t *testing.T) {
 				t.Fatalf("library_id = %v, scalar request %t", scalar, tc.scalar)
 			}
 		})
+	}
+}
+
+// Preview items carry the presigned poster the service resolved, never the
+// storage key it came from; an item without one omits poster_url.
+func TestAdminSectionPreviewServesPresignedPosters(t *testing.T) {
+	f := newFakeAdminSections()
+	f.preview = []*models.MediaItem{
+		{ContentID: "item1", Title: "Signed", Type: "movie", PosterPath: "private/storage/poster", PosterThumbhash: "hash1"},
+		{ContentID: "item2", Title: "Bare", Type: "movie"},
+	}
+	f.previewPosters = map[string]string{"item1": "https://cdn.example/signed.jpg?sig=1"}
+	h := adminSectionsTestHandler(t, f)
+	rec := do(t, h, http.MethodPost, Prefix+"/admin/sections/preview", `{"section_type":"recently_added","config":{},"item_limit":3}`, bearer(adminToken))
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "private/") {
+		t.Fatalf("preview %d %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Items []struct {
+			ContentID       string  `json:"content_id"`
+			PosterURL       *string `json:"poster_url"`
+			PosterThumbhash string  `json:"poster_thumbhash"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 2 {
+		t.Fatalf("items %s", rec.Body)
+	}
+	if got := body.Items[0]; got.ContentID != "item1" || got.PosterURL == nil || *got.PosterURL != "https://cdn.example/signed.jpg?sig=1" || got.PosterThumbhash != "hash1" {
+		t.Fatalf("signed item %s", rec.Body)
+	}
+	if got := body.Items[1]; got.ContentID != "item2" || got.PosterURL != nil {
+		t.Fatalf("item without a poster %s", rec.Body)
 	}
 }

@@ -27,6 +27,7 @@ const collection: components["schemas"]["AdminCollection"] = {
   sort_order: 0,
   featured: false,
   poster_url: "",
+  poster_is_collage: false,
   backdrop_url: "",
   source_url: "",
   query_definition: {},
@@ -117,7 +118,7 @@ describe("admin collection adapter", () => {
     const snapshots = await prepareAdminCollectionDeletes(["1", "2", "3", "4", "5", "1"]);
     expect(maximum).toBe(4);
     expect(snapshots).toHaveLength(5);
-    expect(snapshots[4]).toEqual({ id: "5", etag: '"5"' });
+    expect(snapshots[4]).toMatchObject({ id: "5", etag: '"5"', collection: { id: "5" } });
     expect(
       request.mock.calls.every(([operation]) => operation === "GET /api/v2/admin/collections/{id}"),
     ).toBe(true);

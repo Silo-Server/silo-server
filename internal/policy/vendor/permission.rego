@@ -54,6 +54,7 @@ acting_admin_allowed(i) if {
 	user_enabled(i)
 	admin_role(i)
 	declared_profile_id(i) == ""
+	not household_requires_profile(i)
 } else if {
 	user_enabled(i)
 	admin_role(i)
@@ -90,6 +91,12 @@ user_enabled(i) if {
 
 acting_as_primary(i) if {
 	object.get(i, "acting_as_primary", false) == true
+}
+
+# A household with a PIN-protected or access-limited profile withholds admin
+# powers from a request that declares no profile; precomputed in Go.
+household_requires_profile(i) if {
+	object.get(i, "household_requires_profile", false) == true
 }
 
 user_libraries_restricted(i) if {

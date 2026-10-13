@@ -136,6 +136,19 @@ type Bundle struct {
 	TemplateIDs []string `json:"template_ids"`
 }
 
+// BundleWithTemplates pairs a bundle with its templates in bundle order.
+type BundleWithTemplates struct {
+	Bundle
+	Templates []Template
+}
+
+// NeedsSetup reports whether applying the template creates a collection that
+// cannot sync until an admin sets its source: the TMDB Franchise placeholder
+// ships without a TMDB collection ID.
+func (t Template) NeedsSetup() bool {
+	return t.Source == SourceTMDBCollection && (t.TMDBCollection == nil || t.TMDBCollection.CollectionID <= 0)
+}
+
 // Catalog is the listing returned by the API: templates grouped by category
 // in a stable display order for the gallery.
 type Catalog struct {

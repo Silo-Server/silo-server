@@ -72,6 +72,10 @@ type Claims struct {
 	// RemuxDVMode freezes whether a Profile 7 remux preserves or strips DV
 	// metadata. Empty is the legacy auto behavior for old tokens.
 	RemuxDVMode string `json:"dvm,omitempty"`
+	// RemuxResumeLeadingPictureDrop asks a seeked progressive remux to drop
+	// open-GOP leading pictures when the executing FFmpeg supports it. It is
+	// best effort, so a node that predates the claim serves the plain copy.
+	RemuxResumeLeadingPictureDrop bool `json:"rlpd,omitempty"`
 
 	// Ownership / authorization lookup keys (re-resolved at reconstruct).
 	// Not trust assertions.

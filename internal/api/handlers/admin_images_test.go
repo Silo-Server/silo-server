@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,6 +81,18 @@ func (f *imageServiceFake) FetchSeasonImages(_ context.Context, providerIDs map[
 
 func (f *imageServiceFake) ApplyItemImage(context.Context, metadata.ApplyItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	return nil, nil
+}
+
+func (f *imageServiceFake) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType, language string, folderID int, _ string) ([]metadata.RemoteImage, map[string]string, error) {
+	return f.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+}
+
+func (f *imageServiceFake) LocalImagePreview(context.Context, string, string) (string, error) {
+	return "", errors.New("no local images")
+}
+
+func (f *imageServiceFake) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	return nil, errors.New("no local images")
 }
 
 func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {

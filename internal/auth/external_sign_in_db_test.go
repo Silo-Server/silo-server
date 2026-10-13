@@ -128,9 +128,6 @@ func (e *externalSignInEnv) identity(label string) ExternalIdentity {
 // Signup below exercises real account creation and password authentication.
 func (e *externalSignInEnv) localAccount(t *testing.T, label, role string) *models.User {
 	t.Helper()
-	// Precomputed at bcrypt's default cost (10) for "correct horse battery".
-	// Every account has its own row; only the immutable password hash is shared.
-	const passwordHash = "$2a$10$kDcspmOXIWSeScumFFMzeuFucd5Er.a4q2A3wMePiRTPG/wQtt2kC"
 	permissions := []string{}
 	if role != models.RoleAdmin {
 		permissions = DefaultUserPermissions()
@@ -139,7 +136,7 @@ func (e *externalSignInEnv) localAccount(t *testing.T, label, role string) *mode
 		(username, email, password_hash, role, permissions, local_password_login_enabled, access_group_id)
 		VALUES ($1, $2, $3, $4, $5, true,
 			CASE WHEN $4 = 'admin' THEN NULL ELSE (SELECT id FROM access_groups WHERE is_default) END)
-		RETURNING `+allColumns, e.name(label), e.name(label)+"@example.test", passwordHash, role, permissions))
+		RETURNING `+allColumns, e.name(label), e.name(label)+"@example.test", externalSignInPasswordHash, role, permissions))
 	if err != nil {
 		t.Fatalf("seed %s: %v", label, err)
 	}

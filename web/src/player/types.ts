@@ -184,6 +184,9 @@ export type MarkerKind = "intro" | "recap" | "credits" | "preview";
 
 /** Every occurrence in the v2 marker inventory. An empty array means no markers. */
 export interface PlayerMarkerSegment {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;
@@ -199,6 +202,9 @@ export interface MarkerDraft {
 
 /** A marker range positioned on the seek bar, tagged with its kind for color. */
 export interface MarkerRegionView {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start: number;
   end: number;
@@ -342,6 +348,11 @@ export interface EpisodeRef {
   /** Optional display fields for post-roll / next-episode UI. */
   overview?: string;
   stillUrl?: string;
+  stillIsEpisodeStill?: boolean;
   stillThumbhash?: string;
   airDate?: string | null;
+  /** The profile's watch state, for spoiler protection. */
+  watchState?: { played?: boolean; is_in_progress?: boolean; position_seconds?: number };
+  /** A shuffle can play a movie next; spoiler protection covers episodes only. */
+  isMovie?: boolean;
 }

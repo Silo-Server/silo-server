@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { catalogKeys } from "@/hooks/queries/keys";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { catalogKeys } from "@/hooks/queries/keys";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "./sidebarItemNavigation";
 
 const mocks = vi.hoisted(() => ({
@@ -272,7 +272,7 @@ describe("Layout request routes", () => {
   // The padded shell wraps the page in one gutter div; unpadded pages render
   // straight into <main>.
   const isShellPadded = () =>
-    screen.getByRole("main").firstElementChild?.classList.contains("lg:px-10") ?? false;
+    screen.getByRole("main").firstElementChild?.classList.contains("px-(--page-gutter)") ?? false;
 
   it.each([
     ["/requests", false, false],

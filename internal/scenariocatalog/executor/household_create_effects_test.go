@@ -12,9 +12,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// householdCreates reports whether the case creates a profile. The admin's
+// non-primary profile (profiles_create.admin_any_profile) is refused on both
+// transports since the critical v1 bridge fix.
 func householdCreates(id string) bool {
 	switch id {
-	case "profiles_create.ok", "profiles_create.meaning", "profiles_create.admin_any_profile", "profiles_create.limit", "profiles_create.shape":
+	case "profiles_create.ok", "profiles_create.meaning", "profiles_create.limit", "profiles_create.shape":
 		return true
 	}
 	return false
@@ -91,9 +94,6 @@ func assertHouseholdCreation(t *testing.T, e *Env, id string, resp response, seq
 		t.Fatal("new profile is not UUIDv4")
 	}
 	owner := e.users[fixtureMember].ID
-	if id == "profiles_create.admin_any_profile" {
-		owner = e.users[fixtureAdmin].ID
-	}
 	want := maps.Clone(template)
 	want["id"] = profileID
 	want["user_id"] = float64(owner)
@@ -114,6 +114,9 @@ func assertHouseholdCreation(t *testing.T, e *Env, id string, resp response, seq
 			}
 		}
 		want["pin_hash"] = hash
+		// The PIN is set after the insert, which advances the new profile's
+		// own PIN revision once.
+		want["pin_revision"] = float64(1)
 	}
 	equal(want, added)
 	if resp.Status != http.StatusCreated {

@@ -273,3 +273,73 @@ func TestJWT_ApplePushDisplayTokenIsProfileScopedAndLongLived(t *testing.T) {
 		t.Fatal("expected error without profile")
 	}
 }
+
+func TestJWT_DirectDownloadLinkTokenIsFileAndProfileScoped(t *testing.T) {
+	svc := newTestJWTService()
+
+	admin := 7
+	token, expiresAt, err := svc.GenerateDirectDownloadLinkToken(42, "user", "sess-1", "profile-1", &admin, 99)
+	if err != nil {
+		t.Fatalf("GenerateDirectDownloadLinkToken() error: %v", err)
+	}
+	claims, err := svc.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypeDirectDownloadLink {
+		t.Fatalf("token_type = %q, want %q", claims.TokenType, auth.TokenTypeDirectDownloadLink)
+	}
+	if claims.UserID != 42 || claims.SessionID != "sess-1" || claims.ProfileID != "profile-1" || claims.FileID != 99 ||
+		claims.ImpersonatorUserID == nil || *claims.ImpersonatorUserID != 7 {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if exp := claims.ExpiresAt.Time; expiresAt.After(exp) || exp.Sub(expiresAt) > 2*time.Second {
+		t.Fatalf("expires_at %v, token exp %v", expiresAt, exp)
+	}
+	if remaining := time.Until(expiresAt); remaining > auth.DirectDownloadLinkTTL || remaining < auth.DirectDownloadLinkTTL-time.Minute {
+		t.Fatalf("lifetime = %v, want about %v", remaining, auth.DirectDownloadLinkTTL)
+	}
+	for _, tc := range []struct {
+		session, profile string
+		file             int
+	}{{"", "profile-1", 99}, {"sess-1", "", 99}, {"sess-1", "profile-1", 0}} {
+		if _, _, err := svc.GenerateDirectDownloadLinkToken(42, "user", tc.session, tc.profile, nil, tc.file); err == nil {
+			t.Fatalf("expected error for %+v", tc)
+		}
+	}
+}
+
+// TestStoredRefreshTokenSessionID: the login session named by a stored
+// refresh token is read even after the token expires; other tokens name none.
+func TestStoredRefreshTokenSessionID(t *testing.T) {
+	svc := newTestJWTService()
+	refresh, err := svc.GenerateRefreshToken(1, "user", "sess-uuid-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := auth.StoredRefreshTokenSessionID(refresh); err != nil || got != "sess-uuid-1" {
+		t.Fatalf("refresh token = %q, %v", got, err)
+	}
+	expired := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{UserID: 1, SessionID: "sess-uuid-2", TokenType: auth.TokenTypeRefresh,
+		RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour))}})
+	expiredToken, err := expired.SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := auth.StoredRefreshTokenSessionID(expiredToken); err != nil || got != "sess-uuid-2" {
+		t.Fatalf("expired refresh token = %q, %v", got, err)
+	}
+	access, err := svc.GenerateAccessToken(1, "user", "sess-uuid-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionless, err := svc.GenerateRefreshToken(1, "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{"access token": access, "no session": sessionless, "not a JWT": "refresh", "empty": ""} {
+		if got, err := auth.StoredRefreshTokenSessionID(token); err == nil {
+			t.Errorf("%s = %q, want an error", name, got)
+		}
+	}
+}

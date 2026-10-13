@@ -50,9 +50,8 @@ type AdminRateLimitConfigView struct {
 	// can differ from Backend until the server restarts.
 	ActiveBackend string `json:"active_backend,omitempty"`
 	// RedisAvailable reports whether the Redis backend can be selected at all,
-	// using the same rule the save path enforces. Sentinel and REDIS_URL
-	// deployments have no persisted redis.url row, so admins cannot derive
-	// this client-side.
+	// using the same rule the save path enforces. REDIS_URL deployments have
+	// no persisted redis.url row, so admins cannot derive this client-side.
 	RedisAvailable bool `json:"redis_available"`
 }
 
@@ -220,7 +219,7 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 		}
 		if backend == "redis" && !redisConfiguredSettings(current, h.redisBootstrapAvailable) {
 			requestError = "redis_not_configured"
-			requestErr = fmt.Errorf("configure a Redis URL, or start the server with a valid Sentinel deployment, before selecting the Redis rate-limit backend")
+			requestErr = fmt.Errorf("configure a Redis URL before selecting the Redis rate-limit backend")
 			return nil, requestErr
 		}
 
@@ -404,11 +403,9 @@ func boundedBurst(name string, value int) error {
 }
 
 func redisConfiguredSettings(values map[string]string, redisBootstrapAvailable bool) bool {
-	// Sentinel addresses are bootstrap-only and intentionally have no flat
-	// server_settings representation (see config.LoadFromDB). A usable Sentinel
-	// deployment or REDIS_URL override is therefore captured by
-	// redisBootstrapAvailable from startup config and takes precedence over any
-	// stale persisted redis.url row.
+	// A usable REDIS_URL override is captured by redisBootstrapAvailable from
+	// startup config and takes precedence over any stale persisted redis.url
+	// row.
 	if redisBootstrapAvailable {
 		return true
 	}

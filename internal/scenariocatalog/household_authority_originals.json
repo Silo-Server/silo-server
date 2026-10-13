@@ -360,7 +360,7 @@
     "scenario": {
       "id": "household.admin",
       "category": "authorization",
-      "description": "An admin sees its own household regardless of profile.",
+      "description": "An admin session that declares no profile cannot list the household sessions once a profile on the account has a PIN or a limit; household management belongs to the primary profile (critical v1 bridge fix).",
       "principal": {
         "class": "admin"
       },
@@ -368,9 +368,45 @@
         "path": "/api/v1/profiles/household/sessions"
       },
       "expect": {
-        "status": 200
-      },
-      "v2_expectation": null
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Profile management requires the primary profile or admin access"
+          }
+        ]
+      }
     },
     "pair": {
       "kind": "intentional_difference",
@@ -382,12 +418,12 @@
         "path": "/api/v2/profiles/household/sessions"
       },
       "expect": {
-        "status": 200,
+        "status": 403,
         "headers": [
           {
             "name": "Content-Type",
             "op": "equals",
-            "value": "application/json"
+            "value": "application/problem+json"
           },
           {
             "name": "Cache-Control",
@@ -397,16 +433,14 @@
         ],
         "body": [
           {
-            "pointer": "",
-            "op": "keys_equal",
-            "value": [
-              "items"
-            ]
+            "pointer": "/status",
+            "op": "equals",
+            "value": 403
           },
           {
-            "pointer": "/items",
-            "op": "length",
-            "value": 0
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/permission_denied$"
           }
         ]
       }

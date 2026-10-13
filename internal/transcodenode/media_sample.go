@@ -19,6 +19,7 @@ import (
 // need this node's resolved accelerator and the GPU admission gate, and no
 // remote caller needs it yet.
 func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	var req mediasample.Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, mediasample.MaxRemoteRequestBytes)).Decode(&req); err != nil {
 		writeMediaSampleError(w, http.StatusBadRequest, mediasample.ReasonInvalidRequest, "invalid request body")
@@ -40,6 +41,10 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.requireApprovedInputPath(w, r, req.Input) {
+		return
+	}
+	if s.draining() {
+		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, errNodeDraining)
 		return
 	}
 	// API servers each reserve nodes on their own, so the node enforces the

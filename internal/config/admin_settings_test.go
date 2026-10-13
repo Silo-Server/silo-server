@@ -430,7 +430,7 @@ func TestValidateAdminSettingsRequiresDurableRedisTransport(t *testing.T) {
 	if err := ValidateAdminSettingsWithCapabilities(values, AdminSettingsCapabilities{
 		RedisBootstrapAvailable: true,
 	}); err != nil {
-		t.Fatalf("bootstrap Sentinel transport was rejected: %v", err)
+		t.Fatalf("bootstrap Redis URL was rejected: %v", err)
 	}
 
 	values["redis.url"] = "redis://cache.example.invalid:6379"

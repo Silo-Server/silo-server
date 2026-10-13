@@ -100,16 +100,10 @@ func historyImportRequestActor(r *http.Request) HistoryImportActor {
 }
 
 // historyImportsForAnyProfile reports whether actor may import into, and see
-// the runs of, every profile on the account: a server admin, or the primary
-// profile (PIN-verified when it has one), as for other household management.
-// Every other profile acts only for itself.
+// the runs of, every profile on the account: the household manager that
+// canManageHouseholdAs names (the primary profile, PIN-verified when it has
+// one, whatever the account's role). Every other profile acts only for itself.
 func (h *HistoryImportHandler) historyImportsForAnyProfile(ctx context.Context, actor HistoryImportActor) (bool, error) {
-	if apimw.IsAdmin(ctx) {
-		return true, nil
-	}
-	if actor.ProfileID == "" {
-		return false, nil
-	}
 	store, err := h.service.UserStore(ctx, actor.UserID)
 	if err != nil {
 		return false, err

@@ -109,7 +109,11 @@ func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportMDBList(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ImportMDBList(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -123,7 +127,11 @@ func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportTMDB(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ImportTMDB(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -137,7 +145,11 @@ func (h *UserCollectionImportHandler) HandleImportTrakt(w http.ResponseWriter, r
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportTrakt(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ImportTrakt(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -308,7 +320,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 
-	syncResult, updated, syncErr := h.sync.RunSync(ctx, store, collection)
+	syncResult, updated, syncErr := h.sync.RunSync(ctx, userID, store, collection)
 	if syncErr != nil {
 		// Persist failure state inline so the UI shows the error and the user
 		// can retry; the row is intentionally kept around for that retry path.
@@ -318,10 +330,19 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 			Message:    syncErr.Error(),
 			LastSyncAt: time.Now().UTC(),
 			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
+
+			// The sync started on the schedule and next run the collection was
+			// created with.
+			ScheduleAtStart:   collection.SyncSchedule,
+			NextSyncAtAtStart: collection.NextSyncAt,
 		})
-		updated = collection
-		updated.LastSyncStatus = "failed"
-		updated.LastSyncMessage = syncErr.Error()
+		// Render what was stored, as a successful sync does; a schedule
+		// edited while the sync ran kept its own next run.
+		if updated, err = store.GetCollection(ctx, collection.ID); err != nil {
+			updated = collection
+			updated.LastSyncStatus = "failed"
+			updated.LastSyncMessage = syncErr.Error()
+		}
 	}
 
 	return UserImportView{
@@ -419,15 +440,19 @@ type MDBListDiscoveryView struct {
 	Lists      []mdblist.ListSummary `json:"lists"`
 }
 
-// mdblistConfigured returns true when the discovery client is usable. When
-// false it has already written a "not configured" 200 response so callers
-// can simply early-return.
+// MDBListConfigured reports whether MDBList search and top lists can answer,
+// which needs an MDBList API key. v2 collection capabilities report it as
+// mdblist_search.
+func (h *UserCollectionImportHandler) MDBListConfigured() bool {
+	return h.mdblist != nil && h.mdblist.Configured()
+}
+
 // SearchMDBList answers the MDBList lists matching query. An unconfigured
 // MDBList client answers configured=false and no lists rather than an error,
 // so clients can hide the search box. v1 GET /collections/import/mdblist/search
 // and v2 searchMDBListLists both call it.
 func (h *UserCollectionImportHandler) SearchMDBList(ctx context.Context, query string) (MDBListDiscoveryView, error) {
-	if h.mdblist == nil || !h.mdblist.Configured() {
+	if !h.MDBListConfigured() {
 		return MDBListDiscoveryView{Configured: false, Lists: []mdblist.ListSummary{}}, nil
 	}
 	query = strings.TrimSpace(query)
@@ -444,7 +469,7 @@ func (h *UserCollectionImportHandler) SearchMDBList(ctx context.Context, query s
 // TopMDBList answers MDBList's most-liked lists; see SearchMDBList for the
 // unconfigured answer.
 func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDiscoveryView, error) {
-	if h.mdblist == nil || !h.mdblist.Configured() {
+	if !h.MDBListConfigured() {
 		return MDBListDiscoveryView{Configured: false, Lists: []mdblist.ListSummary{}}, nil
 	}
 	lists, err := h.mdblist.Top(ctx)
@@ -507,7 +532,7 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		return nil, err
 	}
 	collection, err := store.GetCollection(ctx, collectionID)
-	if err != nil {
+	if err != nil || !collection.VisibleTo(profileID) {
 		return nil, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
 	if collection.CreatorProfileID != profileID {
@@ -517,7 +542,7 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		return nil, apiError(http.StatusConflict, "sync_in_flight", "A sync is already running for this collection")
 	}
 
-	result, _, err := h.sync.RunSync(ctx, store, collection)
+	result, _, err := h.sync.RunSync(ctx, userID, store, collection)
 	if err != nil {
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")

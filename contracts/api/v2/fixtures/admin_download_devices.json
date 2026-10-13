@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "user_id": "7",
+      "username": "maya",
+      "profile_id": "p-maya",
+      "profile_name": "Maya",
+      "device_id": "dev-pixel",
+      "device_name": "Pixel 8",
+      "platform": "android",
+      "last_seen_at": "2026-09-19T09:30:00.000Z",
+      "stale": true,
+      "copies": 12,
+      "finished": 7,
+      "waiting": 5,
+      "failed": 0,
+      "revoked": 0,
+      "bytes_on_device": 34100000000,
+      "monitors": 1
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}
