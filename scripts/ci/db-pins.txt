@@ -56,6 +56,7 @@
 # Watch detail artwork: movies, episodes and extras carry the poster and
 # backdrop clients publish to system media controls (#803).
 ./internal/catalog TestGetWatchDetailArtwork
+./internal/catalog TestGetWatchDetailOmitsArtworkResolution
 
 # Detail and versions: localization and folder reads per detail build, and the
 # versions endpoint issuing fewer queries than full detail with no image work.

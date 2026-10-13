@@ -53,6 +53,9 @@ type AccessFilter struct {
 	// size. Unset means the caller expressed no preference, and the per-context
 	// defaults apply. See internal/imagesize.
 	ImageSize imagesize.Size
+	// OmitWatchArtwork skips presentation-only artwork in watch detail for
+	// legacy responses and internal source selection. It does not change access.
+	OmitWatchArtwork bool
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so
