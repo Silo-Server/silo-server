@@ -55,6 +55,11 @@ The adapter checks status, ETag, size and returned range before forwarding
 bytes. File replacement, truncated responses, stale grants and cancellation
 fail the operation. Streaming uses fixed 64 KiB buffers; it does not stage the
 whole source file or scale memory with source size.
+An authorized reader can pause without losing its stream. A bounded authority
+watcher renews the write deadline while access remains valid and interrupts a
+blocked write when access is revoked. Adapter cancellation also interrupts
+blocked local writes, releases reader slots and joins its callback before the
+handler returns.
 
 Native Matroska keyframe indexing also reads admitted HTTP ranges. Its cache
 and saved copy-playback plans bind the stable source identity and revision;

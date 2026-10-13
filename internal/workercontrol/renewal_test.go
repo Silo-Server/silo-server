@@ -241,6 +241,27 @@ func TestSourceRenewalCancellationAndUnavailableDeadline(t *testing.T) {
 	if _, err := r.openSources(a); err != nil {
 		t.Fatal(err)
 	}
+	// Keep control authority alive while only the source renewal is unavailable.
+	// Its two-second timeout must not race the independent two-second lease.
+	stopSnapshots, snapshotsDone := make(chan struct{}), make(chan struct{})
+	snapshotErrors := make(chan error, 1)
+	go func() {
+		defer close(snapshotsDone)
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for sequence := uint64(2); ; sequence++ {
+			select {
+			case <-stopSnapshots:
+				return
+			case <-ticker.C:
+				if err := r.authority.Apply(raceSnapshot(r, sequence, 4, 2000), time.Now()); err != nil {
+					snapshotErrors <- err
+					return
+				}
+			}
+		}
+	}()
+	defer func() { close(stopSnapshots); <-snapshotsDone }()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	r.renewals.renewDue(ctx, time.Now().Add(46*time.Second))
@@ -261,6 +282,11 @@ func TestSourceRenewalCancellationAndUnavailableDeadline(t *testing.T) {
 	}
 	if !r.renewals.blocked("work", 4) {
 		t.Fatal("unavailable renewal did not fence work")
+	}
+	select {
+	case err := <-snapshotErrors:
+		t.Fatalf("control authority refresh: %v", err)
+	default:
 	}
 }
 

@@ -8,12 +8,18 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 func strconvNode(node int) string { return strconv.Itoa(node) }
+
+const sourceWatchInterval = 250 * time.Millisecond
+const sourceCheckTimeout = time.Second
+const sourceWriteHorizon = 2 * time.Second
+
 func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Encoding", "identity")
@@ -97,8 +103,6 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	stop := context.AfterFunc(r.Context(), func() { _ = f.Close(); _ = http.NewResponseController(w).SetWriteDeadline(time.Now()) })
-	defer stop()
 	start, length, status := int64(0), record.Source.Size, 200
 	if r.Method == http.MethodGet && r.Header.Get("Range") != "" {
 		start, length, status = singleRange(r.Header.Get("Range"), record.Source.Size)
@@ -123,52 +127,115 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buffer := make([]byte, a.options.Limits.ChunkBytes)
+	streamCtx, cancelStream := context.WithCancel(r.Context())
+	defer cancelStream()
+	var authorityMu sync.Mutex
 	lastSharedCheck := a.options.Now()
 	authorized := func() bool {
-		if r.Context().Err() != nil {
+		checkCtx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
+		defer cancel()
+		if checkCtx.Err() != nil {
 			return false
 		}
+		authorityMu.Lock()
 		now := a.options.Now()
 		// A long GET can outlive its initial lease when the control plane renews
 		// it. Refresh before rejecting that snapshot, without a store operation
 		// for every chunk. Deletion on another core is observed within a second.
 		if now.Sub(lastSharedCheck) >= time.Second || !now.Before(record.ExpiresAt) {
-			current, e := a.options.Store.Get(r.Context(), record.Source.Grant)
+			current, e := a.options.Store.Get(checkCtx, record.Source.Grant)
 			if e != nil || current.Source != record.Source {
+				authorityMu.Unlock()
 				return false
 			}
 			record.ExpiresAt = current.ExpiresAt
 			lastSharedCheck = a.options.Now()
 		}
-		return a.options.Now().Before(record.ExpiresAt) && a.options.Active(r.Context(), node, record.Source.WorkID, record.Source.Generation)
+		unexpired := a.options.Now().Before(record.ExpiresAt)
+		authorityMu.Unlock()
+		return unexpired && a.options.Active(checkCtx, node, record.Source.WorkID, record.Source.Generation) && checkCtx.Err() == nil
 	}
+	invalidate := func(err error) {
+		if streamCtx.Err() == nil {
+			ctx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
+			defer cancel()
+			_ = a.invalidate(ctx, record.Source.Grant, err)
+		}
+	}
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
+	stopWatch, watchDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		ticker := time.NewTicker(sourceWatchInterval)
+		defer ticker.Stop()
+		interrupt := func() {
+			cancelStream()
+			_ = controller.SetWriteDeadline(time.Now())
+			_ = f.Close()
+		}
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-streamCtx.Done():
+				interrupt()
+				return
+			case <-ticker.C:
+				if !authorized() {
+					interrupt()
+					return
+				}
+				if err := validatePin(f, record.Path, record.Identity); err != nil {
+					invalidate(err)
+					interrupt()
+					return
+				}
+				if streamCtx.Err() != nil {
+					interrupt()
+					return
+				}
+				// Healthy backpressure has no fixed transfer timeout. Only this
+				// watcher renews the safety horizon or expires it on authority loss.
+				_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
+			}
+		}
+	}()
+	defer func() {
+		normal := streamCtx.Err() == nil
+		close(stopWatch)
+		cancelStream()
+		<-watchDone
+		if normal {
+			_ = controller.SetWriteDeadline(time.Time{})
+		}
+	}()
 	w.WriteHeader(status)
 	for offset, remaining := start, length; remaining > 0; {
 		if !authorized() {
 			return
 		}
 		if err := validatePin(f, record.Path, record.Identity); err != nil {
-			_ = a.invalidate(r.Context(), record.Source.Grant, err)
+			invalidate(err)
 			return
 		}
 		count := min(int64(len(buffer)), remaining)
 		n, readErr := f.ReadAt(buffer[:count], offset)
-		if r.Context().Err() != nil {
+		if streamCtx.Err() != nil {
 			// Canceling one speculative fetch does not revoke its work's grant.
 			return
 		}
 		if readErr != nil || int64(n) != count {
-			_ = a.invalidate(r.Context(), record.Source.Grant, ErrChanged)
+			invalidate(ErrChanged)
 			return
 		}
 		if err := validatePin(f, record.Path, record.Identity); err != nil {
-			_ = a.invalidate(r.Context(), record.Source.Grant, err)
+			invalidate(err)
 			return
 		}
 		if !authorized() {
 			return
 		}
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Second))
 		written, writeErr := w.Write(buffer[:n])
 		if writeErr != nil || written != n {
 			return
@@ -177,7 +244,7 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		remaining -= int64(n)
 	}
 	if err := validatePin(f, record.Path, record.Identity); err != nil {
-		_ = a.invalidate(r.Context(), record.Source.Grant, err)
+		invalidate(err)
 	}
 }
 

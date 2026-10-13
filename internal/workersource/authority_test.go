@@ -334,8 +334,9 @@ func TestNewRejectsMissingAuthority(t *testing.T) {
 
 func TestStreamingRenewalRefreshesExpiryBeforeRejectingOldSnapshot(t *testing.T) {
 	a, path, _ := testAuthority(t, "0123456789abcdef", Limits{ChunkBytes: 4})
-	now := time.Now()
-	a.options.Now = func() time.Time { return now }
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	a.options.Now = func() time.Time { return time.Unix(0, clock.Load()) }
 	source, err := a.Acquire(t.Context(), 7, "work", 3, path, "media")
 	if err != nil {
 		t.Fatal(err)
@@ -347,10 +348,11 @@ func TestStreamingRenewalRefreshesExpiryBeforeRejectingOldSnapshot(t *testing.T)
 	w := httptest.NewRecorder()
 	a.Handler().ServeHTTP(&mutatingWriter{ResponseWriter: w, after: func() {
 		// A replica renews while this stream still holds the initial expiry.
-		now = now.Add(121 * time.Second)
-		if err := a.options.Store.Extend(t.Context(), source.Grant, now.Add(DefaultTTL)); err != nil {
+		next := a.options.Now().Add(121 * time.Second)
+		if err := a.options.Store.Extend(t.Context(), source.Grant, next.Add(DefaultTTL)); err != nil {
 			t.Error(err)
 		}
+		clock.Store(next.UnixNano())
 	}}, r)
 	if w.Body.String() != "0123456789abcdef" {
 		t.Fatalf("active renewed stream was truncated: %q", w.Body.String())
@@ -361,8 +363,9 @@ func TestStreamingRevocationAndReleaseTerminateReads(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		t.Run(fmt.Sprint("release=", release), func(t *testing.T) {
 			a, path, active := testAuthority(t, "0123456789abcdef", Limits{ChunkBytes: 4})
-			now := time.Now()
-			a.options.Now = func() time.Time { return now }
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			a.options.Now = func() time.Time { return time.Unix(0, clock.Load()) }
 			source, err := a.Acquire(t.Context(), 7, "work", 3, path, "media")
 			if err != nil {
 				t.Fatal(err)
@@ -377,7 +380,7 @@ func TestStreamingRevocationAndReleaseTerminateReads(t *testing.T) {
 					if err := a.Release(t.Context(), 7, "work", 3, source.Grant); err != nil {
 						t.Error(err)
 					}
-					now = now.Add(time.Second)
+					clock.Add(int64(time.Second))
 				} else {
 					active.Store(false)
 				}

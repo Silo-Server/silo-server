@@ -208,9 +208,24 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
-	stop := context.AfterFunc(h.ctx, cancel)
-	defer stop()
-	defer cancel()
+	cancelDone := make(chan struct{})
+	stop := context.AfterFunc(h.ctx, func() { cancel(); close(cancelDone) })
+	writeDone := make(chan struct{})
+	stopWrite := context.AfterFunc(ctx, func() {
+		// Cancellation must also wake a writer held by downstream flow control.
+		// Healthy readers have no transfer deadline.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+		close(writeDone)
+	})
+	defer func() {
+		if !stop() {
+			<-cancelDone
+		}
+		if !stopWrite() {
+			<-writeDone
+		}
+		cancel()
+	}()
 	request, err := http.NewRequestWithContext(ctx, r.Method, h.source.URL, nil)
 	if err != nil {
 		http.Error(w, "invalid source", http.StatusBadGateway)
