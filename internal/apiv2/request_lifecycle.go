@@ -369,6 +369,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		oauth, ok := providers.(interface {
 			OAuthRedirectURI() (string, error)
+			OnPublicOrigin(*http.Request) bool
 			StartOAuth(context.Context, int, string, string) (watchsync.OAuthStart, error)
 		})
 		if !ok {
@@ -376,6 +377,9 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		if _, err := oauth.OAuthRedirectURI(); err != nil {
 			return nil, watchProviderProblem(err)
+		}
+		if r := requestFrom(ctx); r == nil || !oauth.OnPublicOrigin(r) {
+			return nil, NewProblem(TypeConflict, "Open Silo at its public URL to connect a watch provider.")
 		}
 		started, err := oauth.StartOAuth(ctx, u, p, in.Provider)
 		if err != nil {
@@ -411,6 +415,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		oauth, ok := providers.(interface {
 			FinishOAuth(context.Context, string, string, string) (string, error)
 			OAuthRedirectURI() (string, error)
+			OAuthBinderCallbackURL(context.Context, string) (string, error)
 		})
 		if !ok {
 			redirectBack("", "unavailable")
@@ -418,13 +423,17 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		query := r.URL.Query()
 		state := query.Get("state")
-		callbackURL, _ := oauth.OAuthRedirectURI()
-		if callbackURL == "" {
-			callbackURL = watchsync.OAuthCallbackPath
-		}
 		clearBinder := func() {
 			if state == "" {
 				return
+			}
+			callbackURL, err := oauth.OAuthBinderCallbackURL(r.Context(), state)
+			if err != nil || callbackURL == "" {
+				if uri, uriErr := oauth.OAuthRedirectURI(); uriErr == nil {
+					callbackURL = uri
+				} else {
+					callbackURL = watchsync.OAuthCallbackPath
+				}
 			}
 			cookie := watchsync.ClearOAuthBinderCookie(state, callbackURL)
 			http.SetCookie(w, &cookie)

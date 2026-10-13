@@ -16,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
 const (
@@ -104,6 +106,12 @@ func (s *Service) StartOAuth(ctx context.Context, userID int, profileID, provide
 	sessionID := uuid.NewString()
 	authorizationURL, state, err := starter.StartAuthorization(ctx, redirectURI, sessionID)
 	if err != nil {
+		if limited, ok := AsRateLimited(err); ok {
+			return OAuthStart{}, RateLimitedError{Provider: providerKey, RetryAfter: limited.RetryAfter}
+		}
+		if IsRetryableProviderError(err) {
+			return OAuthStart{}, retryableProviderError{message: "watch provider authorization start failed"}
+		}
 		return OAuthStart{}, fmt.Errorf("watch provider authorization start failed")
 	}
 	if _, err := s.repo.UpsertAuthSession(ctx, DeviceAuthSession{
@@ -186,6 +194,12 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code, binder string) (
 	}
 	tokens, err := exchanger.ExchangeAuthorizationCode(ctx, redirectURI, code, providerState)
 	if err != nil {
+		if limited, ok := AsRateLimited(err); ok {
+			return session.Provider, RateLimitedError{Provider: session.Provider, RetryAfter: limited.RetryAfter}
+		}
+		if IsRetryableProviderError(err) {
+			return session.Provider, retryableProviderError{message: "watch provider authorization exchange failed"}
+		}
 		return session.Provider, fmt.Errorf("watch provider authorization exchange failed")
 	}
 	accountProvider, ok := provider.(AuthProvider)
@@ -194,6 +208,12 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code, binder string) (
 	}
 	account, err := accountProvider.LookupAccount(ctx, cfg, connectionWithTokens(Connection{}, tokens))
 	if err != nil {
+		if limited, ok := AsRateLimited(err); ok {
+			return session.Provider, RateLimitedError{Provider: session.Provider, RetryAfter: limited.RetryAfter}
+		}
+		if IsRetryableProviderError(err) {
+			return session.Provider, retryableProviderError{message: "watch provider account lookup failed"}
+		}
 		return session.Provider, fmt.Errorf("watch provider account lookup failed")
 	}
 	if _, err := s.persistConnection(ctx, session.Provider, session.UserID, session.ProfileID, tokens, account); err != nil {
@@ -205,6 +225,36 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code, binder string) (
 // ClearOAuthBinderCookie expires the browser-binding cookie for state.
 func ClearOAuthBinderCookie(state, callbackURL string) http.Cookie {
 	return oauthBinderCookie(state, "", callbackURL, -1)
+}
+
+// OAuthBinderCallbackURL is the redirect URI StartOAuth stored for state, used
+// to clear the binder cookie on the same Path it was set with.
+func (s *Service) OAuthBinderCallbackURL(ctx context.Context, state string) (string, error) {
+	session, err := s.repo.GetAuthSession(ctx, state)
+	if err != nil {
+		return "", err
+	}
+	if !isOAuthAuthSession(session) {
+		return "", ErrAuthSessionMismatch
+	}
+	if uri := strings.TrimSpace(session.VerificationURL); uri != "" {
+		return uri, nil
+	}
+	return s.OAuthRedirectURI()
+}
+
+// OnPublicOrigin reports whether r is on the configured https public URL origin
+// so the binder cookie is set where the provider callback will land.
+func (s *Service) OnPublicOrigin(r *http.Request) bool {
+	if s == nil || r == nil {
+		return true
+	}
+	base, err := url.Parse(s.publicOrigin())
+	if err != nil || base.Host == "" {
+		return true
+	}
+	return strings.EqualFold(base.Scheme, clientip.RequestScheme(r)) &&
+		strings.EqualFold(base.Host, clientip.RequestHost(r))
 }
 
 func isOAuthAuthSession(session DeviceAuthSession) bool {
