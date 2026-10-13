@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,6 +55,22 @@ func TestCopyRecoveryFFmpegProcess(t *testing.T) {
 	release := make([]byte, 1)
 	if _, err := io.ReadFull(conn, release); err != nil {
 		t.Fatal(err)
+	}
+	if !probe && release[0] == 'g' {
+		outputDir := filepath.Dir(args[len(args)-1])
+		if err := os.WriteFile(filepath.Join(outputDir, "seg_00012.m4s"), []byte("restored encoder segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		manifest := recoveryTestManifest + "#EXTINF:2.000000,\nseg_00012.m4s\n"
+		if err := os.WriteFile(args[len(args)-1], []byte(manifest), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.Write([]byte{1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadFull(conn, release); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if probe {
 		fmt.Println("#tb 0: 1/1000")
@@ -147,6 +164,7 @@ func newCopyRecoverySession(t *testing.T) (*TranscodeManager, *TranscodeSession,
 		SeekSeconds:            18.261,
 		StreamOriginSeconds:    18,
 		CopySeekAnchorResolved: true,
+		FastStart:              true,
 		TargetCodecVideo:       "copy",
 		TargetCodecAudio:       "copy",
 		SegmentDuration:        2,
@@ -364,6 +382,159 @@ func TestRestartSegmentLocked_CopyRecoveryUnresolvedKeepsEncoder(t *testing.T) {
 	}
 }
 
+func TestRestartSegmentLocked_CopyRecoveryProbeFailureRestoresProgress(t *testing.T) {
+	for _, limit := range []int{1, 0} {
+		for _, release := range []byte{'f', 'm'} {
+			t.Run(fmt.Sprintf("limit_%d_%c", limit, release), func(t *testing.T) {
+				encodinglimit.Configure(limit)
+				t.Cleanup(func() { encodinglimit.Configure(0) })
+				m, session, events := newCopyRecoverySession(t)
+				before := session.Opts()
+				retained := filepath.Join(before.OutputDir, "seg_00009.m4s")
+				if err := os.WriteFile(retained, []byte("existing segment"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				hooks := make(chan struct{}, 2)
+				session.SetRestartHook(func(context.Context) { hooks <- struct{}{} })
+				var restored copyRecoveryProcess
+				// Neither retry can improve the probe result. A valid producer must
+				// still survive so ordinary segment requests can make progress.
+				for range 2 {
+					results := startCopyRecovery(m, session)
+					probe := awaitCopyRecoveryProcess(t, events)
+					if !probe.isProbe() {
+						t.Fatal("recovery did not start an anchor probe")
+					}
+					if _, err := probe.conn.Write([]byte{release}); err != nil {
+						t.Fatal(err)
+					}
+					result := awaitCopyRecoveryResult(t, results)
+					if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
+						t.Fatalf("failed or unmapped probe outcome = %+v", result)
+					}
+					if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || session.Opts() != before {
+						t.Fatal("failed or unmapped probe left no encoder with the previous recipe")
+					}
+					restored = awaitCopyRecoveryProcess(t, events)
+					if restored.isProbe() || !slices.Equal(restored.args, buildFFmpegArgs(before)) {
+						t.Fatalf("restored encoder changed the previous recipe: %v", restored.args)
+					}
+					if data, err := os.ReadFile(retained); err != nil || string(data) != "existing segment" {
+						t.Fatalf("restored encoder discarded previous output: %q, %v", data, err)
+					}
+					select {
+					case <-hooks:
+					default:
+						t.Fatal("restored encoder did not re-arm its restart hook")
+					}
+				}
+				if _, ok, err := m.RestartSegmentLocked(t.Context(), before.SessionID, session, 99); ok || err != nil || !session.IsRunning() {
+					t.Fatalf("out-of-manifest retry lost the restored producer: %t, %v", ok, err)
+				}
+				if _, err := restored.conn.Write([]byte{'g'}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.ReadFull(restored.conn, make([]byte, 1)); err != nil {
+					t.Fatal(err)
+				}
+				lease, err := session.WaitForOpenSegment("seg_00012.m4s", time.Second)
+				if err != nil {
+					t.Fatalf("restored encoder did not produce the next segment: %v", err)
+				}
+				if err := lease.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if seek, ok, err := session.SegmentStartTime(12); err != nil || !ok || math.Abs(seek-24.006) > 0.0001 {
+					t.Fatalf("restored encoder changed URI timing: %.6f, %t, %v", seek, ok, err)
+				}
+				m.CloseTranscodeSession(before.SessionID, "")
+				if encodinglimit.Snapshot().ActiveJobs != 0 {
+					t.Fatal("restored encoder cleanup leaked capacity")
+				}
+			})
+		}
+	}
+}
+
+func TestRestartSegmentLocked_CopyRecoveryRestoreFailureAllowsCleanup(t *testing.T) {
+	encodinglimit.Configure(1)
+	t.Cleanup(func() { encodinglimit.Configure(0) })
+	m, session, events := newCopyRecoverySession(t)
+	before := session.Opts()
+	oldDone := session.Done()
+	crashed := make(chan struct{}, 1)
+	m.OnFFmpegCrash = func(_ context.Context, id string, failed *TranscodeSession) {
+		if id != before.SessionID || failed != session {
+			t.Error("restoration failure cleaned up the wrong session")
+		}
+		m.CloseTranscodeSessionUnderLifecycle(id, "")
+		crashed <- struct{}{}
+	}
+	results := startCopyRecovery(m, session)
+	probe := awaitCopyRecoveryProcess(t, events)
+	if err := os.Remove(before.FFmpegPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := probe.conn.Write([]byte{'m'}); err != nil {
+		t.Fatal(err)
+	}
+	result := awaitCopyRecoveryResult(t, results)
+	if result.ok || result.err == nil {
+		t.Fatalf("failed encoder restoration was reported as a retryable miss: %+v", result)
+	}
+	awaitCopyRecoveryMonitor(t, m.monitorLocalTranscodeExit(before.SessionID, session, oldDone, 0))
+	select {
+	case <-crashed:
+	default:
+		t.Fatal("intentional probe cancellation hid a failed encoder restoration")
+	}
+	if m.GetTranscodeSession(before.SessionID) != nil || encodinglimit.Snapshot().ActiveJobs != 0 {
+		t.Fatal("failed encoder restoration blocked reconstruction or leaked capacity")
+	}
+}
+
+func TestRestartSegmentLocked_CopyRecoveryRestoreRespectsCapacity(t *testing.T) {
+	encodinglimit.Configure(1)
+	t.Cleanup(func() { encodinglimit.Configure(0) })
+	m, session, events := newCopyRecoverySession(t)
+	before := session.Opts()
+	oldDone := session.Done()
+	var competitor *TranscodeSession
+	err := m.restartSessionLocked(before.SessionID, session, func() error {
+		return session.restart(t.Context(), SegmentRecoveryTarget{}, func() (SegmentRecoveryTarget, bool, error) {
+			// Another workload can take the freed slot after probing. Restoration
+			// must use normal admission and must not stop that unrelated workload.
+			opts := before
+			opts.SessionID = "competing-encoder"
+			opts.OutputDir = t.TempDir()
+			var startErr error
+			competitor, startErr = StartTranscode(t.Context(), opts)
+			if startErr != nil {
+				return SegmentRecoveryTarget{}, false, startErr
+			}
+			t.Cleanup(func() { _ = competitor.Close() })
+			awaitCopyRecoveryProcess(t, events)
+			return SegmentRecoveryTarget{}, false, nil
+		})
+	})
+	if !errors.Is(err, encodinglimit.ErrAtCapacity) {
+		t.Fatalf("restoration bypassed occupied capacity or hid its refusal: %v", err)
+	}
+	m.OnFFmpegCrash = func(_ context.Context, id string, failed *TranscodeSession) {
+		m.CloseTranscodeSessionIfUnderLifecycle(id, failed, "")
+	}
+	awaitCopyRecoveryMonitor(t, m.monitorLocalTranscodeExit(before.SessionID, session, oldDone, 0))
+	if m.GetTranscodeSession(before.SessionID) != nil || !competitor.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 {
+		t.Fatal("restoration refusal left a dead session or disturbed the competing encoder")
+	}
+	if err := competitor.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if encodinglimit.Snapshot().ActiveJobs != 0 {
+		t.Fatal("competing encoder leaked capacity")
+	}
+}
+
 func TestRestartSegmentLocked_CopyRecoveryProbeFailureCanRetry(t *testing.T) {
 	for _, release := range []byte{'f', 'm'} {
 		t.Run(string(release), func(t *testing.T) {
@@ -380,8 +551,12 @@ func TestRestartSegmentLocked_CopyRecoveryProbeFailureCanRetry(t *testing.T) {
 			if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
 				t.Fatalf("failed or unmapped probe outcome = %+v", result)
 			}
-			if session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 0 || session.Opts() != before {
-				t.Fatal("failed or unmapped probe leaked capacity or changed the recipe")
+			if !session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 1 || session.Opts() != before {
+				t.Fatal("failed or unmapped probe did not restore the previous recipe")
+			}
+			restored := awaitCopyRecoveryProcess(t, events)
+			if restored.isProbe() {
+				t.Fatal("failed probe started another probe instead of restoring the encoder")
 			}
 			if manifest, err := os.ReadFile(filepath.Join(before.OutputDir, "stream.m3u8")); err != nil || string(manifest) != recoveryTestManifest {
 				t.Fatalf("failed probe changed the manifest: %s, %v", manifest, err)
@@ -459,7 +634,7 @@ func TestRestartSegmentLocked_CopyRecoverySerializesConcurrentRestart(t *testing
 }
 
 func TestRestartSegmentLocked_CopyRecoveryIgnoresQueuedOldProcessExit(t *testing.T) {
-	for _, release := range []byte{1, 'f'} {
+	for _, release := range []byte{1, 'f', 'm'} {
 		t.Run(fmt.Sprintf("probe_%d", release), func(t *testing.T) {
 			encodinglimit.Configure(1)
 			t.Cleanup(func() { encodinglimit.Configure(0) })
@@ -510,14 +685,15 @@ func TestRestartSegmentLocked_CopyRecoveryIgnoresQueuedOldProcessExit(t *testing
 			if m.GetTranscodeSession(id) != session {
 				t.Fatal("old exit monitor removed the recovering session")
 			}
-			if release == 'f' {
-				if result.ok || result.err == nil || session.IsRunning() || encodinglimit.Snapshot().ActiveJobs != 0 {
-					t.Fatalf("probe failure left inconsistent process state: %+v", result)
+			if release != 1 {
+				if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
+					t.Fatalf("probe failure changed its reported outcome: %+v", result)
 				}
-				return
-			}
-			if result.err != nil || !result.ok || !session.IsRunning() || session.Done() == oldDone {
+			} else if result.err != nil || !result.ok {
 				t.Fatalf("old exit monitor interfered with the successful replacement: %+v", result)
+			}
+			if !session.IsRunning() || session.Done() == oldDone || encodinglimit.Snapshot().ActiveJobs != 1 {
+				t.Fatal("old exit monitor interfered with the replacement or restored encoder")
 			}
 			awaitCopyRecoveryProcess(t, events)
 			replacementDone := session.Done()

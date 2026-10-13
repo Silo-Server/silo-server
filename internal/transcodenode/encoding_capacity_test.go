@@ -94,7 +94,7 @@ esac
 		t.Fatal(err)
 	}
 	defer release()
-	rec := postTrickplay(newTrickplayTestServer(t, ffmpeg), sheetsRequestJSON(t, "/media/movie.mkv"))
+	rec := postTrickplay(t, newTrickplayTestServer(t, ffmpeg), sheetsRequestJSON(t, "/media/movie.mkv"))
 	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("capacity failure is not retryable: %d %s", rec.Code, rec.Body.String())
 	}

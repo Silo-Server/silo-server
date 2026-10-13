@@ -428,6 +428,12 @@ covers missing process-local state. A 404 can represent unavailable/refused
 reconstruction. Manifests retain source-aligned timeline selection, relative
 segment links, forwarded query and no-store caching. Segment leases can wait or
 undergo guarded seek/restart recovery; init data also has a bounded wait.
+Copy recovery reaps the current encoder before its capacity-limited anchor
+probe. A failed or unmapped probe restores the exact previous recipe and its
+segment timing before returning the probe outcome. If restoration cannot start,
+the worker retires that failed runtime under its lifecycle lock, releases job
+accounting and tracking, and retains both the output timeline and reconstruction
+authority. A later request can rebuild the session through the existing path.
 ServeContent handles conditions/ranges and extension/sniffed media. Private
 generation is returned only to marked proxy hops. Direct full reads report
 exact-generation completion; proxied reads defer that accounting to

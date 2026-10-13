@@ -1056,8 +1056,9 @@ func (m *TranscodeManager) handleLocalTranscodeExit(sessionID string, session *T
 	session.mu.Lock()
 	// A restart cancels the old child intentionally. The monitor may have
 	// waited behind a long anchor probe, so compare its captured process with
-	// the current one only after acquiring the lifecycle lock. A failed probe
-	// leaves no replacement; that intentional exit still is not a crash.
+	// the current one only after acquiring the lifecycle lock. Failed copy probes
+	// restore the previous recipe; a failed restoration clears waitCanceled so
+	// this generation can follow the normal crash cleanup and reconstruction path.
 	ignore := session.done != done || session.running || session.restarting != nil || session.waitCanceled
 	waitErr := session.waitErr
 	session.mu.Unlock()

@@ -3223,20 +3223,29 @@ func (s *TranscodeSession) restart(
 	if done != nil {
 		<-done
 	}
+	var probeErr error
+	restorePrevious := false
 	if resolveTarget != nil {
 		var ok bool
-		var err error
-		target, ok, err = resolveTarget()
-		if err != nil || !ok {
-			s.mu.Lock()
-			flight.err = err
-			s.restarting = nil
-			s.mu.Unlock()
-			close(flight.done)
-			return err
+		target, ok, probeErr = resolveTarget()
+		if probeErr != nil || !ok {
+			// The old process has already released its slot. Restore its exact
+			// recipe before reporting the probe outcome: an unmapped target is
+			// retryable only while a producer can still grow the playlist.
+			restorePrevious = true
+			target = SegmentRecoveryTarget{
+				SeekSeconds: opts.SeekSeconds, StartSegmentNumber: opts.StartSegmentNumber,
+				StreamOriginSeconds: opts.StreamOriginSeconds, CopySeekAnchorResolved: opts.CopySeekAnchorResolved,
+			}
 		}
 	}
 	startSegment := target.StartSegmentNumber
+	wrapStartError := func(err error) error {
+		if restorePrevious {
+			return errors.Join(probeErr, fmt.Errorf("restore previous transcode recipe: %w", err))
+		}
+		return err
+	}
 
 	s.mu.Lock()
 	s.running = false
@@ -3266,22 +3275,26 @@ func (s *TranscodeSession) restart(
 
 	previousOpts := opts
 
-	opts.SeekSeconds = target.SeekSeconds
-	opts.StartSegmentNumber = startSegment
-	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
-		// A seek restart describes a new emitted timeline. Never retain the
-		// previous copy seek's keyframe origin when the caller has not resolved
-		// a replacement; falling back to SeekSeconds is conservative and matches
-		// the behavior of recipes created before copy anchors were introduced.
-		opts.StreamOriginSeconds = target.StreamOriginSeconds
-		opts.CopySeekAnchorResolved = target.CopySeekAnchorResolved
+	if !restorePrevious {
+		opts.SeekSeconds = target.SeekSeconds
+		opts.StartSegmentNumber = startSegment
+		if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+			// A seek restart describes a new emitted timeline. Never retain the
+			// previous copy seek's keyframe origin when the caller has not resolved
+			// a replacement; falling back to SeekSeconds is conservative and matches
+			// the behavior of recipes created before copy anchors were introduced.
+			opts.StreamOriginSeconds = target.StreamOriginSeconds
+			opts.CopySeekAnchorResolved = target.CopySeekAnchorResolved
+		}
+		opts.FastStart = false // seek-restarts use veryfast for better quality
 	}
-	opts.FastStart = false // seek-restarts use veryfast for better quality
 
 	// Old segments are only reusable when this generation emits the same recipe
 	// as the previous one; otherwise they, and the manifest describing them,
 	// have to go before the replacement process starts.
-	if s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
+	// Restoring the identical recipe retains its known segment-to-source mapping
+	// and existing output, including when the replacement cannot be started.
+	if !restorePrevious && s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
 		log.Printf("playback: cleaned stale transcode output at/after segment %d before restart (video %q -> %q)",
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)
 	}
@@ -3302,13 +3315,14 @@ func (s *TranscodeSession) restart(
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		err = wrapStartError(fmt.Errorf("create stdin pipe: %w", err))
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
 		s.waitErr = err
 		s.mu.Unlock()
 		close(flight.done)
-		return fmt.Errorf("create stdin pipe: %w", err)
+		return err
 	}
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
@@ -3334,6 +3348,7 @@ func (s *TranscodeSession) restart(
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
+		err = wrapStartError(fmt.Errorf("restart ffmpeg: %w", err))
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
@@ -3341,7 +3356,7 @@ func (s *TranscodeSession) restart(
 		s.mu.Unlock()
 		close(flight.done)
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
-		return fmt.Errorf("restart ffmpeg: %w", err)
+		return err
 	}
 
 	s.mu.Lock()
@@ -3352,6 +3367,7 @@ func (s *TranscodeSession) restart(
 	s.cancel = cancel
 	s.opts = opts
 	s.running = true
+	flight.err = probeErr
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
 	s.lastRequestedSegment = startSegment
@@ -3369,7 +3385,7 @@ func (s *TranscodeSession) restart(
 		hook(ctx)
 	}
 
-	return nil
+	return probeErr
 }
 
 // WaitForSegment polls until the named segment file exists on disk or the
