@@ -160,9 +160,22 @@ func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
 }
 
 func TestSanitizeTextMasksUserinfoContainingAt(t *testing.T) {
-	const input = "fetch ftp://user:pa@ss@host/file failed"
-	want := "fetch ftp://" + Placeholder + "@host/file failed"
-	if got := SanitizeText(input); got != want {
-		t.Fatalf("SanitizeText() = %q, want %q", got, want)
+	for _, suffix := range []string{"/file", "?email=a@example.test", "#mailto:a@example.test"} {
+		t.Run(suffix, func(t *testing.T) {
+			input := "fetch ftp://user:pa@ss@host" + suffix + " failed"
+			want := "fetch ftp://" + Placeholder + "@host" + suffix + " failed"
+			if got := SanitizeText(input); got != want {
+				t.Fatalf("SanitizeText() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSanitizeTextKeepsURLWithoutUserinfo(t *testing.T) {
+	for _, suffix := range []string{"/a@example.test", "?email=a@example.test", "#mailto:a@example.test"} {
+		input := "fetch ftp://host" + suffix + " failed"
+		if got := SanitizeText(input); got != input {
+			t.Fatalf("SanitizeText() = %q, want %q", got, input)
+		}
 	}
 }

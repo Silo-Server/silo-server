@@ -131,7 +131,7 @@ var secretAssignmentPattern = regexp.MustCompile(`(?i)([\w.-]*(?:password|passwd
 
 // urlUserinfoPattern matches through the last @ in a URL authority, since
 // unescaped @ characters may also appear in the userinfo.
-var urlUserinfoPattern = regexp.MustCompile(`://[^/\s]+@`)
+var urlUserinfoPattern = regexp.MustCompile(`://[^/?#\s]+@`)
 
 // SanitizeText masks credential assignments and URL userinfo in free-form
 // diagnostic text, such as a stored error message, and keeps everything else.
