@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -253,8 +255,29 @@ func (s *Service) OnPublicOrigin(r *http.Request) bool {
 	if err != nil || base.Host == "" {
 		return true
 	}
-	return strings.EqualFold(base.Scheme, clientip.RequestScheme(r)) &&
-		strings.EqualFold(base.Host, clientip.RequestHost(r))
+	scheme := clientip.RequestScheme(r)
+	if !strings.EqualFold(base.Scheme, scheme) {
+		return false
+	}
+	return oauthHostWithPort(clientip.RequestHost(r), scheme) == oauthHostWithPort(base.Host, base.Scheme)
+}
+
+// oauthHostWithPort normalizes host[:port] with default ports made explicit,
+// matching the account OAuth sameOrigin helper.
+func oauthHostWithPort(host, scheme string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	name, port, err := net.SplitHostPort(host)
+	if err != nil {
+		name = strings.Trim(host, "[]")
+		port = "80"
+		if strings.EqualFold(scheme, "https") {
+			port = "443"
+		}
+	}
+	if addr, parseErr := netip.ParseAddr(name); parseErr == nil {
+		name = addr.String()
+	}
+	return net.JoinHostPort(name, port)
 }
 
 func isOAuthAuthSession(session DeviceAuthSession) bool {

@@ -2,7 +2,9 @@ package watchsync
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +105,36 @@ func TestFinishOAuthRequiresBinderAndClaimsOnce(t *testing.T) {
 	}
 	if provider.exchangeRedirect != started.RedirectURI {
 		t.Fatalf("exchange redirect = %q, want %q", provider.exchangeRedirect, started.RedirectURI)
+	}
+}
+
+func TestOnPublicOriginAcceptsDefaultHTTPSPort(t *testing.T) {
+	service := NewService(nil, NewRegistry())
+	service.SetPublicURL("https://silo.example:443")
+	req, err := http.NewRequest(http.MethodPost, "https://silo.example/api/v2/watch-providers/trakt/auth/authorize", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "silo.example"
+	req.TLS = &tls.ConnectionState{}
+	if !service.OnPublicOrigin(req) {
+		t.Fatal("expected https://silo.example to match public URL with explicit :443")
+	}
+	req.Host = "other.example"
+	if service.OnPublicOrigin(req) {
+		t.Fatal("expected a different host to be rejected")
+	}
+}
+
+func TestOAuthHostWithPortNormalizesDefaultPorts(t *testing.T) {
+	if got, want := oauthHostWithPort("silo.example", "https"), "silo.example:443"; got != want {
+		t.Fatalf("bare https host = %q, want %q", got, want)
+	}
+	if got, want := oauthHostWithPort("silo.example:443", "https"), "silo.example:443"; got != want {
+		t.Fatalf("explicit :443 = %q, want %q", got, want)
+	}
+	if got, want := oauthHostWithPort("silo.example:8443", "https"), "silo.example:8443"; got != want {
+		t.Fatalf("non-default port = %q, want %q", got, want)
 	}
 }
 
