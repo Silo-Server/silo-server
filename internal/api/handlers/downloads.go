@@ -559,8 +559,19 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 	// instead of truncating the body at 120 s.
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+		if errors.Is(err, downloads.ErrResponseCommitted) {
+			// Headers and part of the file already went out, so an error body
+			// would corrupt the media response. Abort it instead, as the v2
+			// stream writer requires. A client that left has canceled the
+			// request; any other failure, such as a short read from storage,
+			// is the server's.
+			if r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "direct download failed after the response started",
+					"component", "downloads", "file_id", fileID, "error", err)
+			}
+			panic(http.ErrAbortHandler)
+		}
 		h.writeDownloadError(w, err)
-		return
 	}
 }
 

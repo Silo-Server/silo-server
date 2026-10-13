@@ -86,6 +86,13 @@ A Jellyfin or Emby record without a last-played time carries an unknown timestam
 sorts before any local activity: it can create missing progress but never replaces newer
 Silo progress. Favorite-only records add the favorite without creating progress.
 
+Source servers are user-supplied, so what an import reads from one is bounded
+(`internal/historyimport/upstream_limits.go`): each successful response is decoded only up
+to 16 MiB, and each paged listing stops at 5,000 pages, 500,000 items, or 512 MiB in total.
+Going over a limit fails the run with its own message. That includes lists whose other
+failures only add a warning (resume positions, favorites, the watchlist, Plex sections, and
+metadata lookups), so an import never completes without a list the source sent.
+
 A node reserves local capacity before atomically claiming a queued row. Claims use
 `FOR UPDATE SKIP LOCKED` and an incremented generation. Heartbeat, progress, and
 terminal writes require the running status and exact generation. New personal runs

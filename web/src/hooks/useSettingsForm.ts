@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { captureProfileRequestContext } from "@/api/client";
-import { adminSettingsKey } from "@/api/v2/adminSettingsSnapshot";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import {
+  adminSettingsKey,
+  captureSettingsBaseline,
+  type ChatGPTSettingsChange,
+} from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
   useAdminServerSettings,
@@ -19,6 +23,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
   const { data: sensitiveData, isError: sensitiveStatusError } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
+  const [, setBaselineRevision] = useState(0);
+  const saveEpoch = useRef(0);
+  const savePending = useRef(false);
   const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
@@ -137,6 +144,48 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     [dirty, keys, localValues, settings],
   );
 
+  const beginSettingsTransition = useCallback(() => {
+    const startedAt = saveEpoch.current;
+    const overlappingSave = savePending.current;
+    const authority = captureProfileRequestContext();
+    return (change: ChatGPTSettingsChange) => {
+      if (
+        !authority ||
+        !isCapturedProfileAuthorityActive(authority) ||
+        overlappingSave ||
+        savePending.current ||
+        saveEpoch.current !== startedAt
+      )
+        return;
+      if (
+        !editBaseline.current ||
+        !change.settingsSnapshot ||
+        dirtyRef.current.has("ai.chat_model") ||
+        dirtyRef.current.has("subtitle_ai.chat_model") ||
+        dirtyRef.current.has("ai.reasoning_effort")
+      )
+        return;
+      try {
+        const before = captureSettingsBaseline(editBaseline.current);
+        const after = captureSettingsBaseline(change.settingsSnapshot);
+        if (before.etag !== change.beforeETag || after.etag !== change.afterETag) return;
+        // Both records must belong to the initiating authority, even if an old
+        // callback is delivered after the form switched profiles.
+        if (
+          JSON.stringify(adminSettingsKey(before.profileContext)) !==
+            JSON.stringify(adminSettingsKey(authority)) ||
+          JSON.stringify(adminSettingsKey(after.profileContext)) !==
+            JSON.stringify(adminSettingsKey(authority))
+        )
+          return;
+        editBaseline.current = change.settingsSnapshot;
+        setBaselineRevision((revision) => revision + 1);
+      } catch {
+        // Keep the original conflict guard when the transition cannot be proven.
+      }
+    };
+  }, []);
+
   const save = useCallback(
     async (selectedKeys?: string[]) => {
       const submittedKeys = Array.from(dirty).filter((key) => selectedKeys?.includes(key) ?? true);
@@ -152,7 +201,14 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         toast.error(error.message);
         throw error;
       }
-      const result = await updateSettings.mutateAsync(values);
+      saveEpoch.current++;
+      savePending.current = true;
+      let result;
+      try {
+        result = await updateSettings.mutateAsync(values);
+      } finally {
+        savePending.current = false;
+      }
       // An acknowledged save changes the validator even when newer local edits
       // remain dirty. Reconcile only with a refresh matching that write's revision;
       // background reads and failed writes never advance this draft baseline.
@@ -231,5 +287,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     sensitiveStatusReady: sensitiveData != null,
     sensitiveStatusError,
     buildConnectionCheckRequest,
+    beginSettingsTransition,
   };
 }

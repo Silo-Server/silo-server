@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -19,7 +20,7 @@ func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodep
 	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
 }
 
-var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1"]}`)
+var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1","trickplay_extract_v2"]}`)
 
 // fakeNode answers /trickplay/extract with status and body, counting calls.
 func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32) {
@@ -27,7 +28,7 @@ func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32
 	calls := &atomic.Int32{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/trickplay/extract" || r.Header.Get("Authorization") != "Bearer secret" {
+		if r.URL.Path != "/trickplay/extract" || !nodeauthtest.Signed(r, "secret") {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -118,7 +119,9 @@ func TestNodeExtractorModes(t *testing.T) {
 
 func TestMakesTrickplay(t *testing.T) {
 	for report, want := range map[string]bool{
-		`{"transport_features":["trickplay_extract_v1"]}`: true,
+		`{"transport_features":["trickplay_extract_v1","trickplay_extract_v2"]}`: true,
+		// An older node would ignore the tone-map source signal.
+		`{"transport_features":["trickplay_extract_v1"]}`: false,
 		`{"transport_features":["prepared_tracks_v1"]}`:   false,
 		`{}`: false,
 		``:   false,

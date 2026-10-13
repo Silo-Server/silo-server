@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -37,6 +38,8 @@ type SectionWithItems struct {
 
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
 type SectionItemMeta struct {
+	// Raw still path, before image sizing or signing; nil means unavailable metadata.
+	EpisodeStillPath  *string
 	SeriesID          *string
 	SeriesTitle       string
 	SeasonNumber      *int
@@ -1127,12 +1130,13 @@ func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libr
 // LogFetchError records a section that failed to load and is shown empty. A
 // row whose server or personal collection was deleted is expected to stay on
 // a layout until someone removes it, so it logs at debug instead of error.
+// So does a fetch that failed only because the caller went away.
 func LogFetchError(ctx context.Context, component string, sec ResolvedSection, err error) {
 	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) {
 		slog.DebugContext(ctx, "section collection no longer exists", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
 		return
 	}
-	slog.ErrorContext(ctx, "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+	slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelError), "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
 }
 
 type sectionFetchRunner func(context.Context, ResolvedSection) (SectionWithItems, error)
@@ -1270,7 +1274,7 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 	case SectionReturningShows:
 		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionProfileActivityFeed:
-		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
+		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionWatchlist, SectionFavorites:
 		return f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	default:
@@ -2335,6 +2339,9 @@ func (f *Fetcher) fetchRecentlyAdded(ctx context.Context, s ResolvedSection, lib
 	if items, total, handled, err := f.fetchTVRecentlyAdded(ctx, s, libraryID, libraryIDs, filter); handled || err != nil {
 		return items, total, err
 	}
+	if items, total, handled, err := f.fetchMixedRecentlyAdded(ctx, s, libraryID, libraryIDs, filter); handled || err != nil {
+		return items, total, err
+	}
 	query, args := buildRecentlyAddedQuery(s, libraryID, libraryIDs, filter)
 	rows, err := f.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -2375,21 +2382,127 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 		return nil, 0, tvScoped, err
 	}
 
-	// The home row needs the newest cards, not the size of the whole event
-	// history: ListNewest groups only recently active shows. total_count is a
-	// lower bound (the documented contract): one more than the page when more
-	// cards exist, which is what clients test it for.
-	targets, hasMore, err := catalog.NewRecentTVRepository(f.pool).ListNewest(ctx, catalog.RecentTVQuery{
-		LibraryIDs: effectiveLibraryIDs,
-		Access:     filter,
-		Limit:      s.ItemLimit,
-	})
+	items, hasMore, err := f.fetchRecentTVItems(ctx, effectiveLibraryIDs, s.ItemLimit, filter)
 	if err != nil {
 		return nil, 0, true, err
 	}
-	total := len(targets)
+	// total_count is a lower bound (the documented contract): one more than
+	// the page when more cards exist, which is what clients test it for.
+	total := len(items)
 	if hasMore {
 		total++
+	}
+	return items, total, true, nil
+}
+
+// fetchMixedRecentlyAdded serves a recently-added row that spans TV libraries
+// and other libraries, such as the default home row. TV libraries go through
+// arrival-event grouping, so a new episode of an old show still reaches the
+// row; the other libraries use the plain query. The two newest-first lists
+// merge by added time. Rows confined to one library, or to TV only, keep their
+// dedicated paths, and a row with no TV library falls through to the plain
+// query.
+func (f *Fetcher) fetchMixedRecentlyAdded(
+	ctx context.Context,
+	s ResolvedSection,
+	libraryID *int,
+	libraryIDs []int,
+	filter catalog.AccessFilter,
+) ([]*models.MediaItem, int, bool, error) {
+	if s.DisableTVEventGrouping || libraryID != nil {
+		return nil, 0, false, nil
+	}
+	cfgFilters := recentlyAddedConfigFilters(s.Config)
+	if cfgFilters.FilterType != "" {
+		return nil, 0, false, nil
+	}
+	requested := cfgFilters.LibraryIDs()
+	if len(requested) == 0 {
+		if libraryIDs != nil && len(libraryIDs) == 0 {
+			return nil, 0, false, nil
+		}
+		requested = append([]int(nil), libraryIDs...)
+	}
+	videoOnly := len(recentlyAddedMediaTypes(s.Config)) > 0
+	split, err := catalog.SplitRecentLibraries(ctx, f.pool, requested, videoOnly, filter)
+	if err != nil {
+		return nil, 0, true, err
+	}
+	if len(split.TV) == 0 {
+		return nil, 0, false, nil
+	}
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	// Each side reads one card past the page. A series in both a TV library
+	// and a mixed library appears on both sides, so only the merged, deduped
+	// set can tell whether a card exists beyond the page.
+	tvItems, _, err := f.fetchRecentTVItems(ctx, scopeTVLibraries(split.TV, libraryIDs), limit+1, filter)
+	if err != nil {
+		return nil, 0, true, err
+	}
+	var otherItems []*models.MediaItem
+	if len(split.Other) > 0 {
+		// Always the created_at-ordered query, even for one library: the merge
+		// compares other cards by CreatedAt, and the single-library query
+		// orders by first_seen_at instead.
+		otherFilters := SectionConfigFilters{FilterLibraryIDs: split.Other}
+		otherSection := s
+		otherSection.ItemLimit = limit + 1
+		query, args := buildRecentlyAddedMultiLibraryQuery(otherSection, otherFilters, nil, libraryIDs, filter)
+		rows, err := f.pool.Query(ctx, query, args...)
+		if err != nil {
+			return nil, 0, true, err
+		}
+		otherItems, err = scanMediaItems(rows)
+		rows.Close()
+		if err != nil {
+			return nil, 0, true, err
+		}
+	}
+
+	merged, leftover := mergeRecentlyAdded(tvItems, otherItems, limit)
+	// total_count is a lower bound, as on the TV path.
+	total := len(merged)
+	if leftover {
+		total++
+	}
+	return merged, total, true, nil
+}
+
+// scopeTVLibraries limits a mixed row's TV libraries to the caller's scope
+// (nil means every library). The other libraries' query checks the caller's
+// scope as a separate membership test, but the TV event query reads only the
+// libraries it is given, so a series in a configured TV library outside the
+// scope is left out even when it also belongs to a library in scope.
+func scopeTVLibraries(tv, scope []int) []int {
+	if scope == nil {
+		return tv
+	}
+	scoped := make([]int, 0, len(tv))
+	for _, id := range tv {
+		if slices.Contains(scope, id) {
+			scoped = append(scoped, id)
+		}
+	}
+	return scoped
+}
+
+// fetchRecentTVItems loads the newest arrival-grouped TV cards from the given
+// visible TV libraries, newest first, each stamped with its event's added time.
+// hasMore reports that more cards exist beyond limit.
+func (f *Fetcher) fetchRecentTVItems(ctx context.Context, tvLibraryIDs []int, limit int, filter catalog.AccessFilter) ([]*models.MediaItem, bool, error) {
+	// The home row needs the newest cards, not the size of the whole event
+	// history: ListNewest groups only recently active shows.
+	targets, hasMore, err := catalog.NewRecentTVRepository(f.pool).ListNewest(ctx, catalog.RecentTVQuery{
+		LibraryIDs: tvLibraryIDs,
+		Access:     filter,
+		Limit:      limit,
+	})
+	if err != nil {
+		return nil, false, err
 	}
 
 	seriesIDs := make([]string, 0, len(targets))
@@ -2402,13 +2515,13 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 		}
 	}
 
-	seriesItems, err := f.fetchItemsByContentIDs(ctx, seriesIDs, nil, effectiveLibraryIDs, filter)
+	seriesItems, err := f.fetchItemsByContentIDs(ctx, seriesIDs, nil, tvLibraryIDs, filter)
 	if err != nil {
-		return nil, 0, true, err
+		return nil, false, err
 	}
-	episodeItems, _, err := f.fetchEpisodeTargetsByContentIDs(ctx, episodeIDs, nil, effectiveLibraryIDs, filter)
+	episodeItems, _, err := f.fetchEpisodeTargetsByContentIDs(ctx, episodeIDs, nil, tvLibraryIDs, filter)
 	if err != nil {
-		return nil, 0, true, err
+		return nil, false, err
 	}
 	itemByKey := make(map[string]*models.MediaItem, len(seriesItems)+len(episodeItems))
 	for _, item := range append(seriesItems, episodeItems...) {
@@ -2424,7 +2537,49 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 			ordered = append(ordered, &itemCopy)
 		}
 	}
-	return ordered, total, true, nil
+	return ordered, hasMore, nil
+}
+
+// mergeRecentlyAdded interleaves two newest-first lists by added time, keeping
+// the first card for a content ID and stopping at limit. Equal times keep the
+// TV card first so the merge is deterministic. leftover reports that the limit
+// cut a card from either list that is not already in merged; duplicates left
+// behind do not count.
+func mergeRecentlyAdded(tv, other []*models.MediaItem, limit int) (merged []*models.MediaItem, leftover bool) {
+	merged = make([]*models.MediaItem, 0, min(limit, len(tv)+len(other)))
+	seen := make(map[string]struct{}, cap(merged))
+	push := func(item *models.MediaItem) {
+		if _, dup := seen[item.ContentID]; dup {
+			return
+		}
+		seen[item.ContentID] = struct{}{}
+		merged = append(merged, item)
+	}
+	i, j := 0, 0
+	for len(merged) < limit && (i < len(tv) || j < len(other)) {
+		if j >= len(other) || (i < len(tv) && !recentlyAddedTime(tv[i]).Before(recentlyAddedTime(other[j]))) {
+			push(tv[i])
+			i++
+		} else {
+			push(other[j])
+			j++
+		}
+	}
+	unseen := func(item *models.MediaItem) bool {
+		_, dup := seen[item.ContentID]
+		return !dup
+	}
+	return merged, slices.ContainsFunc(tv[i:], unseen) || slices.ContainsFunc(other[j:], unseen)
+}
+
+// recentlyAddedTime is the time a recently-added card sorts by: the TV event's
+// added time when set, else the item's creation time, which the plain query
+// orders by.
+func recentlyAddedTime(item *models.MediaItem) time.Time {
+	if item.AddedAt != nil {
+		return *item.AddedAt
+	}
+	return item.CreatedAt
 }
 
 type sectionQuery struct {
@@ -2434,16 +2589,23 @@ type sectionQuery struct {
 
 func buildRecentlyAddedQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, []any) {
 	cfgFilters := recentlyAddedConfigFilters(s.Config)
-
 	if query, ok := buildRecentlyAddedSingleLibraryQuery(s, cfgFilters, libraryID, libraryIDs, filter); ok {
 		return query.sql, query.args
 	}
+	return buildRecentlyAddedMultiLibraryQuery(s, cfgFilters, libraryID, libraryIDs, filter)
+}
 
+// buildRecentlyAddedMultiLibraryQuery builds the plain recently-added query
+// for the given library and type filters, newest mi.created_at first. The
+// section's media_scope still applies, so a mixed row's non-TV half stays
+// inside its scope.
+func buildRecentlyAddedMultiLibraryQuery(s ResolvedSection, cfgFilters SectionConfigFilters, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
 
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
+	applyMediaTypesFilter("mi", recentlyAddedMediaTypes(s.Config), &conditions, &args, &argIdx)
 
 	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, cfgFilters.LibraryIDs(), filter.DisabledLibraryIDs, argIdx)
 	conditions = append(conditions, libConditions...)
@@ -2478,6 +2640,18 @@ func recentlyAddedConfigFilters(config json.RawMessage) SectionConfigFilters {
 		cfgFilters.FilterType = legacyCfg.Types[0]
 	}
 	return cfgFilters
+}
+
+// recentlyAddedMediaTypes returns the item types a recently-added row's
+// group media_scope covers, such as movies and series for "video". Single-type
+// scopes are already carried by filter_type, so they and an absent scope
+// return nil.
+func recentlyAddedMediaTypes(config json.RawMessage) []string {
+	def, err := ParseQueryDefinition(config)
+	if err != nil || def.MediaScope != catalog.MediaScopeVideo {
+		return nil
+	}
+	return catalog.MediaScopeItemTypes(def.MediaScope)
 }
 
 func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionConfigFilters, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (sectionQuery, bool) {
@@ -2527,6 +2701,7 @@ func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionC
 	}
 
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
+	applyMediaTypesFilter("mi", recentlyAddedMediaTypes(s.Config), &conditions, &args, &argIdx)
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
 	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
@@ -2771,6 +2946,14 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 	return scanMediaItems(rows)
 }
 
+// markEpisodeStillProvenance records whether the artwork the episode query
+// picked is the episode's own still. It runs on the selected raw paths, before
+// sizing or signing, so the flags stay with the paths through the section cache.
+func markEpisodeStillProvenance(item *models.MediaItem, stillPath string) {
+	item.PosterIsEpisodeStill = new(stillPath != "" && item.PosterPath == stillPath)
+	item.BackdropIsEpisodeStill = new(stillPath != "" && item.BackdropPath == stillPath)
+}
+
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
@@ -2814,7 +2997,8 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
-			si.status
+			si.status,
+			COALESCE(e.still_path, '')
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -2835,6 +3019,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			episodeNumber int
 			seriesTitle   string
 			airDate       *time.Time
+			stillPath     string
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2856,17 +3041,20 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.BackdropThumbhash,
 			&item.LogoPath,
 			&item.Status,
+			&stillPath,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
+		markEpisodeStillProvenance(&item, stillPath)
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
-			SeriesID:      &seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
-			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			EpisodeStillPath: new(stillPath),
+			SeriesID:         &seriesID,
+			SeriesTitle:      seriesTitle,
+			SeasonNumber:     &seasonNumber,
+			EpisodeNumber:    &episodeNumber,
+			Badges:           recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -2976,6 +3164,8 @@ func itemColumnsList(alias string) []string {
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
 		"advisory_age", "advisory_source",
+		// Jellyfin-compatible lists advertise these images from the paths.
+		"banner_path", "thumb_path", "clearart_path", "disc_path",
 	}
 	prefixed := make([]string, len(cols))
 	for i, c := range cols {
@@ -2991,8 +3181,8 @@ func itemColumnsList(alias string) []string {
 	return prefixed
 }
 
-// itemColumns returns the SELECT column list matching scanMediaItems.
-// Mirrors catalog.browseItemColumns.
+// itemColumns returns the SELECT column list matching scanMediaItems by
+// position. It carries the columns section rows need, not catalog's list.
 func itemColumns(alias string) string {
 	return strings.Join(itemColumnsList(alias), ", ")
 }
@@ -3053,6 +3243,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 			&item.AdvisoryAge, &item.AdvisorySource,
+			&item.BannerPath, &item.ThumbPath, &item.ClearArtPath, &item.DiscPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning item: %w", err)
@@ -3229,6 +3420,12 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 	args = append(args, scope.interval)
 	argIdx++
 
+	if scope.userID > 0 {
+		conditions = append(conditions, fmt.Sprintf("uwh.user_id = $%d", argIdx))
+		args = append(args, scope.userID)
+		argIdx++
+	}
+
 	if scope.profileID != "" {
 		op := "="
 		if scope.excludeProfile {
@@ -3270,6 +3467,8 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 type watchActivityScope struct {
 	interval string // Postgres interval, e.g. "7 days"
 	rank     watchActivityRank
+	// userID, when set, keeps only that account's history.
+	userID int
 	// profileID, when set, keeps only that profile's history, or with
 	// excludeProfile every other profile's history.
 	profileID      string
@@ -3317,7 +3516,11 @@ func (f *Fetcher) queryWatchActivity(ctx context.Context, rail, query string, ar
 	return items, len(items), nil
 }
 
-func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+// fetchProfileActivityFeed lists recent watches by every other profile on the
+// server (household mode) or by one pinned profile. The pinned profile_id is
+// saved section config, so it resolves only to a profile on the caller's
+// account: pinning another account's profile lists nothing.
+func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.ProfileActivityFeedParams
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
@@ -3328,13 +3531,17 @@ func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSectio
 	if target == "" && profileID == "" {
 		return []*models.MediaItem{}, 0, nil
 	}
+	// A pinned profile needs an account to check it against.
+	if target != "" && userID <= 0 {
+		return []*models.MediaItem{}, 0, nil
+	}
 
 	// Household mode lists the last week of every other profile's plays; a
 	// named profile shows its last month. Each title appears once, ordered by
 	// its most recent play.
 	scope := watchActivityScope{interval: "7 days", rank: rankByLatest, profileID: profileID, excludeProfile: true}
 	if target != "" {
-		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, profileID: target}
+		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, userID: userID, profileID: target}
 	}
 	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, scope)
 	return f.queryWatchActivity(ctx, "profile activity feed", query, args)
@@ -3491,6 +3698,17 @@ func applyConfigTypeFilter(alias string, filterType string, conditions *[]string
 	}
 	*conditions = append(*conditions, fmt.Sprintf("%s.type = $%d", alias, *argIdx))
 	*args = append(*args, filterType)
+	*argIdx++
+}
+
+// applyMediaTypesFilter limits alias to the given item types; nil adds no
+// condition.
+func applyMediaTypesFilter(alias string, types []string, conditions *[]string, args *[]any, argIdx *int) {
+	if len(types) == 0 {
+		return
+	}
+	*conditions = append(*conditions, fmt.Sprintf("%s.type = ANY($%d)", alias, *argIdx))
+	*args = append(*args, types)
 	*argIdx++
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -790,8 +791,8 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if got, want := request.Header.Get("Authorization"), "Bearer secret"; got != want {
-			t.Errorf("Authorization = %q, want %q", got, want)
+		if !nodeauthtest.Signed(request, "secret") {
+			t.Errorf("request is not signed: Authorization = %q", request.Header.Get("Authorization"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

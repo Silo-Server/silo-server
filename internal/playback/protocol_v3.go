@@ -75,6 +75,7 @@ const (
 	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
 	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
 	// NativeServerFeaturesV3).
+	FeatureMarkerThumbnailsV3  = "marker_thumbnails_v1"
 	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
 	PlanRecipeVersionV3        = "v3.4"
 	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
@@ -118,6 +119,10 @@ const (
 	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
 	// A transcode node that makes trickplay sheets (POST /trickplay/extract).
 	TransportFeatureTrickplayExtractV1 = "trickplay_extract_v1"
+	// A trickplay node that converts HDR with the tone-map source signal a
+	// request names, decodes on CUDA, and repairs missing and repeated cells.
+	// API servers that send the signal only use nodes that advertise it.
+	TransportFeatureTrickplayExtractV2 = "trickplay_extract_v2"
 )
 
 // Degradation warning codes reported by playback plans.
@@ -141,6 +146,15 @@ func AudioTrackUnavailableWarningV3() DegradationWarningV3 {
 // dropped because the effective file has no equivalent track.
 func SubtitleTrackUnavailableWarningV3() DegradationWarningV3 {
 	return DegradationWarningV3{Code: DegradationWarningSubtitleTrackUnavailableV3, Message: "The selected subtitle track is not on this file; starting without it."}
+}
+
+// SubtitleNotShownWarningV3 reports a selected subtitle that is on the file
+// but cannot be shown with any route the file can take (a bitmap burn-in an
+// HDR source cannot be re-encoded for, say), so playback continues without
+// it. The code is the one SubtitleTrackUnavailableWarningV3 uses: clients
+// handle both the same way.
+func SubtitleNotShownWarningV3() DegradationWarningV3 {
+	return DegradationWarningV3{Code: DegradationWarningSubtitleTrackUnavailableV3, Message: "The selected subtitle cannot be shown on this file; playing without it."}
 }
 
 // ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
@@ -177,7 +191,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -323,6 +337,14 @@ const TerminalSourceUnreadableV3 = "source_unreadable"
 // TerminalSourceUnreadableMessageV3 is the planner message for
 // TerminalSourceUnreadableV3.
 const TerminalSourceUnreadableMessageV3 = "The source file could not be read; it appears to be empty or damaged."
+
+// Planner messages for TerminalAudioConversionUnsupportedV3 when the selected
+// audio track's codec has no FFmpeg decoder (see AudioTrackDecodable), with
+// and without another track the viewer could choose instead.
+const (
+	TerminalAudioTrackUndecodableMessageV3 = "The selected audio track uses a codec the server cannot decode. Choose another audio track."
+	TerminalNoDecodableAudioMessageV3      = "None of this file's audio tracks use a codec the server can decode."
+)
 
 // TerminalBitratePolicyUnavailableV3 reports that no route fits the
 // administrator's local or remote per-stream bitrate limit for this version.
@@ -1442,7 +1464,7 @@ func HasFeatureV3(features []string, wanted string) bool {
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

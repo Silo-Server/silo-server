@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -87,7 +88,7 @@ func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(tc.body))
 		if tc.auth {
-			req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+			nodeauthtest.Sign(t, req, cfg.Auth.JWTSecret)
 		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

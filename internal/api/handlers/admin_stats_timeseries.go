@@ -34,6 +34,10 @@ const (
 	// under. A dashboard widget is a few hundred CSS pixels wide, so a month of
 	// minutes would spend megabytes drawing sub-pixel detail nobody can see.
 	adminTimeseriesMaxPoints = 750
+
+	// bytesPerKbpsMinute converts one sampled minute at 1 kbps into bytes:
+	// 1000 bits/s × 60 s ÷ 8 bits per byte.
+	bytesPerKbpsMinute = 1000 * adminTimeseriesResolutionSeconds / 8
 )
 
 // timeseriesBucketSeconds picks the display bucket for a window, keeping every
@@ -95,12 +99,22 @@ type AdminTimeseriesPoint struct {
 //
 // ResolutionSeconds is the bucket this window was aggregated into, not a
 // constant: it widens with the requested window (timeseriesBucketSeconds).
+//
+// EgressBytes and DownloadEgressBytes are the data transferred over the whole
+// window, integrated from every sampled minute rather than from Points: the
+// points are peak-per-bucket, so summing them would count a one-minute spike
+// as if it lasted the whole bucket. Minutes the sampler missed contribute
+// nothing, and node egress is a rolling average, so the totals are a close
+// estimate rather than exact byte accounting. /api/v1 is frozen, so only v2
+// emits them (json:"-").
 type AdminTimeseries struct {
-	ResolutionSeconds int                    `json:"resolution_seconds"`
-	From              time.Time              `json:"from"`
-	To                time.Time              `json:"to"`
-	OldestSampleAt    *time.Time             `json:"oldest_sample_at"`
-	Points            []AdminTimeseriesPoint `json:"points"`
+	ResolutionSeconds   int                    `json:"resolution_seconds"`
+	From                time.Time              `json:"from"`
+	To                  time.Time              `json:"to"`
+	OldestSampleAt      *time.Time             `json:"oldest_sample_at"`
+	EgressBytes         int64                  `json:"-"`
+	DownloadEgressBytes int64                  `json:"-"`
+	Points              []AdminTimeseriesPoint `json:"points"`
 }
 
 // AdminTimeseriesSource returns cached or freshly queried samples for a window
@@ -227,6 +241,20 @@ type timeseriesRow struct {
 	Transcode          *int64
 	EgressKbps         int64
 	DownloadEgressKbps int64
+	// The Sum columns add up every sampled minute's rate in the bucket, which
+	// the transfer totals integrate; the Kbps columns above are the peak.
+	EgressKbpsSum         int64
+	DownloadEgressKbpsSum int64
+}
+
+// sumTransferredBytes integrates the per-minute rates of every bucket into
+// total bytes transferred over the window.
+func sumTransferredBytes(rows []timeseriesRow) (egressBytes, downloadBytes int64) {
+	for _, row := range rows {
+		egressBytes += row.EgressKbpsSum * bytesPerKbpsMinute
+		downloadBytes += row.DownloadEgressKbpsSum * bytesPerKbpsMinute
+	}
+	return egressBytes, downloadBytes
 }
 
 // assembleTimeseries turns grouped rows into response points, reading a missing
@@ -271,7 +299,9 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 	// The outer one collapses those minutes into the display bucket by taking
 	// the peak minute of each column. Averaging would erase the spikes these
 	// charts exist to show; a bucket therefore answers "the worst minute in
-	// here", and its columns may come from different minutes.
+	// here", and its columns may come from different minutes. The trailing
+	// SUM columns are the exception: they feed the window's transfer totals,
+	// which need every minute's rate, not the peak.
 	rows, err := pool.Query(ctx, `
 		WITH minutes AS (
 			SELECT bucket,
@@ -291,7 +321,9 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 		       MAX(streams_remux),
 		       MAX(streams_transcode),
 		       MAX(egress_kbps)::bigint,
-		       MAX(download_egress_kbps)::bigint
+		       MAX(download_egress_kbps)::bigint,
+		       SUM(egress_kbps)::bigint,
+		       SUM(download_egress_kbps)::bigint
 		FROM minutes
 		GROUP BY display_bucket
 		ORDER BY display_bucket
@@ -312,6 +344,8 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 			&row.Transcode,
 			&row.EgressKbps,
 			&row.DownloadEgressKbps,
+			&row.EgressKbpsSum,
+			&row.DownloadEgressKbpsSum,
 		); err != nil {
 			return nil, fmt.Errorf("scanning dashboard metric sample: %w", err)
 		}
@@ -325,6 +359,7 @@ func queryAdminTimeseries(ctx context.Context, pool *pgxpool.Pool, hours int) (*
 		ResolutionSeconds: bucketSeconds,
 		Points:            assembleTimeseries(grouped),
 	}
+	series.EgressBytes, series.DownloadEgressBytes = sumTransferredBytes(grouped)
 
 	// The window bounds come from the same clock the samples were bucketed
 	// with, so a client comparing them against point timestamps never sees the

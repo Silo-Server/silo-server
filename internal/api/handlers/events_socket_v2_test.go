@@ -125,9 +125,24 @@ func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 	}
 }
 
-type socketSessionFixture struct{ valid bool }
+// socketSessionFixture is one session of account: valid or ended, and a
+// remote-playback handoff bound to remoteProfile when that is set. Like the
+// repository, it reports the account's current role.
+type socketSessionFixture struct {
+	valid         bool
+	account       *socketUserFixture
+	remoteProfile string
+}
 
-func (s *socketSessionFixture) IsValid(context.Context, string) (bool, error) { return s.valid, nil }
+func (s *socketSessionFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+	if !s.valid {
+		return auth.SessionAuthority{}, false, nil
+	}
+	if s.remoteProfile != "" {
+		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: s.remoteProfile}, true, nil
+	}
+	return auth.SessionAuthority{Role: s.account.user.Role, Purpose: models.SessionPurposeAccount}, true, nil
+}
 
 type socketUserFixture struct{ user models.User }
 
@@ -144,8 +159,8 @@ func (s *socketViewerFixture) Resolve(context.Context, access.ResolveInput) (acc
 
 func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
 	events, _ := socketTestHandler()
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "secondary", ProfileVerified: true, PolicyRevision: 1}}
 	primaryFlag := false
 	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return primaryFlag, true, nil }, "")
@@ -308,5 +323,50 @@ func TestEventsSocketV2MalformedHandshakeDoesNotConsumeProof(t *testing.T) {
 				t.Fatal("malformed handshake consumed proof")
 			}
 		})
+	}
+}
+
+// A remote-playback handoff's ticket validates as its bound profile with the
+// account role "user", even on an admin account, and a ticket naming another
+// profile is refused.
+func TestSocketValidatorBindsRemotePlayback(t *testing.T) {
+	events, _ := socketTestHandler()
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	_, claims, err := h.Validate(t.Context(), identity)
+	if err != nil || claims.Role != "user" || !claims.IsRemotePlayback() || claims.IsOwnLoginSession() {
+		t.Fatalf("handoff ticket = %+v, %v", claims, err)
+	}
+	identity.ProfileID = "parent"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("ticket for another profile: %v", err)
+	}
+	// A ticket an older release minted with the admin role is an access
+	// change: the client fetches a new one.
+	identity.ProfileID, identity.Role = "kid", "admin"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("admin ticket for a handoff: %v", err)
+	}
+}
+
+// The Watch Together socket refuses a handoff's ticket, at the handshake and
+// on every recheck, even one naming the bound profile that the events socket
+// accepts: one minted before the session was bound, or by an older node.
+func TestWatchTogetherSocketRefusesRemotePlayback(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	primary := func(context.Context, int, string) (bool, bool, error) { return false, true, nil }
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	room := NewWatchTogetherSocketV2(nil, nil, sessions, users, viewer, primary, "")
+	if _, _, err := room.Validate(t.Context(), identity); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("handoff room ticket: %v", err)
+	}
+	sessions.remoteProfile = ""
+	if _, claims, err := room.Validate(t.Context(), identity); err != nil || claims.IsRemotePlayback() {
+		t.Fatalf("ordinary room ticket = %+v, %v", claims, err)
 	}
 }

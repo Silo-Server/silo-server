@@ -23,6 +23,9 @@
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 
+# Same-day episodes sorted by air date keep series title and season/episode order on every query path.
+./internal/catalog TestQueryEpisodeAirDateTiesPostgres
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
@@ -48,6 +51,14 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 
+# Scoped administrator keys cannot redirect recovery through either API version.
+./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
+
+# Recovery identity changes retire links and prevent delivery to a stale address.
+./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
+./internal/passwordreset TestResetIssuanceRejectsChangedRecoveryEmailDB
+./internal/passwordreset TestResetIssuanceSerializesEmailChangeDB
+
 # Task locks and bounded history cleanup.
 ./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
@@ -71,6 +82,10 @@
 # The person name fallback never merges namesakes with different provider IDs.
 ./internal/catalog TestPersonNameFallbackKeepsNamesakesApartPostgres
 
+# An NFO actor photo takes a person's photo source only while the stored source
+# is the one the caller read.
+./internal/catalog TestPersonClaimPhotoSourcesPostgres
+
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
@@ -78,8 +93,19 @@
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
-# Image cache jobs run again for artwork the target no longer holds.
+# Image cache jobs run again for artwork the target no longer holds, and for a
+# local sidecar replaced under the same name.
 ./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
+./internal/metadata TestReplacedLocalSidecarRequeuesSucceededJobDB
+
+# Local sidecar change detection lists scanned items and stores fingerprints.
+./internal/metadata TestLocalSidecarRepositoryDB
+
+# The process that discovers local artwork copies it, other drains wait out the
+# discovery hold, and a server without the library mount leaves local jobs to
+# one that has it without counting attempts.
+./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
+./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
@@ -111,6 +137,7 @@
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
+./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
@@ -131,6 +158,7 @@
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestArtifactEnsureQueuedRoundTripsToneMapRecipe
 ./internal/downloads TestSubscriptionQualityPostgres
 ./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
 ./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
@@ -159,6 +187,9 @@
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
+# A retried push attempt key migration keeps the key an earlier run built.
+./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
+
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
 
@@ -169,9 +200,53 @@
 ./internal/catalog TestRatingSourceRepositoryUpsertPostgres
 ./internal/catalog TestRatingSourceRepositorySyncsTMDBVotesPostgres
 
+# An admin metadata edit that clears a field stores NULL, takes a cleared
+# rating's per-source row with it, and recomputes series air dates.
+./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
+
+# Plugin event deliveries: a claim takes at most its limit, never shares a row,
+# and only the latest claim records the outcome.
+./internal/plugins TestEventDeliveryOutboxPostgres
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
+
+# ChatGPT credential rotations serialize independently of general settings.
+./internal/catalog TestEncryptedSettingsValueAtomicSerializesWithoutBlockingGeneralSettingsDB
+./internal/catalog TestSettingsValueWaitersPreservePoolCapacityDB
+./internal/catalog TestSelectionUsesOneConnectionAndWaitsBeforeGeneralLockDB
+
+# Marker thumbnails preserve current ranges and provider image inventories.
+./internal/chapterthumbs TestMarkerOnlyThumbnailsAndStaleEditsDB
+./internal/chapterthumbs TestOnDemandMarkerThumbnailsDB
+./internal/chapterthumbs TestCanonicalWorkerPreservesOnDemandInventoryDB
+./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
+./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
+
+# Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
+# and Down, slot write-back, backdrop row identity and GC queueing, and the
+# folder-delete reference check over the new columns, provider backfill and
+# repair of the new slots, and Jellyfin recommendations listing every backdrop.
+./migrations TestItemExtraArtworkMigrationUpAndDownPostgres
+./internal/catalog TestItemExtraArtworkSlotsRoundTripDB
+./internal/catalog TestItemBackdropRepositoryDB
+./internal/catalog TestItemBackdropReplaceWaitsForCacheWriteDB
+./internal/catalog TestFilterUnreferencedImageDirsPostgres
+./internal/metadata TestItemOnlyArtworkBackfillAndRepairDB
+./internal/jellycompat TestRecommendationsListEveryBackdropDB
+
+# The A–Z letter index files titles by sort title and reports each letter's
+# first position exactly where the cursor pager and a seek list it.
+./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
+./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
+
+# Deleting a library removes its ID from access groups, account overrides and
+# invitations, without widening an emptied list; a write keeps only existing
+# libraries, even racing the delete; the migration repairs earlier deletes.
+./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
+./migrations TestLibraryDeleteRacingAccessWritePostgres
+./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres

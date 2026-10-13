@@ -379,7 +379,7 @@ func (reg *Registry) createAdminAccount(ctx context.Context, in *AdminAccountCre
 	if p != nil {
 		return nil, p
 	}
-	if p = reg.rejectUnknownLibraries(ctx, policy.LibraryIDs.Value); p != nil {
+	if p = reg.rejectUnknownLibraries(ctx, policy.LibraryIDs.Value, locationLibraryIDs); p != nil {
 		return nil, p
 	}
 	b := in.Body
@@ -417,7 +417,7 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 	if p != nil {
 		return nil, p
 	}
-	if p = reg.rejectUnknownLibraries(ctx, input.LibraryIDs.Value); p != nil {
+	if p = reg.rejectUnknownLibraries(ctx, input.LibraryIDs.Value, locationLibraryIDs); p != nil {
 		return nil, p
 	}
 	b := in.Body

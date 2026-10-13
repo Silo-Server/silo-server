@@ -18,6 +18,7 @@ import {
   ruleDraft,
   ruleSentence,
   rowsToConditions,
+  SERVER_NAMED_OVERRIDES,
   splitOverrideFields,
   traceLine,
 } from "./requestRoutingModel";
@@ -165,6 +166,22 @@ describe("rule sentences", () => {
         { options: { quality_profile_id: [{ value: "4", label: "Ultra-HD" }] } },
       ),
     ).toBe("Quality Ultra-HD");
+  });
+
+  it("names a Sonarr metadata language from the server's options", () => {
+    // A route row loads the server's options only for these keys.
+    expect(SERVER_NAMED_OVERRIDES.has("metadata_language")).toBe(true);
+    expect(
+      overridesSummary(
+        { metadata_language: 8 },
+        {
+          options: { metadata_language: [{ value: "8", label: "Japanese" }] },
+          fields: [
+            { key: "metadata_language", label: "Metadata language" } as PluginAdminFormField,
+          ],
+        },
+      ),
+    ).toBe("Metadata language Japanese");
   });
 });
 

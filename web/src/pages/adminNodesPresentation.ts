@@ -1342,6 +1342,76 @@ export function nodeReportsAcceleration(node: Pick<StreamNode, "type">): boolean
   return node.type !== "proxy";
 }
 
+/** Where a transcode node is in a drain, as the status line under its name says it. */
+export interface NodeDrainPresentation {
+  /** "draining" while work is left, "drained" once the node can be stopped. */
+  phase: "draining" | "drained";
+  /** The status line, e.g. "Draining · 3 transcodes left". */
+  label: string;
+  /** What the phase means for the operator. */
+  detail: string;
+}
+
+/**
+ * Describes a draining transcode node, or returns null for one that is not
+ * draining (and for proxies, which do not drain).
+ *
+ * A drain comes from an administrator's request or from the node receiving a
+ * stop signal. Without a request the page cannot tell a stopping node from one
+ * a resume has not reached yet, so that case says only what is true of both.
+ * "Drained" is only ever what the node itself reported: a request the node has
+ * not picked up yet, or a node too old to report, stays "Draining" with its
+ * transcode count, which is the most the page can honestly say.
+ */
+export function describeNodeDrain(node: StreamNode): NodeDrainPresentation | null {
+  if (node.type !== "transcode") return null;
+  const requested = node.drain_requested === true;
+  const state = node.drain_state ?? "none";
+  if (!node.enabled) {
+    return requested
+      ? {
+          phase: "draining",
+          label: "Drain requested",
+          detail:
+            "The node is disabled. It stays out of new placement when it is enabled again until it is resumed.",
+        }
+      : null;
+  }
+  if (!requested && state === "none") return null;
+  if (!node.healthy) {
+    return requested
+      ? {
+          phase: "draining",
+          label: "Draining · not answering",
+          detail:
+            "Drain requested, but the node did not answer its last health check. New work stays off it.",
+        }
+      : null;
+  }
+  if (state === "drained") {
+    return requested
+      ? {
+          phase: "drained",
+          label: "Drained · safe to stop",
+          detail: "No sessions or jobs are left on this node. Resume it to take new work again.",
+        }
+      : {
+          phase: "drained",
+          label: "Drained · no work left",
+          detail: "The node takes no new work. A node that was told to stop exits now.",
+        };
+  }
+  const active = Math.max(0, Math.trunc(finiteNumber(node.active_jobs) ?? 0));
+  const left = `${active} ${active === 1 ? "transcode" : "transcodes"} left`;
+  return {
+    phase: "draining",
+    label: `Draining · ${left}`,
+    detail: requested
+      ? "New work goes to other nodes. Sessions already here keep playing until they end."
+      : "The node takes no new work. A node that was told to stop exits when its sessions end or its drain timeout passes.",
+  };
+}
+
 /** Concurrency: transcodes on a transcode node, relayed streams on a proxy. */
 export function describeNodeJobs(node: StreamNode): ResourceMetric {
   const label = node.type === "proxy" ? "Streams" : "Transcodes";

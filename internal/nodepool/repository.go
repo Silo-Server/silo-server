@@ -118,6 +118,16 @@ type Node struct {
 	// predates capability reports — and that is a node no longer standing behind
 	// what is stored for it, which a reader must be able to tell from silence.
 	AdvertisedCapabilitiesHash *string `json:"advertised_capabilities_hash,omitempty"`
+	// DrainRequested is an administrator's request to stop placing new work on
+	// this node while its existing sessions finish. A draining node stays in
+	// the pools, so it is still health-checked and its jobs still count. Kept
+	// off the v1 wire, which is frozen; v2 maps it explicitly.
+	DrainRequested bool `json:"-"`
+	// DrainState is what the node said about draining on its last health
+	// check: DrainStateDraining after a drain request or SIGTERM, then
+	// DrainStateDrained once nothing is left. Rewritten by every check, like
+	// Healthy. Off the v1 wire for the same reason as DrainRequested.
+	DrainState DrainState `json:"-"`
 	// PhysicalGPUKeys identifies the actual GPUs behind this node, derived from
 	// Capabilities rather than stored: it is a pure function of that payload, so
 	// a column would only be a second copy that can disagree with it. Two nodes
@@ -429,7 +439,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -448,6 +458,7 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&n.CapabilityDrift, &driftBaselineBytes,
 		&networkAccessBytes,
 		&n.DownloadArtifactDirOverride, &n.DownloadArtifactMaxBytesOverride,
+		&n.DrainRequested, &n.DrainState,
 	)
 	if err != nil {
 		return nil, err
@@ -604,7 +615,8 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 			last_stats = CASE WHEN `+sameURL+` THEN last_stats END,
 			capability_drift = CASE WHEN `+sameURL+` THEN capability_drift END,
 			capability_drift_baseline = CASE WHEN `+sameURL+` THEN capability_drift_baseline END,
-			network_access = CASE WHEN `+sameURL+` THEN network_access ELSE '{}'::jsonb END
+			network_access = CASE WHEN `+sameURL+` THEN network_access ELSE '{}'::jsonb END,
+			drain_state = CASE WHEN `+sameURL+` THEN drain_state ELSE 'none' END
 		 WHERE id = $1
 		 RETURNING `+nodeColumns,
 		id, input.Name, input.URL, input.Enabled,
@@ -653,14 +665,28 @@ func (r *Repository) Delete(ctx context.Context, id int) error {
 // admission reads, so one worker's disk reading landing on a row that now
 // addresses another can exclude a healthy node or admit a full one.
 func (r *Repository) UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) error {
+	return r.updateHealth(ctx, id, checkedURL, healthy, activeJobs, egressKbps, lastStats, networkAccess, nil)
+}
+
+// UpdateHealthReport persists one health check's full result, the node's drain
+// state included. It is UpdateHealth for callers that read the whole report.
+func (r *Repository) UpdateHealthReport(ctx context.Context, id int, checkedURL string, report HealthReport) error {
+	drainState := string(report.DrainState.normalized())
+	return r.updateHealth(ctx, id, checkedURL, report.Healthy, report.ActiveJobs, report.EgressKbps, report.LastStats, report.NetworkAccess, &drainState)
+}
+
+// updateHealth writes a health result. A nil drainState leaves the stored
+// drain state as it is.
+func (r *Repository) updateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, drainState *string) error {
 	networkAccessJSON, err := marshalNetworkAccess(networkAccess)
 	if err != nil {
 		return fmt.Errorf("update node health: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE stream_nodes SET healthy = $2, active_jobs = $3, egress_kbps = $4, last_stats = $5, network_access = $7, last_health_check = NOW()
+		`UPDATE stream_nodes SET healthy = $2, active_jobs = $3, egress_kbps = $4, last_stats = $5, network_access = $7,
+		        drain_state = COALESCE($8, drain_state), last_health_check = NOW()
 		 WHERE id = $1 AND rtrim(url, '/') = rtrim($6, '/')`,
-		id, healthy, activeJobs, egressKbps, lastStats, checkedURL, networkAccessJSON)
+		id, healthy, activeJobs, egressKbps, lastStats, checkedURL, networkAccessJSON, drainState)
 	if err != nil {
 		return fmt.Errorf("update node health: %w", err)
 	}

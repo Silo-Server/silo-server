@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -33,7 +34,7 @@ const (
 	// remoteOverhead covers the transfer and the node's own start on top of
 	// a request's attempt timeouts.
 	remoteOverhead = 30 * time.Second
-	// Generation caps chunks at 64 million pixels, including the initial
+	// Generation caps chunks at 32 million pixels, including the initial
 	// geometry sample. This also fits the base64 form of uncompressible JPEGs.
 	maxRemoteResultBytes = 512 << 20
 )
@@ -129,7 +130,9 @@ func trickplayNodeEligible(node *nodepool.Node) bool {
 }
 
 // makesTrickplay reports whether a node's capability report advertises the
-// trickplay endpoint.
+// trickplay endpoint at the version this server's requests need: one that
+// reads the tone-map source signal, which an older node would ignore and
+// convert with the best-effort chains.
 func makesTrickplay(report []byte) bool {
 	var capabilities struct {
 		TransportFeatures []string `json:"transport_features"`
@@ -137,7 +140,7 @@ func makesTrickplay(report []byte) bool {
 	if len(report) == 0 || json.Unmarshal(report, &capabilities) != nil {
 		return false
 	}
-	return slices.Contains(capabilities.TransportFeatures, playback.TransportFeatureTrickplayExtractV1)
+	return slices.Contains(capabilities.TransportFeatures, playback.TransportFeatureTrickplayExtractV2)
 }
 
 // remote runs req on node. The node decides whether its hardware can decode,
@@ -159,7 +162,9 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+secret)
+	if err := nodeauth.Sign(httpReq, node.URL, secret); err != nil {
+		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
+	}
 	resp, err := telemetry.DoTrustedNode(e.client, httpReq, "trickplay_extract")
 	if err != nil {
 		// A node that dies mid-request is unavailable, not a failure of the file.

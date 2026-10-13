@@ -116,6 +116,35 @@ func integrationScenarios() []scenario {
 			}},
 		},
 		{
+			name: "NFO edited in place",
+			setup: func(t *testing.T, e scenarioEnv) {
+				mkdirs(t, e.root, "Movie N")
+				writeFile(t, e.in("Movie N", "Movie N.mkv"), "data")
+				writeFile(t, e.in("Movie N", "movie.nfo"), "<movie><title>v1</title></movie>")
+			},
+			steps: []scenarioStep{{
+				act: func(t *testing.T, e scenarioEnv) {
+					writeFile(t, e.in("Movie N", "movie.nfo"), "<movie><title>v2</title></movie>")
+				},
+				want: func(e scenarioEnv) []string { return []string{e.subtree("Movie N")} },
+			}},
+		},
+		{
+			name: "poster replaced by a rename",
+			setup: func(t *testing.T, e scenarioEnv) {
+				mkdirs(t, e.root, "Movie P")
+				writeFile(t, e.in("Movie P", "Movie P.mkv"), "data")
+				writeFile(t, e.in("Movie P", "poster.jpg"), "old")
+			},
+			steps: []scenarioStep{{
+				act: func(t *testing.T, e scenarioEnv) {
+					writeFile(t, e.in("Movie P", "poster.jpg.part"), "new")
+					mustRename(t, e.in("Movie P", "poster.jpg.part"), e.in("Movie P", "poster.jpg"))
+				},
+				want: func(e scenarioEnv) []string { return []string{e.subtree("Movie P")} },
+			}},
+		},
+		{
 			name: "file moved in",
 			setup: func(t *testing.T, e scenarioEnv) {
 				mkdirs(t, e.root, "Movie C")

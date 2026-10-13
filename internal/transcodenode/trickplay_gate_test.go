@@ -19,7 +19,7 @@ func TestTrickplayRejectsReprobeBeforeResolvingHardware(t *testing.T) {
 		t.Fatal("could not start reprobe")
 	}
 	defer server.gpu.endReprobe()
-	rec := postTrickplay(server, sheetsRequestJSON(t, filepath.Join(t.TempDir(), "missing.mkv")))
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, filepath.Join(t.TempDir(), "missing.mkv")))
 	if calls != 0 {
 		t.Fatalf("hardware resolved %d times during reprobe", calls)
 	}
@@ -47,7 +47,7 @@ func TestTrickplayResolutionHoldsAndReleasesGPUAdmission(t *testing.T) {
 		}
 		return "none"
 	}
-	rec := postTrickplay(server, sheetsRequestJSON(t, filepath.Join(t.TempDir(), "missing.mkv")))
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, filepath.Join(t.TempDir(), "missing.mkv")))
 	if calls != 1 || rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("calls=%d response=%d %s", calls, rec.Code, rec.Body.String())
 	}

@@ -102,6 +102,8 @@ type baseItemDTO struct {
 	ParentBackdropItemID     string                                 `json:"ParentBackdropItemId,omitempty"`
 	ParentThumbImageTag      string                                 `json:"ParentThumbImageTag,omitempty"`
 	ParentThumbItemID        string                                 `json:"ParentThumbItemId,omitempty"`
+	ParentLogoItemID         string                                 `json:"ParentLogoItemId,omitempty"`
+	ParentLogoImageTag       string                                 `json:"ParentLogoImageTag,omitempty"`
 	ParentPrimaryImageItemID string                                 `json:"ParentPrimaryImageItemId,omitempty"`
 	ParentPrimaryImageTag    string                                 `json:"ParentPrimaryImageTag,omitempty"`
 	ParentID                 string                                 `json:"ParentId,omitempty"`
