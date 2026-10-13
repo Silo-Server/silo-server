@@ -1,9 +1,33 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestEpisodeCatalogEntryDateOrder(t *testing.T) {
+	for _, field := range []string{"release_date", "last_air_date"} {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(field+"/"+order, func(t *testing.T) {
+				direction := strings.ToUpper(order)
+				want := fmt.Sprintf("ORDER BY ece.episode_air_date %[1]s NULLS LAST, LOWER(COALESCE(NULLIF(BTRIM(sort_series.sort_title), ''), sort_series.title)) ASC, ece.series_id ASC, sort_episode.season_number %[1]s, sort_episode.episode_number %[1]s, ece.episode_id ASC", direction)
+				actual, ok := episodeCatalogEntryOrderBy(QuerySort{Field: field, Order: order})
+				if !ok || actual != want {
+					t.Fatalf("order = %q (%v), want %q", actual, ok, want)
+				}
+				join := episodeCatalogEntrySortJoin(field)
+				if !strings.Contains(join, "JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id") ||
+					!strings.Contains(join, "JOIN media_items sort_series ON sort_series.content_id = ece.series_id") {
+					t.Fatalf("date sorting must join the episode numbers and series title, got %q", join)
+				}
+			})
+		}
+	}
+	if episodeCatalogEntrySortJoin("title") != "" {
+		t.Fatal("title sort must not join episodes")
+	}
+}
 
 func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.T) {
 	var whereParts []string

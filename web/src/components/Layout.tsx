@@ -42,6 +42,7 @@ import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -95,12 +96,19 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  const showAdminActivity = useIsActingAdmin();
+  const criticalContentLoaded = useCriticalContentLoaded();
+  // The indicator's four requests wait for Home's first rows (see startupPriority).
+  const showAdminActivity = useIsActingAdmin() && criticalContentLoaded;
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   const isHomePath = location.pathname === "/";
+  // Only Home marks its own first content; every other page releases the
+  // deferred widgets as soon as it mounts.
+  useEffect(() => {
+    if (!isHomePath) markCriticalContentLoaded();
+  }, [isHomePath]);
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");
@@ -392,6 +400,7 @@ export default function Layout({ children }: LayoutProps) {
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
+          data-sticky-header
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}

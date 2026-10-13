@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -37,28 +40,30 @@ func reprobeRequest(t *testing.T) *http.Request {
 }
 
 // fakeNodeServer answers the node-side re-probe route with the given status and
-// body, recording the bearer token it was given.
-func fakeNodeServer(t *testing.T, status int, body string) (url string, authorization *string) {
+// body. signedWith reports whether the request it saw was signed with secret.
+func fakeNodeServer(t *testing.T, status int, body string) (url string, signedWith func(secret string) bool) {
 	t.Helper()
-	seen := ""
+	var seen *http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/admin/reprobe-capabilities" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		seen = r.Header.Get("Authorization")
+		requestBody, _ := io.ReadAll(r.Body)
+		seen = r.Clone(context.WithoutCancel(r.Context()))
+		seen.Body = io.NopCloser(bytes.NewReader(requestBody))
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(server.Close)
-	return server.URL, &seen
+	return server.URL, func(secret string) bool { return seen != nil && nodeauthtest.Signed(seen, secret) }
 }
 
 // The point of the API-side action is that the operator does not have to wait a
 // sweep interval: the node re-probes, and this server immediately refetches and
 // stores the report so the list, the pools, and the planner agree with it.
 func TestHandleReprobeNodeRefreshesStoredCapabilities(t *testing.T) {
-	url, authorization := fakeNodeServer(t, http.StatusOK,
+	url, signedWith := fakeNodeServer(t, http.StatusOK,
 		`{"resolved":"qsv","capability_hash":"sha256:new"}`)
 	repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: url}}
 	refresher := &stubCapabilityRefresher{}
@@ -87,8 +92,8 @@ func TestHandleReprobeNodeRefreshesStoredCapabilities(t *testing.T) {
 	if got := refresher.calls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want exactly one", got)
 	}
-	if *authorization != "Bearer secret" {
-		t.Fatalf("node saw authorization %q, want the bearer secret", *authorization)
+	if !signedWith("secret") {
+		t.Fatal("node request was not signed with the shared secret")
 	}
 }
 

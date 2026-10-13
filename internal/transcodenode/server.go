@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -306,6 +307,21 @@ type Server struct {
 	// retry must revisit them even if the watcher has already adopted a new URL.
 	pendingAuthorityRevocations []string
 	activeJobs                  atomic.Int32
+	// inFlight counts requests for work activeJobs does not count; see
+	// trackInFlight.
+	inFlight atomic.Int32
+	// shutdownDrain is set by SIGTERM: from then on the node takes no new work
+	// while its sessions finish. See draining.
+	shutdownDrain atomic.Bool
+	// drainAnnouncer tells the API servers the node started or stopped
+	// draining; see SetDrainAnnouncer.
+	drainAnnouncer atomic.Pointer[func()]
+	// drainWatch is set while announceWhenDrained runs.
+	drainWatch atomic.Bool
+	// drainedReported latches a drained health answer; drainFence orders it
+	// against work admission. See healthStatus.
+	drainFence      sync.Mutex
+	drainedReported atomic.Bool
 	// trickplay admits one trickplay run at a time.
 	trickplay trickplayWork
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
@@ -935,6 +951,7 @@ func (s *Server) router() chi.Router {
 
 // handleDownloadPrepare validates and starts a prepared-download job.
 func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	var req downloadprepare.Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -950,6 +967,10 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.PreparedTracksRequested() && !req.ValidPreparedTracks() {
 		http.Error(w, "invalid track recipe", http.StatusBadRequest)
+		return
+	}
+	if s.draining() {
+		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1176,6 +1197,7 @@ func (s *Server) sessionOutputDir(sessionID string) string {
 }
 
 func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	artifactID := chi.URLParam(r, "artifact_id")
 	if !downloadprepare.ValidArtifactID(artifactID) {
 		http.NotFound(w, r)
@@ -1276,7 +1298,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
-		Status:           "ok",
+		Status:           s.healthStatus(),
 		ActiveJobs:       s.activeJobs.Load(),
 		CapabilitiesHash: s.storedCapabilityHash(),
 		System:           snapshot.System,
@@ -1481,6 +1503,7 @@ func toneMapCapabilityResolveTimeout(hardwareBackend, hardwareDevice string) tim
 }
 
 func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	var req chapterthumbs.RemoteExtractRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeChapterThumbnailError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
@@ -1491,6 +1514,10 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
+		return
+	}
+	if s.draining() {
+		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", errNodeDraining)
 		return
 	}
 
@@ -1537,7 +1564,9 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	})
 }
 
-// requireBearer is middleware that checks for Authorization: Bearer {secret}.
+// requireBearer is middleware that admits only API servers and proxies: it
+// checks the request's node signature (see nodeauth). The name predates
+// signing and is kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1546,8 +1575,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.Auth.JWTSecret {
+		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1557,6 +1585,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 
 // handleStart validates and starts a remote HLS transcode.
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	var req TranscodeStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1580,6 +1609,15 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
+		return
+	}
+	// A draining node starts no new transcode, but it still replaces one it
+	// runs: a Jellyfin audio-track switch re-posts the same session id here,
+	// and refusing it would end the stream it is meant to keep alive. A start
+	// admitted just before the drain began is counted by inFlight and then
+	// activeJobs, so the drain waits for it like any other session.
+	if s.draining() && !s.hostsSession(req.SessionID) {
+		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
 	cfg := s.watcher.Config()
@@ -1831,7 +1869,7 @@ func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request
 // identity-only by design (see internal/noderecipe), and a header-authenticated
 // (tokenless) attempt, where no client-visible URL carries a credential and the
 // relayed request therefore has no token to forward. The token was never this
-// route's authorization — the static bearer already authenticated the caller —
+// route's authorization — the node signature already authenticated the caller —
 // so its absence only removes a recipe source, never a permission.
 //
 // Returns nil when no source yields a complete transcode recipe for the session
@@ -1930,6 +1968,7 @@ func recipeIsComplete(card playback.RecipeCard) bool {
 // single-flight in reconstructFromToken, so it is the sole writer racing to
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
 func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
+	defer s.trackInFlight()()
 	if s.inputPaths == nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct input authority unavailable", "component", "transcodenode", "session", sessionID)
 		return nil, nil
@@ -1983,7 +2022,10 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	s.reloadMu.RLock()
 	defer s.reloadMu.RUnlock()
-	if s.shuttingDown {
+	// A draining node that has reported itself drained rebuilds no lost
+	// session: whoever read that may stop it. The client's next plan puts the
+	// session on another node.
+	if s.shuttingDown || s.reportedDrained() {
 		return nil, nil
 	}
 	if s.watcher.Config() != cfg {
@@ -2190,10 +2232,11 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-// handleRemux executes a progressive remux on demand. The static bearer
+// handleRemux executes a progressive remux on demand. The node signature
 // authenticates the proxy process; the independently verified stream token
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
+	defer s.trackInFlight()()
 	cfg := s.watcher.Config()
 	if cfg == nil || cfg.Auth.JWTSecret == "" {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
@@ -2262,6 +2305,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if s.shuttingDown {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	// A draining node still serves its viewers' reconnects and seeks, which
+	// each arrive as a fresh GET, until it has reported itself drained.
+	if r.Method != http.MethodHead && s.reportedDrained() {
+		s.reloadMu.RUnlock()
+		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
 	if s.watcher.Config() != cfg {

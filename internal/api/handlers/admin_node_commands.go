@@ -15,6 +15,7 @@ type AdminNodeCheckView struct {
 	ActiveJobs       int
 	EgressKbps       int
 	CapabilitiesHash string
+	DrainState       nodepool.DrainState
 	HealthPersisted  bool
 }
 
@@ -29,14 +30,26 @@ func (h *NodeHandler) CheckAdminNode(ctx context.Context, id int) (AdminNodeChec
 	return h.checkNodeView(ctx, node), nil
 }
 func (h *NodeHandler) checkNodeView(ctx context.Context, node *nodepool.Node) AdminNodeCheckView {
-	healthy, jobs, egress, hash, stats, networkAccess := nodepool.CheckNode(ctx, node)
-	err := h.repo.UpdateHealth(ctx, node.ID, node.URL, healthy, jobs, egress, stats, networkAccess)
+	report := nodepool.CheckNodeReport(ctx, node)
+	var err error
+	if repo, ok := h.repo.(nodeHealthReportRepository); ok {
+		err = repo.UpdateHealthReport(ctx, node.ID, node.URL, report)
+	} else {
+		err = h.repo.UpdateHealth(ctx, node.ID, node.URL, report.Healthy, report.ActiveJobs, report.EgressKbps, report.LastStats, report.NetworkAccess)
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "persisting health check result", "component", "api", "node_id", node.ID, "error", err)
 	}
-	h.applyHealthToPools(node, healthy, jobs, egress, hash, stats, networkAccess)
-	return AdminNodeCheckView{Healthy: healthy, ActiveJobs: jobs, EgressKbps: egress, CapabilitiesHash: hash, HealthPersisted: err == nil}
+	h.applyHealthToPools(node, report)
+	return AdminNodeCheckView{Healthy: report.Healthy, ActiveJobs: report.ActiveJobs, EgressKbps: report.EgressKbps, CapabilitiesHash: report.CapabilitiesHash, DrainState: report.DrainState, HealthPersisted: err == nil}
 }
+
+// nodeHealthReportRepository persists a whole health report, the node's drain
+// state included. *nodepool.Repository implements it.
+type nodeHealthReportRepository interface {
+	UpdateHealthReport(ctx context.Context, id int, checkedURL string, report nodepool.HealthReport) error
+}
+
 func (h *NodeHandler) ReprobeAdminNode(w http.ResponseWriter, r *http.Request, id int) (ReprobeNodeResult, error) {
 	if h == nil || h.repo == nil {
 		return ReprobeNodeResult{}, ErrAdminNodesUnavailable

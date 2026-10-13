@@ -31,7 +31,7 @@ type WatchTogetherSocketV2 struct {
 }
 
 func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether.RoomSocketCredentialStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *WatchTogetherSocketV2 {
-	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: newSocketAuthorityValidator(sessions, users, resolver, primary), PublicOrigin: publicURL}
+	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: refuseRemotePlaybackSocket(newSocketAuthorityValidator(sessions, users, resolver, primary)), PublicOrigin: publicURL}
 }
 func (h *WatchTogetherSocketV2) available() bool {
 	return h != nil && h.Room != nil && h.Room.Service != nil && h.Room.TokenService != nil && h.Tickets != nil && h.Validate != nil

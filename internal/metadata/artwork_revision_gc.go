@@ -415,14 +415,24 @@ func (g *ArtworkRevisionGarbageCollector) finishPendingHeals(
 	return result, nil
 }
 
+// artworkReferenceUnionSQL selects the paths in pathsParameter that any sweep
+// surface references.
 func artworkReferenceUnionSQL(pathsParameter string) string {
 	surfaces := artworkSweepSurfaces()
 	parts := make([]string, 0, len(surfaces))
 	for _, surface := range surfaces {
-		parts = append(parts, fmt.Sprintf("SELECT %s AS path FROM %s WHERE %s = ANY(%s)",
-			surface.pathCol, surface.table, surface.pathCol, pathsParameter))
+		parts = append(parts, artworkReferenceSQL(surface, pathsParameter))
 	}
 	return strings.Join(parts, " UNION ALL ")
+}
+
+// artworkReferenceSQL selects the paths in pathsParameter that one surface
+// references. Excluding the empty string matches the partial indexes on columns
+// that hold it when empty and implies the IS NOT NULL predicate of the others,
+// so every surface can use its path index even under a generic plan.
+func artworkReferenceSQL(surface artworkSweepSurface, pathsParameter string) string {
+	return fmt.Sprintf("SELECT %s AS path FROM %s WHERE %s = ANY(%s) AND %s <> ''",
+		surface.pathCol, surface.table, surface.pathCol, pathsParameter, surface.pathCol)
 }
 
 // referencedPaths returns the subset of paths referenced by any catalog

@@ -1,11 +1,15 @@
 import {
+  type Dispatch,
   lazy,
   type ReactNode,
   type RefObject,
+  type SetStateAction,
+  startTransition,
   Suspense,
   useCallback,
   useEffect,
-  useMemo,
+  useId,
+  useImperativeHandle,
   useRef,
   useState,
 } from "react";
@@ -27,7 +31,6 @@ import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
@@ -63,7 +66,7 @@ import { useLongPress } from "@/hooks/useLongPress";
 import { cn } from "@/lib/utils";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
-import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { canCurateMetadata as canCurateMetadataForUser, isActingAdmin } from "@/lib/permissions";
 import {
   mediaItemMenuIconClassName,
   mediaItemMenuTriggerClassName,
@@ -757,60 +760,182 @@ export function MetadataActionDialogHost({
   );
 }
 
-export default function MediaItemMenu({
+type MenuEngineRequest =
+  | { kind: "action"; key: MediaItemMenuActionKey }
+  | { kind: "toggleWatched" }
+  | { kind: "toggleFavorite" };
+
+interface MenuEngineHandle {
+  run: (request: MenuEngineRequest) => void;
+}
+
+interface MenuPendingState {
+  watched: boolean;
+  favorite: boolean;
+  refresh: boolean;
+  any: boolean;
+}
+
+const IDLE_MENU_PENDING: MenuPendingState = {
+  watched: false,
+  favorite: false,
+  refresh: false,
+  any: false,
+};
+
+type MenuInteraction = "keyboard" | "pointer" | null;
+
+/**
+ * The Radix menu behind the three-dot trigger. It mounts the first time the
+ * trigger is focused or opened, so idle cards carry no menu root (each root
+ * installs document-level keyboard listeners). The visible trigger button
+ * stays owned by MediaItemMenu; Radix anchors to an inert span laid over it,
+ * so the button keeps its DOM identity, and with it focus, when this mounts.
+ */
+function MediaItemMenuDropdown({
+  open,
+  onOpenChange,
+  menuId,
+  triggerId,
+  model,
+  userState,
+  isPending,
+  isRefreshing,
+  onSelectAction,
+  triggerRef,
+  lastMenuInteractionRef,
+  pointerClosedMenuRef,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  menuId: string;
+  triggerId: string;
+  model: MediaItemMenuEntry[];
+  userState?: MediaItemUserState;
+  isPending: boolean;
+  isRefreshing: boolean;
+  onSelectAction: (actionKey: MediaItemMenuActionKey) => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  lastMenuInteractionRef: RefObject<MenuInteraction>;
+  pointerClosedMenuRef: RefObject<boolean>;
+}) {
+  const interactedOutsideRef = useRef(false);
+
+  return (
+    <DropdownMenu modal={false} open={open} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-0" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        id={menuId}
+        aria-labelledby={triggerId}
+        align="end"
+        className="w-max max-w-[calc(100vw-2rem)] min-w-0"
+        onPointerDownOutside={() => {
+          lastMenuInteractionRef.current = "pointer";
+        }}
+        onInteractOutside={() => {
+          interactedOutsideRef.current = true;
+        }}
+        onPointerDownCapture={() => {
+          lastMenuInteractionRef.current = "pointer";
+        }}
+        onKeyDownCapture={() => {
+          lastMenuInteractionRef.current = "keyboard";
+        }}
+        onEscapeKeyDown={() => {
+          // Radix handles Escape from a document listener, ahead of the
+          // capture handler above, and this controlled menu closes right away.
+          lastMenuInteractionRef.current = "keyboard";
+        }}
+        onCloseAutoFocus={(event) => {
+          // Radix would return focus to its own (inert) trigger; the visible
+          // button is ours, so mirror Radix's rule here: a pointer close drops
+          // focus so hover exit can hide the trigger, a close after an outside
+          // interaction leaves focus where the user put it, and anything else
+          // (Escape, selecting an item) returns focus to the trigger.
+          event.preventDefault();
+          if (pointerClosedMenuRef.current) {
+            triggerRef.current?.blur();
+          } else if (!interactedOutsideRef.current) {
+            triggerRef.current?.focus();
+          }
+          pointerClosedMenuRef.current = false;
+          interactedOutsideRef.current = false;
+        }}
+      >
+        {model.map((entry, index) => {
+          if (entry.kind === "separator") {
+            return <DropdownMenuSeparator key={`separator-${index}`} />;
+          }
+
+          return (
+            <DropdownMenuItem
+              key={entry.key}
+              disabled={isPending}
+              onSelect={() => onSelectAction(entry.key)}
+            >
+              <MediaItemMenuActionIcon
+                actionKey={entry.key}
+                userState={userState}
+                isRefreshing={isRefreshing}
+              />
+              {entry.label}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The card's action machinery: mutations, navigation, playback, the touch
+ * action sheet, and the dialogs. A home page holds hundreds of cards, so this
+ * mounts on a card's first hover, focus, context menu, long press, or action;
+ * requests made before it mounted are queued and run on mount.
+ */
+function MediaItemMenuEngine({
+  handleRef,
   contentId,
   mediaType,
   libraryId,
-  userState,
-  variant = "poster",
-  showCollectionActions = true,
-  showFavoriteShortcut = true,
   dismissAction,
-  hasPartialProgress = false,
-  showWatchedShortcut = false,
-  narrowPosterActions = false,
-  quickActionMode = "none",
-  longPressRef,
+  model,
+  currentUserState,
+  setCurrentUserState,
+  onPendingChange,
+  takeQueuedRequests,
+  actionSheetMounted,
+  actionSheetOpen,
+  onActionSheetOpenChange,
   itemTitle,
-}: MediaItemMenuProps) {
+}: {
+  handleRef: RefObject<MenuEngineHandle | null>;
+  contentId: string;
+  mediaType: MediaItemType;
+  libraryId?: number;
+  dismissAction?: DismissHomeItemVariables;
+  model: MediaItemMenuEntry[];
+  currentUserState?: MediaItemUserState;
+  setCurrentUserState: Dispatch<SetStateAction<MediaItemUserState | undefined>>;
+  onPendingChange: Dispatch<SetStateAction<MenuPendingState>>;
+  takeQueuedRequests: () => MenuEngineRequest[];
+  actionSheetMounted: boolean;
+  actionSheetOpen: boolean;
+  onActionSheetOpenChange: (open: boolean) => void;
+  itemTitle?: string;
+}) {
   const navigate = useViewTransitionNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
-  const user = useOptionalAuth()?.user;
-  const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
-  const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
-  const isAdmin = useIsActingAdmin();
-  const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
-  const { cardPresentation } = useUICustomization();
-  const hasFinePointer = useHasFinePointer();
-  const [currentUserState, setCurrentUserState] = useState(userState);
-  const lastSyncedUserStateRef = useRef(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [filesDialogOpen, setFilesDialogOpen] = useState(false);
   const [metadataAction, setMetadataAction] = useState<MetadataAction | null>(null);
-  const [actionSheetOpen, setActionSheetOpen] = useState(false);
-  // A card that has never opened one of these surfaces mounts nothing — a home
-  // page holds hundreds of cards. Once opened, the overlay stays mounted so
-  // closing runs its exit animation and restores focus instead of vanishing.
-  const [actionSheetMounted, setActionSheetMounted] = useState(false);
+  // Once opened, an overlay stays mounted so closing runs its exit animation
+  // and restores focus instead of vanishing.
   const [refreshDialogMounted, setRefreshDialogMounted] = useState(false);
   const [filesDialogMounted, setFilesDialogMounted] = useState(false);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const lastMenuInteractionRef = useRef<"keyboard" | "pointer" | null>(null);
-  const pointerClosedMenuRef = useRef(false);
-
-  useEffect(() => {
-    const lastSynced = lastSyncedUserStateRef.current;
-    if (
-      lastSynced?.played === userState?.played &&
-      lastSynced?.is_favorite === userState?.is_favorite &&
-      lastSynced?.in_watchlist === userState?.in_watchlist
-    ) {
-      return;
-    }
-    lastSyncedUserStateRef.current = userState;
-    setCurrentUserState(userState);
-  }, [userState]);
 
   const watchedMutation = useWatchedStateMutation({
     content_id: contentId,
@@ -821,64 +946,7 @@ export default function MediaItemMenu({
   const watchlistMutation = useToggleWatchlist(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
-  const dismissLabel =
-    dismissAction?.surface === "continue_watching"
-      ? mediaType === "audiobook"
-        ? "Remove from Continue Listening"
-        : mediaType === "ebook"
-          ? "Remove from Continue Reading"
-          : "Remove from Continue Watching"
-      : dismissAction?.surface === "next_up"
-        ? "Remove from Next Up"
-        : undefined;
-  const currentHref = useMemo(
-    () => `${location.pathname}${location.search}`,
-    [location.pathname, location.search],
-  );
-
-  const model = buildMediaItemMenuModel({
-    mediaType,
-    userState: currentUserState,
-    hasPartialProgress,
-    isAdmin,
-    canCurateMetadata,
-    showCollectionActions,
-    dismissLabel,
-  });
-  const offersMetadataDialogs = model.some(
-    (entry) =>
-      entry.kind === "action" && (entry.key === "editMetadata" || entry.key === "matchItem"),
-  );
-  useLongPress(longPressRef, {
-    onLongPress: () => {
-      if (offersMetadataDialogs) prefetchMetadataDialogs();
-      setActionSheetMounted(true);
-      setActionSheetOpen(true);
-    },
-    enabled: model.length > 0,
-  });
-  const showPosterFavorite =
-    hasFinePointer &&
-    variant === "poster" &&
-    showFavoriteShortcut &&
-    showsFavoriteQuickAction(quickActionMode) &&
-    model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
-  const hasWatchedAction = model.some(
-    (entry) => entry.kind === "action" && entry.key === "toggleWatched",
-  );
-  const rootPosterSupportsWatchedShortcut =
-    variant === "poster" && (mediaType === "movie" || mediaType === "series");
-  const showWatchedQuickAction =
-    hasFinePointer &&
-    showsWatchedQuickAction(quickActionMode) &&
-    hasWatchedAction &&
-    (rootPosterSupportsWatchedShortcut || showWatchedShortcut);
-  const posterActionDensity: PosterActionDensity =
-    variant === "poster" && narrowPosterActions
-      ? "narrow"
-      : variant === "poster" && cardPresentation.poster_size === "compact"
-        ? "compact"
-        : "standard";
+  const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
     watchedMutation.isPending ||
@@ -886,8 +954,25 @@ export default function MediaItemMenu({
     watchlistMutation.isPending ||
     refreshMetadataMutation.isPending ||
     dismissHomeItemMutation.isPending;
+  const watchedPending = watchedMutation.isPending;
+  const favoritePending = favoriteMutation.isPending;
+  const refreshPending = refreshMetadataMutation.isPending;
 
-  const triggerClassName = mediaItemMenuTriggerClassName(variant, posterActionDensity);
+  useEffect(() => {
+    onPendingChange((previous) =>
+      previous.watched === watchedPending &&
+      previous.favorite === favoritePending &&
+      previous.refresh === refreshPending &&
+      previous.any === isPending
+        ? previous
+        : {
+            watched: watchedPending,
+            favorite: favoritePending,
+            refresh: refreshPending,
+            any: isPending,
+          },
+    );
+  }, [favoritePending, isPending, onPendingChange, refreshPending, watchedPending]);
 
   async function runOptimisticToggle(
     field: "played" | "is_favorite",
@@ -982,6 +1067,28 @@ export default function MediaItemMenu({
     }
   }
 
+  function run(request: MenuEngineRequest) {
+    switch (request.kind) {
+      case "toggleWatched":
+        void handleWatchedToggle();
+        return;
+      case "toggleFavorite":
+        void handleFavoriteToggle();
+        return;
+      case "action":
+        void handleAction(request.key);
+        return;
+    }
+  }
+
+  useImperativeHandle(handleRef, () => ({ run }));
+
+  // The handle is attached during the layout phase, before this runs.
+  useEffect(() => {
+    const queued = takeQueuedRequests();
+    queued.forEach((request) => handleRef.current?.run(request));
+  }, [handleRef, takeQueuedRequests]);
+
   function handleRefreshConfirm(mode: "quick" | "complete") {
     setRefreshDialogOpen(false);
     refreshMetadataMutation.mutate({ item: { content_id: contentId, type: mediaType }, mode });
@@ -989,153 +1096,17 @@ export default function MediaItemMenu({
 
   return (
     <>
-      {(showWatchedQuickAction || showPosterFavorite) && currentUserState && (
-        <div
-          className={cn(
-            "absolute z-20 flex items-center",
-            variant === "wide"
-              ? "bottom-3 left-3 gap-1.5"
-              : posterActionDensity === "narrow"
-                ? "bottom-1.5 left-1.5 gap-0.5"
-                : posterActionDensity === "compact"
-                  ? "bottom-1.5 left-1.5 gap-0.5 sm:bottom-2 sm:left-2 sm:gap-1"
-                  : "bottom-1.5 left-1.5 gap-0.5 sm:bottom-2.5 sm:left-2.5 sm:gap-1.5",
-          )}
-          onClick={stopMenuEvent}
-          onPointerDown={stopMenuEvent}
-        >
-          {showWatchedQuickAction && (
-            <WatchedQuickActionButton
-              mediaType={mediaType}
-              isWatched={currentUserState.played}
-              isPending={watchedMutation.isPending}
-              variant={variant}
-              density={posterActionDensity}
-              onToggle={() => {
-                void handleWatchedToggle();
-              }}
-            />
-          )}
-          {showPosterFavorite && (
-            <PosterCardFavoriteButton
-              isFavorite={currentUserState.is_favorite}
-              isPending={favoriteMutation.isPending}
-              density={posterActionDensity}
-              onToggle={() => {
-                void handleFavoriteToggle();
-              }}
-            />
-          )}
-        </div>
-      )}
-      <div
-        className={cn(
-          "absolute z-20",
-          variant === "wide"
-            ? "right-3 bottom-3"
-            : posterActionDensity === "narrow"
-              ? "right-1.5 bottom-1.5"
-              : posterActionDensity === "compact"
-                ? "right-1.5 bottom-1.5 sm:right-2 sm:bottom-2"
-                : "right-1.5 bottom-1.5 sm:right-2.5 sm:bottom-2.5",
-        )}
-        onClick={stopMenuEvent}
-        onPointerDown={stopMenuEvent}
-      >
-        {model.length === 0 ? (
-          <button type="button" aria-label="More actions" disabled className={triggerClassName}>
-            <MoreVertical className={mediaItemMenuIconClassName(variant, posterActionDensity)} />
-          </button>
-        ) : (
-          <DropdownMenu
-            modal={false}
-            onOpenChange={(open) => {
-              if (open) {
-                if (offersMetadataDialogs) prefetchMetadataDialogs();
-                pointerClosedMenuRef.current = false;
-                lastMenuInteractionRef.current = null;
-                return;
-              }
-
-              pointerClosedMenuRef.current = lastMenuInteractionRef.current === "pointer";
-              lastMenuInteractionRef.current = null;
-            }}
-          >
-            <DropdownMenuTrigger asChild>
-              <button
-                ref={menuTriggerRef}
-                type="button"
-                aria-label="More actions"
-                className={triggerClassName}
-                onPointerDown={() => {
-                  lastMenuInteractionRef.current = "pointer";
-                }}
-                onKeyDown={() => {
-                  lastMenuInteractionRef.current = "keyboard";
-                }}
-              >
-                <MoreVertical
-                  className={mediaItemMenuIconClassName(variant, posterActionDensity)}
-                />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-max max-w-[calc(100vw-2rem)] min-w-0"
-              onPointerDownOutside={() => {
-                lastMenuInteractionRef.current = "pointer";
-              }}
-              onPointerDownCapture={() => {
-                lastMenuInteractionRef.current = "pointer";
-              }}
-              onKeyDownCapture={() => {
-                lastMenuInteractionRef.current = "keyboard";
-              }}
-              onCloseAutoFocus={(event) => {
-                if (pointerClosedMenuRef.current) {
-                  event.preventDefault();
-                  menuTriggerRef.current?.blur();
-                }
-                pointerClosedMenuRef.current = false;
-              }}
-            >
-              {model.map((entry, index) => {
-                if (entry.kind === "separator") {
-                  return <DropdownMenuSeparator key={`separator-${index}`} />;
-                }
-
-                return (
-                  <DropdownMenuItem
-                    key={entry.key}
-                    disabled={isPending}
-                    onSelect={() => {
-                      void handleAction(entry.key);
-                    }}
-                  >
-                    <MediaItemMenuActionIcon
-                      actionKey={entry.key}
-                      userState={currentUserState}
-                      isRefreshing={refreshMetadataMutation.isPending}
-                    />
-                    {entry.label}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
       {actionSheetMounted && (
         <MediaItemActionSheet
           open={actionSheetOpen}
-          onOpenChange={setActionSheetOpen}
+          onOpenChange={onActionSheetOpenChange}
           title={itemTitle}
           entries={model}
           userState={currentUserState}
           isPending={isPending}
           isRefreshing={refreshMetadataMutation.isPending}
           onSelectAction={(actionKey) => {
-            setActionSheetOpen(false);
+            onActionSheetOpenChange(false);
             void handleAction(actionKey);
           }}
         />
@@ -1161,6 +1132,325 @@ export default function MediaItemMenu({
           contentId={contentId}
           open={filesDialogOpen}
           onOpenChange={setFilesDialogOpen}
+        />
+      )}
+    </>
+  );
+}
+
+export default function MediaItemMenu({
+  contentId,
+  mediaType,
+  libraryId,
+  userState,
+  variant = "poster",
+  showCollectionActions = true,
+  showFavoriteShortcut = true,
+  dismissAction,
+  hasPartialProgress = false,
+  showWatchedShortcut = false,
+  narrowPosterActions = false,
+  quickActionMode = "none",
+  longPressRef,
+  itemTitle,
+}: MediaItemMenuProps) {
+  const user = useOptionalAuth()?.user;
+  const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
+  const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
+  // useIsActingAdmin's policy, read from this card's single profile lookup:
+  // fail closed while a selected profile is still resolving.
+  const isAdmin = profileIsResolved && isActingAdmin(user, currentProfile);
+  const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
+  const { cardPresentation } = useUICustomization();
+  const hasFinePointer = useHasFinePointer();
+  const [currentUserState, setCurrentUserState] = useState(userState);
+  const lastSyncedUserStateRef = useRef(userState);
+  // A card that has never been hovered, focused, or used mounts none of the
+  // action machinery — a home page holds hundreds of cards.
+  const [engineMounted, setEngineMounted] = useState(false);
+  const [dropdownMounted, setDropdownMounted] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [actionSheetMounted, setActionSheetMounted] = useState(false);
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
+  const [pending, setPending] = useState(IDLE_MENU_PENDING);
+  const engineRef = useRef<MenuEngineHandle | null>(null);
+  const queuedRequestsRef = useRef<MenuEngineRequest[]>([]);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuOpenRef = useRef(false);
+  const lastMenuInteractionRef = useRef<MenuInteraction>(null);
+  const pointerClosedMenuRef = useRef(false);
+  const pointerPressRef = useRef(false);
+  const menuBaseId = useId();
+  const triggerId = `${menuBaseId}-trigger`;
+  const menuId = `${menuBaseId}-menu`;
+
+  useEffect(() => {
+    const lastSynced = lastSyncedUserStateRef.current;
+    if (
+      lastSynced?.played === userState?.played &&
+      lastSynced?.is_favorite === userState?.is_favorite &&
+      lastSynced?.in_watchlist === userState?.in_watchlist
+    ) {
+      return;
+    }
+    lastSyncedUserStateRef.current = userState;
+    setCurrentUserState(userState);
+  }, [userState]);
+
+  const dismissLabel =
+    dismissAction?.surface === "continue_watching"
+      ? mediaType === "audiobook"
+        ? "Remove from Continue Listening"
+        : mediaType === "ebook"
+          ? "Remove from Continue Reading"
+          : "Remove from Continue Watching"
+      : dismissAction?.surface === "next_up"
+        ? "Remove from Next Up"
+        : undefined;
+
+  const model = buildMediaItemMenuModel({
+    mediaType,
+    userState: currentUserState,
+    hasPartialProgress,
+    isAdmin,
+    canCurateMetadata,
+    showCollectionActions,
+    dismissLabel,
+  });
+  const offersMetadataDialogs = model.some(
+    (entry) =>
+      entry.kind === "action" && (entry.key === "editMetadata" || entry.key === "matchItem"),
+  );
+
+  const takeQueuedRequests = useCallback(() => {
+    const queued = queuedRequestsRef.current;
+    queuedRequestsRef.current = [];
+    return queued;
+  }, []);
+
+  function requestEngine(request: MenuEngineRequest) {
+    const engine = engineRef.current;
+    if (engine) {
+      engine.run(request);
+      return;
+    }
+    queuedRequestsRef.current.push(request);
+    setEngineMounted(true);
+  }
+
+  function warmUp({ dropdown = false, deferred = false } = {}) {
+    if (engineMounted && (!dropdown || dropdownMounted)) return;
+    const mount = () => {
+      setEngineMounted(true);
+      if (dropdown && model.length > 0) setDropdownMounted(true);
+    };
+    if (deferred) {
+      startTransition(mount);
+    } else {
+      mount();
+    }
+  }
+
+  function changeMenuOpen(open: boolean) {
+    if (menuOpenRef.current === open) return;
+    menuOpenRef.current = open;
+    if (open) {
+      if (offersMetadataDialogs) prefetchMetadataDialogs();
+      pointerClosedMenuRef.current = false;
+      lastMenuInteractionRef.current = null;
+      setEngineMounted(true);
+      setDropdownMounted(true);
+    } else {
+      pointerClosedMenuRef.current = lastMenuInteractionRef.current === "pointer";
+      lastMenuInteractionRef.current = null;
+    }
+    setMenuOpen(open);
+  }
+
+  useLongPress(longPressRef, {
+    onLongPress: () => {
+      if (offersMetadataDialogs) prefetchMetadataDialogs();
+      setEngineMounted(true);
+      setActionSheetMounted(true);
+      setActionSheetOpen(true);
+    },
+    enabled: model.length > 0,
+  });
+  const showPosterFavorite =
+    hasFinePointer &&
+    variant === "poster" &&
+    showFavoriteShortcut &&
+    showsFavoriteQuickAction(quickActionMode) &&
+    model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
+  const hasWatchedAction = model.some(
+    (entry) => entry.kind === "action" && entry.key === "toggleWatched",
+  );
+  const rootPosterSupportsWatchedShortcut =
+    variant === "poster" && (mediaType === "movie" || mediaType === "series");
+  const showWatchedQuickAction =
+    hasFinePointer &&
+    showsWatchedQuickAction(quickActionMode) &&
+    hasWatchedAction &&
+    (rootPosterSupportsWatchedShortcut || showWatchedShortcut);
+  const posterActionDensity: PosterActionDensity =
+    variant === "poster" && narrowPosterActions
+      ? "narrow"
+      : variant === "poster" && cardPresentation.poster_size === "compact"
+        ? "compact"
+        : "standard";
+
+  const triggerClassName = mediaItemMenuTriggerClassName(variant, posterActionDensity);
+  // Hovering or focusing the controls mounts the machinery ahead of the first
+  // press. A press that beats it still works: requests queue until it mounts.
+  const warmUpHandlers = (dropdown: boolean) => ({
+    onPointerEnter: (event: React.PointerEvent) => {
+      if (event.pointerType === "mouse") warmUp({ dropdown, deferred: true });
+    },
+    onFocus: () => warmUp({ dropdown }),
+    onContextMenu: () => warmUp({ dropdown }),
+  });
+
+  return (
+    <>
+      {(showWatchedQuickAction || showPosterFavorite) && currentUserState && (
+        <div
+          className={cn(
+            "absolute z-20 flex items-center",
+            variant === "wide"
+              ? "bottom-3 left-3 gap-1.5"
+              : posterActionDensity === "narrow"
+                ? "bottom-1.5 left-1.5 gap-0.5"
+                : posterActionDensity === "compact"
+                  ? "bottom-1.5 left-1.5 gap-0.5 sm:bottom-2 sm:left-2 sm:gap-1"
+                  : "bottom-1.5 left-1.5 gap-0.5 sm:bottom-2.5 sm:left-2.5 sm:gap-1.5",
+          )}
+          onClick={stopMenuEvent}
+          onPointerDown={stopMenuEvent}
+          {...warmUpHandlers(false)}
+        >
+          {showWatchedQuickAction && (
+            <WatchedQuickActionButton
+              mediaType={mediaType}
+              isWatched={currentUserState.played}
+              isPending={pending.watched}
+              variant={variant}
+              density={posterActionDensity}
+              onToggle={() => requestEngine({ kind: "toggleWatched" })}
+            />
+          )}
+          {showPosterFavorite && (
+            <PosterCardFavoriteButton
+              isFavorite={currentUserState.is_favorite}
+              isPending={pending.favorite}
+              density={posterActionDensity}
+              onToggle={() => requestEngine({ kind: "toggleFavorite" })}
+            />
+          )}
+        </div>
+      )}
+      <div
+        className={cn(
+          "absolute z-20",
+          variant === "wide"
+            ? "right-3 bottom-3"
+            : posterActionDensity === "narrow"
+              ? "right-1.5 bottom-1.5"
+              : posterActionDensity === "compact"
+                ? "right-1.5 bottom-1.5 sm:right-2 sm:bottom-2"
+                : "right-1.5 bottom-1.5 sm:right-2.5 sm:bottom-2.5",
+        )}
+        onClick={stopMenuEvent}
+        onPointerDown={stopMenuEvent}
+        {...warmUpHandlers(true)}
+      >
+        {model.length === 0 ? (
+          <button type="button" aria-label="More actions" disabled className={triggerClassName}>
+            <MoreVertical className={mediaItemMenuIconClassName(variant, posterActionDensity)} />
+          </button>
+        ) : (
+          <button
+            ref={menuTriggerRef}
+            id={triggerId}
+            type="button"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? menuId : undefined}
+            data-state={menuOpen ? "open" : "closed"}
+            className={triggerClassName}
+            onPointerDown={(event) => {
+              lastMenuInteractionRef.current = "pointer";
+              // Radix trigger semantics: only a plain primary press toggles.
+              if (event.button !== 0 || event.ctrlKey) return;
+              pointerPressRef.current = true;
+              changeMenuOpen(!menuOpenRef.current);
+            }}
+            onPointerCancel={() => {
+              pointerPressRef.current = false;
+            }}
+            onClick={(event) => {
+              // Screen readers and element.click() send a lone click. A click
+              // that follows a pointer press was already handled on
+              // pointerdown, and Enter/Space clicks are cancelled by the key
+              // handlers below.
+              const handledByPointer = pointerPressRef.current || event.detail > 0;
+              pointerPressRef.current = false;
+              if (handledByPointer) return;
+              lastMenuInteractionRef.current = "keyboard";
+              changeMenuOpen(!menuOpenRef.current);
+            }}
+            onKeyUp={(event) => {
+              // Space activates a button on keyup; keydown already toggled.
+              if (event.key === " ") event.preventDefault();
+            }}
+            onKeyDown={(event) => {
+              lastMenuInteractionRef.current = "keyboard";
+              if (event.key === "Enter" || event.key === " ") {
+                changeMenuOpen(!menuOpenRef.current);
+              } else if (event.key === "ArrowDown") {
+                changeMenuOpen(true);
+              } else {
+                return;
+              }
+              event.preventDefault();
+            }}
+          >
+            <MoreVertical className={mediaItemMenuIconClassName(variant, posterActionDensity)} />
+          </button>
+        )}
+        {dropdownMounted && model.length > 0 && (
+          <MediaItemMenuDropdown
+            open={menuOpen}
+            onOpenChange={changeMenuOpen}
+            menuId={menuId}
+            triggerId={triggerId}
+            model={model}
+            userState={currentUserState}
+            isPending={pending.any}
+            isRefreshing={pending.refresh}
+            onSelectAction={(actionKey) => requestEngine({ kind: "action", key: actionKey })}
+            triggerRef={menuTriggerRef}
+            lastMenuInteractionRef={lastMenuInteractionRef}
+            pointerClosedMenuRef={pointerClosedMenuRef}
+          />
+        )}
+      </div>
+      {engineMounted && (
+        <MediaItemMenuEngine
+          handleRef={engineRef}
+          contentId={contentId}
+          mediaType={mediaType}
+          libraryId={libraryId}
+          dismissAction={dismissAction}
+          model={model}
+          currentUserState={currentUserState}
+          setCurrentUserState={setCurrentUserState}
+          onPendingChange={setPending}
+          takeQueuedRequests={takeQueuedRequests}
+          actionSheetMounted={actionSheetMounted}
+          actionSheetOpen={actionSheetOpen}
+          onActionSheetOpenChange={setActionSheetOpen}
+          itemTitle={itemTitle}
         />
       )}
     </>

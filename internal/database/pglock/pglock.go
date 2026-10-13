@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -64,6 +65,45 @@ func TryAcquire(ctx context.Context, pool *pgxpool.Pool, key int64) (*Lock, bool
 	return &Lock{conn: conn, key: key}, true, nil
 }
 
+// minAcquireWait is the least time Acquire gives itself to get a pooled
+// connection, so a call with little or no wait left still gets an idle one.
+const minAcquireWait = 250 * time.Millisecond
+
+// Acquire takes advisory lock key, waiting up to wait in all for a pooled
+// connection (at least minAcquireWait) and for another session holding the
+// lock to release it; with no wait left it only tries the lock. It reports
+// acquired false (with a nil Lock and no error) when the wait runs out, or
+// when pool is nil. PostgreSQL enforces the lock wait, so a wait that runs out
+// leaves no session queued on the lock.
+//
+// The caller owns the returned Lock and must call Release exactly once.
+func Acquire(ctx context.Context, pool *pgxpool.Pool, key int64, wait time.Duration) (*Lock, bool, error) {
+	if pool == nil {
+		return nil, false, nil
+	}
+	deadline := time.Now().Add(wait)
+	acquireCtx, cancel := context.WithTimeout(ctx, max(wait, minAcquireWait))
+	defer cancel()
+	conn, err := pool.Acquire(acquireCtx)
+	if err != nil {
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("acquiring connection for advisory lock %d: %w", key, err)
+	}
+	locked, err := LockWithin(ctx, conn, key, time.Until(deadline))
+	if err != nil {
+		// PostgreSQL may have granted the lock just before the error.
+		_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+		return nil, false, fmt.Errorf("acquiring advisory lock %d: %w", key, err)
+	}
+	if !locked {
+		conn.Release()
+		return nil, false, nil
+	}
+	return &Lock{conn: conn, key: key}, true, nil
+}
+
 // lockNotAvailable is the SQLSTATE PostgreSQL reports when lock_timeout ends a
 // lock wait.
 const lockNotAvailable = "55P03"
@@ -88,7 +128,7 @@ func (l *Lock) AcquireAlso(ctx context.Context, key int64, wait time.Duration) (
 	if wait <= 0 {
 		err = l.conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&locked)
 	} else {
-		locked, err = lockWithin(ctx, l.conn, key, wait)
+		locked, err = LockWithin(ctx, l.conn, key, wait)
 	}
 	if err != nil {
 		conn := l.conn
@@ -102,10 +142,17 @@ func (l *Lock) AcquireAlso(ctx context.Context, key int64, wait time.Duration) (
 	return locked, nil
 }
 
-// lockWithin takes advisory lock key on conn, waiting up to wait. It reports
-// false with no error when the wait runs out. After any error the session's
-// lock state is unknown and conn must be closed, not reused.
-func lockWithin(ctx context.Context, conn *pgxpool.Conn, key int64, wait time.Duration) (bool, error) {
+// Session is a database session that can begin a transaction: a pooled
+// connection, or a connection of its own.
+type Session interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// LockWithin takes advisory lock key on conn's session, waiting up to wait
+// (at least a millisecond). It reports false with no error when the wait runs
+// out. After any error the session's lock state is unknown and conn must be
+// closed, not reused.
+func LockWithin(ctx context.Context, conn Session, key int64, wait time.Duration) (bool, error) {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return false, err

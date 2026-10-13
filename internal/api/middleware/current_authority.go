@@ -46,13 +46,18 @@ func (am *AuthMiddleware) RevalidateCurrent(ctx context.Context, bearer string, 
 			return ErrCurrentCredentialInvalid
 		}
 		// The bounded operations that recheck here do not depend on the
-		// account role, so only the session itself must still be active.
-		_, active, err := am.sessionValidator.ActiveSessionRole(ctx, current.SessionID)
+		// account role, so only the session itself must still be active,
+		// and a remote-playback session must still admit the operation.
+		authority, active, err := am.sessionValidator.ActiveSession(ctx, current.SessionID)
 		if err != nil {
 			return err
 		}
 		if !active {
 			return ErrCurrentCredentialInvalid
+		}
+		if authority.IsRemotePlayback() && (expected.ProfileID != authority.BoundProfileID ||
+			!remotePlaybackAllowsRoute(method, path)) {
+			return ErrCurrentCredentialForbidden
 		}
 	}
 	if am.apiKeyUserLoader == nil {

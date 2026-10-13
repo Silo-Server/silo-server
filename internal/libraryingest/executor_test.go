@@ -377,3 +377,70 @@ func TestReconcileSkippedRootsSubtreeKeepsRootsOutsideScope(t *testing.T) {
 		t.Fatalf("subtree reconcile removed out-of-scope root %q", outsideRoot)
 	}
 }
+
+// sidecarRecordingChecker records the local sidecar checks a scan asks for.
+type sidecarRecordingChecker struct {
+	mu         sync.Mutex
+	scopes     []string
+	listings   []scanner.SidecarListing
+	reapplied  []string
+	matched    *retryRecordingMatcher
+	afterMatch bool
+}
+
+func (c *sidecarRecordingChecker) CheckLocalSidecars(_ context.Context, _ int, scopePath string, listing scanner.SidecarListing) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scopes = append(c.scopes, scopePath)
+	c.listings = append(c.listings, listing)
+	if c.matched != nil {
+		c.afterMatch = c.matched.processAllCalls.Load() > 0
+	}
+	return c.reapplied, nil
+}
+
+func TestIngestChecksLocalSidecarsAfterMatchingVideoScopes(t *testing.T) {
+	listing := scanner.SidecarListing{"/library/Film": {"movie.nfo"}}
+	for _, tt := range []struct {
+		folderType string
+		wantCheck  bool
+	}{
+		{folderType: "movies", wantCheck: true},
+		{folderType: "series", wantCheck: true},
+		{folderType: "mixed", wantCheck: true},
+		{folderType: "ebooks", wantCheck: false},
+		{folderType: "audiobooks", wantCheck: false},
+	} {
+		t.Run(tt.folderType, func(t *testing.T) {
+			matcher := &retryRecordingMatcher{}
+			checker := &sidecarRecordingChecker{reapplied: []string{"movie-1", "movie-2"}, matched: matcher}
+			exec := &Executor{
+				scanner:       &settleStubScanner{result: &scanner.ScanResult{Sidecars: listing}},
+				matcher:       matcher,
+				localSidecars: checker,
+				now:           time.Now,
+			}
+			folder := &models.MediaFolder{ID: 5, Type: tt.folderType, Paths: []string{"/library"}}
+
+			result, err := exec.IngestSubtree(context.Background(), folder, "/library/Film")
+			if err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+			if !tt.wantCheck {
+				if len(checker.scopes) != 0 {
+					t.Fatalf("checked %v in a %s library", checker.scopes, tt.folderType)
+				}
+				return
+			}
+			if len(checker.scopes) != 1 || checker.scopes[0] != "/library/Film" || len(checker.listings[0]) != 1 {
+				t.Fatalf("checks = %v listings = %v, want the scanned scope with the scan's listing", checker.scopes, checker.listings)
+			}
+			if !checker.afterMatch {
+				t.Fatal("checked local sidecars before matching the scope")
+			}
+			if result.LocalMetadataReapplied != 2 || !shouldPublish(result) {
+				t.Fatalf("result = %+v, want the re-applied count reported and published", result)
+			}
+		})
+	}
+}

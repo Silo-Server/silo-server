@@ -2,124 +2,174 @@ package sections
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestDefaultHomeSectionsWithoutLibraries(t *testing.T) {
-	sections := DefaultHomeSections(nil)
-	// 1 continue-watching + 3 recipe-rich defaults (hidden_gems, trending, seasonal-auto-cycle)
-	if len(sections) != 4 {
-		t.Fatalf("expected 4 default home sections, got %d", len(sections))
-	}
-	if sections[0].SectionType != SectionContinueWatching {
-		t.Fatalf("expected continue watching, got %s", sections[0].SectionType)
-	}
-	assertContinueType(t, sections[0].Config, ContinueTypeWatching)
+// sharedHomeDefaultTail is every default home row after the library rows.
+var sharedHomeDefaultTail = []string{
+	"default-recommended-for-you",
+	"default-because-you-watched",
+	"default-returning-shows",
+	"default-trending-discover",
+	"default-top-rated",
+	"default-hidden-gems",
+	"default-seasonal",
 }
 
-func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
+func assertHomeSectionIDs(t *testing.T, got []*PageSection, want []string) {
+	t.Helper()
+	ids := make([]string, len(got))
+	for i, section := range got {
+		ids[i] = section.ID
+		if section.Position != i {
+			t.Errorf("section %q position = %d, want %d", section.ID, section.Position, i)
+		}
+		if section.Scope != "home" || section.LibraryID != nil {
+			t.Errorf("section %q scope = %q library = %v, want home with no library", section.ID, section.Scope, section.LibraryID)
+		}
+	}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("home section ids = %v, want %v", ids, want)
+	}
+}
+
+func TestDefaultHomeSectionsWithoutLibraries(t *testing.T) {
+	got := DefaultHomeSections(nil)
+	assertHomeSectionIDs(t, got, append([]string{"default-continue-watching", "default-recently-added"}, sharedHomeDefaultTail...))
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
+	for _, section := range got {
+		if section.ItemLimit != DefaultItemLimit {
+			t.Errorf("section %q limit = %d, want %d", section.ID, section.ItemLimit, DefaultItemLimit)
+		}
+	}
+}
+
+func TestDefaultHomeSectionsShareRecentlyAddedAcrossVideoLibraries(t *testing.T) {
 	libraries := []*models.MediaFolder{
 		{ID: 7, Name: "Movies", Type: "movies", SortOrder: 1},
 		{ID: 9, Name: "Shows", Type: "series", SortOrder: 2},
+		{ID: 11, Name: "Everything", Type: "mixed", SortOrder: 3},
 	}
 
 	got := DefaultHomeSections(libraries)
-	// 1 continue-watching + 2 libraries × 2 types + 3 recipe-rich defaults
-	if len(got) != 8 {
-		t.Fatalf("expected 8 default home sections, got %d", len(got))
-	}
+	assertHomeSectionIDs(t, got, append([]string{"default-continue-watching", "default-recently-added"}, sharedHomeDefaultTail...))
 
-	tests := []struct {
-		index       int
-		id          string
-		sectionType SectionType
-		title       string
-		position    int
-		libraryID   int
-	}{
-		{index: 0, id: "default-continue-watching", sectionType: SectionContinueWatching, title: "Continue Watching", position: 0},
-		{index: 1, id: "default-home-recently_added-library-7", sectionType: SectionRecentlyAdded, title: "Recently Added in Movies", position: 1, libraryID: 7},
-		{index: 2, id: "default-home-recently_released-library-7", sectionType: SectionRecentlyReleased, title: "Recently Released in Movies", position: 2, libraryID: 7},
-		{index: 3, id: "default-home-recently_added-library-9", sectionType: SectionRecentlyAdded, title: "Recently Added in Shows", position: 3, libraryID: 9},
-		{index: 4, id: "default-home-recently_released_episodes-library-9", sectionType: SectionCustomFilter, title: "Recently Released Episodes in Shows", position: 4, libraryID: 9},
+	recent := got[1]
+	if recent.SectionType != SectionRecentlyAdded || recent.Title != "Recently Added" {
+		t.Fatalf("shared row = %s %q, want recently_added \"Recently Added\"", recent.SectionType, recent.Title)
 	}
-
-	for _, tt := range tests {
-		section := got[tt.index]
-		if section.ID != tt.id {
-			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
-		}
-		if section.SectionType != tt.sectionType {
-			t.Fatalf("section %d type = %q, want %q", tt.index, section.SectionType, tt.sectionType)
-		}
-		if section.Title != tt.title {
-			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
-		}
-		if section.Position != tt.position {
-			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
-		}
-		if tt.libraryID == 0 {
-			assertContinueType(t, section.Config, ContinueTypeWatching)
-			continue
-		}
-		libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(section.Config)
-		if !ok {
-			t.Fatalf("section %d expected generated home config", tt.index)
-		}
-		if libraryID != tt.libraryID {
-			t.Fatalf("section %d config library id = %d, want %d", tt.index, libraryID, tt.libraryID)
-		}
+	if !IsSharedHomeRecentlyAddedSection(recent) {
+		t.Fatal("shared Recently Added row is not recognized as shared")
 	}
-
-	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
-		LibraryIDs: []int{9},
-		MediaScope: "episode",
+	assertQueryDefinition(t, recent.Config, catalog.QueryDefinition{
+		MediaScope: catalog.MediaScopeVideo,
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
-		Sort:       catalog.QuerySort{Field: "release_date", Order: "desc"},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
 	})
+
+	trending := got[slices.IndexFunc(got, func(s *PageSection) bool { return s.ID == "default-trending-discover" })]
+	if trending.SectionType != SectionTrendingDiscover {
+		t.Fatalf("trending type = %s, want %s", trending.SectionType, SectionTrendingDiscover)
+	}
+	if got := CanonicalTrendingConfigKey(trending.Config); got != CanonicalTrendingConfigKey(json.RawMessage(`{"source":"tmdb","window":"week"}`)) {
+		t.Fatalf("trending config key = %q, want the TMDB weekly feed", got)
+	}
 }
 
-func TestDefaultHomeSectionsWithAudiobookLibrary(t *testing.T) {
+func TestDefaultHomeSectionsKeepBookLibraryRows(t *testing.T) {
 	libraries := []*models.MediaFolder{
 		{ID: 7, Name: "Movies", Type: "movies", SortOrder: 1},
 		{ID: 10, Name: "Books", Type: "audiobooks", SortOrder: 2},
 	}
 
 	got := DefaultHomeSections(libraries)
-	if len(got) != 9 {
-		t.Fatalf("expected 9 default home sections, got %d", len(got))
+	assertHomeSectionIDs(t, got, append([]string{
+		"default-continue-watching",
+		"default-continue-listening",
+		"default-recently-added",
+		"default-home-recently_added-library-10",
+		"default-home-recently_released-library-10",
+	}, sharedHomeDefaultTail...))
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
+	assertContinueType(t, got[1].Config, ContinueTypeListening)
+
+	if got[3].Title != "Recently Added in Books" {
+		t.Fatalf("book row title = %q, want %q", got[3].Title, "Recently Added in Books")
+	}
+	if libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(got[3].Config); !ok || libraryID != 10 {
+		t.Fatalf("book row generated library = %d ok = %v, want 10 true", libraryID, ok)
+	}
+}
+
+// Beta library types (audiobooks, ebooks, manga, podcasts) keep their old row
+// size; only video rows and the shared home rows use DefaultItemLimit.
+func TestDefaultRowLimitsKeepBetaLibrariesAtOldSize(t *testing.T) {
+	assertLimits := func(t *testing.T, label string, got []*PageSection, want int) {
+		t.Helper()
+		if len(got) == 0 {
+			t.Fatalf("%s: no sections", label)
+		}
+		for _, section := range got {
+			if section.ItemLimit != want {
+				t.Errorf("%s: section %q limit = %d, want %d", label, section.ID, section.ItemLimit, want)
+			}
+		}
 	}
 
+	home := DefaultHomeSections([]*models.MediaFolder{
+		{ID: 7, Name: "Movies", Type: "movies"},
+		{ID: 10, Name: "Books", Type: "audiobooks"},
+	})
+	for _, section := range home {
+		want := DefaultItemLimit
+		if section.ID == "default-continue-listening" {
+			want = betaLibraryItemLimit
+		}
+		if libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(section.Config); ok && libraryID == 10 {
+			want = betaLibraryItemLimit
+		}
+		if section.ItemLimit != want {
+			t.Errorf("home section %q limit = %d, want %d", section.ID, section.ItemLimit, want)
+		}
+	}
+
+	libraryID := 3
+	for _, libraryType := range []string{"audiobooks", "ebooks", "manga", "podcasts"} {
+		assertLimits(t, libraryType+" library page", DefaultLibrarySectionsForType(&libraryID, libraryType), betaLibraryItemLimit)
+		assertLimits(t, libraryType+" generated home rows", generatedHomeLibraryRecentDefaults(libraryID, "Lib", libraryType), betaLibraryItemLimit)
+	}
+	for _, libraryType := range []string{"movies", "series", "mixed"} {
+		assertLimits(t, libraryType+" library page", DefaultLibrarySectionsForType(&libraryID, libraryType), DefaultItemLimit)
+		assertLimits(t, libraryType+" generated home rows", generatedHomeLibraryRecentDefaults(libraryID, "Lib", libraryType), DefaultItemLimit)
+	}
+}
+
+func TestIsSharedHomeRecentlyAddedSection(t *testing.T) {
+	seven := 7
 	tests := []struct {
-		index        int
-		id           string
-		title        string
-		position     int
-		continueType ContinueType
+		name    string
+		section *PageSection
+		want    bool
 	}{
-		{index: 0, id: "default-continue-watching", title: "Continue Watching", position: 0, continueType: ContinueTypeWatching},
-		{index: 1, id: "default-continue-listening", title: "Continue Listening", position: 1, continueType: ContinueTypeListening},
+		{"video scope", &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig("video")}, true},
+		{"unscoped", &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: json.RawMessage(`{}`)}, true},
+		{"movie scope", &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig("movie")}, false},
+		{"one library", &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: json.RawMessage(`{"filter_library_ids":[7]}`)}, false},
+		{"generated", &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: GeneratedHomeLibraryRecentConfig(7)}, false},
+		{"library page", &PageSection{Scope: "library", LibraryID: &seven, SectionType: SectionRecentlyAdded, Config: json.RawMessage(`{}`)}, false},
+		{"other type", &PageSection{Scope: "home", SectionType: SectionRecentlyReleased, Config: json.RawMessage(`{}`)}, false},
 	}
 	for _, tt := range tests {
-		section := got[tt.index]
-		if section.ID != tt.id {
-			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
-		}
-		if section.Title != tt.title {
-			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
-		}
-		if section.Position != tt.position {
-			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
-		}
-		assertContinueType(t, section.Config, tt.continueType)
-	}
-
-	if got[2].Position != 2 || got[2].Title != "Recently Added in Movies" {
-		t.Fatalf("first generated library row = position %d title %q", got[2].Position, got[2].Title)
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsSharedHomeRecentlyAddedSection(tt.section); got != tt.want {
+				t.Fatalf("IsSharedHomeRecentlyAddedSection = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -191,8 +241,8 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 	libraryID := 17
 	got := DefaultLibrarySectionsForType(&libraryID, "series")
 
-	if len(got) != 6 {
-		t.Fatalf("expected 6 series default sections, got %d", len(got))
+	if len(got) != 7 {
+		t.Fatalf("expected 7 series default sections, got %d", len(got))
 	}
 
 	tests := []struct {
@@ -204,10 +254,11 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 	}{
 		{index: 0, id: "default-continue-watching", sectionType: SectionContinueWatching, title: "Continue Watching", position: 0},
 		{index: 1, id: "default-recently-added-tv", sectionType: SectionRecentlyAdded, title: "Recently Added TV", position: 1},
-		{index: 2, id: "default-recently-released-episodes", sectionType: SectionCustomFilter, title: "Recently Released Episodes", position: 2},
-		{index: 3, id: "default-top-rated-tv", sectionType: SectionCustomFilter, title: "Top Rated TV", position: 3},
-		{index: 4, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 4},
-		{index: 5, id: "default-random-tv", sectionType: SectionRandom, title: "Random Picks", position: 5},
+		{index: 2, id: "default-returning-shows", sectionType: SectionReturningShows, title: "Returning Shows", position: 2},
+		{index: 3, id: "default-recently-released-episodes", sectionType: SectionCustomFilter, title: "Recently Released Episodes", position: 3},
+		{index: 4, id: "default-top-rated-tv", sectionType: SectionCustomFilter, title: "Top Rated TV", position: 4},
+		{index: 5, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 5},
+		{index: 6, id: "default-random-tv", sectionType: SectionRandom, title: "Random Picks", position: 6},
 	}
 
 	for _, tt := range tests {
@@ -236,20 +287,21 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
 	})
-	assertQueryDefinition(t, got[2].Config, catalog.QueryDefinition{
+	assertEmptyJSON(t, got[2].Config)
+	assertQueryDefinition(t, got[3].Config, catalog.QueryDefinition{
 		MediaScope: "episode",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "release_date", Order: "desc"},
 	})
-	assertQueryDefinition(t, got[3].Config, catalog.QueryDefinition{
+	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
 		MediaScope: "series",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "rating_imdb", Order: "desc"},
 	})
-	assertEmptyJSON(t, got[4].Config)
-	assertQueryDefinition(t, got[5].Config, catalog.QueryDefinition{
+	assertEmptyJSON(t, got[5].Config)
+	assertQueryDefinition(t, got[6].Config, catalog.QueryDefinition{
 		MediaScope: "series",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
@@ -538,8 +590,13 @@ func TestHomeDefaultsIncludeRecipeRichSet(t *testing.T) {
 	defs := DefaultHomeSections(nil)
 	want := []SectionType{
 		SectionContinueWatching,
+		SectionRecentlyAdded,
+		SectionRecommendedForYou,
+		SectionBecauseYouWatched,
+		SectionReturningShows,
+		SectionTrendingDiscover,
+		SectionCriticallyAcclaimed,
 		SectionHiddenGems,
-		SectionTrendingOnServer,
 		SectionSeasonalThemed,
 	}
 	for _, w := range want {

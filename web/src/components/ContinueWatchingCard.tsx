@@ -1,6 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { useCallback, useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import type { ProgressListEntry } from "@/hooks/queries/progress";
@@ -12,10 +12,13 @@ import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPrese
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
+import { type EpisodeSpoilerPrefs, useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
+import { cn } from "@/lib/utils";
 
 type ContinueWatchingCardProps = (
   | {
@@ -33,9 +36,33 @@ type ContinueWatchingCardProps = (
   quickActionMode?: CardQuickActionMode;
   libraryId?: number;
   variant?: "wide" | "poster";
+  /**
+   * The card is in the first row and on screen at first paint: its artwork
+   * loads eagerly at high fetch priority.
+   */
+  priority?: boolean;
+};
+
+type ContinueWatchingCardViewProps = ContinueWatchingCardProps & {
+  spoilerPrefs: EpisodeSpoilerPrefs;
 };
 
 export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
+  return <ContinueWatchingCardView {...props} spoilerPrefs={spoilerPrefs} />;
+}
+
+/**
+ * A Continue Watching card whose spoiler preferences come from its row, so a
+ * row of cards shares one settings lookup instead of one per card.
+ */
+export const ContinueWatchingRowCard = memo(function ContinueWatchingRowCard(
+  props: ContinueWatchingCardViewProps,
+) {
+  return <ContinueWatchingCardView {...props} />;
+});
+
+function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCardViewProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
@@ -58,6 +85,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
           episodeNumber: props.sectionItem.episode_number,
+          backdropIsStill: props.sectionItem.backdrop_is_episode_still,
+          posterIsStill: props.sectionItem.poster_is_episode_still,
           backdropUrl: props.sectionItem.backdrop_url,
           posterUrl: props.sectionItem.poster_url,
           positionSeconds: props.sectionItem.position_seconds ?? 0,
@@ -80,6 +109,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
           episodeNumber: props.detail.episode_number,
+          backdropIsStill: props.detail.backdrop_is_episode_still ?? false,
+          posterIsStill: props.detail.poster_is_episode_still ?? props.detail.type === "episode",
           backdropUrl: props.detail.backdrop_url,
           posterUrl: props.detail.poster_url,
           positionSeconds: props.progress.position_seconds,
@@ -202,7 +233,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const playableContentId = card.contentId ?? "";
   const containerWidth = isPoster
     ? carouselCardWidthClasses(cardPresentation.poster_size)
-    : "w-[260px] shrink-0 sm:w-[315px]";
+    : WIDE_CAROUSEL_CARD_WIDTH_CLASSES;
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   // Audiobook covers are square (Audible-style); use 1:1 for the poster
@@ -213,26 +244,21 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       : "aspect-[2/3]"
     : "aspect-video";
   const isSectionEpisode = "sectionItem" in props && props.sectionItem?.type === "episode";
-  // Episodes store the horizontal still in poster_url (see
-  // episode_catalog_source.go); wide-variant movies/series/seasons need the
-  // backdrop for the 16:9 card. Poster variant always wants the vertical
-  // poster, except section-episode payloads which use poster_url for the
-  // vertical season/series artwork and backdrop_url for the episode still.
-  const imagePrimary = isPoster
-    ? card.posterUrl
-    : isSectionEpisode
-      ? card.backdropUrl
-      : card.type === "episode"
-        ? card.posterUrl
-        : card.backdropUrl;
-  const imageFallback = isPoster
-    ? card.backdropUrl
-    : isSectionEpisode
-      ? card.posterUrl
-      : card.type === "episode"
-        ? card.backdropUrl
-        : card.posterUrl;
+  // Episode detail uses poster_url for its still; section cards prefer the backdrop.
+  const preferPoster = isPoster || (!isSectionEpisode && card.type === "episode");
+  const imagePrimary = preferPoster ? card.posterUrl : card.backdropUrl;
+  const imageFallback = preferPoster ? card.backdropUrl : card.posterUrl;
   const imageSrc = imagePrimary || imageFallback;
+  const selectedPoster = imagePrimary ? preferPoster : !preferPoster;
+  const selectedIsStill = selectedPoster ? card.posterIsStill : card.backdropIsStill;
+  const hideImage =
+    spoilerPrefs.hideImages &&
+    card.type === "episode" &&
+    isEpisodeStill(selectedIsStill) &&
+    isEpisodeUnwatched({
+      played: (props.sectionItem ?? props.detail)?.user_state?.played,
+      position_seconds: card.positionSeconds,
+    });
 
   return (
     <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
@@ -243,8 +269,12 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               <img
                 src={imageSrc}
                 alt={heading}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover/media:scale-105"
-                loading="lazy"
+                className={cn(
+                  "h-full w-full object-cover transition-transform duration-300",
+                  hideImage ? SPOILER_IMAGE_CLASS : "group-hover/media:scale-105",
+                )}
+                loading={props.priority ? "eager" : "lazy"}
+                fetchPriority={props.priority ? "high" : undefined}
                 decoding="async"
               />
             ) : (

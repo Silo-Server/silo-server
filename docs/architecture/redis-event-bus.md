@@ -54,6 +54,11 @@ server to move to.
 
 ## Invariants
 
+- A subscription runs on every node, the publisher's included. Work that must
+  happen once per event observes the publish on the node that made it:
+  `cache.ObservedEventBus` hands each event its process publishes to an
+  observer, with or without Redis. [Plugin event
+  delivery](plugin-event-delivery.md) works this way.
 - Publish and subscribe through `RedisEventBus` only. A `PUBLISH` or
   `SUBSCRIBE` sent on a go-redis client directly uses the bare name and reaches
   every install on the server.

@@ -61,6 +61,19 @@ func TestSubtitleDownloadV2UnknownProviderIsNotFound(t *testing.T) {
 	}
 }
 
+// A provider result ID the provider refuses is a validation problem at
+// body.subtitle_id, not an opaque upstream failure.
+func TestSubtitleDownloadV2InvalidSubtitleIDIsValidationProblem(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	f := &fakeSubtitleDownloads{err: &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "subtitle_id is not a result ID this provider returns", Field: "subtitle_id"}}
+	deps.SubtitleDownloads = f
+	rec := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
+	requireProblem(t, rec, TypeValidationFailed)
+	if !strings.Contains(rec.Body.String(), `"location":"body.subtitle_id"`) || f.calls != 1 {
+		t.Fatal(rec.Body.String(), f.calls)
+	}
+}
+
 func TestSubtitleDownloadV2RefusesBeforeService(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	f := new(fakeSubtitleDownloads)

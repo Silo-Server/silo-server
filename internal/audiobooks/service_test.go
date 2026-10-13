@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
@@ -127,4 +128,38 @@ func (r *recordingImageResolver) ResolveImageURLs(_ context.Context, paths []str
 		out[path] = r.ResolveImageURL(context.Background(), path, variant)
 	}
 	return out
+}
+
+type socketTokenStore struct {
+	abs.TokenStore
+	tok abs.ABSToken
+}
+
+func (s socketTokenStore) GetTokenByJTI(context.Context, string) (abs.ABSToken, error) {
+	return s.tok, nil
+}
+
+type refusingProfileVerifier struct{ calls int }
+
+func (v *refusingProfileVerifier) VerifyTokenProfile(context.Context, string, string, *int64) error {
+	v.calls++
+	return abs.ErrTokenProfileUnverified
+}
+
+// The Socket.io auth applies the profile check bearerAuth applies on HTTP,
+// after the revocation check.
+func TestABSSocketTokenValidatorChecksProfile(t *testing.T) {
+	claims := &abs.Claims{UserID: "1", ProfileID: "parent", JTI: "jti"}
+	verifier := &refusingProfileVerifier{}
+
+	revoked, err := absSocketTokenValidator(socketTokenStore{}, verifier)(context.Background(), claims)
+	if revoked || !errors.Is(err, abs.ErrTokenProfileUnverified) {
+		t.Fatalf("active token, refused profile = %v, %v; want the profile refusal", revoked, err)
+	}
+
+	now := time.Now()
+	revoked, err = absSocketTokenValidator(socketTokenStore{tok: abs.ABSToken{RevokedAt: &now}}, verifier)(context.Background(), claims)
+	if !revoked || err != nil || verifier.calls != 1 {
+		t.Fatalf("revoked token = %v, %v (verifier calls %d); want revoked without a profile check", revoked, err, verifier.calls)
+	}
 }
