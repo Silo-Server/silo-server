@@ -70,10 +70,9 @@ export default function WatchlistTitleCard({
           <MediaCardArtwork
             src={tmdbImageURL(title.poster_path)}
             alt={title.title}
-            fallbackLabel={title.title}
+            mediaType={title.media_type}
             lazy
             dim={status.attention}
-            fallbackOnError
           >
             {downloadPercent !== null ? <RequestDownloadBar percent={downloadPercent} /> : null}
             {overlayPrefs ? (

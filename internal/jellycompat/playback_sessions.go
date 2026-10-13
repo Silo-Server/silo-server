@@ -29,7 +29,7 @@ type PlaybackSession struct {
 	ClientDeviceID string
 	// ClientIP is the resolved address that negotiated this play. Static
 	// streams from clients that send no credentials (Jellyfin for Android TV,
-	// Findroid) are granted only to the same address; see FindStreamGrant.
+	// Findroid) are granted only to the same address; see FindStreamGrants.
 	ClientIP string
 	// ClientPeer is the transport peer host of that request, before forwarding
 	// headers were applied.
@@ -219,11 +219,12 @@ type CompatPlaybackStore interface {
 	// FindByUpstreamSessionID resolves the local upstream session that owns a
 	// compat play. It is used for process-local failure lifecycle handling.
 	FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool)
-	// FindStreamGrant returns the most recently active live negotiation, from
-	// any caller, for the route item and media source that clientIP negotiated
-	// through the transport peer clientPeer, and that was active within maxIdle.
-	// It authorizes credential-less static streams; see PlaybackSessionAuth.
-	FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool)
+	// FindStreamGrants returns the live negotiations, from any caller, for the
+	// route item and media source that clientIP negotiated through the
+	// transport peer clientPeer, and that were active within maxIdle, most
+	// recently active first. They authorize credential-less static streams;
+	// see PlaybackSessionAuth.
+	FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) []*PlaybackSession
 }
 
 // PlaybackSessionStore keeps compat playback sessions in memory. It is the
@@ -688,24 +689,31 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 	return nil, false
 }
 
-// FindStreamGrant implements CompatPlaybackStore.
-func (s *PlaybackSessionStore) FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool) {
+// FindStreamGrants implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) []*PlaybackSession {
 	if routeItemID == "" || mediaSourceID == "" || clientIP == "" || clientPeer == "" {
-		return nil, false
+		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	now := s.now()
 	activeSince := now.Add(-maxIdle)
-	var match *PlaybackSession
+	var matches []*PlaybackSession
 	for _, session := range s.sessions {
-		if streamGrantMatches(&session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) && (match == nil || session.UpdatedAt.After(match.UpdatedAt)) {
+		if streamGrantMatches(&session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) {
 			copy := session
-			match = &copy
+			matches = append(matches, &copy)
 		}
 	}
-	return match, match != nil
+	return newestStreamGrantsFirst(matches)
+}
+
+// newestStreamGrantsFirst orders stream grants by their last activity, most
+// recent first.
+func newestStreamGrantsFirst(grants []*PlaybackSession) []*PlaybackSession {
+	sort.SliceStable(grants, func(i, j int) bool { return grants[i].UpdatedAt.After(grants[j].UpdatedAt) })
+	return grants
 }
 
 // sameStreamPath reports whether a stream reached the server the way its

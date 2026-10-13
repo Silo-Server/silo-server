@@ -590,6 +590,7 @@ describe("library admin hooks on the v2 contract", () => {
             provider_slug: "tmdb",
             priority: 0,
             enabled: true,
+            local: false,
           },
         ],
       },

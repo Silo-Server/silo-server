@@ -34,8 +34,8 @@ func newNodeTestPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM information_schema.columns
 		 WHERE table_name = 'stream_nodes'
-		   AND column_name IN ('capabilities_hash', 'hw_accel_override', 'capability_drift')`).Scan(&columns); err != nil || columns < 3 {
-		t.Skip("test database has not applied the stream_nodes capability/override migrations")
+		   AND column_name IN ('capabilities_hash', 'hw_accel_override', 'capability_drift', 'drain_state')`).Scan(&columns); err != nil || columns < 4 {
+		t.Skip("test database has not applied the stream_nodes capability/override/drain migrations")
 	}
 	return pool
 }

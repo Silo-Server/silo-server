@@ -185,13 +185,13 @@ type authProviderResponse struct {
 // HandleLogin handles POST /auth/login.
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	// Extract device name from User-Agent header and IP from request.
-	view, err := h.Login(r.Context(), LoginInput{
+	// The session records the device headers, else the User-Agent as its
+	// name, and the client IP.
+	view, err := h.Login(auth.WithClientDevice(r.Context(), r.Header), LoginInput{
 		Provider:   req.Provider,
 		Username:   req.Username,
 		Password:   req.Password,
@@ -370,12 +370,11 @@ func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) 
 // HandleSetup handles POST /auth/setup.
 func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	var req setupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	view, err := h.SetupInitialUser(r.Context(), RegistrationInput{
+	view, err := h.SetupInitialUser(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
 		Username:             req.Username,
 		Email:                req.Email,
 		Password:             req.Password,
@@ -426,8 +425,7 @@ func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Requ
 // HandleRefresh handles POST /auth/refresh.
 func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
@@ -581,12 +579,11 @@ func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request)
 // HandleSignup handles POST /auth/signup.
 func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	var req signupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	view, err := h.Signup(r.Context(), RegistrationInput{
+	view, err := h.Signup(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
 		Username:             req.Username,
 		Email:                req.Email,
 		Password:             req.Password,

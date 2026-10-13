@@ -596,3 +596,59 @@ func resetSourcePreflightCache(t *testing.T) {
 	ffmpegVersionCache.entries = make(map[string][]byte)
 	ffmpegVersionCache.Unlock()
 }
+
+// TestValidateSourceRequiresRPUForDolbyVisionKind verifies that a Dolby
+// Vision base is accepted only when the decoded frames carry the RPU the
+// executor applies and the PQ transfer that admitted the source.
+func TestValidateSourceRequiresRPUForDolbyVisionKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		frame    string
+		accepted bool
+	}{
+		{name: "RPU present", frame: `{"color_range":"tv","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020","side_data_list":[{"side_data_type":"Dolby Vision RPU Data"},{"side_data_type":"Dolby Vision Metadata"}]}`, accepted: true},
+		{name: "RPU with untagged transfer", frame: `{"color_range":"tv","color_space":"bt2020nc","color_transfer":"unknown","color_primaries":"bt2020","side_data_list":[{"side_data_type":"Dolby Vision RPU Data"},{"side_data_type":"Dolby Vision Metadata"}]}`},
+		{name: "PQ tags without RPU", frame: `{"color_range":"tv","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020","side_data_list":[]}`},
+		{name: "raw RPU buffer only", frame: `{"color_range":"tv","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020","side_data_list":[{"side_data_type":"Dolby Vision RPU Data"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetSourcePreflightCache(t)
+			request := sourcePreflightTestRequest(t)
+			request.Kind, request.Filter = SourceDolbyVision, SoftwareFilterBT2390
+			var conversionFilters []string
+			runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+				joined := strings.Join(args, " ")
+				if len(args) == 1 && args[0] == "-version" {
+					return []byte("ffmpeg version dv"), nil
+				}
+				if strings.Contains(name, "ffprobe") {
+					if !strings.Contains(joined, "stream=codec_name") {
+						if !strings.Contains(joined, "frame_side_data=side_data_type") {
+							t.Fatalf("frame inspection does not request side data: %q", joined)
+						}
+						return []byte(`{"frames":[` + tt.frame + `]}`), nil
+					}
+					return []byte(`{"streams":[{"codec_name":"h264","pix_fmt":"yuv420p","color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709","side_data_list":[]}],"frames":[{"color_range":"tv","color_space":"bt709","color_transfer":"bt709","color_primaries":"bt709","side_data_list":[]}]}`), nil
+				}
+				conversionFilters = append(conversionFilters, joined)
+				return nil, nil
+			}
+			err := ValidateSourceWithRunner(context.Background(), request, runner)
+			if tt.accepted {
+				if err != nil {
+					t.Fatalf("ValidateSource() = %v, want accepted", err)
+				}
+				for _, filter := range conversionFilters {
+					if !strings.Contains(filter, "apply_dovi=1") {
+						t.Fatalf("conversion %q does not apply the RPU", filter)
+					}
+				}
+				return
+			}
+			if !errors.Is(err, ErrSourcePreflightRejected) {
+				t.Fatalf("ValidateSource() = %v, want rejection", err)
+			}
+		})
+	}
+}

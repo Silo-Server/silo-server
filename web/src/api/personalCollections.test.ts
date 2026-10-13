@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "@/api/v2/schema";
 import {
+  collectionsFromV2,
   collectionUpdateToV2,
   discoveryFromV2,
   importBodyToV2,
@@ -19,13 +20,13 @@ const collection: components["schemas"]["PersonalCollection"] = {
   description: "",
   collection_type: "manual",
   is_shared: false,
-  allowed_profile_ids: ["owner"],
   query_definition: {},
   sort_config: {},
   sort_order: 0,
   group_id: null,
   source_url: "",
   sync_schedule: "",
+  sync_cadence: "",
   next_sync_at: null,
   last_sync_at: null,
   last_sync_status: "",
@@ -34,14 +35,28 @@ const collection: components["schemas"]["PersonalCollection"] = {
   include_in_server_collections: false,
   poster_url: "",
   poster_thumbhash: "",
+  poster_is_collage: false,
   created_at: "2026-09-05T00:00:00.000Z",
   updated_at: "2026-09-05T00:00:00.000Z",
 };
 
 describe("personal collection v2 adapter", () => {
-  it("preserves group removal and converts library IDs without clearing omitted settings", () => {
-    expect(collectionUpdateToV2({ group_id: null, library_ids: [7], max_items: 0 })).toEqual({
-      group_id: null,
+  it("lists own and shared collections without personal collection groups", () => {
+    const shared = { ...collection, id: "theirs", creator_profile_id: "parent", is_shared: true };
+    const result = collectionsFromV2(
+      v2Fixture<"GET /api/v2/collections">({ items: [collection, shared], groups: [] }),
+    );
+    expect(result).toEqual({
+      collections: [
+        expect.objectContaining({ id: "saved", creator_profile_id: "owner" }),
+        expect.objectContaining({ id: "theirs", creator_profile_id: "parent", is_shared: true }),
+      ],
+    });
+  });
+
+  it("sends the sharing switch and converts library IDs without clearing omitted settings", () => {
+    expect(collectionUpdateToV2({ is_shared: true, library_ids: [7], max_items: 0 })).toEqual({
+      is_shared: true,
       library_ids: ["7"],
       max_items: 0,
     });
@@ -88,5 +103,55 @@ describe("personal collection v2 adapter", () => {
       form: { poster },
     });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("saving a staged poster removal", () => {
+  const withPoster = { ...collection, poster_url: "https://images.example/p.webp" };
+
+  it("deletes the poster and returns the collection without it", async () => {
+    request.mockReset().mockResolvedValueOnce(undefined);
+    const result = await saveCollectionPoster(withPoster, null, undefined, true);
+    expect(request.mock.calls).toEqual([
+      [
+        "DELETE /api/v2/collections/{id}/image",
+        { path: { id: "saved" }, query: { type: "poster" } },
+      ],
+    ]);
+    expect(result.collection.poster_url).toBe("");
+    expect(result.posterError).toBeUndefined();
+  });
+
+  it("uploads a replacement file instead of deleting, so the new poster survives", async () => {
+    request.mockReset().mockResolvedValueOnce(withPoster);
+    const poster = new File(["image"], "poster.png", { type: "image/png" });
+    await saveCollectionPoster(withPoster, poster, undefined, true);
+    expect(request.mock.calls).toEqual([
+      ["PUT /api/v2/collections/{id}/poster", { path: { id: "saved" }, form: { poster } }],
+    ]);
+  });
+
+  it("uploads a replacement URL instead of deleting", async () => {
+    request.mockReset().mockResolvedValueOnce(withPoster);
+    await saveCollectionPoster(withPoster, null, "https://images.example/new.png", true);
+    expect(request.mock.calls).toEqual([
+      [
+        "PUT /api/v2/collections/{id}/poster",
+        { path: { id: "saved" }, form: { source_url: "https://images.example/new.png" } },
+      ],
+    ]);
+  });
+
+  it("keeps the saved collection and reports a failed removal", async () => {
+    request.mockReset().mockRejectedValueOnce(new Error("Storage unavailable"));
+    const result = await saveCollectionPoster(withPoster, null, undefined, true);
+    expect(result.collection.poster_url).toBe("https://images.example/p.webp");
+    expect(result.posterError).toBe("Storage unavailable");
+  });
+
+  it("sends nothing when no poster change is staged", async () => {
+    request.mockReset();
+    await saveCollectionPoster(withPoster);
+    expect(request).not.toHaveBeenCalled();
   });
 });

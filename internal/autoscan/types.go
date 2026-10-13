@@ -1,6 +1,10 @@
 package autoscan
 
-import "time"
+import (
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/events"
+)
 
 // Settings is the global autoscan configuration (singleton row).
 type Settings struct {
@@ -128,6 +132,10 @@ type Event struct {
 	ErrorMessage      string
 	MarkerBefore      *string
 	MarkerAfter       *string
+	// Changes is the bounded per-change log (at most MaxEventChangeRecords
+	// entries); ChangesTruncated reports that the event received more.
+	Changes          []ChangeRecord
+	ChangesTruncated bool
 }
 
 type EventCreate struct {
@@ -157,6 +165,10 @@ type EventFinish struct {
 	ScansSuppressed int
 	ErrorMessage    string
 	MarkerAfter     string
+	// Changes is the per-change log for the event. FinishEvent stores it as
+	// given; the service bounds it with boundChangeRecords first.
+	Changes          []ChangeRecord
+	ChangesTruncated bool
 }
 
 type EnqueueResult struct {
@@ -195,7 +207,14 @@ type ScanRunSummary struct {
 	RequestedAt   *time.Time
 	StartedAt     *time.Time
 	CompletedAt   *time.Time
+	// Result is the completed run's outcome counters; nil until the run
+	// completes.
+	Result *ScanResult
 }
+
+// ScanResult is a completed scan run's result_payload, as the scan queue
+// writes it. The activity views project the counters they show.
+type ScanResult = events.ScanRunResult
 
 type ScanWithEvent struct {
 	ScanRunSummary

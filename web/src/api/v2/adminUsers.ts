@@ -26,8 +26,12 @@ function numericID(value: string) {
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Unsupported user ID.");
   return id;
 }
+/** Whether a response validator can guard an If-Match write. */
+export function isStrongTag(value: string | null): value is string {
+  return Boolean(value && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value));
+}
 function strongTag(value: string | null) {
-  if (!value || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value))
+  if (!isStrongTag(value))
     throw new Error("Reload this user before saving: a strong ETag is required.");
   return value;
 }
@@ -120,6 +124,16 @@ export async function getAdminUser(
   id: number,
   profileContext = captureAdminUserAuthority(),
 ): Promise<AdminUserEditor> {
+  const snapshot = await getAdminUserSnapshot(id, profileContext);
+  return { ...snapshot, etag: strongTag(snapshot.etag) };
+}
+
+/** Reading an account remains possible when a proxy omits its validator.
+ * Guarded edits still require the server's strong ETag. */
+export async function getAdminUserSnapshot(
+  id: number,
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminUserEditor> {
   requireAdminUserAuthority(profileContext);
   let etag: string | null = null;
   const user = await v2("GET /api/v2/admin/users/{id}", {
@@ -130,7 +144,7 @@ export async function getAdminUser(
     },
   });
   requireAdminUserAuthority(profileContext);
-  return { user: adminUserFromV2(user), etag: strongTag(etag), profileContext };
+  return { user: adminUserFromV2(user), etag: etag ?? "", profileContext };
 }
 function policyWire(body: UpdateUserRequest) {
   return {

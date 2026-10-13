@@ -1619,7 +1619,6 @@ func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler,
 		t.Fatalf("registering sibling device: %v", err)
 	}
 
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
 }
@@ -1960,11 +1959,10 @@ func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
 	}
 }
 
-// A server admin may act for any profile, including from a non-primary active
-// profile: apimw.IsAdmin short-circuits the household check by design. Pinned
-// because it is easy to mistake for the non-primary refusal above — the
-// difference is the account's role, not the profile's.
-func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
+// The admin role does not make a non-primary profile the household parent: a
+// child profile on an admin account is refused like any other household
+// member, the same way RequireActingAdmin refuses it admin powers.
+func TestSetValue_NonPrimaryProfileOnAdminAccountMayNotNameSibling(t *testing.T) {
 	handler, store := newHouseholdValuesHandler(t, "")
 	if err := store.(userstore.DeviceRegistry).RegisterDevice(t.Context(), userstore.DeviceEntry{
 		ProfileID: "profile-1", DeviceID: "parent-tv",
@@ -1975,7 +1973,7 @@ func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
 	target := "/settings/values/player.hdr_enabled" +
 		"?scope=profile_device&profile_id=profile-1&device_id=parent-tv"
 	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
-	// Acting as the *non-primary* profile, but on an admin account.
+	// Acting as the *non-primary* profile, on an admin account.
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
 	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
 
@@ -1985,15 +1983,15 @@ func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	handler.HandleSetValue(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("admin naming a profile = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("admin account's non-primary naming a sibling = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
 	value, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{
 		Key: "player.hdr_enabled", Scope: settingscontract.ScopeProfileDevice,
 		ProfileID: "profile-1", DeviceID: "parent-tv",
 	})
-	if err != nil || value == nil || string(value.Value) != "false" {
-		t.Fatalf("admin sibling value = %+v, %v", value, err)
+	if err != nil || value != nil {
+		t.Fatalf("refused write stored a value: %+v, %v", value, err)
 	}
 }
 

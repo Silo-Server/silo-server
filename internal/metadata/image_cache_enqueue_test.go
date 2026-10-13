@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -131,4 +132,199 @@ func TestProviderImageSourcePathOnlyRecordsProviderScheme(t *testing.T) {
 	if got := providerImageSourcePath("https://image.tmdb.org/t/p/original/a.jpg"); got != "https://image.tmdb.org/t/p/original/a.jpg" {
 		t.Fatalf("http source = %q", got)
 	}
+}
+
+// An item rebuilt under the same content ID comes back with no cached copy
+// while its earlier job for the same source still reads succeeded, so that
+// job has to run again. Artwork the item already holds a cached copy of must
+// not be fetched again.
+func TestEnqueueItemImagesRequeuesArtworkWithoutACachedCopy(t *testing.T) {
+	service := &MetadataService{}
+	enqueuer := &recordingImageCacheJobEnqueuer{}
+	service.SetAutoCacheImages(true)
+	service.SetImageCacheJobEnqueuer(enqueuer)
+
+	item := &models.MediaItem{
+		ContentID:          "local-series-rebuilt",
+		Type:               "series",
+		PosterPath:         "",
+		PosterSourcePath:   "file:///media/Other/Show/poster.jpg",
+		BackdropPath:       "local/series/local-series-rebuilt/abc123/backdrop/original.webp",
+		BackdropSourcePath: "file:///media/Other/Show/fanart.jpg",
+		LogoPath:           "https://image.example/logo.png",
+		LogoSourcePath:     "https://image.example/logo.png",
+	}
+	service.enqueueItemImages(context.Background(), item, nil, nil)
+
+	requeue := map[string]bool{}
+	for _, in := range enqueuer.inputs {
+		requeue[in.ImageType] = in.RequeueSucceeded
+	}
+	want := map[string]bool{
+		ImageCacheImagePoster:   true,
+		ImageCacheImageBackdrop: false,
+		ImageCacheImageLogo:     true,
+	}
+	if len(enqueuer.inputs) != len(want) {
+		t.Fatalf("queued %d jobs (%v), want one per image type in %v", len(enqueuer.inputs), requeue, want)
+	}
+	for imageType, wantRequeue := range want {
+		if got, ok := requeue[imageType]; !ok || got != wantRequeue {
+			t.Errorf("%s RequeueSucceeded = %v (queued %v), want %v", imageType, got, ok, wantRequeue)
+		}
+	}
+}
+
+// Seasons and episodes of a provider-anchored series keep their content IDs
+// when the series is rebuilt, so a recreated row with no cached copy has to
+// requeue its earlier succeeded job. A row that keeps its cached copy must
+// not.
+func TestPersistSeasonsAndEpisodesRequeuesArtworkWithoutACachedCopy(t *testing.T) {
+	const seriesID = "series-tvdb-123"
+	service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
+	enqueuer := &recordingImageCacheJobEnqueuer{}
+	service.SetAutoCacheImages(true)
+	service.SetImageCacheJobEnqueuer(enqueuer)
+	seasonRepo.seasons[seasonKey(seriesID, 2)] = &models.Season{
+		ContentID:        "season-tvdb-123-2",
+		SeriesID:         seriesID,
+		SeasonNumber:     2,
+		Title:            "Season 2",
+		PosterPath:       "local/series/series-tvdb-123/abc123/poster/original.webp",
+		PosterSourcePath: "file:///media/Show/season02-poster.jpg",
+	}
+
+	service.persistSeasonsAndEpisodes(
+		context.Background(),
+		&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "123"},
+		map[string]string{"tvdb": "123"},
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "Season 1", PosterPath: "file:///media/Show/season01-poster.jpg"},
+			{SeasonNumber: 2, Title: "Season 2", PosterPath: "file:///media/Show/season02-poster.jpg"},
+		},
+		[]EpisodeResult{{
+			ProviderIDs:   map[string]string{"tvdb": "ep-1"},
+			SeasonNumber:  1,
+			EpisodeNumber: 1,
+			Title:         "Pilot",
+			StillPath:     "file:///media/Show/Season 1/Show S01E01-thumb.jpg",
+		}},
+		MergeFillEmpty,
+	)
+
+	requeue := map[string]bool{}
+	for _, in := range enqueuer.inputs {
+		key := fmt.Sprintf("%s s%d", in.TargetType, *in.SeasonNumber)
+		if in.EpisodeNumber != nil {
+			key += fmt.Sprintf("e%d", *in.EpisodeNumber)
+		}
+		requeue[key] = in.RequeueSucceeded
+	}
+	want := map[string]bool{
+		ImageCacheTargetSeason + " s1":    true,
+		ImageCacheTargetSeason + " s2":    false,
+		ImageCacheTargetEpisode + " s1e1": true,
+	}
+	if len(enqueuer.inputs) != len(want) {
+		t.Fatalf("queued %d jobs (%v), want %v", len(enqueuer.inputs), requeue, want)
+	}
+	for key, wantRequeue := range want {
+		if got, ok := requeue[key]; !ok || got != wantRequeue {
+			t.Errorf("%s RequeueSucceeded = %v (queued %v), want %v", key, got, ok, wantRequeue)
+		}
+	}
+}
+
+// Localization rows are deleted with their item and recreated by the next
+// refresh, so localized artwork with no cached copy has to requeue its earlier
+// succeeded job too, and cached localized artwork must not.
+func TestEnqueueLocalizedArtworkRequeuesOnlyWithoutACachedCopy(t *testing.T) {
+	t.Run("item", func(t *testing.T) {
+		service := &MetadataService{}
+		enqueuer := &recordingImageCacheJobEnqueuer{}
+		service.SetAutoCacheImages(true)
+		service.SetImageCacheJobEnqueuer(enqueuer)
+
+		service.enqueueItemLocalizationImages(context.Background(),
+			&models.MediaItem{ContentID: "movie-tmdb-1", Type: "movie"},
+			&models.MediaItemLocalization{
+				ContentID:          "movie-tmdb-1",
+				Language:           "fr",
+				PosterPath:         "https://image.example/fr-poster.jpg",
+				PosterSourcePath:   "https://image.example/fr-poster.jpg",
+				BackdropPath:       "movie/tmdb/1/fr/backdrop/original.webp",
+				BackdropSourcePath: "https://image.example/fr-backdrop.jpg",
+			},
+			nil, nil,
+		)
+
+		requeue := map[string]bool{}
+		for _, in := range enqueuer.inputs {
+			requeue[in.ImageType] = in.RequeueSucceeded
+		}
+		want := map[string]bool{ImageCacheImagePoster: true, ImageCacheImageBackdrop: false}
+		if len(enqueuer.inputs) != len(want) {
+			t.Fatalf("queued %d jobs (%v), want %v", len(enqueuer.inputs), requeue, want)
+		}
+		for imageType, wantRequeue := range want {
+			if got, ok := requeue[imageType]; !ok || got != wantRequeue {
+				t.Errorf("%s RequeueSucceeded = %v (queued %v), want %v", imageType, got, ok, wantRequeue)
+			}
+		}
+	})
+
+	t.Run("season", func(t *testing.T) {
+		const seriesID = "series-tvdb-456"
+		service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
+		seasonLocalizations := newFakeSeasonLocalizationRepo()
+		service.seasonLocalizationRepo = seasonLocalizations
+		enqueuer := &recordingImageCacheJobEnqueuer{}
+		service.SetAutoCacheImages(true)
+		service.SetImageCacheJobEnqueuer(enqueuer)
+		seasonRepo.seasons[seasonKey(seriesID, 2)] = &models.Season{
+			ContentID:    "season-tvdb-456-2",
+			SeriesID:     seriesID,
+			SeasonNumber: 2,
+			Title:        "Season 2",
+		}
+		seasonLocalizations.localizations[seasonLocalizationKey("season-tvdb-456-2", "fr")] = &models.SeasonLocalization{
+			SeasonContentID:  "season-tvdb-456-2",
+			Language:         "fr",
+			Title:            "Saison 2",
+			PosterPath:       "series/tvdb/456/fr/season-2/poster/original.webp",
+			PosterSourcePath: "https://image.example/fr-season-2.jpg",
+		}
+
+		service.persistSeasonsAndEpisodes(
+			context.Background(),
+			&models.MediaItem{ContentID: seriesID, Type: "series", TvdbID: "456"},
+			map[string]string{"tvdb": "456"},
+			"en",
+			"fr",
+			[]SeasonResult{
+				{SeasonNumber: 1, Title: "Saison 1", PosterPath: "https://image.example/fr-season-1.jpg"},
+				{SeasonNumber: 2, Title: "Saison 2", PosterPath: "https://image.example/fr-season-2.jpg"},
+			},
+			nil,
+			MergeFillEmpty,
+		)
+
+		requeue := map[int]bool{}
+		for _, in := range enqueuer.inputs {
+			if in.TargetType == ImageCacheTargetSeasonLocalization {
+				requeue[*in.SeasonNumber] = in.RequeueSucceeded
+			}
+		}
+		want := map[int]bool{1: true, 2: false}
+		if len(requeue) != len(want) {
+			t.Fatalf("queued season localization jobs %v, want %v", requeue, want)
+		}
+		for season, wantRequeue := range want {
+			if got := requeue[season]; got != wantRequeue {
+				t.Errorf("season %d RequeueSucceeded = %v, want %v", season, got, wantRequeue)
+			}
+		}
+	})
 }

@@ -8,9 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ServerVisibleCollection is the per-user view of a personal collection the
-// owner has opted into their own library Collections tab. Personal collections
-// are private to their owner; this list never crosses user boundaries.
+// ServerVisibleCollection is a personal collection opted into the library
+// Collections tab, as one profile sees it: its own, or another profile's on
+// the same login that is shared. This list never crosses logins.
 type ServerVisibleCollection struct {
 	ID               string `json:"id"`
 	CreatorProfileID string `json:"creator_profile_id"`
@@ -24,8 +24,11 @@ type ServerVisibleCollection struct {
 	PosterPath             string `json:"-"`
 	PosterURL              string `json:"poster_url,omitempty"`
 	PosterThumbhash        string `json:"poster_thumbhash,omitempty"`
-	CreatedAt              string `json:"created_at"`
-	UpdatedAt              string `json:"updated_at"`
+	// PosterIsCollage reports that PosterPath is the viewer's collage. The
+	// frozen /api/v1 shape does not carry it.
+	PosterIsCollage bool   `json:"-"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // serverVisibleListLimit caps how many opt-in collections a single library tab
@@ -33,12 +36,14 @@ type ServerVisibleCollection struct {
 // the response.
 const serverVisibleListLimit = 500
 
-// ListServerVisibleByLibrary returns the current user's personal collections
-// that have opted into their library Collections tab and whose library scope
-// matches the requested library. Imported exact collections read library_ids
-// from source_config, while legacy rows can fall back to query_definition. A
+// ListServerVisibleByLibrary returns the personal collections profileID may
+// see (its own, and other profiles' shared collections on the login) that are
+// opted into the library Collections tab and whose library scope matches the
+// requested library. Imported exact collections read library_ids from
+// source_config, while legacy rows can fall back to query_definition. A
 // collection with no library_ids is treated as library-agnostic and therefore
-// visible in every library tab. Other users' collections are never returned.
+// visible in every library tab. Other logins' collections and Audiobookshelf
+// rows are never returned.
 func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID int, profileID string, libraryID int) ([]ServerVisibleCollection, error) {
 	rows, err := pool.Query(ctx,
 		`WITH visible_collections AS (
@@ -51,13 +56,9 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 			       END AS scope_config
 			FROM user_personal_collections upc
 			WHERE upc.user_id = $1
+			  AND upc.native
 			  AND upc.include_in_server_collections = TRUE
-			  AND EXISTS (
-			    SELECT 1 FROM user_personal_collection_profiles vp
-			    WHERE vp.user_id = upc.user_id
-			      AND vp.collection_id = upc.id
-			      AND vp.profile_id = $2
-			  )
+			  AND (upc.creator_profile_id = $2 OR upc.is_shared)
 		)
 		 SELECT id, creator_profile_id, name, description, collection_type, item_count,
 		        query_definition, display_query_definition, poster_url, poster_thumbhash, created_at, updated_at

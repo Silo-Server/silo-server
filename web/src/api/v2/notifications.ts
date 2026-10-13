@@ -22,7 +22,13 @@ function notification(
   const value = row.reason_flags;
   if (value && typeof value === "object") {
     const raw = value as Record<string, unknown>;
-    for (const key of ["favorite", "watchlist", "continue_watching", "next_up"] as const)
+    for (const key of [
+      "favorite",
+      "watchlist",
+      "continue_watching",
+      "next_up",
+      "follower",
+    ] as const)
       if (key in raw && typeof raw[key] === "boolean") reasonFlags[key] = raw[key];
     for (const key of ["request_id", "media_type", "title", "reason"] as const)
       if (key in raw && typeof raw[key] === "string") reasonFlags[key] = raw[key];

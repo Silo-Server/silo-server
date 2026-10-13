@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -51,10 +50,44 @@ type PlexAccount struct {
 }
 
 func NewPlexClient() *PlexClient {
+	httpClient := netguard.NewClient(30 * time.Second)
+	httpClient.CheckRedirect = checkPlexRedirect
 	return &PlexClient{
-		httpClient: netguard.NewClient(30 * time.Second),
+		httpClient: httpClient,
 		limiter:    sharedHistoryImportUpstreamLimiter,
 	}
+}
+
+// checkPlexRedirect bounds the redirect chain and drops the Plex credential
+// once the chain leaves the host it was sent to.
+//
+// net/http strips Authorization, Cookie, and WWW-Authenticate across a
+// cross-host redirect but knows nothing about X-Plex-Token, so a redirect from
+// a user-supplied or advertised Plex address to another host would otherwise
+// hand that host the user's token. Same-host redirects (including a port
+// change) keep it.
+//
+// The comparison is against via[0], not the previous hop: net/http re-copies
+// the original request's headers onto every redirect, so deleting the header
+// here clears it for this hop alone. A chain that leaves the origin host and
+// then redirects within the new host would otherwise get the token back.
+//
+// A redirect from HTTPS to cleartext HTTP drops the token too, even on the
+// same host, so a token sent over an encrypted connection never follows a
+// downgrade.
+func checkPlexRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 Plex redirects")
+	}
+	if len(via) == 0 {
+		return nil
+	}
+	origin := via[0].URL
+	downgrade := strings.EqualFold(origin.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https")
+	if downgrade || !strings.EqualFold(origin.Hostname(), req.URL.Hostname()) {
+		req.Header.Del("X-Plex-Token")
+	}
+	return nil
 }
 
 func (c *PlexClient) CreatePin(ctx context.Context) (pinID int, pinCode string, err error) {
@@ -128,9 +161,11 @@ func (c *PlexClient) GetResources(ctx context.Context, token string) ([]PlexServ
 			Name:             entry.Name,
 			ClientIdentifier: entry.ClientIdentifier,
 			AccessToken:      entry.AccessToken,
+			ConnectionURLs:   make([]string, 0, len(entry.Connections)),
 			Owned:            entry.Owned,
 		}
 		for _, conn := range entry.Connections {
+			server.ConnectionURLs = append(server.ConnectionURLs, conn.URI)
 			if conn.Local {
 				server.LocalURL = conn.URI
 				server.HasLocalURL = true
@@ -160,22 +195,24 @@ func (c *PlexClient) GetCurrentUser(ctx context.Context, token string) (*PlexAcc
 	return &account, nil
 }
 
+type plexMediaContainerBody struct {
+	Size      int        `json:"size"`
+	TotalSize int        `json:"totalSize"`
+	Offset    int        `json:"offset"`
+	Metadata  []PlexItem `json:"Metadata"`
+	// Video mirrors Metadata: the discover API inconsistently keys some
+	// responses on "Video" instead of "Metadata" (movie items in
+	// particular), so both must be decoded.
+	Video     []PlexItem `json:"Video"`
+	Directory []struct {
+		Key   string `json:"key"`
+		Type  string `json:"type"`
+		Title string `json:"title"`
+	} `json:"Directory"`
+}
+
 type plexMediaContainer struct {
-	MediaContainer struct {
-		Size      int        `json:"size"`
-		TotalSize int        `json:"totalSize"`
-		Offset    int        `json:"offset"`
-		Metadata  []PlexItem `json:"Metadata"`
-		// Video mirrors Metadata: the discover API inconsistently keys some
-		// responses on "Video" instead of "Metadata" (movie items in
-		// particular), so both must be decoded.
-		Video     []PlexItem `json:"Video"`
-		Directory []struct {
-			Key   string `json:"key"`
-			Type  string `json:"type"`
-			Title string `json:"title"`
-		} `json:"Directory"`
-	} `json:"MediaContainer"`
+	MediaContainer plexMediaContainerBody `json:"MediaContainer"`
 }
 
 // items returns the container's media entries regardless of whether the
@@ -242,9 +279,18 @@ func (c *PlexClient) FetchLibrarySections(ctx context.Context, baseURL, token st
 		return nil, err
 	}
 	c.setPlexHeaders(req, token)
-	var container plexMediaContainer
+	// Decoded through a pointer so an absent MediaContainer is distinguishable
+	// from an empty one: a stale reverse proxy that answers 200 with unrelated
+	// JSON would otherwise decode into a zero container, win the connection
+	// race against the real server, and import no history at all.
+	var container struct {
+		MediaContainer *plexMediaContainerBody `json:"MediaContainer"`
+	}
 	if err := c.doJSON(req, &container); err != nil {
 		return nil, fmt.Errorf("fetching Plex library sections: %w", err)
+	}
+	if container.MediaContainer == nil {
+		return nil, fmt.Errorf("fetching Plex library sections: response is missing MediaContainer")
 	}
 	var sections []struct{ Key, Type, Title string }
 	for _, dir := range container.MediaContainer.Directory {
@@ -272,8 +318,12 @@ func (c *PlexClient) FetchSectionItems(ctx context.Context, baseURL, token, sect
 
 func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int, filterKey, filterValue string) ([]PlexItem, error) {
 	var allItems []PlexItem
+	var budget listingBudget
 	offset := 0
 	for {
+		if err := budget.startPage(); err != nil {
+			return nil, fmt.Errorf("fetching Plex section items (section %s, type %d): %w", sectionKey, mediaType, err)
+		}
 		query := url.Values{}
 		query.Set("type", strconv.Itoa(mediaType))
 		if filterKey != "" {
@@ -289,12 +339,17 @@ func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sect
 		}
 		c.setPlexHeaders(req, token)
 		var container plexMediaContainer
-		if err := c.doJSON(req, &container); err != nil {
+		err = c.doJSONWithBudget(req, &container, &budget)
+		if err == nil {
+			err = budget.addItems(len(container.items()))
+		}
+		if err != nil {
 			return nil, fmt.Errorf("fetching Plex section items (section %s, type %d, offset %d): %w", sectionKey, mediaType, offset, err)
 		}
-		allItems = append(allItems, container.MediaContainer.Metadata...)
-		offset += len(container.MediaContainer.Metadata)
-		if offset >= container.MediaContainer.TotalSize || len(container.MediaContainer.Metadata) == 0 {
+		pageItems := container.items()
+		allItems = append(allItems, pageItems...)
+		offset += len(pageItems)
+		if offset >= container.MediaContainer.TotalSize || len(pageItems) == 0 {
 			break
 		}
 	}
@@ -316,8 +371,12 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 		base = plexDiscoverBaseURL
 	}
 	var allItems []PlexItem
+	var budget listingBudget
 	offset := 0
 	for {
+		if err := budget.startPage(); err != nil {
+			return nil, nil, fmt.Errorf("fetching Plex watchlist: %w", err)
+		}
 		query := url.Values{}
 		query.Set("includeGuids", "1")
 		query.Set("X-Plex-Container-Start", strconv.Itoa(offset))
@@ -329,7 +388,11 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 		}
 		c.setPlexHeaders(req, accountToken)
 		var container plexMediaContainer
-		if err := c.doJSON(req, &container); err != nil {
+		err = c.doJSONWithBudget(req, &container, &budget)
+		if err == nil {
+			err = budget.addItems(len(container.items()))
+		}
+		if err != nil {
 			return nil, nil, fmt.Errorf("fetching Plex watchlist (offset %d): %w", offset, err)
 		}
 		items := container.items()
@@ -360,6 +423,10 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 			continue
 		}
 		detail, err := c.fetchWatchlistItemMetadata(ctx, base, accountToken, allItems[i].RatingKey)
+		// Unlike other lookup failures, a source over the size limits fails the run.
+		if errors.Is(err, ErrUpstreamResponseTooLarge) {
+			return nil, nil, err
+		}
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -483,6 +550,11 @@ func (c *PlexClient) setPlexHeaders(req *http.Request, token string) {
 }
 
 func (c *PlexClient) doJSON(req *http.Request, out any) error {
+	return c.doJSONWithBudget(req, out, nil)
+}
+
+// doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
+func (c *PlexClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
@@ -492,14 +564,14 @@ func (c *PlexClient) doJSON(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body := readUpstreamErrorBody(resp.Body)
 		return &plexHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if out == nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		discardUpstreamBody(resp.Body)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return decodeUpstreamJSON(resp.Body, out, budget)
 }
 
 type plexHTTPError struct {
@@ -582,8 +654,12 @@ type PlexHistoryItem struct {
 // Plex Media Server. Requires an admin token.
 func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accountID string) ([]PlexHistoryItem, error) {
 	var allItems []PlexHistoryItem
+	var budget listingBudget
 	offset := 0
 	for {
+		if err := budget.startPage(); err != nil {
+			return nil, fmt.Errorf("fetching Plex user history (account %s): %w", accountID, err)
+		}
 		query := url.Values{}
 		query.Set("accountID", accountID)
 		query.Set("sort", "viewedAt:desc")
@@ -603,7 +679,11 @@ func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accou
 				Metadata  []PlexHistoryItem `json:"Metadata"`
 			} `json:"MediaContainer"`
 		}
-		if err := c.doJSON(req, &container); err != nil {
+		err = c.doJSONWithBudget(req, &container, &budget)
+		if err == nil {
+			err = budget.addItems(len(container.MediaContainer.Metadata))
+		}
+		if err != nil {
 			return nil, fmt.Errorf("fetching Plex user history (account %s, offset %d): %w", accountID, offset, err)
 		}
 		for i := range container.MediaContainer.Metadata {

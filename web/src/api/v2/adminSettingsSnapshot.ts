@@ -9,6 +9,12 @@ import { v2 } from "./request";
 
 export type SettingsValues = Record<string, string>;
 export type SettingsBaseline = { etag: string; profileContext: ProfileRequestContextSnapshot };
+export type ChatGPTSettingsChange = {
+  beforeETag: string;
+  afterETag: string;
+  firstConnection?: boolean;
+  settingsSnapshot?: SettingsValues;
+};
 const baselines = new WeakMap<SettingsValues, SettingsBaseline>();
 export function adminSettingsKey(context: ProfileRequestContextSnapshot) {
   return [

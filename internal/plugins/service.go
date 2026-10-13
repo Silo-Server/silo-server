@@ -121,10 +121,9 @@ type Service struct {
 // install, enable, disable, upgrade, or uninstall on this replica reaches the
 // next event. Other replicas drop theirs on cache.EventPluginsChanged.
 //
-// The hook runs before every other lifecycle hook. Events that arrive while
-// the slower hooks run (resident reconcile, provider reloads) already see the
-// change, and the index rebuilt when this replica's own plugins_changed
-// publish comes back is not dropped again by a hook that runs after it.
+// The hook runs before every other lifecycle hook, so events that arrive
+// while the slower hooks run (resident reconcile, provider reloads) already
+// see the change.
 func (s *Service) SetEventDispatcher(d *EventDispatcher) {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -267,7 +266,9 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
-	_, _, manifest, err := openPluginArchive(data)
+	// Refuse a package the installer would refuse before an installed copy
+	// is stopped to replace it.
+	_, _, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
 	}
@@ -306,17 +307,13 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 		return nil, err
 	}
 
-	repositoryID := target.RepositoryID
 	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
 	if err != nil {
 		return nil, err
 	}
 	var result *InstallResult
 	if target.LegacyArchive {
-		archiveReq := InstallArchiveRequest{
-			ArchiveURL:   target.ArchiveURL,
-			RepositoryID: &repositoryID,
-		}
+		archiveReq := target.ArchiveRequest()
 		if existing == nil {
 			result, err = s.installer.InstallRemote(ctx, archiveReq)
 		} else {
@@ -325,11 +322,7 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 			})
 		}
 	} else {
-		binaryReq := InstallBinaryRequest{
-			BinaryURL:    target.ArchiveURL,
-			Checksum:     target.Checksum,
-			RepositoryID: &repositoryID,
-		}
+		binaryReq := target.BinaryRequest()
 		if existing == nil {
 			result, err = s.installer.InstallBinary(ctx, binaryReq)
 		} else {

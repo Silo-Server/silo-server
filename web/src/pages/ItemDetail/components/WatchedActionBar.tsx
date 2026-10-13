@@ -1,10 +1,16 @@
 import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { itemTitleLinks } from "@/lib/titleLinks";
 import { getWatchedActionLabel } from "../watchedState";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
 
-type WatchedActionProps = "isWatched" | "watchedLabel" | "onToggleWatched" | "isUpdatingWatched";
+type WatchedActionProps =
+  | "isWatched"
+  | "watchedLabel"
+  | "onToggleWatched"
+  | "isUpdatingWatched"
+  | "links";
 
 interface WatchedActionBarProps extends Omit<ActionBarProps, WatchedActionProps> {
   item: ItemDetail;
@@ -21,6 +27,8 @@ export default function WatchedActionBar({ item, ...props }: WatchedActionBarPro
   return (
     <ActionBar
       {...props}
+      itemTitle={item.title}
+      links={itemTitleLinks(item)}
       watchedLabel={getWatchedActionLabel(item)}
       isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}

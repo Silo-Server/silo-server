@@ -97,14 +97,7 @@ func (h *LibraryCollectionHandler) ListServerCollections(ctx context.Context, ac
 
 		colls := make([]libraryTabCollection, 0, len(collections))
 		for _, c := range collections {
-			colls = append(colls, libraryTabCollection{
-				ID:              c.ID,
-				Title:           c.Title,
-				PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
-				PosterThumbhash: c.PosterThumbhash,
-				ItemCount:       c.ItemCount,
-				Featured:        c.Featured,
-			})
+			colls = append(colls, h.libraryTabCardOf(ctx, c))
 		}
 
 		resp.Libraries = append(resp.Libraries, ServerCollectionsLibraryView{

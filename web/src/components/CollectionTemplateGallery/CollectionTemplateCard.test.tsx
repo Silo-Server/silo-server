@@ -1,8 +1,10 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { render, screen } from "@testing-library/react";
+import { RadioGroup } from "radix-ui";
 import { describe, expect, it } from "vitest";
 
-import { CollectionTemplateCard } from "./CollectionTemplateCard";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
+
+import { CollectionTemplateCard } from "./CollectionTemplateCard";
 
 const baseTemplate: CollectionTemplate = {
   id: "tmdb_trending_movies_week",
@@ -18,51 +20,36 @@ const baseTemplate: CollectionTemplate = {
   tmdb: { preset: "trending", media_type: "movie", time_window: "week" },
 };
 
+function show(template: CollectionTemplate, value = "") {
+  render(
+    <RadioGroup.Root aria-label="Lists" value={value}>
+      <CollectionTemplateCard template={template} />
+    </RadioGroup.Root>,
+  );
+  return screen.getByRole("radio", { name: template.title });
+}
+
 describe("CollectionTemplateCard", () => {
-  it("shows the template title, description, source badge, and media kind", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionTemplateCard
-        template={{ ...baseTemplate, poster_path: "/images/collection-templates/trending.jpg" }}
-        onPick={() => {}}
-      />,
+  it("is a radio named by the template, described by its source, kind, size and schedule", () => {
+    const radio = show({
+      ...baseTemplate,
+      poster_path: "/images/collection-templates/trending.jpg",
+    });
+    expect(radio).toHaveAccessibleDescription("TMDB Movies · 50 titles · syncs daily");
+    expect(radio).not.toBeChecked();
+    expect(radio.querySelector("img")).toHaveAttribute(
+      "src",
+      "/images/collection-templates/trending.jpg",
     );
-
-    expect(markup).toContain("Trending Movies This Week");
-    expect(markup).toContain("Top trending movies on TMDB");
-    expect(markup).toContain("TMDB");
-    expect(markup).toContain("Movies");
-    expect(markup).toContain("syncs daily");
-    expect(markup).not.toContain("<img");
   });
 
-  it("badges templates that require a profile", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionTemplateCard
-        template={{
-          ...baseTemplate,
-          id: "trakt_recommended_movies",
-          title: "Trakt Recommended Movies",
-          source: "trakt",
-          requires_profile: true,
-          tmdb: undefined,
-          trakt: { preset: "recommended", media_type: "movie" },
-        }}
-        onPick={() => {}}
-      />,
-    );
-
-    expect(markup).toContain("Profile");
-    expect(markup).toContain("Trakt");
+  it("shows as checked when the draft follows it", () => {
+    expect(show(baseTemplate, baseTemplate.id)).toBeChecked();
   });
 
-  it("falls back gracefully when no schedule is configured", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionTemplateCard
-        template={{ ...baseTemplate, default_sync_schedule: undefined }}
-        onPick={() => {}}
-      />,
-    );
-
-    expect(markup).not.toContain("syncs");
+  it("leaves out a schedule it doesn't have, and uses its icon without a poster", () => {
+    const radio = show({ ...baseTemplate, default_sync_schedule: undefined, default_limit: 0 });
+    expect(radio).toHaveAccessibleDescription("TMDB Movies");
+    expect(radio).toHaveTextContent("🎬");
   });
 });

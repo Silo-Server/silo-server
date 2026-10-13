@@ -29,7 +29,6 @@ type PersonalCollectionEditorView struct {
 	Revision   int64
 }
 type PersonalCollectionOrderView struct {
-	GroupID    *string
 	OrderedIDs []string
 	Revision   int64
 	HasMore    bool
@@ -65,15 +64,23 @@ func (h *CollectionHandler) PersonalCollectionEditor(ctx context.Context, userID
 		return out, collectionPageError(userstore.ErrCollectionChanged)
 	}
 	// This is the canonical editor representation. Presigned URLs are displayed
-	// from the collection listing and never participate in a strong validator.
-	view.PosterURL = ""
+	// from the collection listing and never participate in a strong validator,
+	// so the editor carries no poster of any kind. A collage's thumbhash goes
+	// too: the collage is built in the background and per viewer, so it
+	// changes without a revision.
+	if view.PosterIsCollage {
+		view.PosterThumbhash = ""
+	}
+	view.PosterURL, view.PosterIsCollage = "", false
 	out.Collection = view
 	out.Revision = rev
 	return out, nil
 }
 
-func (h *CollectionHandler) PersonalCollectionOrderEditor(ctx context.Context, userID int, profileID string, groupID *string) (PersonalCollectionOrderView, error) {
-	out := PersonalCollectionOrderView{GroupID: groupID, OrderedIDs: []string{}}
+// PersonalCollectionOrderEditor reads the profile's own collections in its
+// order.
+func (h *CollectionHandler) PersonalCollectionOrderEditor(ctx context.Context, userID int, profileID string) (PersonalCollectionOrderView, error) {
+	out := PersonalCollectionOrderView{OrderedIDs: []string{}}
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return out, apiError(500, "internal_error", "Failed to access user store")
@@ -88,16 +95,15 @@ func (h *CollectionHandler) PersonalCollectionOrderEditor(ctx context.Context, u
 	if err != nil {
 		return out, err
 	}
-	view, err := h.ListPersonalCollections(ctx, userID, profileID)
+	// The order covers the profile's own collections, read from the store:
+	// it needs no member counts, so it never depends on resolving another
+	// owner's access. The store lists them first, in the profile's order.
+	collections, err := store.ListCollections(ctx, profileID)
 	if err != nil {
-		return out, err
+		return out, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collections")
 	}
-	for _, c := range view.Collections {
-		same := c.GroupID == nil && groupID == nil
-		if c.GroupID != nil && groupID != nil {
-			same = *c.GroupID == *groupID
-		}
-		if same {
+	for _, c := range collections {
+		if c.CreatorProfileID == profileID {
 			out.OrderedIDs = append(out.OrderedIDs, c.ID)
 		}
 	}
@@ -248,15 +254,15 @@ func reorderCollectionItemsWithRevision(ctx context.Context, s userstore.UserSto
 	}
 	return s.ReorderCollectionItems(ctx, id, ids)
 }
-func reorderCollectionsWithRevision(ctx context.Context, s userstore.UserStore, profile string, group *string, ids []string) error {
+func reorderCollectionsWithRevision(ctx context.Context, s userstore.UserStore, profile string, ids []string) error {
 	if expected := collectionExpectedRevision(ctx); expected != nil {
 		cas, e := mutationStore(s)
 		if e != nil {
 			return e
 		}
-		return cas.ReorderCollectionsIfRevision(ctx, profile, group, ids, *expected)
+		return cas.ReorderCollectionsIfRevision(ctx, profile, ids, *expected)
 	}
-	return s.ReorderCollections(ctx, profile, group, ids)
+	return s.ReorderCollections(ctx, profile, ids)
 }
 func updateCollectionGroupWithRevision(ctx context.Context, s userstore.UserStore, id string, name, slug *string, mode *userstore.GroupSortMode) (*userstore.CollectionGroup, error) {
 	if expected := collectionExpectedRevision(ctx); expected != nil {

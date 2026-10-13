@@ -47,11 +47,11 @@ import {
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { sortSubtitleProviders } from "@/lib/subtitleProviders";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
 import { SettingField, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import {
   SUBTITLE_SYNC_EXECUTION_DEFAULT,

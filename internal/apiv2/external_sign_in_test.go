@@ -162,7 +162,8 @@ func externalSignInDeps(f *fakeExternalSignIn) Dependencies {
 func TestExternalSignInCapabilities(t *testing.T) {
 	rec := do(t, newTestHandler(t, externalSignInDeps(&fakeExternalSignIn{})), http.MethodGet, Prefix+"/auth/external-sign-in/capabilities", "", nil)
 	var body ExternalSignInCapabilities
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.State != StateAvailable || !body.Identities || !body.AdminIdentities || !body.BreakGlass || !body.ConnectionTest || !body.LiveProviderChanges || !body.ProviderRecheck || !body.CredentialsLinking {
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.State != StateAvailable || !body.Identities || !body.AdminIdentities || !body.BreakGlass || !body.ConnectionTest || !body.LiveProviderChanges || !body.ProviderRecheck || !body.CredentialsLinking ||
+		!body.NetworkSignIn || !body.NetworkLinkKeepsPassword {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, newTestHandler(t, pilotDeps(nil, nil)), http.MethodGet, Prefix+"/auth/external-sign-in/capabilities", "", nil)
