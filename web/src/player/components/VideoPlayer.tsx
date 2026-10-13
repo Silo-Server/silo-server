@@ -1093,6 +1093,21 @@ export function VideoPlayer({
     return toMediaTime(video.currentTime, timelineOffsetRef.current);
   }, []);
 
+  // Publishes the element's duration on the media timeline. A direct-play
+  // engine's duration runs on its own clock, which starts at the origin, so
+  // it waits until the origin is known.
+  const applyElementDuration = useCallback((video: HTMLVideoElement) => {
+    if (directPlayOriginPendingRef.current) return;
+    if (!video.duration || !isFinite(video.duration)) return;
+    const originSeconds = planTimelineOffsetRef.current - timelineOffsetRef.current;
+    const mediaDuration = video.duration - originSeconds;
+    // For HLS EVENT playlists still being written, the element reports the
+    // length produced so far. The plan's source duration is the media's
+    // full runtime, so it wins whenever the engine reports something short.
+    if (backendDurationRef.current && mediaDuration < backendDurationRef.current) return;
+    setDuration(mediaDuration);
+  }, []);
+
   const rememberPendingSeek = useCallback((seconds: number) => {
     pendingSeekTimeRef.current = seconds;
     setPendingSeekTime(seconds);
@@ -2260,6 +2275,7 @@ export function VideoPlayer({
               pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
             const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
             if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
+            applyElementDuration(video);
             attemptAutoplayWhenReady();
           };
           video.addEventListener("loadedmetadata", directPlayMetadataHandler, { once: true });
@@ -2290,6 +2306,7 @@ export function VideoPlayer({
     // `planRevision` is the single signal that the transport changed: two plans
     // can share a stream URL and still differ in protocol, timeline, or recipe.
   }, [
+    applyElementDuration,
     effectiveStreamUrl,
     effectiveInitialPosition,
     isHlsStream,
@@ -2395,15 +2412,7 @@ export function VideoPlayer({
       if (hasCurrentFrame()) markPlaybackStarted();
       clearBuffering();
     };
-    const onDurationChange = () => {
-      if (video.duration && isFinite(video.duration)) {
-        // For HLS EVENT playlists still being written, the element reports the
-        // length produced so far. The plan's source duration is the media's
-        // full runtime, so it wins whenever the engine reports something short.
-        if (backendDurationRef.current && video.duration < backendDurationRef.current) return;
-        setDuration(video.duration);
-      }
-    };
+    const onDurationChange = () => applyElementDuration(video);
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
@@ -2517,6 +2526,7 @@ export function VideoPlayer({
     // deps are intentionally narrowed to the primitives the handlers read so
     // room snapshot churn doesn't re-subscribe every listener.
   }, [
+    applyElementDuration,
     pendingSeekTime,
     reportConnectionLost,
     reportCurrentPlanFailure,

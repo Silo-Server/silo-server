@@ -24,6 +24,7 @@ const realtimeOptions = vi.hoisted(() => ({
 const controls = vi.hoisted(() => ({
   current: null as null | {
     currentTime: number;
+    duration: number;
     onSeek: (seconds: number) => void;
     activeSubtitleIndex: number | null;
     subtitleTracks: PlayerSubtitleInfo[];
@@ -144,6 +145,7 @@ vi.mock("./PlayerControls", () => ({
   PlayerControls: vi.fn(
     (props: {
       currentTime: number;
+      duration: number;
       onSeek: (seconds: number) => void;
       activeSubtitleIndex: number | null;
       subtitleTracks: PlayerSubtitleInfo[];
@@ -3030,6 +3032,23 @@ describe("VideoPlayer source timeline", () => {
     video.currentTime = origin;
     fireEvent.loadedMetadata(video);
     expect(video.currentTime).toBeCloseTo(origin);
+  });
+
+  it("publishes direct play's duration on the media timeline", async () => {
+    const origin = 29.977;
+    const { duration_seconds: _omitted, ...source } = directPlan.source;
+    const plan = fixturePlanV3({ ...directPlan, source });
+    const { container } = renderPlayer({ plan });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    // durationchange arrives before loadedmetadata, while the origin is unknown.
+    Object.defineProperty(video, "duration", { configurable: true, value: 1830 });
+    fireEvent.durationChange(video);
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(controls.current!.duration).toBeCloseTo(1830 - origin));
   });
 
   it("skips from the resume position before direct-play metadata", async () => {
