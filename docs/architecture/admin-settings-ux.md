@@ -9,10 +9,11 @@ appears in it exactly once.
 
 - **Monitor**: Dashboard, Activity, Logs (Server Log, Client Diagnostics,
   Settings)
-- **Manage**: Libraries (Libraries, Collections, Home Sections, Skip Markers,
-  Subtitle Files, Settings), Requests (Queue, Settings), Users (Users, Access
-  Groups, Devices, History Import), Playback (Nodes, History, Settings),
-  Downloads (Prepared Files, Settings)
+- **Manage**: Libraries (Libraries, Collections, Home Sections, Subtitle
+  Files, Skip Markers, Settings), Autoscan (Activity, Sources, Settings),
+  Requests (Queue, Settings), Users (Users, Access Groups, Devices, History
+  Import), Playback (Nodes, History, Settings), Downloads (Prepared Files,
+  Settings)
 - **Configure**: Server (General, Appearance, Storage & Database, Scheduled
   Tasks, Maintenance), Sign-in & Security (Sign-in, Security, Network Access,
   API Keys, Policy), Integrations (Plugins, Providers, Watch Providers, AI
@@ -41,7 +42,11 @@ re-check depends on. Logging holds every log setting, the server log and the
 activity log retention alike. Trusted proxies sit beside the public URL on
 General, as the setup wizard presents them. Subtitle sync is automatic audio
 analysis of library media, like skip-marker detection, so it is on Libraries ›
-Settings. The mail server has its own Email page, because invitations and
+Settings. Autoscan's polling defaults and saved server connections are its
+own Settings page; they are not `server_settings` rows, so that page keeps its
+own draft but saves through the same `SaveBar` and unsaved-changes prompt,
+while the switch that turns Autoscan on and Run now stay on Sources beside the
+sources they act on. The mail server has its own Email page, because invitations and
 password resets need it as much as notifications do. Node routing (which
 machine runs a remux or transcode and which serves the stream) is a section of
 the Nodes page with its own save bar, because it only means anything once

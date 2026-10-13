@@ -23,6 +23,7 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "security",
   "sign-in",
   "library",
+  "autoscan",
   "playback",
   "downloads",
   "requests",

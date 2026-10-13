@@ -115,6 +115,10 @@ export function resolveAdminDocumentTitle(pathname: string): string {
     return "Admin User";
   }
 
+  if (adminSegment === "autoscan" && nestedSegment === "activity") {
+    return "Admin Autoscan Activity";
+  }
+
   if (adminSegment === "plugins" && nestedSegment) {
     return "Admin Plugin";
   }

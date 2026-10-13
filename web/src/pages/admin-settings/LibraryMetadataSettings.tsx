@@ -40,7 +40,7 @@ import {
   isNodeBackedExecution,
   subtitleSyncExecutionOptions,
 } from "./playbackSettings.utils";
-import { SearchStatusPanel } from "./SearchStatusPanel";
+import { SearchStatusPanel, SearchStatusSummary } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDefaults";
 
@@ -52,17 +52,22 @@ const MATURITY_KEYS = ["access.unrated_content"];
 
 const RATINGS_KEYS = [EXTRA_RATING_SOURCES_KEY];
 
-// A top-level toggle in the Scanning group, outside the collapsed worker
-// tuning, and applied live without a restart.
-const REALTIME_MONITORING_KEY = "scanner.realtime_monitoring";
+// How many files, lookups, and images run at once is what decides scan speed
+// on a given machine, so the three worker counts are shown; the person lookup
+// rate and the matcher batch are tuning behind Advanced.
+const SCANNER_ADVANCED_KEYS = ["metadata.person_refresh_per_minute", "matcher.batch_size"];
 
 const SCANNER_KEYS = [
   "scanner.workers",
   "matcher.workers",
-  "matcher.batch_size",
   "metadata.image_workers",
-  "metadata.person_refresh_per_minute",
+  ...SCANNER_ADVANCED_KEYS,
 ];
+
+// Each library turns real-time monitoring on or off in its own settings, so the
+// server-wide switch only appears while it is off: the library editor sends an
+// admin here to turn it back on.
+const REALTIME_MONITORING_KEY = "scanner.realtime_monitoring";
 
 const SCANNING_GROUP_KEYS = [REALTIME_MONITORING_KEY, ...SCANNER_KEYS];
 
@@ -109,10 +114,10 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 // support — catalog.search.meilisearch.{rebuild_batch_size,
 // rebuild_task_queue_depth,index_types,embedder,binary_quantized}.
 const KEYS = [
+  ...SCANNING_GROUP_KEYS,
   ...ARTWORK_VERSION_KEYS,
   ...MATURITY_KEYS,
   ...RATINGS_KEYS,
-  ...SCANNING_GROUP_KEYS,
   ...MARKER_KEYS,
   ...SUBTITLE_SYNC_KEYS,
   ...SEARCH_KEYS,
@@ -146,6 +151,9 @@ export default function LibraryMetadataSettings() {
   // it. The button is only offered while something differs from the default,
   // so an untouched group never shows a control that would do nothing.
   const workerOverrides = hasWorkerOverrides(form.getValue);
+  const showRealtimeSwitch =
+    form.getPersistedValue(REALTIME_MONITORING_KEY) === "false" ||
+    form.isDirty(REALTIME_MONITORING_KEY);
   function restoreWorkerDefaults() {
     for (const [key, fallback] of Object.entries(WORKER_SETTING_DEFAULTS)) {
       if (form.getValue(key) !== fallback) form.setValue(key, fallback);
@@ -214,9 +222,10 @@ export default function LibraryMetadataSettings() {
   // the save bar never counts a change the admin cannot see.
   const showSyncCapacity = syncOnNodes || form.isDirty("subtitles.sync_node_capacity");
 
-  // Engine choice, Meilisearch connection and tuning share one disclosure
-  // with the index status; the status panel is not a setting, so not counted.
-  const searchAdvancedCount = 1 + (showMeili ? MEILI_KEYS.length : 0);
+  // The Meilisearch connection and tuning share one disclosure with the index
+  // status; the status panel is not a setting, so not counted, and with
+  // Postgres the disclosure holds nothing else.
+  const searchAdvancedCount = showMeili ? MEILI_KEYS.length : undefined;
 
   if (form.isLoading) {
     return (
@@ -235,6 +244,114 @@ export default function LibraryMetadataSettings() {
       <SettingsPageHeader title="Library & Metadata" />
 
       <div className="flex-1 space-y-5">
+        <FieldGroup
+          label="Scanning"
+          restartAll={allRestart(SCANNING_GROUP_KEYS)}
+          dirty={anyDirty(SCANNING_GROUP_KEYS)}
+          actions={
+            workerOverrides ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={restoreWorkerDefaults}
+              >
+                <RotateCcw aria-hidden="true" />
+                Restore defaults
+              </Button>
+            ) : undefined
+          }
+        >
+          {showRealtimeSwitch && (
+            <SettingField
+              label="Real-time monitoring"
+              type="toggle"
+              description="Off for every library. When on, each library's own switch decides whether its folders are watched."
+              value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
+              onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
+              restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
+            />
+          )}
+          <SettingField
+            label="Scanner workers"
+            type="number"
+            description="How many files Silo reads at once."
+            value={form.getValue("scanner.workers")}
+            onChange={(value) => form.setValue("scanner.workers", value)}
+            restartRequired={restartKeys.has("scanner.workers")}
+          />
+          <SettingField
+            label="Matcher workers"
+            type="number"
+            description="How many items Silo looks up at once."
+            value={form.getValue("matcher.workers")}
+            onChange={(value) => form.setValue("matcher.workers", value)}
+            restartRequired={restartKeys.has("matcher.workers")}
+          />
+          <SettingField
+            label="Image encoding workers"
+            type="number"
+            description="How many artwork images Silo encodes at once. 0 uses one per CPU core."
+            value={form.getValue("metadata.image_workers")}
+            onChange={(value) => form.setValue("metadata.image_workers", value)}
+            restartRequired={restartKeys.has("metadata.image_workers")}
+          />
+          <AdvancedSection
+            id="library.scanning"
+            count={SCANNER_ADVANCED_KEYS.length}
+            forceOpen={anyDirty(SCANNER_ADVANCED_KEYS)}
+          >
+            <SettingField
+              label="Person lookups per minute"
+              type="number"
+              description="How many cast and crew members each server looks up per minute in the background. Opening a person's page isn't limited."
+              value={form.getValue("metadata.person_refresh_per_minute")}
+              onChange={(value) => form.setValue("metadata.person_refresh_per_minute", value)}
+              restartRequired={restartKeys.has("metadata.person_refresh_per_minute")}
+            />
+            <SettingField
+              label="Matcher batch size"
+              type="number"
+              description="How many items each matcher worker claims per round."
+              value={form.getValue("matcher.batch_size")}
+              onChange={(value) => form.setValue("matcher.batch_size", value)}
+              restartRequired={restartKeys.has("matcher.batch_size")}
+            />
+          </AdvancedSection>
+        </FieldGroup>
+
+        <FieldGroup
+          label="Artwork and versions"
+          description="Whether provider artwork is copied into your storage, and which versions a title's detail page lists."
+          restartAll={allRestart(ARTWORK_VERSION_KEYS)}
+          dirty={anyDirty(ARTWORK_VERSION_KEYS)}
+        >
+          <SettingField
+            label="Save provider artwork to storage"
+            type="toggle"
+            description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
+            value={form.getValue("metadata.cache_images")}
+            onChange={(value) => form.setValue("metadata.cache_images", value)}
+            restartRequired={restartKeys.has("metadata.cache_images")}
+          />
+          {/* Shown as the opposite of the stored key: on is the default, where
+              catalog.scope_versions_to_library is false. */}
+          <SettingField
+            label="Show all library versions on detail page"
+            type="toggle"
+            description="When a title is in several libraries, its detail page lists every version the viewer can access, wherever they opened it. Off, it lists only the files in the library they opened it from. Playback always sees every version."
+            value={form.getValue("catalog.scope_versions_to_library") === "true" ? "false" : "true"}
+            onChange={(value) =>
+              form.setValue(
+                "catalog.scope_versions_to_library",
+                value === "true" ? "false" : "true",
+              )
+            }
+            restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+        </FieldGroup>
+
         <FieldGroup
           label="Maturity limits"
           description="For profiles with a maximum content rating, which is set on each profile."
@@ -308,81 +425,6 @@ export default function LibraryMetadataSettings() {
             )}
           </FieldGroup>
         )}
-
-        <FieldGroup
-          label="Scanning"
-          restartAll={allRestart(SCANNING_GROUP_KEYS)}
-          dirty={anyDirty(SCANNING_GROUP_KEYS)}
-          actions={
-            workerOverrides ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={restoreWorkerDefaults}
-              >
-                <RotateCcw aria-hidden="true" />
-                Restore defaults
-              </Button>
-            ) : undefined
-          }
-        >
-          <SettingField
-            label="Real-time monitoring"
-            type="toggle"
-            description="Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually."
-            value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
-            onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
-            restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
-          />
-          <AdvancedSection
-            id="library.scanning"
-            count={SCANNER_KEYS.length}
-            forceOpen={anyDirty(SCANNER_KEYS)}
-          >
-            <SettingField
-              label="Scanner workers"
-              type="number"
-              description="How many files Silo reads at once."
-              value={form.getValue("scanner.workers")}
-              onChange={(value) => form.setValue("scanner.workers", value)}
-              restartRequired={restartKeys.has("scanner.workers")}
-            />
-            <SettingField
-              label="Image encoding workers"
-              type="number"
-              description="How many artwork images Silo encodes at once. 0 uses one per CPU core."
-              value={form.getValue("metadata.image_workers")}
-              onChange={(value) => form.setValue("metadata.image_workers", value)}
-              restartRequired={restartKeys.has("metadata.image_workers")}
-            />
-            <SettingField
-              label="Person lookups per minute"
-              type="number"
-              description="How many cast and crew members each server looks up per minute in the background. Opening a person's page isn't limited."
-              value={form.getValue("metadata.person_refresh_per_minute")}
-              onChange={(value) => form.setValue("metadata.person_refresh_per_minute", value)}
-              restartRequired={restartKeys.has("metadata.person_refresh_per_minute")}
-            />
-            <SettingField
-              label="Matcher workers"
-              type="number"
-              description="How many items Silo looks up at once."
-              value={form.getValue("matcher.workers")}
-              onChange={(value) => form.setValue("matcher.workers", value)}
-              restartRequired={restartKeys.has("matcher.workers")}
-            />
-            <SettingField
-              label="Matcher batch size"
-              type="number"
-              description="How many items each matcher worker claims per round."
-              value={form.getValue("matcher.batch_size")}
-              onChange={(value) => form.setValue("matcher.batch_size", value)}
-              restartRequired={restartKeys.has("matcher.batch_size")}
-            />
-          </AdvancedSection>
-        </FieldGroup>
 
         {/*
           Detection behavior lives here; which online providers answer a lookup,
@@ -564,6 +606,19 @@ export default function LibraryMetadataSettings() {
           description="Built-in Postgres search needs no setup. Meilisearch is optional."
           restartAll={allRestart(SEARCH_KEYS)}
         >
+          <SettingField
+            label="Search engine"
+            type="select"
+            description="Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically."
+            value={provider}
+            onChange={(value) => form.setValue("catalog.search.provider", value)}
+            options={[
+              { value: "postgres", label: "Built-in (Postgres)" },
+              { value: "meilisearch", label: "Meilisearch" },
+            ]}
+            status={meiliEnabled && !searchStatus?.degraded ? <SearchStatusSummary /> : undefined}
+            restartRequired={restartKeys.has("catalog.search.provider")}
+          />
           {meiliEnabled && searchStatus?.degraded && (
             <div className="py-3.5">
               <SettingFieldStatus tone="warn">
@@ -591,21 +646,8 @@ export default function LibraryMetadataSettings() {
           <AdvancedSection
             id="library.search"
             count={searchAdvancedCount}
-            forceOpen={anyDirty(SEARCH_KEYS)}
+            forceOpen={anyDirty(MEILI_KEYS)}
           >
-            <SettingField
-              label="Search engine"
-              type="select"
-              description="Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically."
-              value={provider}
-              onChange={(value) => form.setValue("catalog.search.provider", value)}
-              options={[
-                { value: "postgres", label: "Built-in (Postgres)" },
-                { value: "meilisearch", label: "Meilisearch" },
-              ]}
-              restartRequired={restartKeys.has("catalog.search.provider")}
-            />
-
             {showMeili && (
               <>
                 <SettingField
@@ -717,37 +759,6 @@ export default function LibraryMetadataSettings() {
 
             <SettingsSubheading>Search status</SettingsSubheading>
             <SearchStatusPanel />
-          </AdvancedSection>
-        </FieldGroup>
-
-        {/* Two settings nobody needs on day one, kept together at the foot
-            rather than as two panels that show nothing but a disclosure. */}
-        <FieldGroup
-          label="Artwork and versions"
-          description="Whether provider artwork is copied into your storage, and which versions an item opened from one library lists."
-          restartAll={allRestart(ARTWORK_VERSION_KEYS)}
-        >
-          <AdvancedSection
-            id="library.artwork_versions"
-            count={ARTWORK_VERSION_KEYS.length}
-            forceOpen={anyDirty(ARTWORK_VERSION_KEYS)}
-          >
-            <SettingField
-              label="Keep provider artwork"
-              type="toggle"
-              description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
-              value={form.getValue("metadata.cache_images")}
-              onChange={(value) => form.setValue("metadata.cache_images", value)}
-              restartRequired={restartKeys.has("metadata.cache_images")}
-            />
-            <SettingField
-              label="Show only the browsed library's versions"
-              type="toggle"
-              description="When an item is in several libraries, opening it from one library lists only the files stored there. Off, every version the viewer can access is listed no matter where they opened it. Playback always sees every version."
-              value={form.getValue("catalog.scope_versions_to_library") || "false"}
-              onChange={(value) => form.setValue("catalog.scope_versions_to_library", value)}
-              restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
-            />
           </AdvancedSection>
         </FieldGroup>
       </div>

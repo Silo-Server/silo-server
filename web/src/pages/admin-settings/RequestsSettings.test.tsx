@@ -173,7 +173,7 @@ describe("Requests settings: general", () => {
     ).toBeNull();
   });
 
-  it("keeps the 4K-for-every-title switch under Advanced and saves it", async () => {
+  it("shows the 4K-for-every-title switch and saves it", async () => {
     serve({
       handlers: {
         "PUT /api/v2/admin/request-settings": (options) =>
@@ -183,9 +183,6 @@ describe("Requests settings: general", () => {
     mount();
     await screen.findByLabelText("Request limit");
     const general = within(group("General"));
-    expect(general.queryByRole("switch", { name: /4K version of every title/ })).toBeNull();
-
-    fireEvent.click(general.getByRole("button", { name: "Advanced · 1 setting" }));
     const toggle = general.getByRole("switch", { name: /4K version of every title/ });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     fireEvent.click(toggle);

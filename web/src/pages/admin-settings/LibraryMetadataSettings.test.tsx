@@ -186,7 +186,7 @@ describe("LibraryMetadataSettings", () => {
     useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("orders the groups with subtitle sync after skip markers", () => {
+  it("orders the groups with scanning and artwork first", () => {
     const container = document.createElement("div");
     container.innerHTML = render({});
 
@@ -196,38 +196,46 @@ describe("LibraryMetadataSettings", () => {
       (group) => group.querySelector("h3")?.textContent,
     );
     expect(headings).toEqual([
+      "Scanning",
+      "Artwork and versions",
       "Maturity limits",
       "Ratings",
-      "Scanning",
       "Skip markers",
       "Subtitle sync",
       "Search",
-      "Artwork and versions",
     ]);
   });
 
-  it("keeps artwork caching and per-library versions behind one disclosure at the foot", () => {
-    const labels = ["Keep provider artwork", "Show only the browsed library's versions"];
-    const collapsed = groupNamed(render({}), "Artwork and versions");
-    expect(disclosures(collapsed)).toEqual(["Advanced · 2 settings"]);
-    for (const label of labels) expect(collapsed.textContent).not.toContain(label);
-
-    // An unsaved edit to either setting opens it.
-    for (const key of ["metadata.cache_images", "catalog.scope_versions_to_library"]) {
-      const dirty = groupNamed(render({}, [key]), "Artwork and versions");
-      for (const label of labels) expect(dirty.textContent).toContain(label);
-    }
+  it("shows artwork caching and the versions switch without a disclosure", () => {
+    const group = groupNamed(render({}), "Artwork and versions");
+    expect(disclosures(group)).toEqual([]);
+    expect(group.textContent).toContain("Save provider artwork to storage");
+    expect(group.textContent).toContain("Show all library versions on detail page");
   });
 
-  it("offers the server-wide real-time monitoring switch, on by default", () => {
-    const rendered = render({ "catalog.search.provider": "postgres" });
-
-    expect(text(rendered)).toContain("Real-time monitoring");
-    expect(text(rendered)).toContain(
-      "Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually.",
+  it("shows the versions switch as the opposite of the stored scope key", () => {
+    const label = "Show all library versions on detail page";
+    expect(toggleChecked(render({}), label)).toBe(true);
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "false" }), label)).toBe(
+      true,
     );
-    expect(toggleDisabled(rendered, "Real-time monitoring")).toBe(false);
-    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(true);
+    expect(toggleChecked(render({ "catalog.scope_versions_to_library": "true" }), label)).toBe(
+      false,
+    );
+  });
+
+  it("shows the three worker counts and keeps the rest of scanning behind Advanced", () => {
+    const rendered = render({ "catalog.search.provider": "postgres" });
+    const scanning = groupNamed(rendered, "Scanning");
+
+    for (const label of ["Scanner workers", "Matcher workers", "Image encoding workers"]) {
+      expect(scanning.textContent).toContain(label);
+    }
+    expect(disclosures(scanning)).toEqual(["Advanced · 2 settings"]);
+    expect(scanning.textContent).not.toContain("Matcher batch size");
+    // Each library has its own real-time monitoring switch; the server-wide
+    // one shows only while it is off.
+    expect(text(rendered)).not.toContain("Real-time monitoring");
 
     const calls = useSettingsFormMock.mock.calls;
     const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
@@ -252,11 +260,22 @@ describe("LibraryMetadataSettings", () => {
         "catalog.search.meilisearch.semantic_ratio",
       ]),
     );
-    // Hidden tier: still saved through the API, no control on this tab.
+    // Hidden tier: still saved through the API, no control on this page.
     expect(keys).not.toContain("catalog.search.meilisearch.embedder");
     expect(keys).not.toContain("catalog.search.meilisearch.binary_quantized");
     expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
     expect(keys).toContain("scanner.realtime_monitoring");
+  });
+
+  it("shows the server-wide real-time monitoring switch only while it is off", () => {
+    const off = render({ "scanner.realtime_monitoring": "false" });
+    expect(toggleChecked(off, "Real-time monitoring")).toBe(false);
+
+    // Turning it back on keeps it in view until the change is saved.
+    const turningOn = render({ "scanner.realtime_monitoring": "true" }, [
+      "scanner.realtime_monitoring",
+    ]);
+    expect(toggleChecked(turningOn, "Real-time monitoring")).toBe(true);
   });
 
   it("offers the background person lookup rate in the advanced scanning settings", () => {
@@ -271,12 +290,6 @@ describe("LibraryMetadataSettings", () => {
     );
   });
 
-  it("reflects a stored off value for real-time monitoring", () => {
-    const rendered = render({ "scanner.realtime_monitoring": "false" });
-
-    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(false);
-  });
-
   it("hides Meilisearch connection fields until that engine is selected", () => {
     expand("library.search");
     expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
@@ -286,24 +299,23 @@ describe("LibraryMetadataSettings", () => {
     expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
   });
 
-  it("keeps the search engine, Meilisearch and search status in one disclosure", () => {
+  it("shows the search engine and keeps Meilisearch and search status in one disclosure", () => {
     const postgres = groupNamed(render({ "catalog.search.provider": "postgres" }), "Search");
     expect(postgres.textContent).toContain(
       "Built-in Postgres search needs no setup. Meilisearch is optional.",
     );
-    expect(disclosures(postgres)).toEqual(["Advanced · 1 setting"]);
-    expect(postgres.textContent).not.toContain("Search engine");
+    expect(postgres.textContent).toContain("Search engine");
+    // Only the status panel is behind it, and that is not a setting.
+    expect(disclosures(postgres)).toEqual(["Advanced"]);
 
     const meili = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
-    // Engine, URL, API key and the six tuning fields.
-    expect(disclosures(meili)).toEqual(["Advanced · 9 settings"]);
+    // URL, API key and the six tuning fields.
+    expect(disclosures(meili)).toEqual(["Advanced · 8 settings"]);
     expect(meili.textContent).not.toContain("Meilisearch URL");
 
     expand("library.search");
     const open = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
-    expect(disclosures(open)).toEqual(["Advanced · 9 settings"]);
     for (const label of [
-      "Search engine",
       "Meilisearch URL",
       "Meilisearch API key",
       "Index name prefix",
@@ -314,22 +326,20 @@ describe("LibraryMetadataSettings", () => {
     expect(open.querySelector("h4")?.textContent).toBe("Search status");
   });
 
-  it("opens the search disclosure for an unsaved engine change", () => {
+  it("opens the search disclosure for an unsaved Meilisearch change", () => {
     const group = groupNamed(
-      render({ "catalog.search.provider": "meilisearch" }, ["catalog.search.provider"]),
+      render({ "catalog.search.provider": "meilisearch" }, ["catalog.search.meilisearch.url"]),
       "Search",
     );
 
-    expect(group.textContent).toContain("Search engine");
     expect(group.textContent).toContain("Meilisearch URL");
   });
 
   it("allows caching provider artwork without an S3 bucket", () => {
-    expand("library.artwork_versions");
     storageAvailableMock.mockReturnValue(false);
     const rendered = render({});
     expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
+    expect(toggleDisabled(rendered, "Save provider artwork to storage")).toBe(false);
   });
 
   it("offers separate intro and credits detection while this server detects markers", () => {

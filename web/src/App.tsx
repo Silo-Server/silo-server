@@ -58,7 +58,6 @@ import {
   buildQueryCatalogHref,
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
-import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
 import LegacyAdminHomeRowsRedirect from "@/pages/LegacyAdminHomeRowsRedirect";
 import LegacyRequestDetailRedirect from "@/pages/LegacyRequestDetailRedirect";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
@@ -110,6 +109,8 @@ const AdminUsers = lazy(() => import("@/pages/AdminUsers"));
 const AdminRequests = lazy(() => import("@/pages/AdminRequests"));
 const AdminDevices = lazy(() => import("@/pages/AdminDevices"));
 const AdminLibraries = lazy(() => import("@/pages/AdminLibraries"));
+const AdminAutoscan = lazy(() => import("@/pages/AdminAutoscan"));
+const AdminAutoscanActivity = lazy(() => import("@/pages/AdminAutoscanActivity"));
 const AdminSettingsLayout = lazy(() => import("@/pages/admin-settings/AdminSettingsLayout"));
 const AdminNodes = lazy(() => import("@/pages/AdminNodes"));
 const AdminDownloads = lazy(() => import("@/pages/AdminDownloads"));
@@ -407,16 +408,6 @@ function LegacyWebhookSyncRedirect() {
   return <Navigate to={buildLegacyWebhookSyncRedirectTarget(search)} replace />;
 }
 
-/**
- * `/admin/autoscan` → the Autoscan tab on Libraries. The old query has to be
- * translated, not dropped: the panel's own view moved from `tab` to `view`
- * because `tab` now names the Libraries tab hosting it.
- */
-function LegacyAutoscanRedirect() {
-  const { search } = useLocation();
-  return <Navigate to={buildLegacyAutoscanRedirectTarget(search)} replace />;
-}
-
 function LegacyPersonalCatalogRedirect({
   source,
 }: {
@@ -528,8 +519,8 @@ function AppRoutes() {
                     <Route path="collections/:id/edit" />
                   </Route>
                   <Route path="requests" element={<AdminRequests />} />
-                  {/* Autoscan is a tab on Libraries now; keep old links working. */}
-                  <Route path="autoscan" element={<LegacyAutoscanRedirect />} />
+                  <Route path="autoscan" element={<AdminAutoscan />} />
+                  <Route path="autoscan/activity" element={<AdminAutoscanActivity />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
                   <Route path="marker-history" element={<AdminMarkerHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />

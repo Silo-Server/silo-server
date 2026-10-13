@@ -17,6 +17,8 @@ const TOOL_PAGES = [
   "/admin/logs",
   "/admin/diagnostics",
   "/admin/libraries",
+  "/admin/autoscan",
+  "/admin/autoscan/activity",
   "/admin/collections",
   "/admin/sections",
   "/admin/marker-history",

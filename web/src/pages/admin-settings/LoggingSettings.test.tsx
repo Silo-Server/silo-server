@@ -5,11 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RestartKeyMatcher } from "@/hooks/useRestartKeys";
 
 import LoggingSettings from "./LoggingSettings";
-import {
-  DEFAULT_BUCKET_POLICIES,
-  OPSLOG_BUCKET_POLICIES_KEY,
-  serializeBucketPolicies,
-} from "./logRetentionPolicy";
 
 // Radix Select opens through pointer capture and scrolls its options into
 // view, neither of which jsdom provides.
@@ -53,10 +48,6 @@ const restartKeysMock = vi.fn((): RestartKeyMatcher => NO_RESTART);
 vi.mock("@/hooks/useRestartKeys", () => ({
   useRestartKeys: () => restartKeysMock(),
 }));
-
-const METADATA_RULE = JSON.stringify([
-  { component: "metadata", level: "info", retention_days: 1, max_rows: 100, max_size_mb: 8 },
-]);
 
 function mockForm(overrides: Partial<Record<string, unknown>> = {}) {
   const form = {
@@ -104,12 +95,10 @@ describe("LoggingSettings", () => {
       "server.log_level",
       "server.log_quiet",
       "opslog.retention_days",
-      "opslog.max_rows",
       "opslog.max_size_mb",
+      "opslog.max_rows",
       "policy.decision_log_retention_days",
       "policy.decision_log_verbosity",
-      "policy.decision_log_scope_sample_rate",
-      OPSLOG_BUCKET_POLICIES_KEY,
     ]);
     expect(screen.getByRole("heading", { name: "Logging" })).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
@@ -149,86 +138,37 @@ describe("LoggingSettings", () => {
     render(<LoggingSettings />);
     const retention = group("Log retention");
 
-    // Only the age limit shows by default; the row and size caps are backstops.
+    // The age and size limits show by default; the row cap is a backstop.
     expect(retention.queryByLabelText("Maximum log entries")).not.toBeInTheDocument();
-    expect(retention.queryByLabelText("Maximum log size")).not.toBeInTheDocument();
-    expect(retention.getByRole("button", { name: "Advanced · 6 settings" })).toBeInTheDocument();
+    expect(retention.getByRole("button", { name: "Advanced · 3 settings" })).toBeInTheDocument();
     await userEvent.type(retention.getByLabelText("Delete log entries older than"), "9");
     expect(form.setValue).toHaveBeenCalledWith("opslog.retention_days", "9");
+    await userEvent.type(retention.getByLabelText("Maximum log size"), "9");
+    expect(form.setValue).toHaveBeenCalledWith("opslog.max_size_mb", "9");
 
     await openAdvanced("Log retention");
     await userEvent.type(retention.getByLabelText("Maximum log entries"), "9");
     expect(form.setValue).toHaveBeenCalledWith("opslog.max_rows", "9");
-    await userEvent.type(retention.getByLabelText("Maximum log size"), "9");
-    expect(form.setValue).toHaveBeenCalledWith("opslog.max_size_mb", "9");
     expect(retention.getByText("Permission checks")).toBeInTheDocument();
     await userEvent.type(retention.getByLabelText("Delete permission records older than"), "9");
     expect(form.setValue).toHaveBeenCalledWith("policy.decision_log_retention_days", "9");
-    await userEvent.type(retention.getByLabelText("Record one allowed check in every"), "9");
-    expect(form.setValue).toHaveBeenCalledWith("policy.decision_log_scope_sample_rate", "9");
+    // The sample rate and the per-area limits are Hidden tier.
+    expect(retention.queryByLabelText("Record one allowed check in every")).not.toBeInTheDocument();
+    expect(screen.queryByText("Per-area limits")).not.toBeInTheDocument();
     await userEvent.click(retention.getByRole("combobox", { name: "How much to record" }));
     await userEvent.click(screen.getByRole("option", { name: "Full" }));
     expect(form.setValue).toHaveBeenCalledWith("policy.decision_log_verbosity", "verbose");
   });
 
-  it("opens the retention Advanced section while a log cap is unsaved", () => {
+  it("opens the retention Advanced section while the row cap is unsaved", () => {
     mockForm({
-      isDirty: (key: string) => key === "opslog.max_size_mb",
+      isDirty: (key: string) => key === "opslog.max_rows",
       dirtyCount: 1,
-      getValue: (key: string) => (key === "opslog.max_size_mb" ? "512" : ""),
+      getValue: (key: string) => (key === "opslog.max_rows" ? "512" : ""),
     });
     render(<LoggingSettings />);
 
-    expect(group("Log retention").getByLabelText("Maximum log size")).toHaveValue(512);
-  });
-
-  it("stages bucket override edits through the shared save model", async () => {
-    const setValue = vi.fn();
-    mockForm({
-      setValue,
-      isDirty: (key: string) => key === OPSLOG_BUCKET_POLICIES_KEY,
-      dirtyCount: 1,
-      getValue: (key: string) => (key === OPSLOG_BUCKET_POLICIES_KEY ? METADATA_RULE : ""),
-    });
-
-    render(<LoggingSettings />);
-
-    // A dirty rule set holds the Advanced section open on its own.
-    await userEvent.click(screen.getByRole("button", { name: /Remove metadata rule/ }));
-
-    expect(setValue).toHaveBeenCalledWith(OPSLOG_BUCKET_POLICIES_KEY, "[]");
-  });
-
-  it("restores the recommended rules and adds a blank one", async () => {
-    const setValue = vi.fn();
-    mockForm({ setValue });
-    render(<LoggingSettings />);
-    await openAdvanced("Log retention");
-
-    expect(screen.getByText("No per-area rules configured.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Restore Recommended Rules" }));
-    expect(setValue).toHaveBeenCalledWith(
-      OPSLOG_BUCKET_POLICIES_KEY,
-      serializeBucketPolicies(DEFAULT_BUCKET_POLICIES),
-    );
-
-    // The blank row has no component yet, so it serializes to nothing until
-    // the admin names one.
-    await userEvent.click(screen.getByRole("button", { name: "Add Rule" }));
-    expect(setValue).toHaveBeenLastCalledWith(OPSLOG_BUCKET_POLICIES_KEY, "[]");
-  });
-
-  it("falls back to the recommended rules when the saved ones cannot be read", async () => {
-    mockForm({
-      getValue: (key: string) => (key === OPSLOG_BUCKET_POLICIES_KEY ? "{not json" : ""),
-    });
-    render(<LoggingSettings />);
-    await openAdvanced("Log retention");
-
-    expect(screen.getByText(/The saved rules could not be read/)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Remove (metadata|scanner) rule/ })).toHaveLength(
-      DEFAULT_BUCKET_POLICIES.length,
-    );
+    expect(group("Log retention").getByLabelText("Maximum log entries")).toHaveValue(512);
   });
 
   it("marks a field for a restart on its own when the registry names it", async () => {
@@ -262,7 +202,6 @@ describe("LoggingSettings", () => {
         "opslog.retention_days": "7",
         "opslog.max_rows": "1000000",
         "opslog.max_size_mb": "1024",
-        [OPSLOG_BUCKET_POLICIES_KEY]: METADATA_RULE,
       };
       updateSettingsMock.mockReset();
       updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });
@@ -280,8 +219,9 @@ describe("LoggingSettings", () => {
       await userEvent.type(days, "14");
       await openAdvanced("Server log");
       await userEvent.type(group("Server log").getByLabelText("Quiet log prefixes"), "scanner");
-      await openAdvanced("Log retention");
-      await userEvent.click(screen.getByRole("button", { name: /Remove metadata rule/ }));
+      const size = group("Log retention").getByLabelText("Maximum log size");
+      await userEvent.clear(size);
+      await userEvent.type(size, "512");
 
       expect(screen.getByText("3 unsaved changes")).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -290,7 +230,7 @@ describe("LoggingSettings", () => {
         expect(updateSettingsMock).toHaveBeenCalledWith({
           "opslog.retention_days": "14",
           "server.log_quiet": "scanner",
-          [OPSLOG_BUCKET_POLICIES_KEY]: "[]",
+          "opslog.max_size_mb": "512",
         }),
       );
     });
