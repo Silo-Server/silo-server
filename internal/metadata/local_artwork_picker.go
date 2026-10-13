@@ -18,6 +18,10 @@ import (
 // provider choices at.
 const localArtworkPreviewWidth = 300
 
+// LocalImageProviderID labels local sidecar choices in the admin image list
+// and keys their failures in its provider errors.
+const LocalImageProviderID = imageCacheLocalProviderID
+
 // localArtworkCapabilityID is the built-in provider that discovers sidecar
 // artwork next to an item's files.
 const localArtworkCapabilityID = "nfo"
@@ -64,7 +68,7 @@ func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, provider
 		if providerErrors == nil {
 			providerErrors = map[string]string{}
 		}
-		providerErrors[imageCacheLocalProviderID] = "Local artwork discovery failed"
+		providerErrors[LocalImageProviderID] = "Local artwork discovery failed"
 	}
 	return append(images, local...), providerErrors, nil
 }

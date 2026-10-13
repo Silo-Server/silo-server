@@ -84,9 +84,6 @@ func NewAdminImageHandler(
 	}
 }
 
-// localImageProviderID labels local sidecar choices in the image list.
-const localImageProviderID = "local"
-
 // itemTypeSeries is the media item type for a series.
 const itemTypeSeries = "series"
 
@@ -308,11 +305,11 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 				if providerErrors == nil {
 					providerErrors = map[string]string{}
 				}
-				providerErrors[localImageProviderID] = "Local image preview failed"
+				providerErrors[metadata.LocalImageProviderID] = "Local image preview failed"
 				continue
 			}
 			displayURL = preview
-			providerID = localImageProviderID
+			providerID = metadata.LocalImageProviderID
 		} else if resolved, ok := resolvedURLs[img.URL]; ok && resolved != "" {
 			displayURL = resolved
 		}

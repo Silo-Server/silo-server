@@ -560,23 +560,32 @@ and sidecar directories, so it finds the same files a refresh would, and it runs
 whether or not the library's metadata chain uses the NFO provider: choosing an
 image is an explicit admin action. Local choices come only from that discovery;
 a `file://` URL returned by any provider in the chain is dropped, so a provider
-cannot get another library file offered as this item's artwork. Each local
-choice has the provider ID `local`, keeps its `file://` path as `original_url`,
-and shows a 300-pixel-wide WebP preview as an inline `data:` URI (the web client
-authenticates with a bearer token, so an `<img>` cannot fetch an authenticated
-preview route). The preview is read under the same root confinement, symlink and
-size checks as the processor; a file that fails them is left out of the list,
-and the list's `provider_errors` reports it under `local`. Only the movie and
-series list does this: any other list treats a provider's `file://` URL as an
-ordinary provider choice and never reads it.
+cannot get another library file offered as this item's artwork. Only sidecar
+files (including files an NFO names by relative path) for the slots an admin can
+apply (poster, backdrop, logo) are offered: an image URL an NFO names has no file
+to read here, and banner, thumb, clear art and disc art cannot be applied. Each
+local choice has the provider ID `local`, keeps its fingerprinted `file://`
+source as `original_url`, and shows a 300-pixel-wide WebP preview as an inline
+`data:` URI (the web client authenticates with a bearer token, so an `<img>`
+cannot fetch an authenticated preview route). The preview is read under the same
+root confinement, symlink and size checks as the processor; a file that fails
+them is left out of the list, and the list's `provider_errors` reports it under
+`local`. Only the movie and series list does this: any other list treats a
+provider's `file://` URL as an ordinary provider choice and never reads it.
 
 `POST .../images/apply` with a `file://` `original_url` caches the file only
-when the item's sidecar discovery offers it for that image type, reads it under
-the same checks, stores it under the same `local/...` key the processor would
-use, and publishes it with the images lock like any other choice. Seasons,
-episodes and frozen v1 keep provider-only choices. The node serving the admin
-API reads the file, so it needs the same library mounts as the processor;
-without them local choices are simply not offered.
+when the item's sidecar discovery offers that exact source for that image type,
+so a file replaced since the list (a new fingerprint) must be picked again. It
+reads the file under the same checks, stores it under the same `local/...` key
+the processor would use, and publishes the fingerprinted source with the images
+lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
+choices. The server answering the admin API reads the file, so it needs the
+library mounted, like a server that copies local artwork; on a server without
+the mount discovery finds nothing and local choices are not offered.
+
+The reads open each library root as an `os.Root`, which needs read (list)
+permission on the root directory, not only search permission. The scanner lists
+the roots, so a server that scans a library already has it.
 
 ## Series depth and mixed libraries
 
