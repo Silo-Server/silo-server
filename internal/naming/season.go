@@ -39,19 +39,15 @@ func isBareSeasonDirectory(segment string) bool {
 	return bareSeasonDirectoryRe.MatchString(strings.TrimSpace(segment))
 }
 
-// isBareSeasonFolder is isBareSeasonDirectory for a folder that holds the file
-// fileStem. When the file's own series title is the folder name, as in
-// Season/Season.S01E01.mkv, the folder is a show named "Season", not a season
-// level.
-func isBareSeasonFolder(segment, fileStem string) bool {
+// isBareSeasonFolder is isBareSeasonDirectory for a folder that holds a file
+// whose own series title is fileTitle. When that title is the folder name, as
+// in Season/Season.S01E01.mkv, the folder is a show named "Season", not a
+// season level.
+func isBareSeasonFolder(segment, fileTitle string) bool {
 	if !isBareSeasonDirectory(segment) {
 		return false
 	}
-	if fileStem == "" {
-		return true
-	}
-	token, ok := parseEpisodeToken(fileStem, nil, false, false)
-	return !ok || token.seriesTitle == "" || normalizeComparableTitle(token.seriesTitle) != normalizeComparableTitle(segment)
+	return fileTitle == "" || normalizeComparableTitle(segment) != normalizeComparableTitle(fileTitle)
 }
 
 // seasonLabelStandsAlone reports whether a bare season label in a folder

@@ -171,6 +171,11 @@ func TestBareSeasonFolderJoinsParentShow(t *testing.T) {
 		show + "/Season/Example Show - S01E01.mkv",
 		show + "/Season 2/Example Show - S02E01.mkv",
 		show + "/Staffel/Example Show - S03E01.mkv",
+		show + "/Saison/Example Show - S04E01.mkv",
+		// Decomposed spelling, as macOS file systems store it.
+		show + "/Sa\u0308song/Example Show - S05E01.mkv",
+		show + "/Season/Specials/Example Show - S00E01.mkv",
+		show + "/Season/Extras/Example Show - S00E02.mkv",
 	}
 	_, assignments := InferRootAssignments(paths, "series", 1, nil, "/media/tv")
 	for _, p := range paths {
@@ -212,13 +217,13 @@ func TestBareSeasonFolderOnlyCountsAsImmediateParent(t *testing.T) {
 		"/tv/Season/Example.Show.S01E01.mkv":                           "/tv/Season",
 	}
 	for filePath, want := range cases {
-		root, ok := deriveSeriesRoot(filePath, true, false, "/tv")
+		root, ok := deriveSeriesRoot(filePath, "Example Show", true, false, "/tv")
 		if !ok || root.RootPath != want {
 			t.Errorf("%s: root %+v ok=%v, want %q", filePath, root, ok, want)
 		}
 	}
 	// A show named "Season" with a numbered season folder keeps its own name.
-	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", true, false, "/tv")
+	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", "Season", true, false, "/tv")
 	if !ok || root.RootPath != "/tv/Season" {
 		t.Errorf("show named Season: root %+v ok=%v", root, ok)
 	}
@@ -241,7 +246,7 @@ func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
 		t.Errorf("bare season folder must not supply a season number")
 	}
 	// A bare folder higher up is not season structure.
-	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, "Example.Show.S01E01", true, true); found {
+	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, "Example.Show.S01E01", "Example Show", true, true); found {
 		t.Errorf("ancestor bare season folder counted as season structure")
 	}
 	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
@@ -276,20 +281,22 @@ func TestBareSeasonFolderInsideNumberedSeasonKeepsShow(t *testing.T) {
 }
 
 func TestShowNamedSeasonUnderCategoryFolderKeepsItsFolder(t *testing.T) {
-	filePath := "/tv/Genres/Season/Season.S01E01.mkv"
-	ctx := ResolvePathContext(filePath, "series", "/tv")
-	if ctx.RootPath != "/tv/Genres/Season" || ctx.Title != "Season" {
-		t.Errorf("ResolvePathContext root %q title %q, want /tv/Genres/Season and Season", ctx.RootPath, ctx.Title)
-	}
-	if ctx.HasSeasonStructure {
-		t.Errorf("ResolvePathContext: a show folder named Season counted as season structure")
-	}
-	if evidence := extractPathEvidence(filePath, "series", "/tv"); evidence.HasSeasonStructure {
-		t.Errorf("extractPathEvidence: a show folder named Season counted as season structure")
-	}
-	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
-	if got := assignments[filePath].RootPath; got != "/tv/Genres/Season" {
-		t.Errorf("InferRootAssignments root %q, want /tv/Genres/Season", got)
+	for _, name := range []string{"Season.S01E01.mkv", "Season.E03.mkv", "Season - 03.mkv", "Season.103.mkv"} {
+		filePath := "/tv/Genres/Season/" + name
+		ctx := ResolvePathContext(filePath, "series", "/tv")
+		if ctx.RootPath != "/tv/Genres/Season" || ctx.Title != "Season" {
+			t.Errorf("%s: ResolvePathContext root %q title %q, want /tv/Genres/Season and Season", name, ctx.RootPath, ctx.Title)
+		}
+		if ctx.HasSeasonStructure {
+			t.Errorf("%s: ResolvePathContext: a show folder named Season counted as season structure", name)
+		}
+		if evidence := extractPathEvidence(filePath, "series", "/tv"); evidence.HasSeasonStructure {
+			t.Errorf("%s: extractPathEvidence: a show folder named Season counted as season structure", name)
+		}
+		_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
+		if got := assignments[filePath].RootPath; got != "/tv/Genres/Season" {
+			t.Errorf("%s: InferRootAssignments root %q, want /tv/Genres/Season", name, got)
+		}
 	}
 	// Another show's file in a bare Season folder still lifts to that show.
 	other := "/tv/Genres/Example Show/Season/Example.Show.S01E01.mkv"
