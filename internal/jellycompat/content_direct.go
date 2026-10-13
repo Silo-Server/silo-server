@@ -1487,6 +1487,22 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		ClearArtPath:       d.ClearArtPath,
 		DiscPath:           d.DiscPath,
 		ExtraBackdropPaths: d.ExtraBackdropPaths,
+		// The stored paths seed the image tags alongside UpdatedAt; without
+		// them the timestamp alone would give every language's artwork, and
+		// every artwork update that leaves the item row alone, the same tag.
+		PosterPath:   d.PosterPath,
+		BackdropPath: d.BackdropPath,
+		LogoPath:     d.LogoPath,
+		UpdatedAt:    d.UpdatedAt,
+	}
+	// A thumbhash joins the seed only with its stored path. Episode and season
+	// details carry no paths, and a thumbhash alone would keep a replaced
+	// image's tag; without either their tags follow the presigned URL.
+	if d.PosterPath != "" {
+		detail.PosterThumbhash = d.PosterThumbhash
+	}
+	if d.BackdropPath != "" {
+		detail.BackdropThumbhash = d.BackdropThumbhash
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}

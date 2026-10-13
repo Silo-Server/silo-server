@@ -13708,6 +13708,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       downloads_stats: boolean;
+      egress_totals: boolean;
       health: boolean;
       log_level_list: boolean;
       playback_activity: boolean;
@@ -13825,6 +13826,10 @@ export interface components {
       watch_providers: components["schemas"]["AdminDashboardWatchProviderStats"][];
     };
     AdminDashboardTimeseries: {
+      /** Format: int64 */
+      download_egress_bytes: number;
+      /** Format: int64 */
+      egress_bytes: number;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -25794,8 +25799,10 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       read_at: string | null;
-      /** @description A JSON value whose shape is the setting's value_schema in the settings contract. */
-      reason_flags: unknown;
+      /** @description Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize. */
+      reason_flags: {
+        [key: string]: unknown;
+      };
       /** Format: int64 */
       season_number?: number;
       /**
@@ -30989,6 +30996,9 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      backdrop_thumbhash?: string;
+      /** @description The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size */
+      backdrop_url?: string;
       /** @example movie:heat-1995 */
       content_id: string;
       credits?: components["schemas"]["WatchMarker"];
@@ -31009,6 +31019,9 @@ export interface components {
       overview?: string;
       /** @description Logical watch choices, each spanning one or more ordered parts */
       playback_variants?: components["schemas"]["WatchPlaybackVariant"][];
+      poster_thumbhash?: string;
+      /** @description The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls */
+      poster_url?: string;
       preview?: components["schemas"]["WatchMarker"];
       recap?: components["schemas"]["WatchMarker"];
       /** Format: int64 */

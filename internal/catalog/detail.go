@@ -262,6 +262,18 @@ type ItemDetail struct {
 	DiscPath           string   `json:"-"`
 	ExtraBackdropPaths []string `json:"-"`
 
+	// The stored poster, backdrop and logo paths (localized, when a
+	// localization supplies the artwork) and the item's last modification,
+	// kept out of the JSON contract like the paths above. With the thumbhashes
+	// they seed the Jellyfin-compatible image tags the way list rows do, so an
+	// image keeps one tag across list and detail responses, and the tag still
+	// changes with the artwork and the viewer's language. Set for movies and
+	// series.
+	PosterPath   string    `json:"-"`
+	BackdropPath string    `json:"-"`
+	LogoPath     string    `json:"-"`
+	UpdatedAt    time.Time `json:"-"`
+
 	// Literary work linkage. Present for linked ebook/audiobook items.
 	WorkID      string              `json:"work_id,omitempty"`
 	WorkTitle   string              `json:"work_title,omitempty"`
@@ -700,6 +712,11 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                             `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                           `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                           `json:"effective_version_edition_key,omitempty"`
+	// Artwork is mapped explicitly by v2; the frozen v1 JSON omits it.
+	PosterURL         string `json:"-"`
+	PosterThumbhash   string `json:"-"`
+	BackdropURL       string `json:"-"`
+	BackdropThumbhash string `json:"-"`
 }
 
 func (d ItemDetail) MarshalJSON() ([]byte, error) {
@@ -2262,6 +2279,10 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
+	detail.PosterPath = item.PosterPath
+	detail.BackdropPath = item.BackdropPath
+	detail.LogoPath = item.LogoPath
+	detail.UpdatedAt = item.UpdatedAt
 	copyExtraArtwork(detail, item)
 
 	// File versions and subtitle aggregation only apply to movies.
@@ -3241,6 +3262,12 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 			item.ContentID,
 		)
 		detail.Year = item.Year
+		if !filter.OmitWatchArtwork {
+			detail.PosterThumbhash = item.PosterThumbhash
+			detail.BackdropThumbhash = item.BackdropThumbhash
+			detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
+			detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
+		}
 		s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToWatchDetail(detail)
 		return detail, nil
 	case !errors.Is(err, ErrItemNotFound):
@@ -3311,6 +3338,11 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 	}
 
+	if !filter.OmitWatchArtwork {
+		detail.PosterThumbhash = episode.StillThumbhash
+		detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
+	}
+
 	if seriesErr == nil && series != nil {
 		series, err = s.LocalizeItemModel(ctx, series, localizationFilter)
 		if err != nil {
@@ -3318,6 +3350,10 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 		detail.SeriesTitle = series.Title
 		detail.Year = series.Year
+		if !filter.OmitWatchArtwork {
+			detail.BackdropThumbhash = series.BackdropThumbhash
+			detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
+		}
 	}
 
 	return detail, nil
@@ -3379,6 +3415,12 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 			detail.SeriesTitle = parent.Title
 		}
 		detail.Year = parent.Year
+		if !filter.OmitWatchArtwork {
+			detail.PosterThumbhash = parent.PosterThumbhash
+			detail.BackdropThumbhash = parent.BackdropThumbhash
+			detail.PosterURL = s.PresignImageURL(ctx, parent.PosterPath, "poster", string(filter.ImageSize))
+			detail.BackdropURL = s.PresignImageURL(ctx, parent.BackdropPath, "backdrop", string(filter.ImageSize))
+		}
 	}
 	return detail, nil
 }

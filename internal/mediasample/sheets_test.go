@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // The tile size the unit tests use: small, even, and not square.
@@ -71,6 +73,51 @@ func TestSheetsRequestValidation(t *testing.T) {
 	}
 }
 
+// TestSheetsRequestBoundsARunsPixels refuses a run whose tiles would not fit
+// maxSheetsRunPixels, since a run holds every tile until it finishes.
+func TestSheetsRequestBoundsARunsPixels(t *testing.T) {
+	huge := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 10000)},
+		Sheets: &SheetsOutput{TileWidth: 1920, TileHeight: 1920, Columns: 1, Rows: 1, Quality: 80}}
+	if err := huge.Validate(); err == nil || !strings.Contains(err.Error(), "pixels in one run") {
+		t.Fatalf("error %v, want the run's pixels refused", err)
+	}
+	// Trickplay's largest chunk: 11 sheets of 10x8 tiles of 300x126.
+	chunk := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 880)},
+		Sheets: &SheetsOutput{TileWidth: 300, TileHeight: 126, Columns: 10, Rows: 8, Quality: 80}}
+	if err := chunk.Validate(); err != nil {
+		t.Fatalf("trickplay chunk refused: %v", err)
+	}
+	// A height the probe will replace does not count against the run: a
+	// rotated file's catalog height can exceed the height it decodes at.
+	rotated := chunk
+	rotated.Sheets = &SheetsOutput{TileWidth: 300, TileHeight: 1920, Columns: 10, Rows: 8, Quality: 80, UseInputAspect: true}
+	if err := rotated.Validate(); err != nil {
+		t.Fatalf("run with a probed height refused before probing: %v", err)
+	}
+	rotated.Sheets.UseInputAspect = false
+	if err := rotated.Validate(); err == nil {
+		t.Fatal("run of tall tiles with a fixed height: want it refused")
+	}
+}
+
+// TestRunSheetsBoundsTheProbedRun refuses a run whose probed tile height
+// makes it too large, before ffmpeg decodes anything.
+func TestRunSheetsBoundsTheProbedRun(t *testing.T) {
+	req := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 880)},
+		Sheets: &SheetsOutput{TileWidth: 300, TileHeight: 16, Columns: 10, Rows: 8, Quality: 80, UseInputAspect: true}}
+	var calls [][]string
+	runner := Runner{Exec: func(_ context.Context, _ string, args []string, _ io.Reader, _, stderr io.Writer) error {
+		calls = append(calls, args)
+		// A portrait picture: 300-pixel tiles 534 pixels high.
+		_, _ = io.WriteString(stderr, "Input #0, matroska,webm, from '/media/a.mkv':\n  Duration: 02:00:00.00, start: 0.000000, bitrate: 900 kb/s\n  Stream #0:0: Video: hevc (Main), yuv420p(tv), 1080x1920, SAR 1:1 DAR 9:16\n")
+		return nil
+	}}
+	_, err := runner.Run(t.Context(), req)
+	if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonArgs || len(calls) != 1 {
+		t.Fatalf("error %v after %d runs, want the probed run refused as args after the probe", err, len(calls))
+	}
+}
+
 func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
 	req := sheetsRequest([]float64{5, 15}, 10, 10)
 	req.Samples.ReadThrough = true
@@ -95,24 +142,35 @@ func TestBuildSheetsGraph(t *testing.T) {
 	hdr := out
 	hdr.ToneMap = &ToneMap{AllowSoftware: true}
 	tail := ",metadata=mode=add:key=sample:value=-1,metadata@sheets=print"
+	vaapiScale := `scale_vaapi=w=min(iw\,1280):h=min(ih\,536):format=nv12,hwdownload,format=nv12,`
+	vaapi10 := `scale_vaapi=w=min(iw\,1280):h=min(ih\,536):format=p010,hwdownload,format=p010le,`
+	cudaScale := `scale_cuda=w=min(iw\,1280):h=min(ih\,536):interp_algo=bilinear:format=nv12,hwdownload,format=nv12,`
+	cuda10 := `scale_cuda=w=min(iw\,1280):h=min(ih\,536):interp_algo=bilinear:format=p010,hwdownload,format=p010le,`
+	areaFull := "scale=320:134:flags=area:out_range=full:out_color_matrix=bt601,format=yuv420p"
+	dv := tonemap.SoftwareFilter(tonemap.SourceDolbyVision, tonemap.SoftwareFilterBT2390)
+	hlg := tonemap.SoftwareFilter(tonemap.SourceHLG, tonemap.SoftwareFilterBT2390)
+	toneMapped := func(chain string) string {
+		return "scale=320:134:flags=area," + chain + ",scale=out_range=full:out_color_matrix=bt601,format=yuv420p"
+	}
 	tests := []struct {
-		name, accel, softwareToneMap string
-		out                          SheetsOutput
-		want                         string
+		name, accel string
+		toneMap     sheetsToneMap
+		out         SheetsOutput
+		want        string
 	}{
-		{"software", "", "", out,
-			"scale=320:134:flags=area:out_range=full:out_color_matrix=bt601,format=yuv420p" + tail},
-		{"software HDR", "", softwareToneMapBT2390, hdr,
-			"scale=320:134:flags=area," + softwareToneMapBT2390 + ",scale=out_range=full:out_color_matrix=bt601,format=yuv420p" + tail},
-		{"vaapi", "vaapi", "", out,
-			"scale_vaapi=w=320:h=134:format=nv12,hwdownload,format=nv12,scale=out_range=full:out_color_matrix=bt601,format=yuv420p" + tail},
-		{"qsv HDR", "qsv", "", hdr,
-			vaapiToneMap + ",scale_vaapi=w=320:h=134:format=nv12,hwdownload,format=nv12,scale=out_range=full:out_color_matrix=bt601,format=yuv420p" + tail},
-		{"videotoolbox HDR", "videotoolbox", softwareToneMapHable, hdr,
-			"scale=320:134:flags=area," + softwareToneMapHable + ",scale=out_range=full:out_color_matrix=bt601,format=yuv420p" + tail},
+		{"software", "", sheetsToneMap{}, out, areaFull + tail},
+		{"software HDR", "", sheetsToneMap{software: softwareToneMapBT2390}, hdr, toneMapped(softwareToneMapBT2390) + tail},
+		{"software Dolby Vision", "", sheetsToneMap{kind: tonemap.SourceDolbyVision, software: dv}, hdr, toneMapped(dv) + tail},
+		{"vaapi", "vaapi", sheetsToneMap{}, out, vaapiScale + areaFull + tail},
+		{"qsv HDR best effort", "qsv", sheetsToneMap{}, hdr, vaapiToneMap + "," + vaapiScale + areaFull + tail},
+		{"vaapi HLG", "vaapi", sheetsToneMap{kind: tonemap.SourceHLG, software: hlg}, hdr, vaapi10 + toneMapped(hlg) + tail},
+		{"qsv Dolby Vision", "qsv", sheetsToneMap{kind: tonemap.SourceDolbyVision, software: dv}, hdr, vaapi10 + toneMapped(dv) + tail},
+		{"cuda", "nvenc", sheetsToneMap{}, out, cudaScale + areaFull + tail},
+		{"cuda Dolby Vision", "nvenc", sheetsToneMap{kind: tonemap.SourceDolbyVision, software: dv}, hdr, cuda10 + toneMapped(dv) + tail},
+		{"videotoolbox HDR", "videotoolbox", sheetsToneMap{software: softwareToneMapHable}, hdr, toneMapped(softwareToneMapHable) + tail},
 	}
 	for _, tt := range tests {
-		got, err := buildSheetsGraph(tt.out, tt.accel, tt.softwareToneMap)
+		got, err := buildSheetsGraph(tt.out, tt.accel, tt.toneMap)
 		if err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
@@ -120,8 +178,14 @@ func TestBuildSheetsGraph(t *testing.T) {
 			t.Errorf("%s:\n got %s\nwant %s", tt.name, got, tt.want)
 		}
 	}
-	if _, err := buildSheetsGraph(hdr, "", ""); err == nil {
+	if _, err := buildSheetsGraph(hdr, "", sheetsToneMap{}); err == nil {
 		t.Error("software HDR without a tone-map chain: want an error")
+	}
+	if _, err := buildSheetsGraph(hdr, "nvenc", sheetsToneMap{}); err == nil {
+		t.Error("CUDA HDR without a source signal: want an error")
+	}
+	if _, err := buildSheetsGraph(hdr, "vaapi", sheetsToneMap{kind: tonemap.SourcePQ}); err == nil {
+		t.Error("GPU HDR with a source signal but no software chain: want an error")
 	}
 	if vaapiToneMapDownload != vaapiToneMap+",hwdownload,format=nv12" {
 		t.Errorf("image tone-map chain changed: %s", vaapiToneMapDownload)
@@ -133,7 +197,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	req.Threads = 2
 	output := []string{"-map", "0:V:0", "-an", "-sn", "-dn", "-vf", "GRAPH", "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"}
 
-	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH", "")
+	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH", "", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +218,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	window := req
 	window.Samples = nil
 	window.Window = &Window{StartSeconds: 0, DurationSeconds: 15.04, KeyframesOnly: true}
-	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc")
+	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,13 +263,24 @@ type fakeSheets struct {
 	editLog     func([]string) []string
 	calls       [][]string
 	packetEnd   float64
+	// listStart is the start time a list run's input header reports, and
+	// lists the ffconcat lists the runs read.
+	listStart float64
+	lists     []string
 }
 
-func (f *fakeSheets) exec(_ context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) error {
+func (f *fakeSheets) exec(_ context.Context, _ string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	f.calls = append(f.calls, args)
 	if slices.Contains(args, "copy") && !slices.Contains(args, "framecrc") {
 		_, _ = fmt.Fprintf(stderr, "Input #0, %s, from '/media/a.mkv':\n  Duration: 00:02:00.00, start: 0.000000, bitrate: 900 kb/s\n", f.format)
 		return nil
+	}
+	if slices.Contains(args, "concat") {
+		if stdin != nil {
+			list, _ := io.ReadAll(stdin)
+			f.lists = append(f.lists, string(list))
+		}
+		_, _ = fmt.Fprintf(stderr, "Input #0, concat, from 'pipe:0':\n  Duration: N/A, start: %f, bitrate: N/A\n", f.listStart)
 	}
 	var log []string
 	for i, frame := range f.frames {
@@ -368,7 +443,8 @@ func TestRunSheetsFillsMissingSamples(t *testing.T) {
 }
 
 // TestRunSheetsRereadsSparseListAsWindow decodes one of four samples through
-// the list. When the HEVC decoder logged dropping keyframes as duplicates, as
+// the list, and none of the other three through the repair that lists them
+// again. When the HEVC decoder logged dropping keyframes as duplicates, as
 // it does for open-GOP keyframes after each jump, the attempt reads the
 // samples again as a keyframes-only window; otherwise, including for pictures
 // dropped as merely undecodable, the list's failure stands. A window whose
@@ -388,11 +464,11 @@ func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
 		runs          int
 		want          Reason
 	}{
-		"duplicate keyframes":   {editLog: logDuplicates, window: keyframes, runs: 3},
-		"no drops logged":       {window: keyframes, runs: 2, want: ReasonEmpty},
-		"damaged pictures":      {editLog: logUndecodable, window: keyframes, runs: 2, want: ReasonEmpty},
-		"window empty too":      {editLog: logDuplicates, runs: 3, want: ReasonEmpty},
-		"window duplicates too": {editLog: logDuplicates, window: keyframes, windowEditLog: logDuplicates, runs: 3, want: ReasonEmpty},
+		"duplicate keyframes":   {editLog: logDuplicates, window: keyframes, runs: 4},
+		"no drops logged":       {window: keyframes, runs: 3, want: ReasonEmpty},
+		"damaged pictures":      {editLog: logUndecodable, window: keyframes, runs: 3, want: ReasonEmpty},
+		"window empty too":      {editLog: logDuplicates, runs: 4, want: ReasonEmpty},
+		"window duplicates too": {editLog: logDuplicates, window: keyframes, windowEditLog: logDuplicates, runs: 4, want: ReasonEmpty},
 	}
 	for name, tt := range tests {
 		list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{tagged(10, 5)}, editLog: tt.editLog}
@@ -406,12 +482,13 @@ func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
 			return window.exec(ctx, name, args, stdin, stdout, stderr)
 		}}
 		result, err := runner.Run(t.Context(), sheetsRequest(secondsFrom(5, 10, 4), 2, 2))
-		if len(calls) != tt.runs || !slices.Contains(calls[1], "concat") || (tt.runs == 3 && !slices.Contains(calls[2], "framecrc")) {
-			t.Fatalf("%s: runs %q, want a probe, a list run, and %d more", name, calls, tt.runs-2)
+		if len(calls) != tt.runs || !slices.Contains(calls[1], "concat") || !slices.Contains(calls[2], "concat") ||
+			(tt.runs == 4 && !slices.Contains(calls[3], "framecrc")) {
+			t.Fatalf("%s: runs %q, want a probe, a list run, its repair, and %d more", name, calls, tt.runs-3)
 		}
 		if tt.want != "" {
 			failure, ok := errors.AsType[*Error](err)
-			if !ok || failure.Reason != tt.want || (tt.runs == 3 && !strings.Contains(err.Error(), "after the list run")) {
+			if !ok || failure.Reason != tt.want || (tt.runs == 4 && !strings.Contains(err.Error(), "after the list run")) {
 				t.Fatalf("%s: error %v, want %s naming the list run", name, err, tt.want)
 			}
 			continue
@@ -571,8 +648,12 @@ func TestRunSheetsRejectsBrokenOutput(t *testing.T) {
 		"log without frame": {&fakeSheets{frames: frames(), editLog: func(log []string) []string {
 			return append(log, "[metadata@sheets @ 0x55d0] frame:4    pts:0       pts_time:0", "[metadata@sheets @ 0x55d0] sample=5")
 		}}, ReasonOutput},
-		"counter restarts": {&fakeSheets{frames: frames(), editLog: func(log []string) []string {
-			log[6] = strings.Replace(log[6], "frame:3", "frame:0", 1)
+		"counter skips": {&fakeSheets{frames: frames(), editLog: func(log []string) []string {
+			log[6] = strings.Replace(log[6], "frame:3", "frame:4", 1)
+			return log
+		}}, ReasonOutput},
+		"counter restarts past zero": {&fakeSheets{frames: frames(), editLog: func(log []string) []string {
+			log[6] = strings.Replace(log[6], "frame:3", "frame:1", 1)
 			return log
 		}}, ReasonOutput},
 		"no sample line": {&fakeSheets{frames: frames(), editLog: func(log []string) []string {

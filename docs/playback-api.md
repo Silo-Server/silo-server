@@ -40,6 +40,16 @@ capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
 
+## Watch artwork
+
+`GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
+`backdrop_url`, and `backdrop_thumbhash` for system media controls. Movies
+use their own artwork, episodes use their still as the poster and their
+series' backdrop, and local extras inherit their parent's artwork. URLs use
+the same resolver and `image_size` query as catalog item detail. Missing
+artwork is omitted; clients can retain their catalog-detail fallback.
+The frozen v1 watch response does not gain these fields.
+
 ## Marker ranges
 
 V2 watch detail includes `marker_segments` on each file version, including

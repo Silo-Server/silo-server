@@ -65,7 +65,7 @@ func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Re
 	}
 	e.hardware.Set(accel, readSetting(ctx, e.settings, hwDeviceSetting))
 	resolved, device := e.hardware.Backend(ctx, ffmpeg)
-	hardware := mediasample.SupportsHardwareDecode(resolved)
+	hardware := mediasample.SupportsHardwareSheets(resolved)
 	req.Attempts = AttemptPlan(hardware, len(req.Samples.Seconds))
 	runner := mediasample.Runner{
 		FFmpegPath: ffmpeg,
@@ -93,17 +93,20 @@ func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Re
 
 // fallback moves a failed hardware attempt on to software, logging the
 // first failure per accelerator loudly. An input that has no video stream
-// fails the same way in software, so that ends the run.
+// fails the same way in software, so that ends the run. A GPU that cannot
+// decode a file's codec is no fault of the accelerator and is not its first
+// failure.
 func (e *LocalExtractor) fallback(ctx context.Context, accel string) func(mediasample.Attempt, mediasample.AttemptError) bool {
 	return func(attempt mediasample.Attempt, failure mediasample.AttemptError) bool {
 		if !attempt.Hardware {
 			return true
 		}
-		if failure.Cause() == mediasample.ReasonNoStream {
+		cause := failure.Cause()
+		if cause == mediasample.ReasonNoStream {
 			return false
 		}
 		level := slog.LevelDebug
-		if e.hardware.FirstFailure(accel) {
+		if cause != mediasample.ReasonUnsupported && e.hardware.FirstFailure(accel) {
 			level = slog.LevelWarn
 		}
 		e.logger.Log(ctx, level, "trickplay hardware decode failed; using software",

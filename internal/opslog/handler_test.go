@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -116,5 +117,91 @@ func TestHandlerMasksNestedCredentialAssignments(t *testing.T) {
 	got, ok := writer.entries[0].Attrs["error"].(string)
 	if !ok || strings.Contains(got, "FAKE_FIXTURE_SECRET") || !strings.Contains(got, "api_key=[REDACTED]") || !strings.Contains(got, "Unauthenticated") {
 		t.Fatalf("captured error = %#v, want redacted credential and preserved diagnosis", writer.entries[0].Attrs["error"])
+	}
+}
+
+// TestHandlerRecordsErrorText checks that an error attr is stored as its
+// text. Errors from errors.New and fmt.Errorf have no exported fields, so a
+// JSON encode would store {} and hide why the logged operation failed.
+func TestHandlerRecordsErrorText(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	wrapped := fmt.Errorf("loading overlay summaries: %w", errors.New("connection refused"))
+	logger.With("static_err", errors.New("static")).ErrorContext(context.Background(), "probe: error", "error", wrapped)
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	if got := entry.Attrs["error"]; got != "loading overlay summaries: connection refused" {
+		t.Fatalf("attrs[error] = %#v, want the error text", got)
+	}
+	if got := entry.Attrs["static_err"]; got != "static" {
+		t.Fatalf("attrs[static_err] = %#v, want the error text", got)
+	}
+}
+
+type nilPtrErr struct{ msg string }
+
+func (e *nilPtrErr) Error() string { return e.msg }
+
+// TestHandlerRecordsTypedNilError checks that a nil pointer satisfying error
+// is recorded instead of panicking when Error dereferences the receiver.
+func TestHandlerRecordsTypedNilError(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	var err *nilPtrErr
+	logger.ErrorContext(context.Background(), "probe: error", "error", err)
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	if got := entry.Attrs["error"]; got != "<nil *opslog.nilPtrErr>" {
+		t.Fatalf("attrs[error] = %#v, want a nil placeholder", got)
+	}
+}
+
+// TestHandlerSanitizesErrorURLs checks that a requested URL inside an error
+// chain loses its query string and credentials before it is stored.
+func TestHandlerSanitizesErrorURLs(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	urlErr := &url.Error{Op: "Get", URL: "https://user:pass@cdn.example/v.mp4?token=s3cret&sig=abc", Err: errors.New("timeout")}
+	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("fetch stream: %w", urlErr))
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	got, _ := entry.Attrs["error"].(string)
+	if strings.Contains(got, "s3cret") || strings.Contains(got, "pass") || strings.Contains(got, "sig=") {
+		t.Fatalf("attrs[error] = %q leaks a secret", got)
+	}
+	if !strings.Contains(got, "fetch stream") || !strings.Contains(got, "timeout") {
+		t.Fatalf("attrs[error] = %q, want the wrapper and cause kept", got)
+	}
+}
+
+// TestHandlerRedactsSecretAssignmentsInErrorText checks that a secret
+// key=value pair in plain error text, as a plugin's gRPC status description
+// carries it, is masked before the entry is stored.
+func TestHandlerRedactsSecretAssignmentsInErrorText(t *testing.T) {
+	t.Parallel()
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
+
+	err := errors.New("rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_SECRET rejected")
+	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("metadata lookup: %w", err))
+
+	writer.mu.Lock()
+	entry := writer.entries[0]
+	writer.mu.Unlock()
+	got, _ := entry.Attrs["error"].(string)
+	if want := "metadata lookup: rpc error: code = Unauthenticated desc = api_key=[REDACTED] rejected"; got != want {
+		t.Fatalf("attrs[error] = %q, want %q", got, want)
 	}
 }

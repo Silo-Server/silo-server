@@ -193,6 +193,13 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := parseItemsQuery(r, h.codec)
+	if query.matchesNothing() {
+		// A genre, person, studio, or item filter whose IDs name nothing
+		// matches nothing, rather than falling back to an unfiltered browse
+		// or the Collections view's BoxSet list.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
 
 	// Browsing the synthetic Collections view lists its BoxSets. The view ID is
 	// a fixed Jellyfin sentinel (not a codec-encoded ID), so it is matched here
@@ -214,10 +221,6 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
-	case query.unmatchedIDFilter:
-		// A genre or person filter whose IDs name nothing matches nothing,
-		// rather than falling back to an unfiltered browse.
-		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r):
 		h.handleSpecificItems(w, r, session, query)
 	case query.parentCollectionID != "":
@@ -253,7 +256,7 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleSearchItems(w, r, session, query)
 	case query.isFavorite:
 		h.handleFavoriteItems(w, r, session, query)
-	case query.parentLibraryID == 0 && len(query.itemTypes) == 0 && !query.recursive && !query.hasRootFilter:
+	case query.listsUserRootViews():
 		// No ParentId and no filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
 		// and expect CollectionFolder items representing the user's libraries.
@@ -3427,6 +3430,7 @@ func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL str
 	if dto.SeriesID != "" {
 		h.images.RememberSized(dto.SeriesID, "Primary", series.PosterURL, compatCardImageSize)
 		h.images.RememberSized(dto.SeriesID, "Backdrop", series.BackdropURL, compatCardImageSize)
+		h.images.RememberSized(dto.SeriesID, "Logo", series.LogoURL, compatCardImageSize)
 	}
 }
 
@@ -3765,6 +3769,8 @@ func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *S
 				BackdropURL:       detail.BackdropURL,
 				BackdropPath:      detail.BackdropPath,
 				BackdropThumbhash: detail.BackdropThumbhash,
+				LogoURL:           detail.LogoURL,
+				LogoPath:          detail.LogoPath,
 				UpdatedAt:         detail.UpdatedAt,
 			}
 			h.rememberDetailImages(*detail)
@@ -3894,6 +3900,10 @@ func applyItemsResponseOptions(items []baseItemDTO, query itemsQuery) {
 		if !allowed("thumb") {
 			dto.ParentThumbImageTag = ""
 			dto.ParentThumbItemID = ""
+		}
+		if !allowed("logo") {
+			dto.ParentLogoImageTag = ""
+			dto.ParentLogoItemID = ""
 		}
 		if imagesOff {
 			dto.ImageBlurHashes = nil

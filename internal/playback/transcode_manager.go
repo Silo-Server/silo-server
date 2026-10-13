@@ -897,6 +897,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	cfg := m.runtimeConfig()
 	outputDir := reconstructionOutputDir(cfg.TranscodeDir, sessionID, card.OutputSubdir)
 	opts := card.TranscodeOpts(outputDir, cfg.FFmpegPath, m.logSink())
+	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but a reconstruction is
 	// not a fresh generation: restore the conservative manifest lead so recovery
 	// never exposes a hardware encoder after only one fragment.

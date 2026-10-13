@@ -524,6 +524,7 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	filter.OmitWatchArtwork = true
 
 	detail, err := h.WatchDetail(r.Context(), apimw.GetUserID(r.Context()), requestProfileID(r), id, filter)
 	if err != nil {

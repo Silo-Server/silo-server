@@ -34,7 +34,7 @@ type Runner struct {
 	// starts ffmpeg.
 	Exec ExecFunc
 	// Capabilities returns the binary's inventory when a run needs it, which
-	// only software tone mapping of images does so far. Nil means
+	// only software tone mapping of images and sheets does so far. Nil means
 	// LoadCapabilities; tests replace it.
 	Capabilities func(ctx context.Context, ffmpegPath string) (Capabilities, error)
 	// Fallback reports whether a run moves on to its next attempt after
@@ -140,7 +140,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 	// A hardware attempt reserves its device, and an image or sheet attempt
 	// settles its filters, before its timeout starts, so neither eats into
 	// the decode's time.
-	hw, release, failure := r.reserveHardware(attempt)
+	hw, release, failure := r.reserveHardware(req, attempt)
 	if failure != nil {
 		failure.Decoder = decoder
 		return Result{}, failure
@@ -181,19 +181,23 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 }
 
 // reserveHardware returns the hardware attempt decodes on. A hardware
-// attempt reserves one render device through playback.AcquireHWDevice,
-// falling back to playback.PickRenderDevice, until release is called. A
-// multi-device HWDevice therefore resolves to one device per attempt, and the
-// reservation spans only this attempt. A hardware attempt the host cannot
-// run, such as VAAPI without a render device, fails as unsupported without
+// attempt reserves one device through playback.AcquireHWDevice, falling back
+// to playback.PickRenderDevice for an accelerator that opens a render device,
+// until release is called. A multi-device HWDevice therefore resolves to one
+// device per attempt, and the reservation spans only this attempt. A hardware
+// attempt the host cannot run, such as VAAPI without a render device, or req's
+// outputs cannot run on, such as stats on CUDA, fails as unsupported without
 // starting ffmpeg: that is no fault of the request or the file.
-func (r Runner) reserveHardware(attempt Attempt) (hardwareDecode, func(), *AttemptError) {
+func (r Runner) reserveHardware(req Request, attempt Attempt) (hardwareDecode, func(), *AttemptError) {
 	hw := hardwareDecode{Accel: r.HWAccel}
 	if !attempt.Hardware {
 		return hw, func() {}, nil
 	}
+	if !req.supportsHardware(r.HWAccel) {
+		return hardwareDecode{}, nil, &AttemptError{Reason: ReasonUnsupported, Err: fmt.Errorf("hardware decode does not support %q for this output", r.HWAccel)}
+	}
 	device, release := playback.AcquireHWDevice(r.HWDevice, r.HWAccel)
-	if device == "" {
+	if device == "" && usesRenderDevice(r.HWAccel) {
 		device = playback.PickRenderDevice("")
 	}
 	hw.Device = device
@@ -244,7 +248,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
 			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
-			if err := out.validate(); err != nil {
+			if err := errors.Join(out.validate(), out.validateRun(len(req.Samples.Seconds))); err != nil {
 				return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 			}
 			req.Sheets = &out
@@ -367,8 +371,9 @@ func watchDuplicatePOC(seen *bool) func(string) {
 }
 
 // sheets runs a Sheets request for the sample times, reading req's list
-// (with inpoints offset by inputStart) or window, and tiles the frames.
-// logHandlers also read ffmpeg's log.
+// (with inpoints offset by inputStart) or window, repairs a list's weak cells
+// (see sheet_repair.go), and tiles the frames. logHandlers also read
+// ffmpeg's log.
 func (a attemptRun) sheets(req Request, times []float64, inputStart float64, logHandlers ...func(string)) (Result, *AttemptError) {
 	var packetTimingPath string
 	if req.Window != nil {
@@ -379,7 +384,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		defer func() { _ = os.RemoveAll(dir) }()
 		packetTimingPath = filepath.Join(dir, "packets.framecrc")
 	}
-	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath)
+	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath, sampledSheetsList)
 	if err != nil {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 	}
@@ -387,13 +392,24 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 	if req.Window != nil {
 		offset = req.Window.StartSeconds
 	}
-	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
+	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset, sampledSheetsList.span)
+	assembler.inputStart = inputStart
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}
 	if packetTimingPath != "" {
 		if err := assembler.readPacketTiming(packetTimingPath); err != nil {
 			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("read packet timing: %w", err)}
+		}
+	}
+	if failure := assembler.close(); failure != nil {
+		failure.Decoder = a.decoder
+		return Result{}, failure
+	}
+	if req.Samples != nil {
+		a.repairSheets(req, assembler, inputStart)
+		if err := a.ctx.Err(); err != nil {
+			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonCanceled, Err: err}
 		}
 	}
 	sheets, frames, failure := assembler.finish()
