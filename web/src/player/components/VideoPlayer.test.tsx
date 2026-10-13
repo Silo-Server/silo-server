@@ -4104,9 +4104,32 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(onConnectionLost).not.toHaveBeenCalled();
 
-    // The switch fails and leaves the idle stream in place, so the reopen runs again.
+    // The switch fails and leaves the idle stream in place, so the reconnect
+    // reopens it.
     rerenderPlayer({ replacing: false });
-    expect(onReanchorSeek).toHaveBeenCalledTimes(2);
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+  });
+
+  it("reconnects once when the reopen's own replan fails", async () => {
+    const { video, rerenderPlayer, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+
+    // The session shows the reopen's replan in flight, and it answers false
+    // before the render that clears the flag.
+    rerenderPlayer({ replanning: true });
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    rerenderPlayer({ replanning: false });
+
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
   });
 
   it("hands a reopen the session refuses to the reconnect", async () => {

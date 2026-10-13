@@ -1225,8 +1225,9 @@ export function VideoPlayer({
   planChangeInFlightRef.current = planChangeInFlight;
   const planRevisionRef = useRef(planRevision);
   planRevisionRef.current = planRevision;
-  // The plan revision a deferred reopen is waiting to see replaced.
-  const reopenAfterPlanChangeRef = useRef<number | null>(null);
+  // What to do once the plan change in flight settles without replacing the
+  // stream, and the plan revision it would replace.
+  const afterPlanChangeRef = useRef<{ revision: number; run: () => void } | null>(null);
   const reopenIdleProgressiveRemux = useCallback(() => {
     const video = videoRef.current;
     if (!video || !isProgressiveRemux || watchTogetherRoomId) return;
@@ -1243,30 +1244,41 @@ export function VideoPlayer({
       duration: durationRef.current,
       playing: true,
     });
+    const revision = planRevisionRef.current;
     if (planChangeInFlightRef.current) {
-      reopenAfterPlanChangeRef.current = planRevisionRef.current;
+      afterPlanChangeRef.current = {
+        revision,
+        // A viewer who paused meanwhile is still on the idle stream; the next
+        // play reopens it.
+        run: () => {
+          if (videoRef.current?.paused) transportIdleSinceRef.current = 0;
+          else reopenIdleProgressiveRemuxRef.current();
+        },
+      };
       return;
     }
     // When the reopen does not take, the session may have expired during the
     // pause or the route may no longer be granted. The reconnect replans or
     // starts a new attempt at the same position, unless another plan already
-    // replaced this stream or the viewer has left. A change that started
-    // meanwhile, such as a version switch, supersedes the reopen; it is
-    // retried only if that change lands no plan.
-    const revision = planRevisionRef.current;
+    // replaced this stream or the viewer has left.
     const reconnect = () => {
       if (!isMountedRef.current) return;
       if (planRevisionRef.current !== revision) return;
       if (connectionStatusRef.current !== "connected") return;
-      if (planChangeInFlightRef.current) {
-        reopenAfterPlanChangeRef.current = revision;
-        return;
-      }
       onConnectionLost?.(position, !video.paused);
     };
+    // A change can still look in flight here: this reopen's own replan until
+    // its answer renders, or a version switch that started meanwhile. The
+    // reconnect waits for it to settle, so a switch that lands a plan
+    // replaces the stream instead, and a failed reopen reconnects once rather
+    // than reopening again.
+    const fallBack = () => {
+      if (planChangeInFlightRef.current) afterPlanChangeRef.current = { revision, run: reconnect };
+      else reconnect();
+    };
     const accepted = reanchorAt(position);
-    if (accepted === false) reconnect();
-    else if (accepted !== true) accepted.then((ok) => ok || reconnect(), reconnect);
+    if (accepted === false) fallBack();
+    else if (accepted !== true) accepted.then((ok) => ok || fallBack(), fallBack);
   }, [
     isProgressiveRemux,
     onConnectionLost,
@@ -1277,16 +1289,12 @@ export function VideoPlayer({
   reopenIdleProgressiveRemuxRef.current = reopenIdleProgressiveRemux;
 
   useEffect(() => {
-    const waitingOn = reopenAfterPlanChangeRef.current;
-    if (waitingOn === null || planChangeInFlight) return;
-    reopenAfterPlanChangeRef.current = null;
-    // The change landed a new stream, which is not idle.
-    if (planRevision !== waitingOn) return;
-    // A viewer who paused meanwhile is still on the idle stream; the next
-    // play reopens it.
-    if (videoRef.current?.paused) transportIdleSinceRef.current = 0;
-    else reopenIdleProgressiveRemux();
-  }, [planChangeInFlight, planRevision, reopenIdleProgressiveRemux]);
+    const waiting = afterPlanChangeRef.current;
+    if (waiting === null || planChangeInFlight) return;
+    afterPlanChangeRef.current = null;
+    // A change that landed a plan replaced the stream, which is not idle.
+    if (planRevision === waiting.revision) waiting.run();
+  }, [planChangeInFlight, planRevision]);
 
   const handlePlayerSeek = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
