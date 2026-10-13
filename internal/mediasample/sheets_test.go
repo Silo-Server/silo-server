@@ -73,6 +73,22 @@ func TestSheetsRequestValidation(t *testing.T) {
 	}
 }
 
+// TestSheetsRequestBoundsARunsPixels refuses a run whose tiles would not fit
+// maxSheetsRunPixels, since a run holds every tile until it finishes.
+func TestSheetsRequestBoundsARunsPixels(t *testing.T) {
+	huge := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 10000)},
+		Sheets: &SheetsOutput{TileWidth: 1920, TileHeight: 1920, Columns: 1, Rows: 1, Quality: 80}}
+	if err := huge.Validate(); err == nil || !strings.Contains(err.Error(), "pixels in one run") {
+		t.Fatalf("error %v, want the run's pixels refused", err)
+	}
+	// Trickplay's largest chunk: 11 sheets of 10x8 tiles of 300x126.
+	chunk := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 880)},
+		Sheets: &SheetsOutput{TileWidth: 300, TileHeight: 126, Columns: 10, Rows: 8, Quality: 80}}
+	if err := chunk.Validate(); err != nil {
+		t.Fatalf("trickplay chunk refused: %v", err)
+	}
+}
+
 func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
 	req := sheetsRequest([]float64{5, 15}, 10, 10)
 	req.Samples.ReadThrough = true

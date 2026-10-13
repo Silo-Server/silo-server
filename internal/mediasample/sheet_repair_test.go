@@ -206,3 +206,38 @@ func TestMissingRepairSpan(t *testing.T) {
 		}
 	}
 }
+
+// TestRunSheetsRepairsAListThatDecodedNothing repairs a list whose short
+// entries all missed a keyframe, as one over a container that flags none can.
+func TestRunSheetsRepairsAListThatDecodedNothing(t *testing.T) {
+	list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{{luma: 9, pts: "0"}}}
+	repair := &fakeSheets{frames: []fakeSheetFrame{at(10, 5, "0.2"), at(20, 15, "10.2"), at(30, 25, "20.2"), at(40, 35, "30.2")}}
+	exec, _ := runSequence([]*fakeSheets{list, repair}, nil)
+	result, err := Runner{Exec: exec}.Run(t.Context(), sheetsRequest(secondsFrom(5, 10, 4), 2, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 20, 30, 40}) || result.SheetFrames != (SheetFrames{Decoded: 4, Refined: 4}) {
+		t.Fatalf("cells %v, frames %+v; want every sample from the repair", got, result.SheetFrames)
+	}
+}
+
+// TestRunSheetsRepairsARecoveredRepeat recovers the second sample's missing
+// cell with the keyframe the first cell shows, then decodes it at its own
+// time. The cell counts as repaired once.
+func TestRunSheetsRepairsARecoveredRepeat(t *testing.T) {
+	list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{at(10, 5, "-3"), at(30, 25, "-4")}}
+	missing := &fakeSheets{frames: []fakeSheetFrame{at(11, 15, "-13")}}
+	exact := &fakeSheets{frames: []fakeSheetFrame{at(11, 15, "-13"), at(20, 15, "-1")}}
+	exec, calls := runSequence([]*fakeSheets{list, missing, exact}, nil)
+	result, err := Runner{Exec: exec}.Run(t.Context(), sheetsRequest(secondsFrom(5, 10, 3), 3, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sheetLumas(t, result, 3, 1); !near(got[0], []int{10, 20, 30}) || result.SheetFrames != (SheetFrames{Decoded: 3, Refined: 1}) {
+		t.Fatalf("cells %v, frames %+v; want the second sample's own moment, repaired once", got, result.SheetFrames)
+	}
+	if len(*calls) != 4 || !strings.Contains(strings.Join((*calls)[3], " "), "-skip_frame:v noref") {
+		t.Fatalf("runs %q, want a probe, the list, a keyframe repair, and a reference-frame repair", *calls)
+	}
+}

@@ -71,6 +71,10 @@ const (
 	maxSheetPixels  = 16384
 	maxFilledShare  = 0.1
 	sheetMetadataID = "sheets"
+	// maxSheetsRunPixels bounds the tile pixels of one run, which holds
+	// every tile it decodes, about 1.5 bytes a pixel, until its repairs are
+	// done. Callers chunk longer files into several runs.
+	maxSheetsRunPixels = 64 << 20
 )
 
 func (o SheetsOutput) validate() error {
@@ -90,6 +94,16 @@ func (o SheetsOutput) validate() error {
 	}
 	if o.ToneMap != nil {
 		return o.ToneMap.validate()
+	}
+	return nil
+}
+
+// validateRun checks that the sheets of samples fit maxSheetsRunPixels.
+func (o SheetsOutput) validateRun(samples int) error {
+	perSheet := o.Columns * o.Rows
+	sheets := (samples + perSheet - 1) / perSheet
+	if pixels := int64(sheets) * int64(perSheet) * int64(o.TileWidth) * int64(o.TileHeight); pixels > maxSheetsRunPixels {
+		return fmt.Errorf("%d sheets of %dx%d tiles of %dx%d exceed %d pixels in one run", sheets, o.Columns, o.Rows, o.TileWidth, o.TileHeight, maxSheetsRunPixels)
 	}
 	return nil
 }

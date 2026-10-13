@@ -406,8 +406,9 @@ must use the returned height and reject chunks whose geometry differs.
   reason and log describe the latest read, and its error names the list
   run's.
 - Sheets are JPEG-encoded in-process (`image/jpeg`, `Quality`) once the run
-  and its repairs are done, since a repair may replace any cell; callers
-  bound a run's tiles, which it holds until then. `Result.Sheets` holds them
+  and its repairs are done, since a repair may replace any cell. A run holds
+  its tiles until then, so a request whose sheets exceed 64 million tile
+  pixels is invalid; callers chunk longer files. `Result.Sheets` holds them
   in order and `Result.SheetFrames` counts the decoded, filled, and
   repaired (`Refined`) cells.
 
@@ -443,8 +444,11 @@ were written and logged in order, and leaves the rest. Both repairs share one
 time box, 30 seconds plus a quarter second a sample of the run, within the
 attempt's timeout: on a 4K HEVC clip with a keyframe every 25 seconds and
 samples every 10, software repaired 12 of 31 cells in 26 seconds, CUDA in 4.
-A repair never fails the run, except that the caller canceling ends it as
-`canceled`; the sparse check then counts what the run and its repairs
+Missing cells are repaired first, then the repeated cells, recomputed so a
+recovered cell that shows its neighbor's keyframe is decoded at its own time
+too. A list that decoded nothing is repaired as well, since a container
+without keyframe flags can miss every short entry. A repair never fails the
+run, except that the caller canceling ends it as `canceled`; the sparse check then counts what the run and its repairs
 decoded, so a list whose repairs recover its missing samples no longer needs
 the window fallback above.
 

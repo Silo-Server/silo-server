@@ -129,7 +129,9 @@ type sheetAssembler struct {
 	sheets    []Sheet
 	decoded   int
 	filled    int
-	refined   int
+	// refined counts the cells a repair replaced, each once.
+	refined      int
+	refinedCells map[int]bool
 
 	err error
 }
@@ -151,6 +153,7 @@ func newSheetAssembler(out SheetsOutput, times []float64, sampled bool, offset, 
 	}
 	if sampled {
 		a.cells = make(map[int64]int, len(times))
+		a.refinedCells = map[int]bool{}
 		a.sources = make([]float64, len(times))
 		for i, at := range times {
 			a.cells[sampleKey(at)] = i

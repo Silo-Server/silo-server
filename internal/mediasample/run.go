@@ -248,7 +248,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
 			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
-			if err := out.validate(); err != nil {
+			if err := errors.Join(out.validate(), out.validateRun(len(req.Samples.Seconds))); err != nil {
 				return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 			}
 			req.Sheets = &out
@@ -405,7 +405,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		failure.Decoder = a.decoder
 		return Result{}, failure
 	}
-	if req.Samples != nil && assembler.decoded > 0 {
+	if req.Samples != nil {
 		a.repairSheets(req, assembler, inputStart)
 		if err := a.ctx.Err(); err != nil {
 			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonCanceled, Err: err}

@@ -209,6 +209,9 @@ func (r Request) Validate() error {
 		if err := r.Sheets.validate(); err != nil {
 			return err
 		}
+		if err := r.Sheets.validateRun(len(r.Samples.Seconds)); err != nil {
+			return err
+		}
 	}
 	if !r.hasOutput() {
 		return errors.New("request has no output")

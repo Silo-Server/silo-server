@@ -82,7 +82,8 @@ func (a *sheetAssembler) offer(cell int, source float64, frame []byte) {
 
 // repairs returns the cells of a closed sampled run worth a second read:
 // those without a frame, and those whose frame is the keyframe the cell
-// before already shows.
+// before already shows. A run that decoded nothing is repaired too: a
+// container that flags no keyframes can miss every short list entry.
 func (a *sheetAssembler) repairs() (missing, repeated []int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -131,7 +132,10 @@ func (a *sheetAssembler) adopt(cells []int, repair *sheetAssembler) {
 		if missing {
 			a.decoded++
 		}
-		a.refined++
+		if !a.refinedCells[cell] {
+			a.refinedCells[cell] = true
+			a.refined++
+		}
 	}
 }
 
@@ -149,6 +153,8 @@ func (a attemptRun) repairSheets(req Request, run *sheetAssembler, inputStart fl
 	repair.attemptCtx = ctx
 	if len(missing) > 0 {
 		repair.repair(req, run, missing, inputStart, sheetsList{span: missingRepairSpan(run.times), skip: keyframeSkipFrame})
+		// A recovered cell can show the keyframe of the cell after it.
+		_, repeated = run.repairs()
 	}
 	if len(repeated) > 0 && ctx.Err() == nil {
 		repair.repair(req, run, repeated, inputStart, sheetsList{span: sheetSampleSpanSeconds, skip: exactSkipFrame})
