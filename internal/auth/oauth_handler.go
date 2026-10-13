@@ -1063,6 +1063,11 @@ type OAuthCompleteResponse struct {
 	NextURL      string `json:"next"`
 }
 
+// maxOAuthCompleteBodyBytes bounds the public v1 POST /auth/oauth/complete
+// body, which is decoded before the completion code is checked. It matches
+// the v2 default structured-body cap.
+const maxOAuthCompleteBodyBytes = 1 << 20
+
 // HandleComplete serves v1 POST /auth/oauth/complete. v1 takes no
 // code_verifier, so it redeems web codes only, with the browser's
 // completion cookie.
@@ -1072,7 +1077,13 @@ func (h *OAuthHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req OAuthCompleteRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthCompleteBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

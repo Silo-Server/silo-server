@@ -2,6 +2,7 @@ package subtitles
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,7 @@ func (m *mockBlobStore) Delete(_ context.Context, key string) error {
 
 type stubProvider struct {
 	name string
+	data []byte
 }
 
 func (s stubProvider) Name() string { return s.name }
@@ -144,7 +146,31 @@ func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, 
 }
 
 func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
-	return nil, FormatSRT, nil
+	return s.data, FormatSRT, nil
+}
+
+func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {
+	repo := newMockSubtitleRepo()
+	blobs := newMockBlobStore()
+	manager := NewManager(repo, blobs)
+	manager.RegisterProvider(stubProvider{name: "big", data: make([]byte, MaxUploadSize+1)})
+	manager.RegisterProvider(stubProvider{name: "ok", data: []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")})
+
+	_, err := manager.Download(context.Background(), DownloadRequest{MediaFileID: 7, ProviderName: "big", SubtitleID: "1", Language: "en"})
+	if !errors.Is(err, ErrSubtitleTooLarge) {
+		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
+	}
+	if repo.inserts != 0 || len(blobs.keys) != 0 {
+		t.Fatalf("oversized download stored %d rows and %d blobs, want none", repo.inserts, len(blobs.keys))
+	}
+
+	sub, err := manager.Download(context.Background(), DownloadRequest{MediaFileID: 7, ProviderName: "ok", SubtitleID: "2", Language: "en"})
+	if err != nil {
+		t.Fatalf("Download() error = %v", err)
+	}
+	if sub.Provider != "ok" || sub.Format != FormatSRT {
+		t.Fatalf("stored provider=%q format=%q, want ok srt", sub.Provider, sub.Format)
+	}
 }
 
 func TestManagerProviderNames(t *testing.T) {

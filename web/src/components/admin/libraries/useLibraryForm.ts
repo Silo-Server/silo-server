@@ -17,6 +17,8 @@ export type LevelChainItem = {
   capability_id: string;
   provider_slug: string;
   enabled: boolean;
+  /** The built-in local metadata provider: pinned first, switched on or off for every level at once. */
+  local?: boolean;
 };
 
 // hasChainProviders reports whether the server's resolved provider chains (a
@@ -72,22 +74,57 @@ export function contentLevelLabel(level: string): string {
 
 // levelChainsFromResponse converts a provider-chain API response (a library's
 // saved chain, or the server-computed defaults for a library type) into the
-// editor's per-level item lists, preserving server priority order.
+// editor's per-level item lists, preserving server priority order with the
+// local metadata entry first, where the server always runs it.
 export function levelChainsFromResponse(
   response: LibraryProviderChainResponse | null | undefined,
 ): Record<string, LevelChainItem[]> {
   const mapped: Record<string, LevelChainItem[]> = {};
   for (const [level, entries] of Object.entries(response?.levels ?? {})) {
     mapped[level] = [...entries]
-      .sort((a, b) => a.priority - b.priority)
+      .sort((a, b) => {
+        if (Boolean(a.local) !== Boolean(b.local)) return a.local ? -1 : 1;
+        return a.priority - b.priority;
+      })
       .map((entry) => ({
         plugin_installation_id: entry.plugin_installation_id,
         capability_id: entry.capability_id,
         provider_slug: entry.provider_slug,
         enabled: entry.enabled,
+        local: Boolean(entry.local),
       }));
   }
   return mapped;
+}
+
+// remoteLevelChains drops the local metadata entries, which the editor shows
+// as one pinned switch instead of a row per level.
+export function remoteLevelChains(
+  chains: Record<string, LevelChainItem[]>,
+): Record<string, LevelChainItem[]> {
+  return Object.fromEntries(
+    Object.entries(chains).map(([level, items]) => [level, items.filter((item) => !item.local)]),
+  );
+}
+
+// setLocalMetadataEnabled turns the local metadata entry on or off at every
+// level that has one.
+export function setLocalMetadataEnabled(
+  chains: Record<string, LevelChainItem[]>,
+  enabled: boolean,
+): Record<string, LevelChainItem[]> {
+  return Object.fromEntries(
+    Object.entries(chains).map(([level, items]) => [
+      level,
+      items.map((item) => (item.local ? { ...item, enabled } : item)),
+    ]),
+  );
+}
+
+// withLocalFirst rebuilds one level from its local entries and the given
+// remote ones, so edits to the remote order can never move local metadata.
+function withLocalFirst(items: LevelChainItem[], remote: LevelChainItem[]): LevelChainItem[] {
+  return [...items.filter((item) => item.local), ...remote];
 }
 
 // mergeChainWithDefaults fills content levels the saved chain doesn't cover
@@ -239,16 +276,29 @@ export function useLibraryForm({
     );
   }
 
-  function reorderLevel(level: string, items: LevelChainItem[]) {
-    setLevelChains({ ...activeLevelChains, [level]: items });
+  // reorderLevel and toggleLevelProvider act on a level's remote providers;
+  // the local metadata entry stays first and follows its own switch.
+  function reorderLevel(level: string, remote: LevelChainItem[]) {
+    const items = activeLevelChains[level] ?? [];
+    setLevelChains({ ...activeLevelChains, [level]: withLocalFirst(items, remote) });
     setChainDirty(true);
   }
 
-  function toggleLevelProvider(level: string, index: number) {
-    const source = activeLevelChains[level] ?? [];
-    const updated = [...source];
-    updated[index] = { ...updated[index]!, enabled: !updated[index]!.enabled };
-    setLevelChains({ ...activeLevelChains, [level]: updated });
+  function toggleLevelProvider(level: string, remoteIndex: number) {
+    const items = activeLevelChains[level] ?? [];
+    const remote = items.filter((item) => !item.local);
+    remote[remoteIndex] = { ...remote[remoteIndex]!, enabled: !remote[remoteIndex]!.enabled };
+    setLevelChains({ ...activeLevelChains, [level]: withLocalFirst(items, remote) });
+    setChainDirty(true);
+  }
+
+  const remoteChains = remoteLevelChains(activeLevelChains);
+  const localMetadataEntries = Object.values(activeLevelChains)
+    .flat()
+    .filter((item) => item.local);
+
+  function toggleLocalMetadata(enabled: boolean) {
+    setLevelChains(setLocalMetadataEnabled(activeLevelChains, enabled));
     setChainDirty(true);
   }
 
@@ -358,10 +408,16 @@ export function useLibraryForm({
     setRealtimeMonitoring,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
+    remoteLevelChains: remoteChains,
     chainLoading,
     reorderLevel,
     toggleLevelProvider,
+    hasLocalMetadata: localMetadataEntries.length > 0,
+    // On when any level reads local files; the switch sets every level.
+    localMetadataEnabled: localMetadataEntries.some((item) => item.enabled),
+    toggleLocalMetadata,
     hasMetadataProviders: hasChainProviders(activeLevelChains),
+    hasRemoteProviders: hasChainProviders(remoteChains),
     errors,
     isPending,
     submit,

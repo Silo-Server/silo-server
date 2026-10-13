@@ -41,7 +41,7 @@ dev-frontend:
 
 # Run the Go backend (integrated mode)
 dev-backend:
-	go run ./cmd/silo/
+	SILO_SHUTDOWN_DELAY=$${SILO_SHUTDOWN_DELAY:-0} go run ./cmd/silo/
 
 # Run a proxy node (stateless stream proxy, no DB required)
 dev-proxy:

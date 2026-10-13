@@ -121,10 +121,9 @@ type Service struct {
 // install, enable, disable, upgrade, or uninstall on this replica reaches the
 // next event. Other replicas drop theirs on cache.EventPluginsChanged.
 //
-// The hook runs before every other lifecycle hook. Events that arrive while
-// the slower hooks run (resident reconcile, provider reloads) already see the
-// change, and the index rebuilt when this replica's own plugins_changed
-// publish comes back is not dropped again by a hook that runs after it.
+// The hook runs before every other lifecycle hook, so events that arrive
+// while the slower hooks run (resident reconcile, provider reloads) already
+// see the change.
 func (s *Service) SetEventDispatcher(d *EventDispatcher) {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

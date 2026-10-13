@@ -72,7 +72,7 @@ type Installer struct {
 func NewInstaller(installations installationStore, opts InstallerOptions) *Installer {
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newPackageFetchClient(defaultPackageFetchTimeouts)
 	}
 	baseDir := opts.BaseDir
 	if baseDir == "" {

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -299,17 +300,25 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 	}
 }
 
-// feedMediaStore resolves one media file by id for the RSS feed-file route.
+// feedMediaStore serves one item with one media file for the RSS feed-file
+// route.
 type feedMediaStore struct {
 	noopMediaStore
 	file *models.MediaFile
 }
 
-func (f *feedMediaStore) GetMediaFileByID(_ context.Context, id int) (*models.MediaFile, error) {
-	if f.file == nil || f.file.ID != id {
-		return nil, ErrNotFound
+func (f *feedMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
+	if f.file == nil || f.file.ContentID != id {
+		return nil, nil
 	}
-	return f.file, nil
+	return &models.MediaItem{ContentID: id}, nil
+}
+
+func (f *feedMediaStore) GetMediaFiles(_ context.Context, id string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
+	if f.file == nil || f.file.ContentID != id {
+		return nil, nil
+	}
+	return []*models.MediaFile{f.file}, nil
 }
 
 type feedStore struct {
@@ -343,6 +352,8 @@ func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
 	server := absTelemetryServer(t, registry, Dependencies{
 		MediaStore:   &feedMediaStore{file: &models.MediaFile{ID: 501, FilePath: path, ContentID: "book-9"}},
 		RSSFeedStore: &feedStore{feed: RSSFeed{ID: "feed-1", UserID: "7", ProfileID: "profile-9", LibraryItemID: "book-9", Slug: "slug-9"}},
+		AccessResolver: newFakeOwnerResolver().
+			set("7", "profile-9", catalog.AccessFilter{UserID: 7, ProfileID: "profile-9"}),
 	})
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 	t.Cleanup(client.CloseIdleConnections)

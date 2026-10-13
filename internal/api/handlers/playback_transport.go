@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -19,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
 
 // startLocalPlaybackTransport is the shared local ffmpeg launch primitive for
@@ -45,9 +47,12 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-	response, err := telemetry.DoTrustedNode(http.DefaultClient, httpRequest, "transcode_start")
+	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
+		return transcodenode.TranscodeStartResponse{}, 0, err
+	}
+	response, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpRequest, "transcode_start")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	defer response.Body.Close()
@@ -108,7 +113,7 @@ func remoteAutoFallbackPossibleV3(request transcodenode.TranscodeStartRequest) b
 }
 
 func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, http.DefaultClient, nodeURL, jwtSecret)
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, jwtSecret)
 	if err != nil {
 		return playback.HWAccelInfo{}, err
 	}

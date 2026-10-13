@@ -54,8 +54,8 @@ func TestOrderedAppleDisplayRenewalAndAuthority(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &appleFinalizerFixture{receipt: notifications.ApplePushReceipt{Generation: 1, RegistrationID: "registration", ServerDeviceID: "server-device", Enabled: true}}
 			issuer := new(appleIssuerFixture)
-			sessions := &socketSessionFixture{valid: true}
 			users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, Role: "user"}}
+			sessions := &socketSessionFixture{valid: true, account: users}
 			viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, PolicyRevision: 1}}
 			h := NewOrderedApplePushV2(notifications.NewPushDeviceService(store, handlerPushCipher(t)), issuer, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return false, true, nil })
 			cmd := notifications.ApplePushCommand{UserID: 7, ProfileID: "profile", Generation: 1}

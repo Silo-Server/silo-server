@@ -126,6 +126,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		listItems = append(listItems, item)
 	}
 	fillListItemDurations(r.Context(), h.detailSvc, listItems)
+	attachListExtraBackdrops(r.Context(), h.detailSvc, listItems)
 	for _, item := range listItems {
 		itemsByID[item.ContentID] = item
 	}

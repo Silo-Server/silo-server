@@ -260,6 +260,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `public_url` | string \| null | Client-facing base URL, when it differs from `url`. Stream and download URLs handed to players are built on it. Only meaningful on proxy nodes — clients never talk to transcode nodes. Absent or `null` means clients use `url`, which must then be publicly reachable. |
 | `enabled` | bool | Whether the node is eligible for new placement. Disabling also stops routine health sampling after pool reconciliation; existing streams continue. See the v2 node configuration lifecycle below. |
 | `healthy` | bool | Result of the last health check. |
+| `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
+| `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
 | `max_jobs`, `max_bandwidth_kbps` | int \| null | Capacity caps. `null` means unlimited. |
@@ -416,7 +418,7 @@ Each entry in `disks`:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `path` | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own bearer-authed `/status`, and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`. |
+| `path` | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own `/status`, which needs a [signed request](architecture/worker-http-protocol.md#authentication), and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`. |
 | `role` | string | What the mount is for: `scratch`, or `library-N` positionally per media root. Assigned when the sample is built, so it names the same mount on `/health`, `/status`, `/admin/system/resources` and the `streamapp_node_disk_*` series, and it stays with the mount even when a probe cannot measure it. |
 | `used_gb`, `total_gb` | float | Capacity in GiB. `used_gb` counts filesystem-reserved blocks, as `df` does. `total_gb` is the capacity usable by the node process — used plus still-available — so it reads lower than the device's nameplate size on a volume that reserves blocks for root, and `used_gb`/`total_gb` is the ratio `df` prints as Use%. |
 | `stale` | bool | The numbers are real but carried over from an earlier pass because the current probe has not returned — the normal reading for a network mount whose server went away. Omitted when false. |
@@ -750,7 +752,7 @@ report. Every hardware probe ends in a real encode on the GPU; a card at its
 concurrent encoder-session limit fails that encode with an error nothing can
 distinguish from a missing device, and the resulting `verified: false` would be
 stored as a hardware regression for a GPU that is at that moment encoding.
-Disable the node or wait for it to drain, then re-probe.
+[Drain](#node-drain-v2) the node, wait for `drained`, then re-probe.
 
 The call can take a while. The node is given the probe budget it advertises in
 its own report (`probe_request_timeout_ms`, up to five minutes); a node that has
@@ -761,7 +763,7 @@ this route can legitimately outlive the API listener's ordinary 120-second
 as a hung request. This re-probes only — it does not reload configuration or tear
 anything down.
 
-Under the hood this is a bearer-authenticated `POST
+Under the hood this is a [signed](architecture/worker-http-protocol.md#authentication) `POST
 /admin/reprobe-capabilities` on the node's own listener, which both transcode
 nodes and proxy nodes serve. That route is internal to the cluster and is not
 part of any client contract.
@@ -2090,6 +2092,12 @@ by any other route. It answers deterministically:
 - Pause, resume and message require a live realtime lane (`409 conflict`
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
   the server ends the session after the deadline, as on the bridge.
+- A pause, resume or stop the player does not confirm before its deadline ends
+  the session, here and on the bridge. The session's playback attempt is then
+  recorded as ended by an administrator, so the player is told to leave
+  (`410 playback_session_ended`) when it next reports progress or replans,
+  rather than starting a fresh session
+  ([playback API](playback-api.md#progress-and-stop)).
 - An unknown session is `404`; a server without playback control answers
   `503 dependency_unavailable`.
 
@@ -2113,7 +2121,8 @@ session's playback authority durably, then dispatches the dismissal as best
 effort, and reports the two facts separately. It never promises that media
 already buffered stops instantly, and it never waits for the player.
 
-Revocation is the ordinary user stop plus the stream deny marker. The server
+Revocation is the ordinary user stop plus the stream deny marker, and the
+attempt is recorded as ended by an administrator, as above. The server
 stops the live session and its transcode, runs the stop and history writer, and
 writes the Redis key `silo:streamauth:<session_id>` so no replica serves or
 reconstructs the session from a stream token that is still inside its TTL
@@ -2894,6 +2903,38 @@ disable automatic/authentication replay, and fence late receipts, feedback and c
 invalidation. Node list caches include profile/PIN authority so old rows cannot be reused
 under a new authority. There is no corresponding Jellyfin administrative operation.
 
+### Node drain (v2)
+
+`POST /api/v2/admin/nodes/{id}/drain` (`drainAdminNode`) and
+`POST /api/v2/admin/nodes/{id}/resume` (`resumeAdminNode`) set and clear a
+transcode node's drain request. Both require an acting administrator, reject
+demo mode, take no body and are natural_idempotent: repeating converges on the
+same request. A proxy node returns 409 (only transcode nodes drain), a missing
+node 404, missing configuration 503, invalid IDs 422, and repository failures a
+private 500 problem. The request is operational state, not configuration: it does not
+advance `config_etag` or the pool generation.
+
+The 200 body is `{node_id, drain_requested, drain_state, active_jobs}` with
+`node_id` an opaque decimal string. This replica's pools change before the
+response; the server publishes `node_pool_changed`, so the other replicas and the
+node itself reread the row at once (and within five seconds and sixty seconds
+respectively without the event). From then on new sessions, downloads,
+trickplay, chapter thumbnails and subtitle-sync samples go to other nodes, while
+sessions already on the node keep playing until they end. `drain_state` moves to
+`draining` once the node has read the request and to `drained` when it has no
+work left. Resume also resets `drain_state` to `none`, so the node takes new
+work at once; a node that is draining on its own after SIGTERM (until its
+sessions end or `SILO_NODE_DRAIN_TIMEOUT`, default ten minutes, passes) reports
+`draining` again on its next check, and resume does not end that drain.
+Changing a node's `url` also resets `drain_state`. Drained covers sessions and
+jobs, not prepared downloads stored on the node, which are unavailable while it
+is stopped.
+
+`GET /api/v2/admin/nodes/capabilities` (`getAdminNodeCapabilities`) advertises
+`drain: true`. The web nodes page shows `Draining · N transcodes left` and then
+`Drained · safe to stop` from these fields. See
+[node drain](architecture/node-drain.md) for the protocol.
+
 ### Force reload nodes (v2)
 
 `POST /api/v2/admin/nodes/force-reload` (`forceReloadAdminNodes`) takes a snapshot
@@ -2963,7 +3004,8 @@ post-commit URL/override reload described above creates no durable execution job
 Setting only `enabled` to false removes the node from new placement and routine
 health sweeps on each replica's next pool reconciliation. It does not contact
 the worker, drain or reassign existing sessions, or revoke their stream authority;
-existing streams keep serving. Previously stored `healthy`, `active_jobs`,
+existing streams keep serving. To take a transcode node out of service while
+keeping its health and load current, [drain](#node-drain-v2) it instead. Previously stored `healthy`, `active_jobs`,
 `egress_kbps`, `last_stats` and `last_health_check` remain the last observations,
 not current liveness or load. A health check already in flight may still finish;
 an explicit administrator check can also refresh the sample. Re-enabling restores

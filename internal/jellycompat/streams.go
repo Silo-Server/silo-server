@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -927,7 +928,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		manifest, relayErr := h.fetchRemoteCompatManifest(r.Context(), remoteNodeURL, playSession.UpstreamSessionID)
 		if relayErr != nil {
 			lastPreparationErr = relayErr
-			h.tm.StopRemoteTranscode(playSession.UpstreamSessionID, remoteNodeURL)
+			h.tm.StopRemoteTranscodeAfterFailure(playSession.UpstreamSessionID, remoteNodeURL, relayErr)
 			h.releaseCompatSessionReservation(playSession.UpstreamSessionID)
 			excludedNodes[strings.TrimRight(remoteNodeURL, "/")] = struct{}{}
 			continue
@@ -1350,9 +1351,12 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
+		return nil, err
+	}
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1371,10 +1375,14 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
+		return
+	}
 	transcodeproxy.PrepareRequest(req, r)
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
 		return
 	}
@@ -1387,7 +1395,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, path), h.JWTSecret, generation); err != nil {
+		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.JWTSecret, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
 	}
