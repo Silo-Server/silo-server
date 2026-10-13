@@ -4088,6 +4088,7 @@ describe("VideoPlayer progressive remux after a long pause", () => {
       10 * 60_000,
     ],
     ["a long pause while another replan replaces the stream", { replanning: true }, 10 * 60_000],
+    ["a long pause while a version switch replaces the session", { replacing: true }, 10 * 60_000],
   ])("keeps the stream after %s", (_, overrides, pauseMs) => {
     const { video, onReanchorSeek } = playThenPause(overrides);
 

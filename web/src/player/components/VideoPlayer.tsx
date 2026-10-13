@@ -157,6 +157,8 @@ interface VideoPlayerProps {
   shouldAutoPlay?: boolean;
   /** True while a replan is in flight, so the quality menu can show progress. */
   replanning?: boolean;
+  /** True while a fresh start replaces the session, such as a version switch. */
+  replacing?: boolean;
   /** Server-described replan error, if the last replan was refused. */
   replanError?: string | null;
   /** Title for the replan error, used when surfacing the refusal as a toast. */
@@ -363,6 +365,7 @@ export function VideoPlayer({
   planRevision,
   shouldAutoPlay = true,
   replanning = false,
+  replacing = false,
   replanError = null,
   replanErrorTitle = null,
   sessionId,
@@ -1214,15 +1217,16 @@ export function VideoPlayer({
 
   // See PROGRESSIVE_REMUX_IDLE_REOPEN_MS. The element plays from its buffer
   // until the reopened stream replaces it. A room keeps its own transport. A
-  // replan already in flight replaces this stream when it lands a plan; the
-  // reopen waits for it and runs only if it does not.
+  // replan or fresh start already in flight replaces this stream when it lands
+  // a plan; the reopen waits for it and runs only if it does not.
   const isProgressiveRemux = plan.delivery === "server_remux_progressive";
-  const replanningRef = useRef(replanning);
-  replanningRef.current = replanning;
+  const planChangeInFlight = replanning || replacing;
+  const planChangeInFlightRef = useRef(planChangeInFlight);
+  planChangeInFlightRef.current = planChangeInFlight;
   const planRevisionRef = useRef(planRevision);
   planRevisionRef.current = planRevision;
   // The plan revision a deferred reopen is waiting to see replaced.
-  const reopenAfterReplanRef = useRef<number | null>(null);
+  const reopenAfterPlanChangeRef = useRef<number | null>(null);
   const reopenIdleProgressiveRemux = useCallback(() => {
     const video = videoRef.current;
     if (!video || !isProgressiveRemux || watchTogetherRoomId) return;
@@ -1233,14 +1237,14 @@ export function VideoPlayer({
       pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
     // The session reads the play intent when a new plan lands, which can be
     // before the effect that reports this play has run. That includes the
-    // plan of a replan already in flight.
+    // plan of a change already in flight.
     onPlaybackStateChange?.({
       currentTime: position,
       duration: durationRef.current,
       playing: true,
     });
-    if (replanningRef.current) {
-      reopenAfterReplanRef.current = planRevisionRef.current;
+    if (planChangeInFlightRef.current) {
+      reopenAfterPlanChangeRef.current = planRevisionRef.current;
       return;
     }
     // When the reopen does not take, the session may have expired during the
@@ -1266,16 +1270,16 @@ export function VideoPlayer({
   reopenIdleProgressiveRemuxRef.current = reopenIdleProgressiveRemux;
 
   useEffect(() => {
-    const waitingOn = reopenAfterReplanRef.current;
-    if (waitingOn === null || replanning) return;
-    reopenAfterReplanRef.current = null;
-    // The replan landed a new stream, which is not idle.
+    const waitingOn = reopenAfterPlanChangeRef.current;
+    if (waitingOn === null || planChangeInFlight) return;
+    reopenAfterPlanChangeRef.current = null;
+    // The change landed a new stream, which is not idle.
     if (planRevision !== waitingOn) return;
     // A viewer who paused meanwhile is still on the idle stream; the next
     // play reopens it.
     if (videoRef.current?.paused) transportIdleSinceRef.current = 0;
     else reopenIdleProgressiveRemux();
-  }, [planRevision, reopenIdleProgressiveRemux, replanning]);
+  }, [planChangeInFlight, planRevision, reopenIdleProgressiveRemux]);
 
   const handlePlayerSeek = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
