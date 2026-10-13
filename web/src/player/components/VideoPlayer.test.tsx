@@ -2345,6 +2345,7 @@ describe("VideoPlayer plan failure recovery", () => {
       }),
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     const transport = ready.mock.lastCall![0];
     sendRoomMessage.mockClear();
@@ -3002,11 +3003,54 @@ describe("VideoPlayer source timeline", () => {
     });
     expect(playerSeek).not.toHaveBeenCalled();
     expect(controls.current!.currentTime).toBe(500);
-
     video.currentTime = origin;
     fireEvent.loadedMetadata(video);
     expect(video.currentTime).toBeCloseTo(500 + origin);
     await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-origin));
+  });
+
+  // A load queues a timeupdate at position 0. A held seek to 0 must survive it
+  // rather than settle on it and fall back to the resume position.
+  it("keeps a held seek to the start through a load's reset timeupdate", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const { container } = renderPlayer({ plan, initialPosition: 1300 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    act(() => {
+      controls.current!.onSeek(0);
+    });
+    fireEvent.timeUpdate(video);
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(origin);
+  });
+
+  it("skips from the resume position before direct-play metadata", async () => {
+    const origin = 29.977;
+    const ready = vi.fn();
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const { container } = renderPlayer({
+      plan,
+      initialPosition: 1300,
+      onPlaybackTransportReady: ready,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    act(() => ready.mock.lastCall![0].skipForward());
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(1330 + origin);
   });
 
   it("uses native HLS for Dolby Vision when hls.js is also available", async () => {

@@ -1083,6 +1083,16 @@ export function VideoPlayer({
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
 
+  // Where the media is on the element's clock. While an original file's clock
+  // origin is unknown the element has no position on the stream yet, so that
+  // is where playback is heading.
+  const elementMediaPosition = useCallback((): number | null => {
+    const video = videoRef.current;
+    if (!video) return null;
+    if (directPlayOriginPendingRef.current) return subtitleFetchAnchorRef.current;
+    return toMediaTime(video.currentTime, timelineOffsetRef.current);
+  }, []);
+
   const rememberPendingSeek = useCallback((seconds: number) => {
     pendingSeekTimeRef.current = seconds;
     setPendingSeekTime(seconds);
@@ -1223,17 +1233,13 @@ export function VideoPlayer({
   // scrub instead of snapping back to where the element still is.
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
-      const now =
-        pendingSeekTimeRef.current ??
-        (videoRef.current
-          ? toMediaTime(videoRef.current.currentTime, timelineOffsetRef.current)
-          : currentTimeRef.current);
+      const now = pendingSeekTimeRef.current ?? elementMediaPosition() ?? currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
       handlePlayerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
       );
     },
-    [handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
+    [elementMediaPosition, handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
   );
   const handleSkipRef = useRef(handleSkip);
   useEffect(() => {
@@ -1262,13 +1268,8 @@ export function VideoPlayer({
   );
 
   const buildExitState = useCallback((): PlaybackExitState => {
-    const video = videoRef.current;
-    // Before metadata the element's clock is not on this stream yet; leaving
-    // then keeps the position playback was heading to.
     const positionSeconds =
-      video?.readyState === HTMLMediaElement.HAVE_NOTHING
-        ? subtitleFetchAnchorRef.current
-        : toMediaTime(video?.currentTime ?? currentTime, timelineOffsetRef.current);
+      elementMediaPosition() ?? toMediaTime(currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
 
@@ -1281,7 +1282,7 @@ export function VideoPlayer({
       lastCodecVideo: selectedVersion?.codec_video,
       lastEditionKey: selectedVersion?.edition_key,
     };
-  }, [activeFileId, currentTime, duration, selectedVersion]);
+  }, [activeFileId, currentTime, duration, elementMediaPosition, selectedVersion]);
 
   useEffect(() => {
     if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {
@@ -2338,9 +2339,15 @@ export function VideoPlayer({
     // counting it would cancel the render: no loading overlay, a startup
     // guard marked started, and the new transport's first frame never seen.
     const hasCurrentFrame = () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    // Until an original file's clock origin is known the element has no media;
+    // its events are load resets and must not settle a held seek.
+    const resolveSeekAt = (actualTime: number) =>
+      directPlayOriginPendingRef.current && pendingSeekTime !== null
+        ? { currentTime: pendingSeekTime, pendingSeekTime }
+        : resolvePendingSeekTime(actualTime, pendingSeekTime);
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
-      const resolved = resolvePendingSeekTime(nextTime, pendingSeekTime);
+      const resolved = resolveSeekAt(nextTime);
       setCurrentTime(resolved.currentTime);
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
@@ -2373,10 +2380,7 @@ export function VideoPlayer({
       }
     };
     const onSeeked = () => {
-      const resolved = resolvePendingSeekTime(
-        toMediaTime(video.currentTime, timelineOffsetRef.current),
-        pendingSeekTime,
-      );
+      const resolved = resolveSeekAt(toMediaTime(video.currentTime, timelineOffsetRef.current));
       setCurrentTime(resolved.currentTime);
       setPendingSeekTime(resolved.pendingSeekTime);
       // Reloading a stream can finish an older native seek. It does not settle
