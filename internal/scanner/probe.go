@@ -89,6 +89,7 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	}
 
 	probe := convertProbeData(&raw)
+	applyMatroskaSubtitleTrackIDs(ctx, filePath, probe)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
 			// A failed or empty packet scan must not discard the codec and
@@ -120,13 +121,19 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 // the failure without depending on ffprobe's wording. Either one finding an
 // access problem logs it and answers false. A canceled or timed-out probe, a
 // process killed by a signal, a missing binary, or unparseable output is not a
-// rejection either.
+// rejection either, and neither is an exit status of 126 or 127, which
+// means ffprobe never got as far as opening the file.
 func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	// ffprobe refuses input with exit status 1; 126 and 127 come from the
+	// shell or the dynamic loader when ffprobe itself cannot start.
+	if code := exitErr.ExitCode(); code <= 0 || code == 126 || code == 127 {
 		return false
 	}
 	accessErr := probeStderrAccessFailure(exitErr.Stderr)
@@ -959,7 +966,7 @@ func detectContainer(formatName string) string {
 		p = strings.TrimSpace(p)
 		switch p {
 		case "matroska", "webm":
-			return "mkv"
+			return containerMKV
 		case "mov", "mp4", "m4a":
 			return "mp4"
 		case "avi":

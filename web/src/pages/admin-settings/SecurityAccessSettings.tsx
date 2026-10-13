@@ -25,7 +25,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import {
   SETTINGS_CONTROL_WIDTH,
   SETTINGS_NUMBER_WIDTH,

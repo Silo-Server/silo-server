@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -101,12 +102,12 @@ func waitNodeConfiguration(t *testing.T, ready func() bool) {
 // server's cached capabilities for the node; a rename does neither. The response
 // is the committed row either way and does not wait on the worker.
 func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
-	reloaded := make(chan string, 4)
+	reloaded := make(chan bool, 4)
 	var destructive atomic.Bool
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/admin/reload-config":
-			reloaded <- r.Header.Get("Authorization")
+			reloaded <- nodeauthtest.Signed(r, "secret")
 		case "/admin/force-reload":
 			destructive.Store(true)
 		}
@@ -135,8 +136,8 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 			t.Fatal("post-commit work did not finish")
 		}
 		for len(reloaded) > 0 {
-			if auth := <-reloaded; auth != "Bearer secret" {
-				t.Fatalf("authorization %q", auth)
+			if signed := <-reloaded; !signed {
+				t.Fatal("reload request was not signed with the shared secret")
 			}
 			reloads++
 		}

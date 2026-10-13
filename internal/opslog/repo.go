@@ -208,7 +208,9 @@ func buildListQuery(opts ListOptions) (string, []any, int, error) {
 		if err != nil {
 			return "", nil, 0, err
 		}
-		conditions = append(conditions, fmt.Sprintf("(timestamp, id) < ($%d, $%d)", argIdx, argIdx+1))
+		// The redundant bare bound lets PostgreSQL prune partitions newer than
+		// the cursor; it cannot prune on the row comparison.
+		conditions = append(conditions, fmt.Sprintf("(timestamp, id) < ($%d, $%d) AND timestamp <= $%d", argIdx, argIdx+1, argIdx))
 		args = append(args, cursorTs, cursorID)
 		argIdx += 2
 	}

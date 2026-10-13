@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,8 +104,8 @@ func TestRemapSubtitleSelectionRetainsHearingImpairedVariant(t *testing.T) {
 		}
 		request := playback.StartRequestV3{SubtitleTrackIndex: new(0)}
 		handler := &PlaybackHandler{}
-		if err := handler.remapSubtitleSelectionV3(t.Context(), source, target, &request); err != nil {
-			t.Fatal(err)
+		if dropped, err := handler.remapSubtitleSelectionV3(t.Context(), source, target, &request); err != nil || dropped {
+			t.Fatalf("dropped=%v err=%v", dropped, err)
 		}
 		if *request.SubtitleTrackIndex != 1 {
 			t.Fatalf("external=%v chose non-SDH track", external)
@@ -147,8 +148,8 @@ func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			request := playback.StartRequestV3{SubtitleTrackIndex: new(tc.from)}
 			handler := &PlaybackHandler{}
-			if err := handler.remapSubtitleSelectionV3(t.Context(), source, tc.target, &request); err != nil {
-				t.Fatal(err)
+			if dropped, err := handler.remapSubtitleSelectionV3(t.Context(), source, tc.target, &request); err != nil || dropped {
+				t.Fatalf("dropped=%v err=%v", dropped, err)
 			}
 			if *request.SubtitleTrackIndex != tc.want {
 				t.Fatalf("remapped to %d, want %d", *request.SubtitleTrackIndex, tc.want)
@@ -161,8 +162,9 @@ func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
 
 	request := playback.StartRequestV3{SubtitleTrackIndex: new(1)}
 	other := &models.MediaFile{ID: 3, SubtitleTracks: []models.SubtitleTrack{{Language: "eng", Codec: "subrip"}}}
-	if err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, other, &request); err == nil {
-		t.Fatal("a language the effective file lacks was remapped")
+	dropped, err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, other, &request)
+	if err != nil || !dropped || request.SubtitleTrackIndex != nil || request.SubtitleTrackID != "" {
+		t.Fatalf("a language the effective file lacks must drop the selection: dropped=%v err=%v request=%+v", dropped, err, request)
 	}
 }
 
@@ -172,9 +174,12 @@ func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
 func TestRemapSubtitleSelectionAcrossFormatsNeedsOneDeliverableMatch(t *testing.T) {
 	remap := func(source, target *models.MediaFile, from int) (int, error) {
 		request := playback.StartRequestV3{SubtitleTrackIndex: new(from)}
-		err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, target, &request)
+		dropped, err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, target, &request)
 		if err != nil {
 			return -1, err
+		}
+		if dropped {
+			return -1, errors.New("selection dropped")
 		}
 		return *request.SubtitleTrackIndex, nil
 	}
@@ -230,5 +235,21 @@ func TestRemapSubtitleSelectionAcrossFormatsNeedsOneDeliverableMatch(t *testing.
 	}}
 	if got, err := remap(embeddedTitled, embeddedTargets, 1); err != nil || got != 1 {
 		t.Fatalf("embedded title disambiguation: got %d, %v; want the Commentary track at 1", got, err)
+	}
+}
+
+// A failed downloaded-subtitle lookup is an error, not a missing track: dropping
+// the selection would keep subtitles off for the rest of the session.
+func TestRemapSubtitleSelectionKeepsDownloadedSelectionWhenLookupFails(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	repo.listErr = errors.New("database unavailable")
+	handler := &PlaybackHandler{SubtitleRepo: repo}
+	request := playback.StartRequestV3{SubtitleTrackIndex: new(0)}
+	dropped, err := handler.remapSubtitleSelectionV3(t.Context(), &models.MediaFile{ID: 1}, &models.MediaFile{ID: 2}, &request)
+	if err == nil || dropped {
+		t.Fatalf("lookup failure must be an error: dropped=%v err=%v", dropped, err)
+	}
+	if request.SubtitleTrackIndex == nil || *request.SubtitleTrackIndex != 0 {
+		t.Fatalf("selection changed on a lookup failure: %+v", request)
 	}
 }

@@ -64,6 +64,16 @@ func (s *interestTrackingStore) ListAllSectionOverrides(ctx context.Context) ([]
 	return enumerator.ListAllSectionOverrides(ctx)
 }
 
+// ManualCollectionsHolding preserves Add to collection's membership read;
+// both backing stores implement it.
+func (s *interestTrackingStore) ManualCollectionsHolding(ctx context.Context, creatorProfileID, mediaItemID string) ([]string, error) {
+	reader, ok := s.UserStore.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, errors.New("collection membership reads are not supported")
+	}
+	return reader.ManualCollectionsHolding(ctx, creatorProfileID, mediaItemID)
+}
+
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
 	store, err := p.inner.ForUser(ctx, userID)
 	if err != nil || store == nil {

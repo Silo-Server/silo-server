@@ -177,6 +177,7 @@ type ProviderChainEntry struct {
 	ProviderSlug         string `json:"provider_slug" example:"tmdb"`
 	Priority             int    `json:"priority" doc:"Lower runs first" example:"0"`
 	Enabled              bool   `json:"enabled" example:"true"`
+	Local                bool   `json:"local" doc:"The built-in local metadata provider, which reads .nfo files and sidecar artwork. It runs before every remote provider at its level, so it is always listed and stored first." example:"false"`
 }
 
 // ProviderChainLevel is the provider chain at one content level.
@@ -681,7 +682,7 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/{id}/providers", "getLibraryProviders", "libraries",
 		"The library's metadata provider chain, per content level. Legacy unlevelled rows (content_level '') that an upgraded database keeps are not exposed; setLibraryProviders preserves them.")), reg.getLibraryProviders)
 	setProviders := humaOp(http.MethodPut, Prefix+"/libraries/{id}/providers", opSetLibraryProviders, "libraries",
-		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.")
+		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers. The local metadata entry is stored first in its level whatever priority it is sent with.")
 	setProviders.DefaultStatus = http.StatusNoContent
 	Register(reg, admin(setProviders), reg.setLibraryProviders)
 
@@ -1212,6 +1213,7 @@ func providerChainLevelsOf(byLevel map[string][]handlers.ChainLevelEntryView) []
 				ProviderSlug:         e.ProviderSlug,
 				Priority:             e.Priority,
 				Enabled:              e.Enabled,
+				Local:                e.Local,
 			})
 		}
 		levels = append(levels, ProviderChainLevel{ContentLevel: name, Entries: entries})

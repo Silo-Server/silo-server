@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -64,7 +65,7 @@ func (h *NodeHandler) NodeNetworkAccessDisconnect(ctx context.Context, node plug
 	return status, err
 }
 
-// nodeNetworkAccessCall performs one bearer-authenticated request against a
+// nodeNetworkAccessCall performs one signed request against a
 // proxy's network-access routes and decodes the JSON answer into out. A 404
 // is the proxy saying the provider is not installed there and maps to
 // plugins.ErrNetworkAccessProviderNotFound; every other failure carries the
@@ -79,7 +80,9 @@ func (h *NodeHandler) nodeNetworkAccessCall(ctx context.Context, node plugins.Ne
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
+	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+		return err
+	}
 	req.Header.Set("Accept", "application/json")
 	client := &http.Client{Timeout: nodeNetworkAccessTimeout}
 	resp, err := telemetry.DoTrustedNode(client, req, operation)
@@ -99,7 +102,7 @@ func (h *NodeHandler) nodeNetworkAccessCall(ctx context.Context, node plugins.Ne
 	case http.StatusNotFound:
 		return plugins.ErrNetworkAccessProviderNotFound
 	case http.StatusUnauthorized:
-		return fmt.Errorf("proxy node refused the node bearer")
+		return fmt.Errorf("proxy node refused the signed request; check that it shares this server's secret, runs this Silo version, and keeps the correct time")
 	case http.StatusServiceUnavailable:
 		return fmt.Errorf("proxy node does not host network access providers: %s", trimNodeReason(body))
 	default:

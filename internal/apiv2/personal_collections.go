@@ -15,10 +15,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// Section personal-collections: a profile's own collections and groups
-// (v1 /collections, CollectionHandler and UserCollectionImportHandler).
+// Section personal-collections: a profile's own collections and the ones
+// other profiles on its login share (v1 /collections, CollectionHandler and
+// UserCollectionImportHandler).
 
-// PersonalCollection is a collection the acting profile owns or may see.
+// PersonalCollection is a collection the acting profile owns, or another
+// profile's collection shared with every profile on the login. Only its
+// creator changes it.
 type PersonalCollection struct {
 	ID                         ID              `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q4"`
 	ProfileID                  ID              `json:"profile_id" doc:"The profile the row is scoped to" example:"p-owner"`
@@ -26,15 +29,15 @@ type PersonalCollection struct {
 	Name                       string          `json:"name" example:"Rainy days"`
 	Description                string          `json:"description" example:""`
 	CollectionType             string          `json:"collection_type" doc:"manual, smart, or an import source (mdblist, tmdb, trakt)" example:"manual"`
-	IsShared                   bool            `json:"is_shared" example:"false"`
-	AllowedProfileIDs          []ID            `json:"allowed_profile_ids" doc:"Profiles a shared collection is limited to; empty means every profile on the account" example:"[]"`
+	IsShared                   bool            `json:"is_shared" doc:"Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does" example:"false"`
 	QueryDefinition            json.RawMessage `json:"query_definition" doc:"Smart-collection query document; {} for a manual collection"`
 	SortConfig                 json.RawMessage `json:"sort_config" doc:"Default sort document; {} when unset"`
-	SortOrder                  int             `json:"sort_order" example:"0"`
-	GroupID                    *ID             `json:"group_id" nullable:"true" doc:"null when ungrouped" example:"g1"`
+	SortOrder                  int             `json:"sort_order" doc:"Position in its creator's own order of collections" example:"0"`
+	GroupID                    *ID             `json:"group_id" nullable:"true" doc:"Always null: personal collection groups are no longer supported" example:"g1"`
 	SourceURL                  string          `json:"source_url" doc:"Where an imported collection is synced from; empty otherwise" example:""`
 	SourceConfig               json.RawMessage `json:"source_config,omitempty" doc:"Import source document; absent for a manual or smart collection"`
 	SyncSchedule               string          `json:"sync_schedule" doc:"Empty when the collection is not synced" example:""`
+	SyncCadence                string          `json:"sync_cadence" enum:",daily,weekly,monthly,custom" doc:"The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces" example:""`
 	NextSyncAt                 *Instant        `json:"next_sync_at" nullable:"true" example:"2026-01-02T03:04:05.678Z"`
 	LastSyncAt                 *Instant        `json:"last_sync_at" nullable:"true" example:"2026-01-02T03:04:05.678Z"`
 	LastSyncStatus             string          `json:"last_sync_status" doc:"Empty until the first sync" example:""`
@@ -44,8 +47,10 @@ type PersonalCollection struct {
 	IncludeInServerCollections bool            `json:"include_in_server_collections" example:"false"`
 	PosterURL                  string          `json:"poster_url" doc:"Presigned, short-lived; empty when there is no poster" example:""`
 	PosterThumbhash            string          `json:"poster_thumbhash" example:""`
+	PosterIsCollage            bool            `json:"poster_is_collage" doc:"poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt                  Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
+	Contains                   *bool           `json:"contains,omitempty" doc:"Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access" example:"true"`
 }
 
 // CollectionGroup is an account-wide grouping of personal collections.
@@ -58,10 +63,16 @@ type CollectionGroup struct {
 }
 
 // PersonalCollectionCollection is the listCollections envelope: the
-// profile's visible collections plus the account's groups.
+// profile's own collections, then the shared collections of other profiles on
+// the login. Groups is always empty.
 type PersonalCollectionCollection struct {
 	Collection[PersonalCollection]
-	Groups []CollectionGroup `json:"groups" doc:"The account's collection groups in sort order; empty, never null"`
+	Groups []CollectionGroup `json:"groups" doc:"Always empty: personal collection groups are no longer supported"`
+}
+
+// PersonalCollectionListInput is the listCollections request.
+type PersonalCollectionListInput struct {
+	ContainsItem string `query:"contains_item" doc:"A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q5"`
 }
 
 // PersonalCollectionCollectionOutput is the listCollections response.
@@ -84,9 +95,9 @@ type PersonalCollectionCreatedOutput struct {
 // PersonalCollectionCreate is the createCollection body.
 type PersonalCollectionCreate struct {
 	Name                       string          `json:"name" minLength:"1" example:"Rainy days"`
+	Description                *string         `json:"description,omitempty" nullable:"false" doc:"Empty when omitted. Send only when getCollectionCapabilities reports create_description; otherwise the request fails" example:"For wet afternoons"`
 	CollectionType             *string         `json:"collection_type,omitempty" nullable:"false" enum:"manual,smart" doc:"Defaults to manual" example:"manual"`
-	IsShared                   *bool           `json:"is_shared,omitempty" nullable:"false" example:"false"`
-	AllowedProfileIDs          *[]ID           `json:"allowed_profile_ids,omitempty" nullable:"false" doc:"Profiles a shared collection is limited to" example:"[]"`
+	IsShared                   *bool           `json:"is_shared,omitempty" nullable:"false" doc:"Show the collection to every profile on the login; defaults to false" example:"false"`
 	QueryDefinition            json.RawMessage `json:"query_definition,omitempty" doc:"Smart-collection query document; required to be valid when collection_type is smart"`
 	SortConfig                 json.RawMessage `json:"sort_config,omitempty" doc:"Default sort document"`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment"`
@@ -102,8 +113,8 @@ type PersonalCollectionCreateInput struct {
 
 // CollectionOrder is the reorderCollections body.
 type CollectionOrder struct {
-	GroupID    *ID  `json:"group_id,omitempty" nullable:"true" doc:"The group whose collections are ordered; omitted or null orders the ungrouped section" example:"g1"`
-	OrderedIDs []ID `json:"ordered_ids" doc:"Every visible collection in the scope, exactly once, in the new order" example:"[\"01J9Z8C3W4R5T6Y7U8I9O0P1Q4\"]"`
+	GroupID    *ID  `json:"group_id,omitempty" nullable:"true" doc:"Omit or send null: personal collection groups are no longer supported, and any other value is a validation failure" example:"g1"`
+	OrderedIDs []ID `json:"ordered_ids" doc:"Each of the acting profile's own collections, exactly once, in the new order; another profile's collection is a validation failure" example:"[\"01J9Z8C3W4R5T6Y7U8I9O0P1Q4\"]"`
 }
 
 // CollectionOrderInput is the reorderCollections request.
@@ -117,7 +128,8 @@ type CollectionOrderInput struct {
 // detect before using a member.
 type CollectionCapabilities struct {
 	Capability
-	Groups                    bool                           `json:"groups" doc:"The acting account supports collection groups"`
+	Groups                    bool                           `json:"groups" doc:"Always false: personal collection groups are no longer supported"`
+	LoginSharing              bool                           `json:"login_sharing" doc:"is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it"`
 	Imports                   bool                           `json:"imports" doc:"The acting account supports imported collections"`
 	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the acting account can create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
 	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
@@ -128,6 +140,13 @@ type CollectionCapabilities struct {
 	CollectionSortPreferences bool                           `json:"collection_sort_preferences" example:"true"`
 	EffectiveCollectionSort   bool                           `json:"effective_collection_sort" example:"true"`
 	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
+	CreateDescription         bool                           `json:"create_description" doc:"createCollection stores a description for the acting account" example:"true"`
+	MDBListSearch             bool                           `json:"mdblist_search" doc:"searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key" example:"true"`
+	ScheduleTimeZone          CollectionScheduleTimeZone     `json:"schedule_time_zone"`
+	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"updateCollection accepts sync_schedule on a synced list; false when imports is false" example:"true"`
+	ContainsItem              bool                           `json:"contains_item" doc:"listCollections accepts contains_item and marks the acting profile's own manual collections with contains" example:"true"`
+	PreviewPosters            bool                           `json:"preview_posters" doc:"previewCollection items carry poster_url when the title has a poster" example:"true"`
+	PosterCollages            bool                           `json:"poster_collages" doc:"A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork" example:"true"`
 }
 
 // importableCollectionSources are the import sources a new collection can be
@@ -141,6 +160,10 @@ const (
 	importSourceTMDB     = "tmdb"
 	importSourceTMDBList = "tmdb_list"
 )
+
+// collectionTypeManual is the collection_type of a collection whose titles
+// are added by hand.
+const collectionTypeManual = "manual"
 
 // collectionImportSources reports importableCollectionSources when imports
 // are supported and an empty list otherwise.
@@ -231,9 +254,9 @@ type CollectionImportBase struct {
 	Description            *string         `json:"description,omitempty" nullable:"false" example:""`
 	Limit                  *int            `json:"limit,omitempty" nullable:"false" minimum:"1" doc:"Cap on synced items; the server's own maximum applies when omitted" example:"50"`
 	SyncSchedule           *string         `json:"sync_schedule,omitempty" nullable:"false" doc:"Sync cadence name; the server default when omitted" example:"daily"`
-	IsShared               *bool           `json:"is_shared,omitempty" nullable:"false" example:"false"`
+	IsShared               *bool           `json:"is_shared,omitempty" nullable:"false" doc:"Show the collection to every profile on the login; defaults to false" example:"false"`
 	PosterURL              *string         `json:"poster_url,omitempty" nullable:"false" doc:"A bundled template poster path or an image URL" example:""`
-	LibraryIDs             *[]ID           `json:"library_ids,omitempty" nullable:"false" doc:"Libraries the sync matches against; every library when omitted" example:"[\"1\"]"`
+	LibraryIDs             *[]ID           `json:"library_ids,omitempty" nullable:"false" doc:"Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted" example:"[\"1\"]"`
 	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment"`
 	SortConfig             json.RawMessage `json:"sort_config,omitempty" doc:"Default sort document"`
 }
@@ -344,9 +367,10 @@ type MDBListSearchInput struct {
 // handler writes and an *handlers.APIError on failure.
 type PersonalCollectionService interface {
 	ListPersonalCollections(ctx context.Context, userID int, profileID string) (handlers.PersonalCollectionListView, error)
+	PersonalCollectionsHoldingItem(ctx context.Context, userID int, profileID, itemID string) (map[string]bool, error)
 	Capabilities() handlers.CollectionCapabilitiesView
 	CreatePersonalCollection(ctx context.Context, cmd handlers.PersonalCollectionCreateCommand) (handlers.PersonalCollectionView, error)
-	ReorderPersonalCollections(ctx context.Context, userID int, profileID string, groupID *string, orderedIDs []string) error
+	ReorderPersonalCollections(ctx context.Context, userID int, profileID string, orderedIDs []string) error
 	CreateCollectionGroup(ctx context.Context, userID int, req handlers.CollectionGroupCreateRequest) (handlers.CollectionGroupView, error)
 	UpdateCollectionGroup(ctx context.Context, userID int, id string, req handlers.CollectionGroupUpdateRequest) (handlers.CollectionGroupView, error)
 	DeleteCollectionGroup(ctx context.Context, userID int, id string) error
@@ -363,7 +387,12 @@ type CollectionImportService interface {
 	ImportTrakt(ctx context.Context, userID int, profileID string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error)
 	SearchMDBList(ctx context.Context, query string) (handlers.MDBListDiscoveryView, error)
 	TopMDBList(ctx context.Context) (handlers.MDBListDiscoveryView, error)
+	MDBListConfigured() bool
 }
+
+// groupsRemovedSummary describes each personal collection group operation,
+// kept (answering 501) until native clients tolerate its absence (#1615).
+const groupsRemovedSummary = "Not supported: personal collection groups were removed, and this operation answers capability_unsupported."
 
 const (
 	opReorderCollections      = "reorderCollections"
@@ -387,38 +416,46 @@ func registerPersonalCollections(reg *Registry) {
 	}
 
 	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections", "listCollections", "collections",
-		"List the collections the acting profile owns or may see, with the account's collection groups.")), reg.listCollections)
+		"List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order.")), reg.listCollections)
 
 	create := humaOp(http.MethodPost, Prefix+"/collections", "createCollection", "collections",
 		"Create a manual or smart collection for the acting profile. Not idempotent: a retry after a lost response creates a second collection.")
 	create.DefaultStatus = http.StatusCreated
-	Register(reg, write(create), reg.createCollection)
+	createOp := write(create)
+	// A description or poster the acting account's store cannot keep.
+	createOp.Errors = append(createOp.Errors, http.StatusNotImplemented)
+	Register(reg, createOp, reg.createCollection)
 
 	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/capabilities", "getCollectionCapabilities", "collections",
 		"The collection features this server supports.")), reg.getCollectionCapabilities)
 
 	order := humaOp(http.MethodPut, Prefix+"/collections/order", opReorderCollections, "collections",
-		"Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.")
+		"Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation.")
 	order.DefaultStatus = http.StatusOK
 	Register(reg, write(order), reg.reorderCollections)
 
+	groupOp := func(op huma.Operation) Operation {
+		o := write(op)
+		o.Errors = append(o.Errors, http.StatusNotImplemented)
+		return o
+	}
 	createGroup := humaOp(http.MethodPost, Prefix+"/collections/groups", "createCollectionGroup", "collections",
-		"Create an account-wide collection group. Not idempotent: a retry after a lost response creates a second group.")
+		groupsRemovedSummary)
 	createGroup.DefaultStatus = http.StatusCreated
-	Register(reg, write(createGroup), reg.createCollectionGroup)
+	Register(reg, groupOp(createGroup), reg.createCollectionGroup)
 
 	groupOrder := humaOp(http.MethodPut, Prefix+"/collections/groups/order", opReorderCollectionGroups, "collections",
-		"Replace the order of the account's collection groups. Retries are not safe after an intervening mutation.")
+		groupsRemovedSummary)
 	groupOrder.DefaultStatus = http.StatusOK
-	Register(reg, write(groupOrder), reg.reorderCollectionGroups)
+	Register(reg, groupOp(groupOrder), reg.reorderCollectionGroups)
 
-	Register(reg, write(humaOp(http.MethodPatch, Prefix+"/collections/groups/{id}", opUpdateCollectionGroup, "collections",
-		"Update a collection group; omitted members are unchanged. Retries are not safe after an intervening mutation.")), reg.updateCollectionGroup)
+	Register(reg, groupOp(humaOp(http.MethodPatch, Prefix+"/collections/groups/{id}", opUpdateCollectionGroup, "collections",
+		groupsRemovedSummary)), reg.updateCollectionGroup)
 
 	deleteGroup := humaOp(http.MethodDelete, Prefix+"/collections/groups/{id}", opDeleteCollectionGroup, "collections",
-		"Delete a collection group; its collections become ungrouped.")
+		groupsRemovedSummary)
 	deleteGroup.DefaultStatus = http.StatusNoContent
-	Register(reg, write(deleteGroup), reg.deleteCollectionGroup)
+	Register(reg, groupOp(deleteGroup), reg.deleteCollectionGroup)
 
 	importOp := func(path, id, summary string) huma.Operation {
 		op := humaOp(http.MethodPost, Prefix+path, id, "collections",
@@ -483,19 +520,15 @@ func collectionProblem(err error) *Problem {
 }
 
 func personalCollectionOf(v handlers.PersonalCollectionView) PersonalCollection {
-	ids := make([]ID, 0, len(v.AllowedProfileIDs))
-	for _, id := range v.AllowedProfileIDs {
-		ids = append(ids, ID(id))
-	}
 	out := PersonalCollection{
 		ID: ID(v.ID), ProfileID: ID(v.ProfileID), CreatorProfileID: ID(v.CreatorProfileID),
 		Name: v.Name, Description: v.Description, CollectionType: v.CollectionType, IsShared: v.IsShared,
-		AllowedProfileIDs: ids, QueryDefinition: jsonDocument(v.QueryDefinition), SortConfig: jsonDocument(v.SortConfig),
-		SortOrder: v.SortOrder, SourceURL: v.SourceURL, SyncSchedule: v.SyncSchedule,
+		QueryDefinition: jsonDocument(v.QueryDefinition), SortConfig: jsonDocument(v.SortConfig),
+		SortOrder: v.SortOrder, SourceURL: v.SourceURL, SyncSchedule: v.SyncSchedule, SyncCadence: usercollections.CadenceOf(v.SyncSchedule),
 		NextSyncAt: instantOfStamp(v.NextSyncAt), LastSyncAt: instantOfStamp(v.LastSyncAt),
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage,
 		ItemCount: v.ItemCount, IncludeInServerCollections: v.IncludeInServerCollections,
-		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash,
+		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 	if v.GroupID != nil {
 		out.GroupID = new(ID(*v.GroupID))
@@ -542,7 +575,7 @@ func intsOfIDs(ids []ID, member string) ([]int, *Problem) {
 	return out, nil
 }
 
-func (reg *Registry) listCollections(ctx context.Context, _ *struct{}) (*PersonalCollectionCollectionOutput, error) {
+func (reg *Registry) listCollections(ctx context.Context, in *PersonalCollectionListInput) (*PersonalCollectionCollectionOutput, error) {
 	svc, p := reg.personalCollections()
 	if p != nil {
 		return nil, p
@@ -551,13 +584,28 @@ func (reg *Registry) listCollections(ctx context.Context, _ *struct{}) (*Persona
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.ListPersonalCollections(ctx, userID, profileFrom(ctx))
+	profileID := profileFrom(ctx)
+	// Marked as /api/v2, the read shows collections' collages (#1618).
+	view, err := svc.ListPersonalCollections(handlers.WithNativeAPIV2(ctx), userID, profileID)
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
+	marking := in.ContainsItem != ""
+	var holding map[string]bool
+	if marking {
+		if holding, err = svc.PersonalCollectionsHoldingItem(ctx, userID, profileID, in.ContainsItem); err != nil {
+			return nil, collectionProblem(err)
+		}
+	}
 	items := make([]PersonalCollection, 0, len(view.Collections))
 	for _, c := range view.Collections {
-		items = append(items, personalCollectionOf(c))
+		item := personalCollectionOf(c)
+		// Only the profile's own manual collections take a title from Add
+		// to collection; every other collection leaves contains out.
+		if marking && c.CreatorProfileID == profileID && c.CollectionType == collectionTypeManual {
+			item.Contains = new(holding[c.ID])
+		}
+		items = append(items, item)
 	}
 	groups := make([]CollectionGroup, 0, len(view.Groups))
 	for _, g := range view.Groups {
@@ -569,7 +617,7 @@ func (reg *Registry) listCollections(ctx context.Context, _ *struct{}) (*Persona
 func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *CapabilityInput) (*CollectionCapabilitiesOutput, error) {
 	svc := reg.deps.PersonalCollections
 	if svc == nil {
-		return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{Capability: Capability{State: StateNotConfigured}, DisplayFilterFields: []string{}, DisplayFilterPresets: CollectionDisplayFilterPresets{Watched: []string{}, Media: []string{}}, SortPreferenceKinds: []string{}}}, nil
+		return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{Capability: Capability{State: StateNotConfigured}, DisplayFilterFields: []string{}, DisplayFilterPresets: CollectionDisplayFilterPresets{Watched: []string{}, Media: []string{}}, SortPreferenceKinds: []string{}, MDBListSearch: reg.mdblistSearch(), ScheduleTimeZone: reg.scheduleTimeZone()}}, nil
 	}
 	v := svc.Capabilities()
 	features := userstore.CollectionFeatures{}
@@ -587,7 +635,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		}
 	}
 	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
-		Groups: features.Groups, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
+		Groups: features.Groups, LoginSharing: true, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
 		ImportSources:       collectionImportSources(features.Imports),
 		DisplayFilterFields: NonNil(v.DisplayFilterFields),
 		DisplayFilterPresets: CollectionDisplayFilterPresets{
@@ -597,6 +645,13 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		CollectionSortPreferences: v.CollectionSortPreferences,
 		EffectiveCollectionSort:   v.EffectiveCollectionSort,
 		SortPreferenceKinds:       NonNil(v.SortPreferenceKinds),
+		CreateDescription:         features.Description,
+		MDBListSearch:             reg.mdblistSearch(),
+		ScheduleTimeZone:          reg.scheduleTimeZone(),
+		SyncScheduleEditable:      features.Imports,
+		ContainsItem:              true,
+		PreviewPosters:            true,
+		PosterCollages:            v.PosterCollages && features.Artwork,
 	}}, nil
 }
 
@@ -623,14 +678,14 @@ func (reg *Registry) createCollection(ctx context.Context, in *PersonalCollectio
 		SortConfig:             b.SortConfig,
 		DisplayQueryDefinition: b.DisplayQueryDefinition,
 	}
+	if b.Description != nil {
+		req.Description = *b.Description
+	}
 	if b.CollectionType != nil {
 		req.CollectionType = *b.CollectionType
 	}
 	if b.IsShared != nil {
 		req.IsShared = *b.IsShared
-	}
-	if b.AllowedProfileIDs != nil {
-		req.AllowedProfileIDs = stringsOfIDs(*b.AllowedProfileIDs)
 	}
 	if b.IncludeInServerCollections != nil {
 		req.IncludeInServerCollections = *b.IncludeInServerCollections
@@ -653,20 +708,23 @@ func (reg *Registry) reorderCollections(ctx context.Context, in *CollectionOrder
 	if p != nil {
 		return nil, p
 	}
-	group := ""
-	var groupID *string
 	if in.Body.GroupID != nil {
-		group = string(*in.Body.GroupID)
-		groupID = &group
+		return nil, collectionGroupScopeProblem(locationBody + ".group_id")
 	}
-	guarded, _, p := reg.prepareCollectionGuard(ctx, "order", group, CollectionPreconditions{IfMatch: in.IfMatch, IfNoneMatch: in.IfNoneMatch})
+	guarded, _, p := reg.prepareCollectionGuard(ctx, "order", "", CollectionPreconditions{IfMatch: in.IfMatch, IfNoneMatch: in.IfNoneMatch})
 	if p != nil {
 		return nil, p
 	}
-	if err := svc.ReorderPersonalCollections(guarded, claimsFrom(ctx).UserID, profileFrom(ctx), groupID, stringsOfIDs(in.Body.OrderedIDs)); err != nil {
-		return nil, reg.guardedCollectionError(ctx, "order", group, err)
+	if err := svc.ReorderPersonalCollections(guarded, claimsFrom(ctx).UserID, profileFrom(ctx), stringsOfIDs(in.Body.OrderedIDs)); err != nil {
+		return nil, reg.guardedCollectionError(ctx, "order", "", err)
 	}
-	return reg.getCollectionOrder(ctx, &CollectionOrderReadInput{GroupID: group})
+	return reg.getCollectionOrder(ctx, &CollectionOrderReadInput{})
+}
+
+// collectionGroupScopeProblem refuses a group-scoped collection order: each
+// profile has one flat order of its own collections.
+func collectionGroupScopeProblem(location string) *Problem {
+	return validationProblem(location, codeInvalid, "Personal collection groups are not supported; omit group_id.")
 }
 
 func (reg *Registry) createCollectionGroup(ctx context.Context, in *CollectionGroupCreateInput) (*CollectionGroupCreatedOutput, error) {

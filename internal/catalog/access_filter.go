@@ -65,6 +65,42 @@ type AccessFilter struct {
 	ExcludedMediaTypes []string
 }
 
+// LibraryScope resolves the libraries a read may touch: the requested
+// libraries (none requested means every library), limited to
+// AllowedLibraryIDs, minus DisabledLibraryIDs. A nil AllowedLibraryIDs is
+// unrestricted; an empty non-nil one grants no library.
+//
+// none reports that no library survived, and the caller must then match
+// nothing: an empty scope must never be read as "no library filter". When
+// none is false, a non-nil ids is the complete scope, already free of disabled
+// libraries, in request order (or allowlist order when nothing was
+// requested). A nil ids with none false means the read is not narrowed to
+// particular libraries; the caller still has to exclude DisabledLibraryIDs
+// itself, because "every library but these" has no ID list here.
+//
+// The rule compares IDs only. A requested library that does not exist stays
+// in the scope and simply matches no rows.
+func (f AccessFilter) LibraryScope(requested []int) (ids []int, none bool) {
+	if len(requested) == 0 {
+		if f.AllowedLibraryIDs == nil {
+			return nil, false
+		}
+		requested = f.AllowedLibraryIDs
+	} else if f.AllowedLibraryIDs != nil {
+		requested = intersectInts(requested, f.AllowedLibraryIDs)
+	}
+	ids = make([]int, 0, len(requested))
+	for _, id := range requested {
+		if !intInSlice(id, f.DisabledLibraryIDs) {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, true
+	}
+	return ids, false
+}
+
 // CanAccessLibraryCollection reports whether a visible server collection is
 // reachable through at least one library in the viewer's effective scope.
 // Collections without explicit library scope retain their legacy unrestricted
@@ -76,16 +112,8 @@ func CanAccessLibraryCollection(collection *models.LibraryCollection, filter Acc
 	if len(collection.LibraryIDs) == 0 {
 		return filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0
 	}
-	for _, libraryID := range collection.LibraryIDs {
-		if filter.AllowedLibraryIDs != nil && !intInSlice(libraryID, filter.AllowedLibraryIDs) {
-			continue
-		}
-		if intInSlice(libraryID, filter.DisabledLibraryIDs) {
-			continue
-		}
-		return true
-	}
-	return false
+	_, none := filter.LibraryScope(collection.LibraryIDs)
+	return !none
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {

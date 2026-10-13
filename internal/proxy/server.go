@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -99,7 +100,7 @@ type Server struct {
 	// (SetNetworkAccessStatus), which leaves the health field absent — the same
 	// as a build that predates it.
 	networkAccess NetworkAccessStatusSource
-	// networkAccessHost drives the provider instances for the bearer
+	// networkAccessHost drives the provider instances for the signed
 	// network-access routes; nil answers 503 there. See network_access.go.
 	networkAccessHost NetworkAccessProviderHost
 	// ingressTokens validates the X-Silo-Ingress-Token a provider plugin
@@ -297,7 +298,7 @@ func (s *Server) router() chi.Router {
 		r.Get("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodGet, "/downloads/file/{token}", s.handleDownloadFile))
 	})
 
-	// Admin routes — bearer-auth protected.
+	// Admin routes — callers must sign each request (nodeauth).
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireBearer)
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
@@ -306,7 +307,7 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
 		// Network access providers running beside this proxy; the API fans its
-		// admin status/connect/disconnect out to these with the node bearer.
+		// admin status/connect/disconnect out to these with signed requests.
 		r.Get("/network-access/status", s.handleNetworkAccessStatus)
 		r.Get("/network-access/{provider}/status", s.handleNetworkAccessProviderStatus)
 		r.Post("/network-access/{provider}/connect", s.handleNetworkAccessConnect)
@@ -560,13 +561,14 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 	s.metrics.Start(ctx)
 }
 
-// requireBearer checks Authorization: Bearer {secret} for admin endpoints.
+// requireBearer admits only API servers to the admin endpoints: it checks the
+// request's node signature (see nodeauth). The name predates signing and is
+// kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := s.watcher.Config()
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.Auth.JWTSecret {
+		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -753,6 +755,7 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	// Attach here rather than at the call sites so both the token routes and the
 	// grant routes attribute their bytes to the viewer.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -952,6 +955,7 @@ func remuxRunsOnTranscodeNodeV3(claims *streamtoken.Claims) bool {
 
 func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, forwardToken string) {
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -974,6 +978,7 @@ func validAudioV2RemuxClaims(claims *streamtoken.Claims) bool {
 func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) {
 	// See serveDirectPlayClaims: shared by the token and grant routes.
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
@@ -988,13 +993,14 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 	// legacy auto behavior for old tokens), mirroring how the integrated
 	// server's stream handler serves the same claims.
 	_ = playback.ServeRemuxWithOptions(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
-		DVMode:                 playback.RemuxDVMode(claims.RemuxDVMode),
-		FFmpegPath:             s.watcher.Config().Playback.FFmpegPath,
-		ContentType:            playback.RemuxContentType(claims.AudioOnly),
-		AudioOnly:              claims.AudioOnly,
-		SourceAudioChannels:    claims.SourceAudioChannels,
-		TargetAudioChannels:    claims.TargetAudioChannels,
-		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
+		DVMode:                    playback.RemuxDVMode(claims.RemuxDVMode),
+		FFmpegPath:                s.watcher.Config().Playback.FFmpegPath,
+		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		ContentType:               playback.RemuxContentType(claims.AudioOnly),
+		AudioOnly:                 claims.AudioOnly,
+		SourceAudioChannels:       claims.SourceAudioChannels,
+		TargetAudioChannels:       claims.TargetAudioChannels,
+		TargetAudioBitrateKbps:    claims.TargetAudioBitrateKbps,
 	})
 }
 
@@ -1004,6 +1010,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	s.touchTranscodeSession(r, claims)
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/master.m3u8", chi.URLParam(r, "token"))
 }
@@ -1014,6 +1021,7 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	attachStream(r.Context(), claims)
+	noteDelivery(r, claims)
 	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/segment/"+name, chi.URLParam(r, "token"))
@@ -1153,7 +1161,10 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+	if err := nodeauth.Sign(req, claims.TranscodeNode, cfg.Auth.JWTSecret); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if isSegmentRoute {
 		transcodeproxy.PrepareRequest(req, r)
 	}
@@ -1183,7 +1194,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode+path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}

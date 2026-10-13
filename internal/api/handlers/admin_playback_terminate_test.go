@@ -166,7 +166,7 @@ func TestAdminTerminateRevokesAnAttemptHeldElsewhere(t *testing.T) {
 		t.Fatalf("view = %+v, %v", view, err)
 	}
 	record, err := control.playback.PlanStoreV3.GetAttempt(t.Context(), remote)
-	if err != nil || record.StoppedAt == nil {
-		t.Fatalf("remote attempt not stopped: %+v %v", record, err)
+	if err != nil || !attemptEndedByAdmin(record) {
+		t.Fatalf("remote attempt not stopped by an administrator: %+v %v", record, err)
 	}
 }

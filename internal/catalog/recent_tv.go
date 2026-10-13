@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -90,9 +91,10 @@ func recentTVFilterTypeScope(filterType string) (explicitSeries bool, tvEligible
 // ResolveRecentTVLibraryIDs decides whether a recently-added section is
 // exclusively TV-targeted and returns the effective visible TV libraries.
 // filterType is the section's configured filter_type: an explicit "series"
-// scope may include mixed libraries, an empty scope requires every requested
-// library to be a dedicated series library, and any other type is not TV
-// scoped at all because event grouping cannot honor it.
+// scope may include mixed libraries and TV libraries typed with an alias such
+// as "tv", an empty scope requires every requested library to be a dedicated
+// series library, and any other type is not TV scoped at all because event
+// grouping cannot honor it.
 func ResolveRecentTVLibraryIDs(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -155,16 +157,91 @@ func ResolveRecentTVLibraryIDs(
 
 	ids := make([]int, 0, len(byID))
 	for id, libraryType := range byID {
-		if libraryType == recentTVTypeSeries || (explicitSeries && libraryType == "mixed") {
+		if libraryType == recentTVTypeSeries || (explicitSeries && (librarykind.IsTV(libraryType) || librarykind.IsMixed(libraryType))) {
 			ids = append(ids, id)
 		}
 	}
-	ids = intersectOptionalInts(ids, access.AllowedLibraryIDs)
-	ids = subtractInts(ids, access.DisabledLibraryIDs)
 	if len(ids) == 0 {
 		return []int{}, true, nil
 	}
+	ids, none := access.LibraryScope(ids)
+	if none {
+		return []int{}, true, nil
+	}
 	return sortedUniqueInts(ids), true, nil
+}
+
+// RecentLibrarySplit divides the libraries of a recently-added row that is not
+// confined to TV. TV holds the dedicated series libraries, whose cards come
+// from arrival-event grouping; Other holds every remaining library, read by the
+// plain recently-added query.
+type RecentLibrarySplit struct {
+	TV    []int
+	Other []int
+}
+
+// SplitRecentLibraries reads the enabled libraries among requested (every
+// enabled library when requested is empty), limits them to the viewer's
+// library scope, and splits them into TV and other libraries, each in ID
+// order. videoOnly keeps only movie, TV, and mixed libraries, dropping
+// audiobook, ebook, podcast, manga, and unknown library types.
+func SplitRecentLibraries(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	requested []int,
+	videoOnly bool,
+	access AccessFilter,
+) (RecentLibrarySplit, error) {
+	var split RecentLibrarySplit
+	if pool == nil {
+		return split, nil
+	}
+	scope, none := access.LibraryScope(uniquePositiveInts(requested))
+	if none {
+		return split, nil
+	}
+
+	conditions := []string{"enabled = true"}
+	args := []any{}
+	if scope != nil {
+		args = append(args, scope)
+		conditions = append(conditions, fmt.Sprintf("id = ANY($%d)", len(args)))
+	} else if len(access.DisabledLibraryIDs) > 0 {
+		// A nil scope is "every library"; LibraryScope leaves the disabled
+		// exclusion to the caller in that case.
+		args = append(args, access.DisabledLibraryIDs)
+		conditions = append(conditions, fmt.Sprintf("NOT (id = ANY($%d))", len(args)))
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT id, type
+		FROM media_folders
+		WHERE `+strings.Join(conditions, " AND ")+`
+		ORDER BY id ASC
+	`, args...)
+	if err != nil {
+		return split, fmt.Errorf("listing recent libraries: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int
+		var libraryType string
+		if err := rows.Scan(&id, &libraryType); err != nil {
+			return split, fmt.Errorf("scanning recent library: %w", err)
+		}
+		switch {
+		case strings.ToLower(strings.TrimSpace(libraryType)) == recentTVTypeSeries:
+			split.TV = append(split.TV, id)
+		case !videoOnly || librarykind.IsMovie(libraryType) || librarykind.IsTV(libraryType) || librarykind.IsMixed(libraryType):
+			// TV aliases such as "tv" are not event-grouped (see
+			// ResolveRecentTVLibraryIDs) but still belong in a video row.
+			split.Other = append(split.Other, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return split, fmt.Errorf("iterating recent libraries: %w", err)
+	}
+	return split, nil
 }
 
 // List returns one page after event grouping. UniqueTargets collapses repeated
@@ -967,32 +1044,6 @@ func sortedUniqueInts(values []int) []int {
 	values = uniquePositiveInts(values)
 	slices.Sort(values)
 	return values
-}
-
-// intersectOptionalInts is intersectInts with the access-layer convention that
-// a nil allow-list means unrestricted rather than "allow nothing".
-func intersectOptionalInts(values, allowed []int) []int {
-	if allowed == nil {
-		return values
-	}
-	return intersectInts(values, allowed)
-}
-
-func subtractInts(values, denied []int) []int {
-	if len(denied) == 0 {
-		return values
-	}
-	deniedSet := make(map[int]struct{}, len(denied))
-	for _, value := range denied {
-		deniedSet[value] = struct{}{}
-	}
-	result := make([]int, 0, len(values))
-	for _, value := range values {
-		if _, denied := deniedSet[value]; !denied {
-			result = append(result, value)
-		}
-	}
-	return result
 }
 
 // The tuple belongs to the final event relation, after grouping and optional

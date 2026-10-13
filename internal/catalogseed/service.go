@@ -206,6 +206,10 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			itemStates[item.ContentID] = true
 		}
 
+		if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
+			return nil, err
+		}
+
 		reportProgress("Importing people", currentWork, totalWork)
 		if err := s.replacePeople(ctx, tx, bundle.People, itemStates, ConflictModeOverwrite, result); err != nil {
 			return nil, err
@@ -385,6 +389,10 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 	result.ItemsCreated = itemsCreated
 	result.ItemsUpdated = itemsUpdated
 	result.Skipped += itemsSkipped
+
+	if err := importTMDBRatingSources(ctx, tx, bundle.Items, itemStates, bundle.Manifest.TMDBRatingSources); err != nil {
+		return nil, err
+	}
 
 	reportProgress("Importing people", currentWork, totalWork)
 	if err := s.replacePeople(ctx, tx, bundle.People, itemStates, opts.ConflictMode, result); err != nil {
@@ -1905,6 +1913,59 @@ func lookupFolderIDsByPaths(ctx context.Context, tx pgx.Tx, paths []string) ([]i
 	}
 	sort.Ints(ids)
 	return ids, rows.Err()
+}
+
+// importTMDBRatingSources writes the TMDB rating source of each item the
+// import created or overwrote; a trigger derives the TMDB vote pair discovery
+// rows rank by from it. When the bundle carries sources (bundleHasSources),
+// an overwritten item without one loses its stale source; an older bundle
+// leaves it in place. Items the import left alone keep theirs.
+func importTMDBRatingSources(ctx context.Context, tx pgx.Tx, items []ItemRecord, itemStates map[string]bool, bundleHasSources bool) error {
+	var changed, providers []string
+	// ids is never nil, so an import with no TMDB sources binds an empty
+	// array (and clears every changed item's source) rather than NULL.
+	ids := []string{}
+	var scores []float64
+	var votes []*int64
+	for _, item := range items {
+		if !itemStates[item.ContentID] {
+			continue
+		}
+		changed = append(changed, item.ContentID)
+		if source := item.TMDBRating; source != nil {
+			ids = append(ids, item.ContentID)
+			scores = append(scores, source.Score)
+			votes = append(votes, source.Votes)
+			providers = append(providers, source.Provider)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if bundleHasSources {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_item_rating_sources
+			WHERE source = 'tmdb' AND content_id = ANY($1::text[]) AND content_id <> ALL($2::text[])`,
+			changed, ids); err != nil {
+			return fmt.Errorf("clearing imported tmdb rating sources: %w", err)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_rating_sources (content_id, source, score, votes, provider)
+		SELECT s.content_id, 'tmdb', s.score, s.votes, s.provider
+		FROM unnest($1::text[], $2::double precision[], $3::bigint[], $4::text[]) AS s(content_id, score, votes, provider)
+		ON CONFLICT (content_id, source) DO UPDATE SET
+			score = EXCLUDED.score,
+			votes = EXCLUDED.votes,
+			provider = EXCLUDED.provider,
+			updated_at = now()`,
+		ids, scores, votes, providers); err != nil {
+		return fmt.Errorf("importing tmdb rating sources: %w", err)
+	}
+	return nil
 }
 
 // batchImportItems inserts items in multi-row batches with ON CONFLICT handling.

@@ -17,9 +17,9 @@ const (
 	// A scoped key must never be able to trade its allowlist for an unscoped
 	// admin session, so this scope stops at the admin boundary: it may not
 	// create an account with the admin role, may not grant that role to an
-	// existing account, and may not change the password or role of an account
-	// that is already an admin. Provisioning and managing ordinary accounts,
-	// passwords included, is in scope.
+	// existing account, and may not change the password, recovery email, role,
+	// or break-glass flag of an account that is already an admin. Provisioning
+	// and managing ordinary accounts, passwords included, is in scope.
 	ScopeAdminUsers = "admin:users"
 
 	// ScopeAdminAccessGroupsRead covers read-only access-group discovery.

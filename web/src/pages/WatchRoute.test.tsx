@@ -95,6 +95,14 @@ describe("buildWatchRouteRequest", () => {
     );
     expect(buildWatchHref(makeRequest())).toBe("/watch/movie-1");
   });
+
+  it("keeps a shuffle in the watch href and the request key", () => {
+    const shuffled = makeRequest("shuffle=shuffle-1");
+
+    expect(shuffled.shuffleId).toBe("shuffle-1");
+    expect(buildWatchHref(shuffled)).toBe("/watch/movie-1?shuffle=shuffle-1");
+    expect(shuffled.requestKey).not.toBe(makeRequest().requestKey);
+  });
 });
 
 describe("buildWatchPageProps", () => {

@@ -357,7 +357,7 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	if err := h.receiveWebhook(r, secret, 0); err != nil {
+	if err := h.receiveWebhook(r, secret, webhooksync.MaxWebhookDeliveryBytes); err != nil {
 		h.writeError(w, err)
 		return
 	}
@@ -411,6 +411,10 @@ func (h *WebhookSyncHandler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, webhooksync.ErrConnectionNotFound), errors.Is(err, historyimport.ErrProfileNotFound):
 		writeError(w, statusCode, "not_found", err.Error())
+	case errors.Is(err, webhooksync.ErrWebhookTooLarge):
+		writeError(w, statusCode, "payload_too_large", err.Error())
+	case errors.Is(err, webhooksync.ErrWebhookBody):
+		writeError(w, statusCode, "bad_request", err.Error())
 	default:
 		message := err.Error()
 		switch {

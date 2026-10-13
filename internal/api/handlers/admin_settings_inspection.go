@@ -49,6 +49,9 @@ func (h *AdminHandler) InspectAdminSensitiveSettings(ctx context.Context) (Admin
 func (h *AdminHandler) adminSensitiveSettingsStatus(all map[string]string) AdminSensitiveSettingsStatus {
 	configured := map[string]struct{}{}
 	for key := range sensitiveSettingKeys {
+		if machineManagedSettingKeys[key] {
+			continue
+		}
 		if all[key] != "" || h.BootstrapSensitiveConfigured[key] || h.BootstrapSensitiveValues[key] != "" {
 			configured[key] = struct{}{}
 		}
@@ -104,4 +107,10 @@ func (h *AdminHandler) InspectAdminSettingsSnapshot(ctx context.Context) (AdminS
 		return AdminSettingsSnapshot{}, err
 	}
 	return h.adminSettingsSnapshot(stored), nil
+}
+
+// SnapshotAdminSettings projects a transaction-owned snapshot using the same
+// bootstrap values and redaction rules as settings inspection and writes.
+func (h *AdminHandler) SnapshotAdminSettings(stored map[string]string) AdminSettingsSnapshot {
+	return h.adminSettingsSnapshot(stored)
 }

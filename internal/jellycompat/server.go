@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -67,8 +68,17 @@ type Dependencies struct {
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
 	LoginResolver   loginResolver
-	Authenticator   *Authenticator
-	WebFS           fs.FS
+	// ProfilePINAttempts is the native API's profile PIN limiter, shared so
+	// password#pin guesses count against the same per-profile budget. Nil
+	// gets a process-local limiter.
+	ProfilePINAttempts *ratelimit.AttemptLimiter
+	// RateLimit is the native API's request rate limiter, shared (not copied)
+	// so admin budget changes reload in place for both listeners and a client
+	// IP spends one set of counters across them. Nil disables rate limiting on
+	// this listener, as on the native API when rate limiting is off.
+	RateLimit     *ratelimit.Middleware
+	Authenticator *Authenticator
+	WebFS         fs.FS
 	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.
@@ -79,6 +89,10 @@ type Dependencies struct {
 	ContentService  ContentService
 	UserDataService UserDataService
 	AuthService     *auth.Service
+	// DeviceLogin serves Jellyfin Quick Connect on Silo's device sign-in
+	// (auth.DeviceLoginService). Nil turns Quick Connect off:
+	// /QuickConnect/Enabled answers false.
+	DeviceLogin QuickConnectService
 
 	// WatchCompletionObserver is notified when a Jellyfin-compat mark-played
 	// completes a watch, so fully-watched items leave the watchlist. Optional.
@@ -121,6 +135,7 @@ type Dependencies struct {
 	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
 	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
+	Downloads              DownloadServer         // serves /Items/{id}/Download; nil refuses every download
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver

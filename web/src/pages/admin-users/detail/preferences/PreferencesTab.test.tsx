@@ -16,11 +16,12 @@ const mocks = vi.hoisted(() => ({
   updateMutateAsync: vi.fn(),
   deleteMutate: vi.fn(),
   clearDeviceMutate: vi.fn(),
+  capabilities: { account_devices: true } as Record<string, boolean>,
 }));
 
 vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserSettings: () => ({ data: mocks.settings, isLoading: false, isError: false }),
-  useAdminUserCapabilities: () => ({ data: { account_devices: true } }),
+  useAdminUserCapabilities: () => ({ data: mocks.capabilities }),
   useUpdateAdminUserSetting: () => ({
     mutate: mocks.updateMutate,
     mutateAsync: mocks.updateMutateAsync,
@@ -42,6 +43,11 @@ vi.mock("@/hooks/queries/admin/history", () => ({
       { id: "p2", name: "Kids" },
     ],
   }),
+}));
+vi.mock("./ProfileHomeSections", () => ({
+  ProfileHomeSections: ({ profileId, profileName }: { profileId: string; profileName: string }) => (
+    <h3 data-profile-id={profileId}>{`Home sections · ${profileName}`}</h3>
+  ),
 }));
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: [{ id: 3, name: "TV Shows" }] }),
@@ -128,6 +134,7 @@ beforeEach(() => {
     },
   ];
   mocks.devices = [shield];
+  mocks.capabilities = { account_devices: true };
   for (const mock of Object.values(mocks)) {
     if (typeof mock === "function") mock.mockReset();
   }
@@ -250,5 +257,27 @@ describe("PreferencesTab levels", () => {
     expect(within(card).getByText("View only")).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Edit JSON" })).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Remove future.setting" })).toBeEnabled();
+  });
+});
+
+describe("PreferencesTab Home sections", () => {
+  it("shows the selected profile's Home sections when the server supports it", () => {
+    mocks.capabilities = { account_devices: true, profile_sections: true };
+    renderTab("?tab=preferences&level=profile.p2");
+    expect(screen.getByRole("heading", { name: "Home sections · Kids" })).toHaveAttribute(
+      "data-profile-id",
+      "p2",
+    );
+  });
+
+  it("leaves Home sections off device levels and older servers", () => {
+    mocks.capabilities = { account_devices: true, profile_sections: true };
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    expect(screen.queryByRole("heading", { name: /Home sections/ })).not.toBeInTheDocument();
+    cleanup();
+
+    mocks.capabilities = { account_devices: true };
+    renderTab("?tab=preferences&level=profile.p1");
+    expect(screen.queryByRole("heading", { name: /Home sections/ })).not.toBeInTheDocument();
   });
 });

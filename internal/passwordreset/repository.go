@@ -23,10 +23,12 @@ import (
 // Sentinel errors for reset link operations.
 var (
 	// ErrNotFound covers every unusable link alike: unknown, expired, used,
-	// replaced, or outdated by a password change. A probe learns nothing.
+	// replaced, or outdated by a password or recovery email change. A probe
+	// learns nothing.
 	ErrNotFound = errors.New("password reset link not found")
 	// ErrNotEligible reports an account that cannot sign in with a local
-	// password (disabled, or managed by an external provider).
+	// password (disabled, or managed by an external provider), or whose
+	// recovery email changed since the caller read it.
 	ErrNotEligible = errors.New("account cannot use a password reset")
 )
 
@@ -66,18 +68,24 @@ type Link struct {
 
 // Issue stores the digest of a new link for the account, replacing any
 // earlier one: an account has at most one live link. It refuses an account
-// that cannot sign in with a local password.
-func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error {
+// that cannot sign in with a local password or whose email no longer matches
+// expectedEmail. Locking the account before the link serializes issuance with
+// email changes, which delete existing links in the same transaction.
+func (r *Repository) Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
+		WITH account AS (
+			SELECT u.id, u.password_hash FROM users u
+			WHERE u.id = $1 AND u.email = $5::citext AND `+eligibleAccount+` FOR NO KEY UPDATE
+		)
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
-		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
+		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM account u
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
 			issued_by = EXCLUDED.issued_by,
 			expires_at = EXCLUDED.expires_at,
 			created_at = now()`,
-		userID, tokenHash, issuedBy, expiresAt)
+		userID, tokenHash, issuedBy, expiresAt, expectedEmail)
 	if err != nil {
 		return fmt.Errorf("issuing password reset link: %w", err)
 	}
@@ -97,11 +105,15 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 // administrator issued, which anyone who knows the account name could
 // otherwise retire. The checks and the replacement are one statement, so
 // concurrent requests across nodes still store one link. It reports false,
-// not an error, for an account that cannot use a reset.
-func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
+// not an error, for an account that cannot use a reset or whose email changed.
+func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
+		WITH account AS (
+			SELECT u.id, u.password_hash FROM users u
+			WHERE u.id = $1 AND u.email = $5::citext AND `+eligibleAccount+` FOR NO KEY UPDATE
+		)
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
-		SELECT u.id, $2, `+passwordFingerprint+`, u.id, $3 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
+		SELECT u.id, $2, `+passwordFingerprint+`, u.id, $3 FROM account u
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
@@ -112,7 +124,7 @@ func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHas
 			AND (password_reset_tokens.issued_by = password_reset_tokens.user_id
 				OR password_reset_tokens.expires_at <= now()
 				OR password_reset_tokens.password_fingerprint <> EXCLUDED.password_fingerprint)`,
-		userID, tokenHash, expiresAt, minAge.Seconds())
+		userID, tokenHash, expiresAt, minAge.Seconds(), expectedEmail)
 	if err != nil {
 		return false, fmt.Errorf("issuing requested password reset link: %w", err)
 	}
@@ -144,8 +156,8 @@ func (r *Repository) Lookup(ctx context.Context, tokenHash string) (*Link, error
 
 // Complete spends a usable link: the link is deleted, the password replaced,
 // and every session of the account revoked, all in one transaction. Locking
-// the account row serializes the reset with any other password change, and
-// the final wall-clock expiry check is the reset's linearization point.
+// the account row serializes the reset with password and recovery email changes.
+// The final wall-clock expiry check is the reset's linearization point.
 func (r *Repository) Complete(ctx context.Context, tokenHash, newPassword string) (*models.User, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -153,9 +165,9 @@ func (r *Repository) Complete(ctx context.Context, tokenHash, newPassword string
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
 
-	// Lock the account before the link, the order a promotion takes them in
-	// (it updates the account, then deletes its links), so completing a link
-	// cannot deadlock against one. The claim below re-checks the link.
+	// Lock the account before the link, the order issuance, promotion and email
+	// changes take them in, so completing a link cannot deadlock against them.
+	// The claim below re-checks the link.
 	var userID int
 	err = tx.QueryRow(ctx, `SELECT user_id FROM password_reset_tokens WHERE token_hash = $1`, tokenHash).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {

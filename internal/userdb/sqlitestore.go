@@ -313,7 +313,7 @@ func (s *SQLiteUserStore) ReorderCollectionItems(_ context.Context, _ string, _ 
 	return fmt.Errorf("collection reordering is not supported on the SQLite user store")
 }
 
-func (s *SQLiteUserStore) ReorderCollections(_ context.Context, _ string, _ *string, _ []string) error {
+func (s *SQLiteUserStore) ReorderCollections(_ context.Context, _ string, _ []string) error {
 	return fmt.Errorf("collection reordering is not supported on the SQLite user store")
 }
 

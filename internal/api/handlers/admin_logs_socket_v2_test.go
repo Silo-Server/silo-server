@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -184,4 +185,29 @@ func TestHandleLogStreamWebSocketKeepsBridgeStatuses(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = resp.Body.Close()
+}
+
+func TestAuditSocketDomainFilterValidationMatchesHistory(t *testing.T) {
+	for _, key := range []string{"action", "target_type", "target_id"} {
+		for _, value := range []string{strings.Repeat("x", 64), strings.Repeat("界", 64)} {
+			_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?"+key+"="+url.QueryEscape(value), nil))
+			if err != nil {
+				t.Fatalf("valid %s boundary: %v", key, err)
+			}
+		}
+		_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?"+key+"="+strings.Repeat("x", 65), nil))
+		if err == nil {
+			t.Fatalf("overlong %s accepted", key)
+		}
+	}
+	for _, value := range []string{"0", "01", "+1", " 1", "-1", "a", strings.Repeat("1", 21), "99999999999999999999"} {
+		_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?actor_user_id="+url.QueryEscape(value), nil))
+		if err == nil {
+			t.Fatalf("invalid actor %q accepted", value)
+		}
+	}
+	opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?actor_user_id=1", nil))
+	if err != nil || opts.ActorUserID == nil || *opts.ActorUserID != 1 {
+		t.Fatalf("valid actor rejected: %+v, %v", opts, err)
+	}
 }
