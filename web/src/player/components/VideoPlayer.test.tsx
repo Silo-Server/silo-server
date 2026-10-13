@@ -4095,6 +4095,22 @@ describe("VideoPlayer progressive remux after a long pause", () => {
   });
 
   it.each([
+    ["has opened but not shown a frame", HTMLMediaElement.HAVE_METADATA, 1],
+    ["was torn down for the next stream", HTMLMediaElement.HAVE_NOTHING, 0],
+  ])("counts a pause before the first frame only when the stream %s", (_, readyState, reopens) => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: remuxPlan, onReanchorSeek });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", { configurable: true, value: readyState });
+    fireEvent.pause(video);
+
+    vi.advanceTimersByTime(10 * 60_000);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledTimes(reopens);
+  });
+
+  it.each([
     ["a short pause on a progressive remux", {}, 30_000],
     [
       "a long pause on an original file the browser can range-request",

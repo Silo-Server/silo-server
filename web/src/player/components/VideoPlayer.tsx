@@ -448,7 +448,7 @@ export function VideoPlayer({
   // the transport is rebuilt (see the hls.js lifecycle effect).
   const streamPlayedRef = useRef(false);
   // When the current transport last stopped playing, or null while it plays.
-  // Only a transport that has shown a frame or settled paused counts.
+  // Only a transport that has opened, shown a frame, or settled paused counts.
   const transportIdleSinceRef = useRef<number | null>(null);
   const connectionStatusRef = useRef(connectionStatus);
   connectionStatusRef.current = connectionStatus;
@@ -2432,9 +2432,12 @@ export function VideoPlayer({
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
-      // Only a stream that played: the pause a teardown queues arrives after
-      // the next transport has started over.
-      if (streamPlayedRef.current) transportIdleSinceRef.current ??= Date.now();
+      // Only a stream that played or has opened. The pause a teardown queues
+      // arrives after the next transport has started over, before it has
+      // metadata.
+      if (streamPlayedRef.current || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        transportIdleSinceRef.current ??= Date.now();
+      }
     };
     const clearBuffering = () => {
       if (bufferingTimerRef.current) {
