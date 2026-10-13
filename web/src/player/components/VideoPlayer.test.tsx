@@ -4005,7 +4005,7 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     const onReanchorSeek = vi.fn(() => true);
     const onPlaybackStateChange = vi.fn();
     const onConnectionLost = vi.fn();
-    const { container } = renderPlayer({
+    const { container, unmount } = renderPlayer({
       plan: remuxPlan,
       onReanchorSeek,
       onPlaybackStateChange,
@@ -4016,7 +4016,7 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     video.currentTime = 40;
     fireFrameTimeUpdate(video);
     fireEvent.pause(video);
-    return { video, onReanchorSeek, onPlaybackStateChange, onConnectionLost };
+    return { video, unmount, onReanchorSeek, onPlaybackStateChange, onConnectionLost };
   }
 
   it("reopens the stream at the paused position when playback resumes", () => {
@@ -4060,6 +4060,25 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     rerenderPlayer({ replanning: false, planRevision: revisionAfterReplan });
 
     expect(onReanchorSeek).toHaveBeenCalledTimes(reopens);
+  });
+
+  it("does not reconnect for a viewer who left while the reopen was pending", async () => {
+    const { video, unmount, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+
+    vi.advanceTimersByTime(10 * 60_000);
+    fireEvent.play(video);
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+
+    unmount();
+    // Leaving ends the session's request, which then reports the reopen as not taken.
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
   });
 
   it("hands a reopen the session refuses to the reconnect", async () => {

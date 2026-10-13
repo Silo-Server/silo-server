@@ -1250,9 +1250,10 @@ export function VideoPlayer({
     // When the reopen does not take, the session may have expired during the
     // pause or the route may no longer be granted. The reconnect replans or
     // starts a new attempt at the same position, unless another plan already
-    // replaced this stream.
+    // replaced this stream or the viewer has left.
     const revision = planRevisionRef.current;
     const reconnect = () => {
+      if (!isMountedRef.current) return;
       if (planRevisionRef.current !== revision) return;
       if (connectionStatusRef.current !== "connected") return;
       onConnectionLost?.(position, !video.paused);
