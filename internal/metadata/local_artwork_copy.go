@@ -202,7 +202,7 @@ func nearestExistingFolderListsEntries(ctx context.Context, dir string, roots []
 		probe := rootcheck.ProbeWithTimeout(ctx, dir, rootcheck.DefaultProbeTimeout)
 		switch {
 		case probe.Reachable:
-			if _, err := localImagePathResolvedWithinRoots(dir, roots); errors.Is(err, errLocalImageOutsideRoots) {
+			if _, _, err := localImagePathResolvedWithinRoots(dir, roots); errors.Is(err, errLocalImageOutsideRoots) {
 				return true
 			}
 			return !probe.Empty
