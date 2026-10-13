@@ -249,7 +249,7 @@ function EventMatrix({ sections }: { sections: EventMatrixSection[] }) {
         <div key={section.label} className="space-y-1.5 px-3 py-2.5">
           <p
             className={cn(
-              "text-[11px] font-medium tracking-wide uppercase",
+              "text-xs font-medium tracking-wide uppercase",
               EVENT_MATRIX_TONE[section.tone],
             )}
           >
@@ -777,7 +777,7 @@ export default function WebhookSyncSettings() {
                   </div>
                   <Badge
                     variant={health === "error" ? "destructive" : "outline"}
-                    className="shrink-0 text-[11px]"
+                    className="shrink-0 text-xs"
                   >
                     {HEALTH_LABEL[health]}
                   </Badge>
@@ -1241,7 +1241,7 @@ export default function WebhookSyncSettings() {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={cn("text-[11px]", EVENT_OUTCOME_BADGE[event.outcome])}
+                              className={cn("text-xs", EVENT_OUTCOME_BADGE[event.outcome])}
                             >
                               {EVENT_OUTCOME_LABEL[event.outcome]}
                             </Badge>
@@ -1351,7 +1351,7 @@ export default function WebhookSyncSettings() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge
                   variant="outline"
-                  className={cn("text-[11px]", EVENT_OUTCOME_BADGE[selectedEvent.outcome])}
+                  className={cn("text-xs", EVENT_OUTCOME_BADGE[selectedEvent.outcome])}
                 >
                   {EVENT_OUTCOME_LABEL[selectedEvent.outcome]}
                 </Badge>
@@ -1376,7 +1376,7 @@ export default function WebhookSyncSettings() {
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([key, value]) => (
                         <div key={key} className="min-w-0">
-                          <p className="text-muted-foreground text-[11px]">{eventAttrLabel(key)}</p>
+                          <p className="text-muted-foreground text-xs">{eventAttrLabel(key)}</p>
                           <p className="truncate text-xs break-all">
                             {typeof value === "string" ? value : JSON.stringify(value)}
                           </p>

@@ -70,7 +70,7 @@ export function ProviderState({
     <span
       data-state={state}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 text-[11.5px] whitespace-nowrap",
+        "inline-flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap",
         state === "error" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
         className,
       )}
@@ -151,8 +151,8 @@ export function ProviderPanelActions({
           role="status"
           className={
             test.ok
-              ? "text-muted-foreground mr-auto text-[11.5px]"
-              : "mr-auto text-[11.5px] text-amber-600 dark:text-amber-400"
+              ? "text-muted-foreground mr-auto text-xs"
+              : "mr-auto text-xs text-amber-600 dark:text-amber-400"
           }
         >
           {test.ok ? testedLabel(test) : test.message}
@@ -220,7 +220,7 @@ export function ProviderTile({
           {meta ? (
             <p
               className={cn(
-                "mt-1 text-[11.5px]",
+                "mt-1 text-xs",
                 state === "error" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
               )}
             >

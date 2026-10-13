@@ -1002,7 +1002,7 @@ function MetricCard({
       >
         {value}
       </div>
-      <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+      <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
         {label}
       </div>
     </div>

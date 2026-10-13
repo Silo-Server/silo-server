@@ -427,7 +427,7 @@ function DeviceDetail({
           </strong>
           .
         </span>
-        <span className="text-muted-foreground/90 mt-1 block text-[12.5px]">
+        <span className="text-muted-foreground mt-1 block text-[13px]">
           {forSomeoneElse ? `${device.profile_name}'s` : "Your"} other devices, and anyone else who
           uses this one, are unaffected.
           {!device.is_current_device

@@ -29,9 +29,7 @@ export function CurrentProfileLink({ className }: { className?: string }) {
         </AvatarFallback>
       </Avatar>
       <span className="min-w-0 flex-1">
-        <span className="text-muted-foreground block text-[11px] leading-tight">
-          Current profile
-        </span>
+        <span className="text-muted-foreground block text-xs leading-tight">Current profile</span>
         <span className="block truncate text-sm font-semibold">{profileName}</span>
       </span>
       <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />

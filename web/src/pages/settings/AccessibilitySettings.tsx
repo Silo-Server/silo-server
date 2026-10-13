@@ -142,7 +142,7 @@ export default function AccessibilitySettings() {
             This sample paragraph reflects your current text size, weight, and contrast preferences.
             Adjustments take effect across the entire interface.
           </p>
-          <p className="text-muted-foreground/70 text-xs">
+          <p className="text-muted-foreground text-xs">
             Secondary text &middot; Metadata &middot; Captions
           </p>
         </div>

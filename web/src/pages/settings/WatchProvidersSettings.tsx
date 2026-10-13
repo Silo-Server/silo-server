@@ -71,7 +71,7 @@ function StatusPill({ variant, children }: { variant: StatusVariant; children: R
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         STATUS_PILL_STYLES[variant],
       )}
     >
@@ -137,7 +137,7 @@ function booleanSettingValue(
 function StatCell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
         {label}
       </div>
       <div className="mt-0.5 truncate text-sm font-medium">{value}</div>

@@ -82,7 +82,7 @@ function FieldRow({ label, icon: Icon, kind, hint, children, copyValue }: FieldR
         kind === "jellyfin" ? "border-info/25 bg-info/[0.06]" : "border-border bg-background/40",
       )}
     >
-      <div className="text-muted-foreground flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.16em] uppercase">
+      <div className="text-muted-foreground flex items-center gap-1.5 text-xs font-semibold tracking-[0.16em] uppercase">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
@@ -139,7 +139,7 @@ function ProfilePicker({
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-[10px] font-semibold tracking-[0.16em] uppercase">
+      <p className="text-muted-foreground text-xs font-semibold tracking-[0.16em] uppercase">
         Which profile are you signing in as?
       </p>
       <div className="flex flex-wrap gap-2">
@@ -160,7 +160,7 @@ function ProfilePicker({
             >
               <Avatar className="h-6 w-6">
                 {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
-                <AvatarFallback className="text-[10px] font-semibold">
+                <AvatarFallback className="text-xs font-semibold">
                   {profile.name.charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>

@@ -123,7 +123,7 @@ function isLoopbackAddress(raw: string): boolean {
 /** Marks a feature that ships outside the 1.0 support promise. */
 function BetaChip() {
   return (
-    <span className="border-border text-muted-foreground inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium tracking-wide">
+    <span className="border-border text-muted-foreground inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-xs font-medium tracking-wide">
       Beta
     </span>
   );

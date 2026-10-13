@@ -221,7 +221,7 @@ function ModelPanelActions({
           role="status"
           aria-live="polite"
           className={cn(
-            "mr-auto text-[11.5px]",
+            "mr-auto text-xs",
             test.ok ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400",
           )}
         >

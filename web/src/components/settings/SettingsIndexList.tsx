@@ -50,7 +50,7 @@ export function SettingsIndexList({ groups, ariaLabel, idPrefix }: SettingsIndex
           <section key={group.label} aria-labelledby={sectionId}>
             <h2
               id={sectionId}
-              className="text-muted-foreground mb-2 px-1 text-[11px] font-semibold tracking-[0.16em] uppercase"
+              className="text-muted-foreground mb-2 px-1 text-xs font-semibold tracking-[0.16em] uppercase"
             >
               {group.label}
             </h2>

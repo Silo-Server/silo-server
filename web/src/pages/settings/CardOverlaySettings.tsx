@@ -59,7 +59,7 @@ function SettingRow({ label, description, hint, control }: SettingRowProps) {
           {label}
         </Label>
         <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
-        {hint && <p className="text-muted-foreground/70 text-xs italic">{hint}</p>}
+        {hint && <p className="text-muted-foreground text-xs italic">{hint}</p>}
       </div>
       <div className="w-full sm:w-auto">{control({ id: controlId })}</div>
     </div>

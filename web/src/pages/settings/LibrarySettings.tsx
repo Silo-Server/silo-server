@@ -171,7 +171,7 @@ function PlaybackField({
         </SelectTrigger>
         <SelectContent>{children}</SelectContent>
       </Select>
-      {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
+      {hint && <p className="text-muted-foreground text-xs leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -211,7 +211,7 @@ function LanguageField({
       >
         {children}
       </LanguageSelect>
-      {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
+      {hint && <p className="text-muted-foreground text-xs leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -365,11 +365,11 @@ function LibraryCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium">{library.name}</span>
-            <Badge variant="outline" className="shrink-0 text-[11px] capitalize">
+            <Badge variant="outline" className="shrink-0 capitalize">
               {library.type}
             </Badge>
             {hasOverride && (
-              <Badge variant="secondary" className="shrink-0 text-[11px]">
+              <Badge variant="secondary" className="shrink-0">
                 Custom
               </Badge>
             )}
@@ -727,7 +727,7 @@ export default function LibrarySettings() {
             <div className="surface-panel flex items-center gap-3 rounded-[1.5rem] px-4 py-4 shadow-lg">
               <GripVertical className="text-muted-foreground h-4 w-4" />
               <span className="text-sm font-medium">{activeLibrary.name}</span>
-              <Badge variant="outline" className="text-[11px] capitalize">
+              <Badge variant="outline" className="capitalize">
                 {activeLibrary.type}
               </Badge>
             </div>

@@ -182,7 +182,7 @@ function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         tone === "neutral" && "border-border/70 text-muted-foreground",
         tone === "positive" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
         tone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-500",

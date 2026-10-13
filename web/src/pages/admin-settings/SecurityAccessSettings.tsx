@@ -111,7 +111,7 @@ function RateBox({
 }) {
   return (
     <span className="flex flex-col items-end gap-1">
-      <Label htmlFor={id} className="text-muted-foreground text-[11px] font-normal">
+      <Label htmlFor={id} className="text-muted-foreground text-xs font-normal">
         {caption}
       </Label>
       <Input

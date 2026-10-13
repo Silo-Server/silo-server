@@ -321,7 +321,7 @@ export default function AppearanceSettings() {
             </SettingFieldRow>
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
-                <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                   Preview
                 </span>
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />

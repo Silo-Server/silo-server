@@ -538,9 +538,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #232328;
     --secondary-foreground: #d0d0d6;
     --muted: #1c1c20;
-    /* Lightened from #6e6e78 (~3.4:1) to meet WCAG AA: ~6.3:1 on --background,
-       ~5.3:1 even on the lightest chip surface (#232328). */
-    --muted-foreground-base: #9696a0;
+    /* Lightened from #6e6e78 (~3.4:1), then from #9696a0 (~6.3:1) for small
+       secondary text: ~7.4:1 on --background (WCAG AAA) and ~5.9:1 on the
+       raised panel surface (#28282e). */
+    --muted-foreground-base: #a4a4ae;
     --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 

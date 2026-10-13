@@ -55,7 +55,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-[12.5px] leading-snug",
+        "inline-flex items-center gap-1.5 text-[13px] leading-snug",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
@@ -143,12 +143,10 @@ export function SettingFieldRow({
           {restartRequired && !groupSaysRestart && <RestartBadge />}
         </div>
         {settingKey ? (
-          <span className="text-muted-foreground/70 mt-0.5 block font-mono text-[10px] tracking-[0.02em]">
-            {settingKey}
-          </span>
+          <span className="text-muted-foreground mt-0.5 block font-mono text-xs">{settingKey}</span>
         ) : null}
         {description ? (
-          <p id={descriptionId} className="text-muted-foreground mt-1 text-xs leading-relaxed">
+          <p id={descriptionId} className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
             {description}
           </p>
         ) : null}
@@ -166,7 +164,7 @@ export function SettingFieldRow({
           {children}
         </div>
         {unit ? (
-          <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap sm:w-[var(--settings-unit-w)]">
+          <span className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
             {unit}
           </span>
         ) : (
