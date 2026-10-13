@@ -22,7 +22,9 @@ source row, every writer of rating sources locks the item first
 renames already do), so writers wait for one another instead of deadlocking. A
 missing source or a zero count leaves both NULL, and a NULL count never
 qualifies: an item without a known count is left out until a refresh supplies
-one. Catalog transfer carries each item's `tmdb` rating source, so the trigger
+one. An administrator who clears an item's TMDB rating deletes its `tmdb` row,
+so the item leaves these rows. The web editor also locks the rating field,
+which keeps a refresh from restoring the row until the field is unlocked. Catalog transfer carries each item's `tmdb` rating source, so the trigger
 derives the pair on import as well; a bundle exported before that leaves the
 target's sources in place.
 

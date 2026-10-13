@@ -453,9 +453,16 @@ Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`
 already returned by the previous page. A virtualized client can retain
 `window_cursor` and send it with `seek`, a zero-based result position, to request
 a distant window or return to position zero. Use this path when the preceding
-page's continuation is unavailable; independent distant windows can load in
-parallel without fetching intermediate pages. A seek locates an additional SQL
-ordering boundary; it can scan the sorted prefix and does not have constant cost.
+page's continuation is unavailable; a distant window loads without fetching
+intermediate pages. A seek locates an additional SQL ordering boundary; it can
+scan the sorted prefix and does not have constant cost, so seek to the first
+page of a window and continue the rest with `next_cursor`. In title order on
+`media_items`, the server records the ordering boundary every 256 rows on the
+first seek with a given `window_cursor` and keeps them for five minutes on that
+node; later seeks with that `window_cursor` walk fewer than 256 rows. Each
+title that joins or leaves the result or is retitled in that time, such as one
+a scan links into the library or one a watch-state rule stops matching, shifts
+later positions by one until the boundaries expire.
 The complete browse request has a
 10-second deadline and honors client cancellation. Keep only visible and
 overscan pages active, and cancel requests when the query changes.
@@ -594,6 +601,67 @@ immutable. Fallback may select PostgreSQL before the first page, but a continuat
 never switches providers. Expiry or Redis eviction returns `invalid_cursor`;
 Redis failure returns `dependency_unavailable`. Restarting performs a new search.
 
+### Letter index
+
+`POST /api/v2/catalog/letters` (`queryCatalogLetters`) backs an alphabetical jump
+bar over a query-source browse in title order. It takes the browse's
+`library_id`, `type`, `match`, and rule `groups`, as `queryCatalogItems` does,
+and an `order` of `asc` (default) or `desc`. It answers the letters that have
+titles, in list order, and the runs of consecutive titles under one letter:
+
+```json
+{
+  "total": 1240,
+  "letters": [
+    { "letter": "#", "count": 14, "position": 0 },
+    { "letter": "A", "count": 96, "position": 14 }
+  ],
+  "runs": [
+    { "letter": "#", "position": 0 },
+    { "letter": "A", "position": 14 }
+  ]
+}
+```
+
+A title files under the first character of its title sort key, the same key
+`name_prefix` matches: the sort title, or the title when no sort title is set.
+"The Hobbit" with sort title "Hobbit, The" files under H. Accented Latin
+initials fold to their base letter ("Élite" under E). Digits, symbols, and
+other scripts file under `#`. A letter missing from the list has no titles.
+The folding is the index's own: `name_prefix` still matches the characters
+as written, so `name_prefix=e` leaves out "Élite", and `#` has no
+`name_prefix` equivalent.
+
+`position` is the zero-based index of the letter's first title in
+`queryCatalogItems` with the same scope and rules, `sort: "title"`, the same
+`order`, and no `query_limit`. Send it as `seek` to load that window. The index
+counts the catalog as it was when it was built; each server node keeps an index
+for up to two minutes. It takes no `cursor`, so it is not fenced to a window
+cursor's snapshot. Titles added between the two reads,
+such as during a scan, shift later positions and `total` by that many, and both
+reads agree again once a refresh of the index is no longer served from the cache. Positions number the rows of the
+same ordering the pager uses, so they hold under any database collation; when
+the collation interleaves a letter's titles with another's (an accented or
+punctuated title sorted among plain ones), `count` still covers every title
+under the letter and `position` is the first one. `total` is the exact count of
+the result at that moment, so a client can size a virtualized list without
+`skip_total=false`.
+
+`runs` covers the whole result in list order: each run starts at its
+`position` and ends where the next starts, or at `total`. Use it, not
+`letters`, to tell which letter a list position is under, such as to mark the
+current letter while the viewer scrolls. A letter has more than one run when
+the collation sorts some of its titles apart: under `C`, accented initials sort
+after Z, and most collations put non-Latin scripts, which file under `#`, after
+the Latin letters. The number of runs grows with that interleaving, not with
+the result.
+
+The letter index sorts the whole result to number it, so its cost grows with
+the result like an exact count; it has the same 10-second deadline as a window
+seek. It covers the query source only and takes no search text or
+`name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
+the operation is available.
+
 ## History ordering
 
 History defaults to chronological watch-event order. Explicit `date_viewed`
@@ -615,6 +683,15 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Extended item artwork
+
+Movie and series detail can carry `banner_url`, `banner_thumbhash`, `thumb_url`,
+`thumb_thumbhash`, `clearart_url`, `disc_url` and `backdrop_urls` (every backdrop,
+`backdrop_url` first). `GET /api/v2/images/capabilities` reports
+`"extended_item_artwork": true` when the server returns them. Cards, seasons and
+episodes do not carry them. See [extended item artwork](images-api.md#extended-item-artwork)
+for each image and its widths.
+
 ## Play target season
 
 A v2 item detail whose `play_content_id` names an episode also carries
@@ -624,6 +701,33 @@ list without fetching the episode first. The season comes from the same query
 that chose the target. The field is absent when there is no play target or the
 target is not an episode; a client that finds it absent fetches the episode as
 before. Cards do not carry it, and the frozen v1 detail does not expose it.
+## Episode spoiler protection
+
+Two profile settings in the settings contract let a viewer hide episode details
+until they start an episode: `catalog.hide_unwatched_episode_images` blurs the
+episode still, and `catalog.hide_unwatched_episode_overviews` hides the episode
+description. Both default to off and roam with the profile.
+
+The server does not change catalog responses for these settings: every episode
+payload keeps its image and overview, so cached catalog data stays shared across
+profiles. Clients apply the settings. An episode counts as unwatched while its
+`user_data` is missing, or `played` is false and it is not in progress
+(`is_in_progress` absent or false and no positive `position_seconds`). Series and season
+artwork and overviews are not affected. Detect support from the settings contract
+capabilities (`manifest_revision` 17 or later).
+
+The v2 API reports image provenance after artwork fallback selection:
+`poster_is_episode_still` and `backdrop_is_episode_still` on catalog cards and
+details, and `still_is_episode_still` on episode rows. `true` identifies an episode
+still; `false` identifies other artwork (or no image). An absent field means the
+source is unknown, including responses from older servers. Protect unknown images
+conservatively when spoiler protection is enabled; older responses cannot guarantee
+that fallback series artwork remains visible. Select the provenance belonging to
+the URL actually displayed, including when falling back from a backdrop to a poster.
+
+`GET /api/v2/images/capabilities` advertises `episode_still_provenance: true`.
+Provenance does not depend on the viewer's spoiler preferences. The frozen v1
+response fields remain unchanged.
 
 ## Collection membership titles
 
@@ -843,7 +947,10 @@ sources the item lacks. Locking the rating field freezes all of them. A
 refresh never removes a source a provider stopped reporting. Identify is the
 exception: it matches the item to a different title, so the sources the new
 match reports replace the stored set, and a source it does not report is
-removed.
+removed. An administrator who clears `rating_imdb`, `rating_tmdb`,
+`rating_rt_critic` or `rating_rt_audience` in a metadata edit also removes the
+item's `imdb`, `tmdb`, `rt_critic` or `rt_audience` source, so the title page
+doesn't show the cleared rating from a plugin's score.
 
 Plugins send them under `ratings.sources` in a metadata item, as
 `{"<source>": {"score": 0-100, "votes": n}}`. The server keeps `imdb`, `tmdb`
@@ -852,9 +959,11 @@ outside 0-100, and a vote count that is not a whole, non-negative number while
 keeping its score.
 
 Silo itself names only IMDb and TMDB. Every other rating comes from a metadata
-provider that declares it. The built-in NFO provider declares `rt_critic` and
-`rt_audience`, the Rotten Tomatoes scores it reads from local `.nfo` files. A
-plugin declares its ratings in its capability's manifest metadata, at the top
+provider that declares it. The built-in NFO provider declares the named ratings
+it reads from local `.nfo` files: `rt_critic` and `rt_audience` (percentages),
+`metacritic` (scale 100), `trakt` (a percentage), `tvdb` (scale 10), and
+`letterboxd` (scale 5). It reports no `imdb` or `tmdb` source rows; its IMDb
+and TMDB scores fill the rating columns. A plugin declares its ratings in its capability's manifest metadata, at the top
 level or inside the SDK's `metadata` envelope:
 
 ```json

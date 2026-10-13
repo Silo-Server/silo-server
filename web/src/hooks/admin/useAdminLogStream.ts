@@ -56,6 +56,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
   enabled: boolean,
 ): AdminLogStreamResult<StreamEntryMap[TStream]> {
   const [rows, setRows] = useState<StreamEntryMap[TStream][]>([]);
+  const [rowScope, setRowScope] = useState("");
   const [nextCursor, setNextCursor] = useState<string>();
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
   const [error, setError] = useState<string>();
@@ -64,6 +65,12 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
   const deferredParams = useDeferredValue(params);
   const queryString = useMemo(() => buildAdminLogsSocketQuery(deferredParams), [deferredParams]);
   const limit = deferredParams.limit ?? 100;
+  const connectionSelection = `${stream}:${queryString}`;
+  const selection = `${stream}:${buildAdminLogsSocketQuery(params)}`;
+  const rowsMatchSelection = rowScope === selection;
+  // Until a snapshot for the current selection arrives there is nothing to
+  // show yet, which is not the same as no matches.
+  const awaitingSnapshot = enabled && !rowsMatchSelection && connectionState !== "disconnected";
 
   useEffect(() => {
     if (!enabled) {
@@ -103,6 +110,12 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
       flushTimer = window.setTimeout(flushAppends, APPEND_FLUSH_MS);
     };
 
+    // Any previous socket is closed by now. Report the pending attempt as
+    // connecting so a changed selection reads as loading, not as live with no
+    // matches, while the attempt below waits out its debounce.
+    setConnectionState("connecting");
+    setError(undefined);
+
     // Debounce the initial attempt; an explicit reconnect() retries immediately.
     // Authority is captured once per connection attempt: the credential is
     // minted under it, and frames arriving after it changed are discarded.
@@ -116,8 +129,6 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
         return;
       }
       const authorityActive = () => isCapturedProfileAuthorityActive(authority);
-      setConnectionState("connecting");
-      setError(undefined);
       void mintAdminLogsSocketTicket(authority)
         .then((ticket) => {
           if (closedByEffect || !authorityActive()) return;
@@ -148,6 +159,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
               clearFlushTimer();
               startTransition(() => {
                 setRows(message.entries as StreamEntryMap[TStream][]);
+                setRowScope(connectionSelection);
                 setNextCursor(message.next_cursor);
                 setError(undefined);
               });
@@ -185,12 +197,13 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
         ws.close();
       }
     };
-  }, [stream, queryString, limit, enabled, deferredParams, reconnectNonce]);
+  }, [stream, queryString, limit, enabled, deferredParams, reconnectNonce, connectionSelection]);
 
   return {
-    rows,
-    nextCursor,
-    isConnecting: connectionState === "connecting",
+    // A failed handshake for new filters must not display the old matches.
+    rows: rowsMatchSelection ? rows : [],
+    nextCursor: rowsMatchSelection ? nextCursor : undefined,
+    isConnecting: connectionState === "connecting" || awaitingSnapshot,
     isLive: connectionState === "live",
     error,
     connectionState,

@@ -87,7 +87,7 @@ type AdminDownloadPreparationOutput struct {
 	BitrateKbps       *int   `json:"bitrate_kbps,omitempty" doc:"Video bitrate cap of a transcode"`
 	ToneMapMode       string `json:"tone_map_mode,omitempty" doc:"Present when HDR is tone-mapped to SDR"`
 	ToneMapSourceKind string `json:"tone_map_source_kind,omitempty"`
-	AllAudioTracks    bool   `json:"all_audio_tracks" doc:"Every source audio track is kept, in source order"`
+	AllAudioTracks    bool   `json:"all_audio_tracks" doc:"Every source audio track the server can decode is kept, in source order"`
 }
 
 type AdminDownloadPreparationWorker struct {

@@ -55,6 +55,11 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.UI_NEXT_UP_MODE,
 ];
 
+const EPISODE_SPOILER_KEYS = [
+  SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
+  SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_OVERVIEWS,
+] as const;
+
 const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
 
@@ -419,6 +424,11 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.UI_THEME_MUSIC_LOOP,
   );
+  // Both spoiler keys share one introduced_in revision.
+  const supportsEpisodeSpoilers = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
+  );
   /**
    * Which intro control this server can honestly show.
    *
@@ -440,11 +450,12 @@ export default function PlaybackSettings() {
       ...BASE_PLAYBACK_KEYS,
       ...(supportsThemeMusic ? [SETTING_KEYS.UI_THEME_MUSIC_ENABLED] : []),
       ...(supportsThemeMusicLoop ? [SETTING_KEYS.UI_THEME_MUSIC_LOOP] : []),
+      ...(supportsEpisodeSpoilers ? EPISODE_SPOILER_KEYS : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop],
+    [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop, supportsEpisodeSpoilers],
   );
   const {
     data: effective,
@@ -750,6 +761,29 @@ export default function PlaybackSettings() {
           )}
         />
       </SettingsGroup>
+
+      {supportsEpisodeSpoilers ? (
+        <SettingsGroup
+          title="Spoilers"
+          description="Applies to episodes you have not started, on every device that uses this profile."
+        >
+          {EPISODE_SPOILER_KEYS.map((key) => (
+            <SettingRow
+              key={key}
+              label={SETTING_DEFINITIONS[key].label}
+              description={SETTING_DEFINITIONS[key].description}
+              control={(id) => (
+                <Switch
+                  id={id}
+                  checked={read<boolean>(key)}
+                  disabled={pending || effectivePending || effectiveError}
+                  onCheckedChange={(value) => saveValue(key, value)}
+                />
+              )}
+            />
+          ))}
+        </SettingsGroup>
+      ) : null}
 
       <SeekControls />
     </div>

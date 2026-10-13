@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -136,6 +137,7 @@ type ImpersonationService interface {
 // AdminHandler handles admin-only HTTP endpoints for user management,
 // session listing, unmatched files, and system stats.
 type AdminHandler struct {
+	ChatGPT            *chatgpt.Service
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
 	loginSessions      adminLoginSessionStore
@@ -526,11 +528,24 @@ func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role strin
 	return true
 }
 
-// rejectScopedAPIKeyUpdate stops a scoped API key from escalating through an
-// existing account: it may neither grant the admin role nor touch the
-// credentials or role of an account that is already an admin — either would
-// hand it an unscoped admin session. Editing an ordinary account, password
-// included, stays in scope.
+// checkScopedAPIKeyUpdate is the mutation policy shared by both API versions.
+// Recovery email is a credential: replacing it lets the key's holder reset
+// the administrator's password and obtain an unrestricted login session.
+// Callers check the account locked by the mutation transaction.
+func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
+	if !actorIsScopedAPIKey(ctx) {
+		return nil
+	}
+	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
+	changesAdminCredentials := target.Role == roleAdmin &&
+		(input.Password != nil || input.Email != nil || input.Role != nil || input.BreakGlass != nil)
+	if grantsAdmin || changesAdminCredentials {
+		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+	}
+	return nil
+}
+
+// rejectScopedAPIKeyUpdate applies the shared policy before v1 validation.
 //
 // It returns the target account when it had to load one, so the caller can
 // reuse it as the pre-update snapshot instead of reading the row twice, and
@@ -544,22 +559,13 @@ func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	if !actorIsScopedAPIKey(r.Context()) {
 		return nil, false
 	}
-	if req.Role != nil && *req.Role == roleAdmin {
-		writeError(w, http.StatusForbidden, "insufficient_scope",
-			"A scoped API key may not grant the admin role")
-		return nil, true
-	}
-	if req.Password == nil && req.Role == nil {
-		return nil, false
-	}
-
 	target, blocked := h.loadTargetUser(w, r, id)
 	if blocked {
 		return nil, true
 	}
-	if target.Role == roleAdmin {
-		writeError(w, http.StatusForbidden, "insufficient_scope",
-			"A scoped API key may not change the password or role of an admin account")
+	input := models.UpdateUserInput{Password: req.Password, Email: req.Email, Role: req.Role}
+	if err := checkScopedAPIKeyUpdate(r.Context(), target, input); err != nil {
+		writeAPIError(w, err)
 		return nil, true
 	}
 	return target, false
@@ -1050,8 +1056,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 		// Recheck the scoped-key limits against the locked account: the
 		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
-		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
-			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		if err := checkScopedAPIKeyUpdate(r.Context(), current, updateInput); err != nil {
+			return false, err
 		}
 		// The frozen v1 route keeps the break-glass invariant v2 enforces:
 		// with local password sign-in off, the last usable break-glass admin
@@ -1616,7 +1622,10 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, adminJobToResponseForClaims(r, job, nil, apimw.GetClaims(r.Context())))
+	// The job already exists; a failed acting-admin lookup only narrows what
+	// the response shows.
+	actingAdmin, _ := apimw.ActingAdmin(r.Context())
+	writeJSON(w, http.StatusAccepted, adminJobToResponseFor(r, job, nil, actingAdmin))
 }
 
 // UpdateItemMetadataRequest contains the fields that can be updated via
@@ -1666,7 +1675,8 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req)
+	// The frozen v1 contract treats null like omission, so v1 clears nothing.
+	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req, nil)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1685,6 +1695,7 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
 var machineManagedSettingKeys = map[string]bool{
+	chatgpt.CredentialsKey:                      true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	config.MediaImageSweepCheckpointKey:         true,
@@ -2362,6 +2373,7 @@ var adminSettingDependencyGroups = [][]string{
 	{"download.max_per_period", "download.period_duration"},
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
+	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -2618,6 +2630,11 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		normalized[key] = value
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanges map[string]bool
@@ -2626,7 +2643,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2646,6 +2663,12 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				rows = maps.Clone(normalized)
 				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
 				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			}
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
 			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
@@ -2997,6 +3020,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		req.Value = strconv.FormatBool(enabled)
 	}
 
+	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
+
 	var (
 		after            map[string]string
 		effectiveChanged bool
@@ -3004,7 +3032,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -3019,13 +3047,19 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
 			}
 			prospective[key] = row
+			if modelValidation != nil {
+				if err := modelValidation.Check(stored, prospective); err != nil {
+					validationErr, validationCode = err, adminInvalidSettingsCode
+					return nil, err
+				}
+			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) {
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {

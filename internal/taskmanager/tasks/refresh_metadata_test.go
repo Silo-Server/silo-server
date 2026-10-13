@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -401,5 +402,57 @@ func TestRefreshMetadataTask_KeepsTheBatchThroughOneFailedRenewal(t *testing.T) 
 	}
 	if got := len(refresher.Calls()); got != len(candidates) {
 		t.Fatalf("refreshed targets = %d, want %d", got, len(candidates))
+	}
+}
+
+// sidecarCheckingRefresher also re-applies changed local sidecars, failing
+// the check for one target and re-anchoring another.
+type sidecarCheckingRefresher struct {
+	fakeMetadataRefresher
+	checkMu sync.Mutex
+	checks  []string
+}
+
+func (f *sidecarCheckingRefresher) CheckLocalSidecarTarget(_ context.Context, targetType, contentID string) (string, error) {
+	f.checkMu.Lock()
+	defer f.checkMu.Unlock()
+	f.checks = append(f.checks, targetType+":"+contentID)
+	switch contentID {
+	case "broken":
+		return contentID, errors.New("sidecar read failed")
+	case "reanchored":
+		return "reanchored-new", nil
+	case "moved":
+		return "", nil
+	}
+	return contentID, nil
+}
+
+func TestRefreshMetadataTask_ChecksLocalSidecarsOfEachVisitedTarget(t *testing.T) {
+	finder := &fakeRefreshCandidateFinder{batches: [][]worker.RefreshCandidate{{
+		{TargetType: "item", ContentID: "movie-1"},
+		{TargetType: "episode", ContentID: "broken"},
+		{TargetType: "season", ContentID: "season-1"},
+		{TargetType: "item", ContentID: "reanchored"},
+		{TargetType: "item", ContentID: "moved"},
+	}}}
+	refresher := &sidecarCheckingRefresher{}
+	if err := NewRefreshMetadataTask(finder, refresher).Execute(context.Background(), noopProgressReporter{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	refresher.checkMu.Lock()
+	checks := append([]string(nil), refresher.checks...)
+	refresher.checkMu.Unlock()
+	slices.Sort(checks)
+	if want := []string{"episode:broken", "item:moved", "item:movie-1", "item:reanchored", "season:season-1"}; !slices.Equal(checks, want) {
+		t.Fatalf("sidecar checks = %v, want %v", checks, want)
+	}
+	// A failed check still refreshes its target; a target the check moved
+	// to a new content ID is refreshed under it, and one that moved to an
+	// unknown ID is not refreshed.
+	calls := refresher.Calls()
+	slices.Sort(calls)
+	if want := []string{"episode:broken", "item:movie-1", "item:reanchored-new", "season:season-1"}; !slices.Equal(calls, want) {
+		t.Fatalf("refreshes = %v, want %v", calls, want)
 	}
 }

@@ -1611,3 +1611,34 @@ func TestPollOnceRecordsPluginErrorWithoutTransportFraming(t *testing.T) {
 		t.Fatalf("events = %+v, want error message %q", store.events, want)
 	}
 }
+
+// sidecarFolderResolver maps an .nfo change to its folder only when the
+// request asks for it, as the real resolver does.
+type sidecarFolderResolver struct{ fakeResolver }
+
+func (sidecarFolderResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if filepath.Ext(req.Path) != ".nfo" || !req.SidecarFolder {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Reason: scantrigger.ReasonUnsupportedExtension}
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: filepath.Dir(req.Path), Trigger: req.Trigger}, nil
+}
+
+func TestPollOnceFileChangeToAnNFOScansItsFolder(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{SourcePath: "/mnt/media/movies/Film (2020)/movie.nfo", Scope: ChangeScopeFile}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, sidecarFolderResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 || q.enqueued[0].Mode != scantrigger.ModeSubtree || q.enqueued[0].Path != "/mnt/media/movies/Film (2020)" {
+		t.Fatalf("enqueued %+v, want a subtree scan of the NFO's folder", q.enqueued)
+	}
+}

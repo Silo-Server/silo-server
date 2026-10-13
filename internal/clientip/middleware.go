@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"context"
+	"net"
 	"net/http"
 )
 
@@ -56,6 +57,20 @@ func FromContext(ctx context.Context) string {
 func PeerFromContext(ctx context.Context) string {
 	addr, _ := ctx.Value(peerIPKey).(string)
 	return addr
+}
+
+// PeerIP returns the transport peer's IP, normalized like FromContext, so the
+// two compare equal for a direct connection. It returns "" when Middleware did
+// not run or the peer is not an IP address.
+func PeerIP(ctx context.Context) string {
+	addr := PeerFromContext(ctx)
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	if ip := net.ParseIP(addr); ip != nil {
+		return normalize(ip)
+	}
+	return ""
 }
 
 // SetPeerContext stores a transport peer address in the context. Useful for

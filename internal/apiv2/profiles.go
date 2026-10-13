@@ -654,6 +654,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	}
 	items := make([]Profile, 0, len(view.Profiles))
 	for _, v := range view.Profiles {
+		// A remote-playback handoff sees only the profile it is bound to.
+		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p

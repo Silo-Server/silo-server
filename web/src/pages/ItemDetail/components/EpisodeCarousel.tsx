@@ -3,6 +3,7 @@ import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -11,6 +12,7 @@ import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
@@ -30,6 +32,7 @@ export default function EpisodeCarousel({
   );
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
+  const { hideImages } = useEpisodeSpoilerPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -66,6 +69,7 @@ export default function EpisodeCarousel({
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={episodeLinkState}
                 quickActionMode={quickActionMode}
+                hideImageIfUnwatched={hideImages}
                 onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
               />
             ))}
@@ -92,18 +96,24 @@ function EpisodeCarouselCard({
   isCurrent,
   episodeLinkState,
   quickActionMode,
+  hideImageIfUnwatched,
   onPrefetch,
 }: {
   ep: EpisodeListItem;
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
   quickActionMode: CardQuickActionMode;
+  hideImageIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
+  const hideImage =
+    hideImageIfUnwatched &&
+    isEpisodeStill(ep.still_is_episode_still) &&
+    isEpisodeUnwatched(ep.user_data);
   const progress =
     !ep.user_data?.played &&
     (ep.user_data?.position_seconds ?? 0) > 0 &&
@@ -139,7 +149,7 @@ function EpisodeCarouselCard({
                   : "border-border/30",
               )}
               style={
-                thumbhashUrl
+                !hideImage && thumbhashUrl
                   ? { backgroundImage: `url(${thumbhashUrl})`, backgroundSize: "cover" }
                   : undefined
               }
@@ -148,7 +158,7 @@ function EpisodeCarouselCard({
                 <img
                   src={ep.still_url}
                   alt={episodeTitle}
-                  className="h-full w-full object-cover"
+                  className={cn("h-full w-full object-cover", hideImage && SPOILER_IMAGE_CLASS)}
                   loading="lazy"
                   decoding="async"
                 />

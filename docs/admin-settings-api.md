@@ -34,6 +34,109 @@ Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
+## AI reasoning and ChatGPT accounts
+
+`ai.auth_mode` selects `api_key` (default) or `chatgpt` for text translation.
+`ai.reasoning_effort` defaults to an empty string, which omits the parameter and
+uses the model's default. Explicit values come from the model's capability
+response. The server validates known model families against their supported
+levels; an unknown custom model is validated by the provider connection check.
+Text requests read the persisted authentication mode, endpoint, API key, model,
+effort, and active registration together at request start.
+
+The following operations require an acting administrator:
+
+- `GET /api/v2/admin/ai/capabilities?model=...` discovers supported reasoning
+  levels and whether the ChatGPT connection service is available.
+- `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
+  connection status, and the latest login outcome without credentials.
+  `attempt_id` identifies the attempt that produced that outcome.
+  `login_first_connection: true` identifies the connected login outcome
+  that first activated the connection; clients must match its `attempt_id`.
+  The field is absent when false.
+  A verified grant missing plan-sharing consent remains saved with
+  `needs_login: true`; inference stays blocked, and Disconnect can revoke
+  its renewable session. A declined reconnect preserves an existing usable grant.
+  A registration with `plan_ineligible: true` has a terminal plan-sharing
+  restriction: `connected` is false, and clients explain the restriction without
+  prompting repeated authorization. The optional field is absent when false.
+  A registration with `usage_limited: true` is paused after a provider usage-limit
+  response. `connected` is false until an explicit successful text model check.
+  Catalog reads and selection remain available for recovery; neither clears the
+  pause. Credential renewal also preserves it. The field is absent when false.
+- `POST /api/v2/admin/ai/chatgpt/login` starts a ten-minute browser sign-in.
+  Optional `client_id` reuses a saved account registration. The response includes
+  `authorization_url`, `callback_uri`, `expires_at`, and `attempt_id`.
+- `POST /api/v2/admin/ai/chatgpt/login/complete` accepts `callback_url` with the
+  full pasted browser address. A pasted URL must match the exact prepared
+  callback URI and contain unique query parameters. Invalid URLs leave the
+  attempt available for a corrected paste. A valid callback is consumed once;
+  clients reconcile an uncertain exchange through connection status before
+  starting a new attempt. Status must match the initiating `attempt_id` before
+  a client treats a terminal outcome as its own. Matching `login_pending: true`
+  remains authoritative even if the browser clock passes `expires_at`.
+  Responses carrying connection state or authorization URLs use
+  `Cache-Control: no-store`.
+- `GET /api/v2/admin/ai/chatgpt/models` returns a saved account's visible
+  streaming text models in provider order with display names; `o1-pro` and
+  `o3-pro` and `gpt-5.5-pro` families are excluded because they do not support
+  streaming. Catalog reads make up to three attempts for transient failures, honoring
+  `Retry-After` within a minute and any earlier caller deadline. Optional `client_id`
+  pins the catalog to that registration even if the active account changes;
+  omitting it uses the active account. The capability endpoint supplies reasoning
+  levels for the selected model.
+- `POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select` selects a connected
+  registration for subsequent requests. In ChatGPT mode, selection and successful
+  login retain the current model when available, otherwise select the first
+  listed model. Incompatible reasoning effort resets to the provider default.
+  These changes commit together. An unavailable or empty model catalog prevents
+  activation. API-key model settings are preserved.
+- `DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}` disables the account before
+  contacting OpenAI, retains the refresh token for bounded revocation retries,
+  honoring `Retry-After` within the cleanup deadline,
+  then clears it while retaining the registration. `revocation_confirmed` reports
+  whether OpenAI confirmed revocation; a local disconnect succeeds even if
+  revocation fails. Missing local tokens do not confirm remote revocation.
+  Cleanup cannot overwrite a newer successful reconnect.
+
+Single-setting and batch writes validate model/effort pairs. Model and reasoning
+saves in ChatGPT mode also validate against the account catalog.
+A selection that changes during validation rejects the save so the client can
+refresh its settings. The web refreshes persisted settings after activation and
+preserves unsaved drafts under the existing revision guards. Completion,
+selection, and disconnect also reconcile cached viewer translation readiness
+after an error response, because the server may already have changed credentials.
+Successful selection and login completion return `X-Silo-Settings-Before-ETag` and
+`X-Silo-Settings-After-ETag`, signed from the settings inside the activation
+transaction. `X-Silo-ChatGPT-First-Connection` is `true` only for the activation
+that first enabled this server's plan connection and `false` for later
+activations. Completion remains HTTP 204. The web opens its welcome message
+from that header after selection or successful browser sign-in completion.
+It reconciles uncertain completion responses through matching
+`login_first_connection` status; both paths confirm an attempt once.
+The welcome applies once per server credential
+bundle shared by all administrators and saved OpenAI accounts.
+The activation transaction owns the decision, so stale status reads or
+concurrent selections cannot request additional welcomes. A client may advance
+an unrelated draft only if its baseline matches the before validator and refreshed settings
+match the after validator, under the same authority and without an overlapping
+settings save. Dirty model/effort fields retain their original guard. Background
+reads and uncertain completion status cannot acknowledge this transition.
+
+`ai.chatgpt.credentials` is encrypted internal state. Generic settings reads,
+secret-status lists, writes, and settings revision validators exclude it. The
+account operations are the only administrative credential boundary. See
+[AI provider authentication](architecture/ai-provider-authentication.md) for
+identity, refresh, and inference invariants.
+
+ChatGPT plan credentials authorize text translation. Speech-to-text continues to
+use the configured Whisper-compatible URL and API key. These operations belong
+to the web administrator UI; Apple, Android, and Jellyfin clients continue to
+consume the existing translated subtitle and metadata contracts and require no
+account or settings changes.
+
+### Managed storage transitions
+
 `GET /api/v2/admin/storage-transitions/capabilities`
 (`getAdminStorageTransitionCapabilities`) is the acting-administrator discovery
 document for managed storage transitions. Its typed fields report support for

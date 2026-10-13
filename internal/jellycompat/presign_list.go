@@ -2,13 +2,15 @@ package jellycompat
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // presignCompatListItems presigns every list item's poster/backdrop/logo/still
 // image using exactly four batched PresignImageURLsWithExpiry calls (one per
-// image type) for the whole page, independent of item count. Each call dedupes
+// image type) for the whole page, independent of item count, and loads the
+// page's backdrops after the primary with one query. Each call dedupes
 // its paths and singleflights the underlying plugin resolution, so a 40-item
 // rail costs four resolver invocations instead of 4×40. This is the single
 // shared implementation for both directContentService and ItemsHandler; do not
@@ -34,6 +36,30 @@ func presignCompatListItems(ctx context.Context, detailSvc *catalog.DetailServic
 		items[i].BackdropURL = resolvedListImageURL(backdropURLs, items[i].BackdropURL)
 		items[i].LogoURL = resolvedListImageURL(logoURLs, items[i].LogoURL)
 		items[i].StillURL = resolvedListImageURL(stillURLs, items[i].StillURL)
+	}
+	attachListExtraBackdrops(ctx, detailSvc, items)
+}
+
+// attachListExtraBackdrops gives each movie and series on the page the cached
+// paths of its backdrops after the primary, which become BackdropImageTags[1:].
+// Their URLs are presigned only when a client asks for one.
+func attachListExtraBackdrops(ctx context.Context, detailSvc *catalog.DetailService, items []upstreamListItem) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Type == compatMovieType || item.Type == compatSeriesType {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	paths, err := detailSvc.ExtraBackdropPaths(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat: loading item backdrops failed; advertising the primary only", "component", "jellycompat", "error", err)
+		return
+	}
+	for i := range items {
+		items[i].ExtraBackdropPaths = paths[items[i].ContentID]
 	}
 }
 
