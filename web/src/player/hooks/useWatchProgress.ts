@@ -39,7 +39,9 @@ export function useWatchProgress(
 
   const getProgressSnapshot = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return null;
+    // Before metadata (startup, or a transport swap) currentTime is not a
+    // position on this stream yet; reporting it would overwrite the resume point.
+    if (!video || video.readyState === HTMLMediaElement.HAVE_NOTHING) return null;
 
     return {
       position: toMediaTime(video.currentTime ?? 0, streamOriginRef?.current ?? 0),

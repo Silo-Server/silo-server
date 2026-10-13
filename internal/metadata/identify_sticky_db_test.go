@@ -165,7 +165,6 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 // owns the chosen IDs, and only on it: the generic merge may keep the item
 // being identified, which still has its old IDs.
 func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
-	t.Skip("duplicate merges fail at the personal collection step until #2299 is fixed")
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
 	t.Run("into the owner", func(t *testing.T) {

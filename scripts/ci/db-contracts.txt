@@ -244,6 +244,13 @@
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
 
+# Deleting a library removes its ID from access groups, account overrides and
+# invitations, without widening an emptied list; a write keeps only existing
+# libraries, even racing the delete; the migration repairs earlier deletes.
+./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
+./migrations TestLibraryDeleteRacingAccessWritePostgres
+./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
 # A played mark later in the same second as a history removal stays visible.
 ./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
 ./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB

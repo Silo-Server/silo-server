@@ -65,16 +65,15 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
   // One spoiler lookup per row rather than one per card.
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs({ enabled: isProgressRow });
   const spoilerPrefs = useMemo(() => ({ hideImages, hideOverviews }), [hideImages, hideOverviews]);
-  // Continue Watching with only movies, audiobooks, and/or ebooks looks better
-  // as upright covers (audiobook covers render square within the poster
-  // variant; ebook covers are naturally 2:3). Episodes (incl. Next Up) keep the
-  // wide variant so stills are shown with their natural 16:9 framing.
+  // Progress rows stay wide (16:9) whenever they hold any video, matching the
+  // native apps, so Continue Watching keeps its shape as movies and episodes
+  // come and go. Only a Continue Watching row made up entirely of books uses
+  // the poster variant, where audiobook covers render square and ebook covers
+  // upright 2:3.
   const progressCardVariant: "wide" | "poster" =
     section.section_type === "continue_watching" &&
     section.items.length > 0 &&
-    section.items.every(
-      (it) => it.type === "movie" || it.type === "audiobook" || it.type === "ebook",
-    )
+    section.items.every((it) => it.type === "audiobook" || it.type === "ebook")
       ? "poster"
       : "wide";
   const slideSize = isProgressRow && progressCardVariant === "wide" ? "wide" : posterSize;
