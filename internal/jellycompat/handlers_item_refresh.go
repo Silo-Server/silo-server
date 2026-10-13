@@ -107,10 +107,16 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 			writeScanTriggerError(w, resolveErr)
 			return
 		}
-		if target != nil && target.Mode == scantrigger.ModeSubtree && filepath.Clean(target.Path) == dir {
+		if target == nil {
+			// Item refresh must cover every file, including vanished versions.
+			// Do not claim success after silently dropping part of the item.
+			writeError(w, http.StatusConflict, "Conflict", "Item files cannot be scanned individually; refresh the library instead")
+			return
+		}
+		if target.Mode == scantrigger.ModeSubtree && filepath.Clean(target.Path) == dir {
 			scannedDirs[dir] = struct{}{}
 		}
-		if target != nil && target.Mode == scantrigger.ModeFile && target.Folder != nil && librarykind.IsAudiobook(target.Folder.Type) {
+		if target.Mode == scantrigger.ModeFile && target.Folder != nil && librarykind.IsAudiobook(target.Folder.Type) {
 			scannedDirs[dir] = struct{}{}
 		}
 		targets = appendAutoscanTarget(targets, seen, target)

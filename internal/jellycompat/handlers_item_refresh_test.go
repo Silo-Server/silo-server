@@ -255,6 +255,52 @@ func TestItemRefreshUnscannableFilesReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestItemRefreshRejectsPartiallyScannableItems(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		directory    string
+		missingFirst bool
+		wantStatus   int
+	}{
+		{name: "root existing first", wantStatus: http.StatusConflict},
+		{name: "root missing first", missingFirst: true, wantStatus: http.StatusConflict},
+		{name: "subdirectory existing first", directory: "Movie", wantStatus: http.StatusNoContent},
+		{name: "subdirectory missing first", directory: "Movie", missingFirst: true, wantStatus: http.StatusNoContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			present := writeMediaFile(t, root, tc.directory, "Movie-new.mkv")
+			missing := filepath.Join(root, tc.directory, "Movie-old.mkv")
+			versions := []*models.MediaFile{
+				{ID: 1, ContentID: "movie-tmdb-100", FilePath: present},
+				{ID: 2, ContentID: "movie-tmdb-100", FilePath: missing},
+			}
+			if tc.missingFirst {
+				versions[0], versions[1] = versions[1], versions[0]
+			}
+			queue := &fakeAutoscanQueue{}
+			handler := newItemRefreshHandler(root, "movie", queue, &fakeItemRefreshFiles{
+				byContentID: map[string][]*models.MediaFile{"movie-tmdb-100": versions},
+			}, nil)
+
+			rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDItem, "movie-tmdb-100"))
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected %d, got %d: %s", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus == http.StatusConflict {
+				if len(queue.batches) != 0 || len(queue.calls) != 0 {
+					t.Fatalf("expected no partial enqueue, got batches=%#v calls=%#v", queue.batches, queue.calls)
+				}
+				return
+			}
+			assertQueuedScans(t, queue, []queuedScan{{
+				libraryID: 7, mode: scantrigger.ModeSubtree, path: filepath.Dir(present), trigger: itemRefreshTrigger,
+			}})
+		})
+	}
+}
+
 func TestItemRefreshUnknownItemReturnsNotFound(t *testing.T) {
 	root := t.TempDir()
 	queue := &fakeAutoscanQueue{}
