@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // VariantFile is the narrow media_files projection that variant finalization

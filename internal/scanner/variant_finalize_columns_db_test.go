@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // variantContractMovie is a movies folder with one matched movie, for the
