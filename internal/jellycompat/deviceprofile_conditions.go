@@ -318,19 +318,30 @@ func encodeOutputConditionValues(output catalog.FileVersion, audioStreamIndex *i
 	return values
 }
 
-// conditionPropertyRefFrames is the normalized RefFrames condition property.
-const conditionPropertyRefFrames = "refframes"
+// Normalized condition properties of the facts an encoder chooses.
+const (
+	conditionPropertyRefFrames    = "refframes"
+	conditionPropertyVideoProfile = "videoprofile"
+	conditionPropertyVideoLevel   = "videolevel"
+)
 
 // encodeOutputConditionsMatch matches conditions against a planned H.264
 // encode. Its reference frames are the encoder's choice and Silo does not yet
 // pass a client's limit to the encoder, so, as Jellyfin's StreamBuilder treats
 // a RefFrames rule (ApplyTranscodingConditions), the rule is an encode target
 // rather than a refusal. The streaming libx264 presets use one reference
-// frame. Every other rule, profile and level included, is checked as usual.
+// frame. An optional rule on the stated profile or level is an encode target
+// too: Jellyfin applies it the same way, and before the encode stated them it
+// passed as unknown, so a client that sends one with a high bitrate limit
+// keeps its transcode. Every other rule, and a required profile or level
+// rule, is checked as usual.
 func encodeOutputConditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
 	for _, condition := range conditions {
 		property := normalizeConditionToken(condition.Property)
 		if _, known := values[property]; !known && property == conditionPropertyRefFrames {
+			continue
+		}
+		if !condition.IsRequired && (property == conditionPropertyVideoProfile || property == conditionPropertyVideoLevel) {
 			continue
 		}
 		if !conditionMatches(condition, values) {

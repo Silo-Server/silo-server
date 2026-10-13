@@ -359,7 +359,11 @@ func h264EncodeFacts(video models.VideoTrack, videoBitrateKbps int, source catal
 	if kbps <= 0 {
 		kbps = playback.H264EquivalentKbps(source.Bitrate, source.CodecVideo)
 	}
-	level = max(playback.H264LevelFor(video.Width, video.Height, parseCompatFrameRate(video.FrameRate), kbps), h264StreamingLevel)
+	// Not max: this package's max(value, fallback) returns any positive value.
+	level = playback.H264LevelFor(video.Width, video.Height, parseCompatFrameRate(video.FrameRate), kbps)
+	if level < h264StreamingLevel {
+		level = h264StreamingLevel
+	}
 	return playback.H264EncodeProfile, level
 }
 

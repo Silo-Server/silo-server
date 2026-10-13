@@ -90,6 +90,12 @@ func TestEncodedOutputConditionsDoNotUseSourceCodecFacts(t *testing.T) {
 		{"required level below the encode", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "40", IsRequired: true}, 0, false},
 		{"required profile the encode meets", ProfileCondition{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline", IsRequired: true}, 0, true},
 		{"required baseline profile", ProfileCondition{Condition: "Equals", Property: "VideoProfile", Value: "baseline", IsRequired: true}, 0, false},
+		// A 720p encode at 4 Mbps fits level 3.1, but libx264 writes 4.1.
+		{"required level below the libx264 pin", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "31", IsRequired: true}, 4000000, false},
+		// An optional profile or level rule is an encode target, as in Jellyfin.
+		// At 120 Mbps the encode is stated at level 5.1, above an optional 4.2.
+		{"optional level below the encode", ProfileCondition{Condition: "LessThanEqual", Property: "VideoLevel", Value: "42"}, 120_000_000, true},
+		{"optional baseline profile", ProfileCondition{Condition: "Equals", Property: "VideoProfile", Value: "baseline"}, 0, true},
 		// The encoder chooses reference frames, so a rule on them is an encode
 		// target either way, as in Jellyfin.
 		{"required reference frame limit", ProfileCondition{Condition: "LessThanEqual", Property: "RefFrames", Value: "4", IsRequired: true}, 0, true},
