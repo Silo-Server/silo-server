@@ -2,10 +2,11 @@
 
 Admin settings are organized by admin intent ("I want subtitles to download
 automatically"), not by subsystem. `/admin/settings` is the **Overview**:
-server health across the top and one live card per settings group. Twelve
+server health across the top and one live card per settings group. Fourteen
 standalone pages hang off it: General, Storage & Database, Appearance,
-Security & Access, Library & Metadata, Playback, Downloads, Subtitles &
-Metadata, Watch Providers, AI Services, Notifications, and Compatibility. The
+Security & Access, Library & Metadata, Playback, Downloads, Requests,
+Subtitles & Metadata, Watch Providers, AI Services, Notifications,
+Compatibility, and Network Access. The
 global admin sidebar has one Settings destination; the Overview owns the
 settings information architecture. Old `?tab=` URLs and retired page ids from
 earlier layouts (including `integrations`, now split into Subtitles & Metadata,
@@ -56,7 +57,16 @@ credits markers, while *which provider answers, in what order, and on what
 terms* is a tile beside the subtitle and metadata providers, with a cross-link
 each way. A tile only reads "Connected" when the provider could actually serve
 a request — its configuration saved and the provider switched on — so an
-installed plugin whose API key was never entered reads "Needs setup". Staged edits raise
+installed plugin whose API key was never entered reads "Needs setup". Request
+servers (Sonarr, Radarr) are the exception to the provider-page rule: they are
+destinations that request routing chooses between, not interchangeable
+providers, so the Requests page holds the servers, the routing rules that pick
+one, and the request limits together. Routing starts on Standard, which needs
+no setup (each request goes to the server for its type) and shows only a line
+per media type; the rules appear under Advanced, which a second server of a
+kind turns on. The Standard/Advanced switch, each routing rule and each media
+type's Everything else carry their own validators and save as the admin goes;
+the save pill covers only the general request settings. Staged edits raise
 one floating save pill (`SaveBar`) and arm the shell's unsaved-changes prompt;
 the restart prompt is a single `RestartBanner` (`web/src/components/admin/`)
 rendered by the admin shell (`AdminLayout`), never per page. A restart is owed

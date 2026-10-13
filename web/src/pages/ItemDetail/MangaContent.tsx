@@ -311,13 +311,7 @@ export default function MangaContent({
             status={item.show_status || undefined}
           />
         }
-        scoreRow={
-          <ScoreRow
-            ratingImdb={item.rating_imdb}
-            ratingRtCritic={item.rating_rt_critic}
-            ratingRtAudience={item.rating_rt_audience}
-          />
-        }
+        scoreRow={<ScoreRow ratings={item.ratings} />}
         overview={item.overview}
         crewLine={<HeroCrewLine crew={item.crew ?? []} />}
         genres={item.genres}

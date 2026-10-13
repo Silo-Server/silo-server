@@ -6,10 +6,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -108,7 +115,8 @@ func (s *Service) buildBatchManifestRows(ctx context.Context, rows []*Download, 
 
 // ServeArtwork streams poster/backdrop/logo bytes for a managed entry through
 // the image resolver (never a presigned redirect), re-checking per-profile
-// access via GetItemDetail before serving.
+// access via GetItemDetail before serving. series_poster serves an episode
+// entry's parent series poster.
 func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, kind string, filter catalog.AccessFilter) error {
 	dl, err := s.authorizeManagedAsset(ctx, userID, profileID, deviceID, downloadID)
 	if err != nil {
@@ -117,62 +125,242 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 	if s.artworkSource == nil {
 		return ErrManifestUnavailable
 	}
-	detail, err := s.artworkSource.GetItemDetail(ctx, manifestContentID(dl), filter)
+	imageURL, err := s.artworkImageURL(ctx, dl, kind, filter)
 	if err != nil {
 		return err
 	}
-	var url string
-	switch kind {
-	case "poster":
-		url = detail.PosterURL
-	case "backdrop":
-		url = detail.BackdropURL
-	case "logo":
-		url = detail.LogoURL
-	default:
-		return ErrAssetNotFound
+	err = s.streamArtwork(ctx, w, r, imageURL)
+	if errors.Is(err, ErrAssetUnavailable) {
+		logArtworkUnavailable(ctx, downloadID, kind, err)
 	}
-	if url == "" {
-		return ErrAssetNotFound
-	}
-	return s.streamArtwork(ctx, w, r, url)
+	return err
 }
 
-func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, url string) error {
-	client := s.httpClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// artworkImageURL resolves one artwork kind of a managed entry to its image,
+// checking the profile's access to the entry (and, for series_poster, to the
+// parent series) through the catalog detail path.
+func (s *Service) artworkImageURL(ctx context.Context, dl *Download, kind string, filter catalog.AccessFilter) (string, error) {
+	detail, err := s.artworkSource.GetItemDetail(ctx, manifestContentID(dl), filter)
 	if err != nil {
-		return fmt.Errorf("building artwork request: %w", err)
+		return "", err
 	}
-	resp, err := client.Do(req)
+	var imageURL string
+	switch kind {
+	case "poster":
+		imageURL = detail.PosterURL
+	case "backdrop":
+		imageURL = detail.BackdropURL
+	case "logo":
+		imageURL = detail.LogoURL
+	case "series_poster":
+		seriesID := episodeSeriesID(dl, detail)
+		if seriesID == "" {
+			return "", ErrAssetNotFound
+		}
+		series, err := s.artworkSource.GetItemDetail(ctx, seriesID, filter)
+		if err != nil {
+			return "", err
+		}
+		imageURL = series.PosterURL
+	default:
+		return "", ErrAssetNotFound
+	}
+	if imageURL == "" {
+		return "", ErrAssetNotFound
+	}
+	return imageURL, nil
+}
+
+// logArtworkUnavailable records a failing artwork store. The error itself can
+// quote the presigned URL (a malformed redirect's Location, for one), so only
+// the upstream status or whether the fetch timed out is logged.
+func logArtworkUnavailable(ctx context.Context, downloadID, kind string, err error) {
+	attrs := []any{"component", "downloads", "download_id", downloadID, "kind", kind}
+	if status, ok := errors.AsType[artworkStatusError](err); ok {
+		attrs = append(attrs, "upstream_status", int(status))
+	} else if netErr, ok := errors.AsType[net.Error](err); ok {
+		attrs = append(attrs, "timeout", netErr.Timeout())
+	}
+	slog.WarnContext(ctx, "download artwork unavailable", attrs...)
+}
+
+// artworkStatusError is the artwork store's answer when it wasn't 200.
+type artworkStatusError int
+
+func (e artworkStatusError) Error() string {
+	return "artwork upstream status " + strconv.Itoa(int(e))
+}
+
+// artworkStallTimeout bounds how long the artwork store may take to send its
+// response headers, and how long any one read of the image may wait for data.
+// Time spent writing to a slow client doesn't count against it.
+var artworkStallTimeout = 30 * time.Second
+
+// artworkClient fetches artwork when the service has no client of its own.
+var artworkClient = &http.Client{Transport: artworkTransport()}
+
+func artworkTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	t := base.Clone()
+	t.ResponseHeaderTimeout = artworkStallTimeout
+	return t
+}
+
+func (s *Service) artworkHTTPClient() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return artworkClient
+}
+
+func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
+	fetchCtx, stopFetch := context.WithCancel(ctx)
+	defer stopFetch()
+	image, err := s.openArtwork(fetchCtx, imageURL)
 	if err != nil {
-		return fmt.Errorf("fetching artwork: %w", err)
+		if ctx.Err() != nil {
+			// The client went away; the store isn't at fault.
+			return ctx.Err()
+		}
+		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("artwork upstream status %d: %w", resp.StatusCode, ErrAssetNotFound)
+	defer func() { _ = image.body.Close() }()
+	if image.contentType != "" {
+		w.Header().Set("Content-Type", image.contentType)
 	}
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
-		w.Header().Set("Content-Length", cl)
+	if image.contentLength != "" {
+		w.Header().Set("Content-Length", image.contentLength)
 	}
 	// Artwork is immutable for a stored manifest; let the client cache it once.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	store := &storeReader{Reader: image.body, stall: time.AfterFunc(artworkStallTimeout, stopFetch)}
+	defer store.stall.Stop()
+	if written, err := io.Copy(w, store); err != nil {
+		if written == 0 {
+			// Nothing reached the client, so an error response may follow;
+			// it mustn't carry the image's length or cache policy.
+			for _, name := range []string{"Content-Type", "Content-Length", "Cache-Control"} {
+				w.Header().Del(name)
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if store.err != nil {
+			// The store stopped sending, or timed out mid-body. Before the
+			// first byte is written, v2 can still answer 503.
+			return fmt.Errorf("streaming artwork: %w: %w", ErrAssetUnavailable, err)
+		}
 		return fmt.Errorf("streaming artwork: %w", err)
 	}
 	return nil
 }
 
-// ServeSubtitle streams a subtitle asset (external sidecar or downloaded S3 file)
-// for a managed entry, authorized on (user, profile, device) with a per-profile
-// content-access re-check. ref encodes "external:{index}" or "downloaded:{id}".
-func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, _ *http.Request, userID int, profileID, deviceID, downloadID, ref string, filter catalog.AccessFilter) error {
+// artworkImage is an opened artwork body and the headers to send with it.
+type artworkImage struct {
+	body          io.ReadCloser
+	contentType   string
+	contentLength string
+}
+
+// openArtwork opens imageURL. Local artwork storage resolves images to this
+// server's signed artwork route, which is read from the store directly; any
+// other URL is fetched over HTTP.
+func (s *Service) openArtwork(ctx context.Context, imageURL string) (artworkImage, error) {
+	if s.artworkStore != nil && s.artworkSigner != nil {
+		if key, ok := s.artworkSigner.SignedKey(imageURL, time.Now()); ok {
+			return s.openStoredArtwork(ctx, key)
+		}
+	}
+	return s.fetchArtwork(ctx, imageURL)
+}
+
+func (s *Service) openStoredArtwork(ctx context.Context, key string) (artworkImage, error) {
+	body, info, err := s.artworkStore.Get(ctx, key)
+	if errors.Is(err, blobstore.ErrNotFound) {
+		if s.artworkRepair != nil && artworkkey.Revision(key) != "" {
+			_, _ = s.artworkRepair.EnqueueArtworkRepair(ctx, []string{artworkkey.OriginalOf(key)}, 1)
+		}
+		return artworkImage{}, fmt.Errorf("reading artwork: %w", ErrAssetNotFound)
+	}
+	if err != nil {
+		return artworkImage{}, fmt.Errorf("reading artwork: %w: %w", ErrAssetUnavailable, err)
+	}
+	image := artworkImage{body: body, contentType: blobstore.MediaType(key)}
+	if info.Size > 0 {
+		image.contentLength = strconv.FormatInt(info.Size, 10)
+	}
+	return image, nil
+}
+
+func (s *Service) fetchArtwork(ctx context.Context, imageURL string) (artworkImage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		// Not wrapped: the parse error quotes the presigned URL.
+		return artworkImage{}, errors.New("building artwork request: invalid artwork URL")
+	}
+	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
+		// A relative URL that isn't a valid signed artwork route can't be
+		// fetched over HTTP. Retrying won't help.
+		return artworkImage{}, errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
+	}
+	resp, err := s.artworkHTTPClient().Do(req)
+	if err != nil {
+		// A failed request's error text repeats the presigned URL; keep only
+		// the cause.
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+		return artworkImage{}, fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+		_ = resp.Body.Close()
+		// Also ErrAssetNotFound, which the frozen v1 route answers with 404
+		// as it always has.
+		return artworkImage{}, fmt.Errorf("%w: %w: %w", artworkStatusError(resp.StatusCode), ErrAssetUnavailable, ErrAssetNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return artworkImage{}, fmt.Errorf("%w: %w", artworkStatusError(resp.StatusCode), ErrAssetNotFound)
+	}
+	return artworkImage{
+		body:          resp.Body,
+		contentType:   resp.Header.Get("Content-Type"),
+		contentLength: resp.Header.Get("Content-Length"),
+	}, nil
+}
+
+// storeReader reads the artwork store's response. It gives up on a read that
+// waits longer than artworkStallTimeout, timing only the reads, and remembers
+// why a read failed, so a failed write to the client isn't blamed on the store.
+type storeReader struct {
+	io.Reader
+	stall *time.Timer
+	err   error
+}
+
+func (r *storeReader) Read(p []byte) (int, error) {
+	r.stall.Reset(artworkStallTimeout)
+	n, err := r.Reader.Read(p)
+	r.stall.Stop()
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
+}
+
+// subtitleRefEmbedded addresses an embedded ASS/SSA or PGS track by its
+// subtitle ordinal (0:s:N); multi-track prepared MP4s deliver those as sidecars.
+const subtitleRefEmbedded = "embedded"
+
+// ServeSubtitle streams a subtitle asset (external sidecar, embedded ASS or PGS
+// track, or downloaded S3 file) for a managed entry, authorized on (user, profile,
+// device) with a per-profile content-access re-check. ref encodes
+// "external:{index}", "embedded:{ordinal}", or "downloaded:{id}".
+func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, ref string, filter catalog.AccessFilter) error {
 	dl, err := s.authorizeManagedAsset(ctx, userID, profileID, deviceID, downloadID)
 	if err != nil {
 		return err
@@ -201,8 +389,9 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, _ *h
 		if err != nil {
 			return fmt.Errorf("reading external subtitle: %w", ErrAssetNotFound)
 		}
-		writeSubtitle(w, ext.Format, data)
-		return nil
+		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, data)
+	case subtitleRefEmbedded:
+		return s.serveEmbeddedSubtitle(w, r.WithContext(ctx), dl, value)
 	case "downloaded":
 		if s.subtitleSource == nil {
 			return ErrManifestUnavailable
@@ -216,22 +405,105 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, _ *h
 		if sub == nil || sub.MediaFileID != dl.MediaFileID {
 			return ErrAssetNotFound
 		}
-		writeSubtitle(w, string(sub.Format), data)
-		return nil
+		return serveDownloadedSubtitle(w, r, sub, data)
 	default:
 		return ErrInvalidSubtitleRef
 	}
 }
 
-// parseSubtitleRef parses a subtitle reference of the form "external:{index}"
-// or "downloaded:{id}" into its kind and integer value.
+// downloadedSubtitleETag names one delivered representation of a stored
+// subtitle. Its bytes are immutable, so the row revision, which changes with
+// the timing correction, identifies the timed bytes.
+func downloadedSubtitleETag(sub *subtitles.DownloadedSubtitle) string {
+	return fmt.Sprintf(`"downloaded-%d-%d"`, sub.ID, sub.Revision)
+}
+
+// serveDownloadedSubtitle writes a stored subtitle with its timing correction.
+// Unlike sidecar assets it is revalidated on every use, since a timing change
+// alters the bytes behind the same ref.
+func serveDownloadedSubtitle(w http.ResponseWriter, r *http.Request, sub *subtitles.DownloadedSubtitle, data []byte) error {
+	etag := downloadedSubtitleETag(sub)
+	if ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "private, no-cache")
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	timed, err := subtitles.DeliveryBytes(sub, data)
+	if err != nil {
+		return fmt.Errorf("applying downloaded subtitle timing: %w", err)
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Content-Type", subtitles.SubtitleContentType(subtitles.SubtitleFormat(strings.ToLower(string(sub.Format)))))
+	_, _ = w.Write(timed)
+	return nil
+}
+
+// ifNoneMatchMatches applies the weak comparison RFC 9110 requires for
+// If-None-Match to a comma-separated list, including "*".
+func ifNoneMatchMatches(header, etag string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false
+	}
+	if header == "*" {
+		return true
+	}
+	for candidate := range strings.SplitSeq(header, ",") {
+		if strings.TrimPrefix(strings.TrimSpace(candidate), "W/") == etag {
+			return true
+		}
+	}
+	return false
+}
+
+// serveEmbeddedSubtitle serves one complete embedded ASS/SSA script or PGS
+// stream, the sidecar a multi-track prepared download advertises for subtitles
+// its MP4 cannot carry faithfully. It shares the streaming subtitle cache, so a
+// track is demuxed from the source at most once while its cache entry lives.
+func (s *Service) serveEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, dl *Download, ordinal int) error {
+	file, err := s.fileRepo.GetByID(r.Context(), dl.MediaFileID)
+	if err != nil {
+		return fmt.Errorf("loading media file: %w", err)
+	}
+	if file == nil || ordinal < 0 || ordinal >= len(file.SubtitleTracks) {
+		return ErrAssetNotFound
+	}
+	track := file.SubtitleTracks[ordinal]
+	if track.External || playback.PreparedSubtitleSidecarFormat(track.Codec) == "" {
+		return ErrAssetNotFound
+	}
+	ffmpegPath := ""
+	if s.artifacts != nil && s.artifacts.liveCfg != nil {
+		if cfg := s.artifacts.liveCfg(); cfg != nil {
+			ffmpegPath = cfg.Playback.FFmpegPath
+		}
+	}
+	response := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	err = s.subtitleCache.ServeExtract(response, r, playback.StreamExtractOpts{
+		InputPath:   file.FilePath,
+		TrackIndex:  ordinal,
+		SourceCodec: track.Codec,
+		FFmpegPath:  playback.ResolveFFmpegPath(ffmpegPath),
+	}, playback.StreamExtractSubtitle)
+	if err == nil || response.Status() == 0 || r.Context().Err() != nil {
+		return err
+	}
+	playback.LogSubtitleStreamError(r.Context(), err, file.ID, ordinal)
+	// A clean EOF would let the client keep a truncated track; abort instead.
+	panic(http.ErrAbortHandler)
+}
+
+// parseSubtitleRef parses a subtitle reference of the form "external:{index}",
+// "embedded:{ordinal}", or "downloaded:{id}" into its kind and integer value.
 func parseSubtitleRef(ref string) (kind string, value int, err error) {
 	k, v, ok := strings.Cut(ref, ":")
 	if !ok {
 		return "", 0, ErrInvalidSubtitleRef
 	}
 	switch k {
-	case "external", "downloaded":
+	case "external", subtitleRefEmbedded, "downloaded":
 		n, perr := strconv.Atoi(v)
 		if perr != nil {
 			return "", 0, ErrInvalidSubtitleRef
@@ -240,6 +512,27 @@ func parseSubtitleRef(ref string) (kind string, value int, err error) {
 	default:
 		return "", 0, ErrInvalidSubtitleRef
 	}
+}
+
+// serveExternalSubtitle writes a sidecar with its timing correction. Like a
+// stored subtitle it is revalidated on every use: the correction, or the file
+// on disk, can change behind the same ref.
+func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format string, data []byte) error {
+	subFormat := subtitles.SubtitleFormat(strings.ToLower(format))
+	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, data)
+	if err != nil {
+		return fmt.Errorf("applying external subtitle timing: %w", err)
+	}
+	etag := `"external-` + revision + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	w.Header().Set("Content-Type", subtitles.SubtitleContentType(subFormat))
+	_, _ = w.Write(timed)
+	return nil
 }
 
 // writeSubtitle writes subtitle bytes with a format-appropriate content type

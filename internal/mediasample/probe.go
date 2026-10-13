@@ -2,17 +2,19 @@ package mediasample
 
 import (
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// A Samples request first opens its input on its own to learn the two things
+// A Samples request first opens its input on its own to learn the things
 // its list depends on: the container, which decides whether the concat
 // demuxer can seek to keyframes in it, and the start time, which the list's
-// inpoints are offset by. ffmpeg prints both in the input header it logs at
-// info level:
+// inpoints are offset by. Sheets using the input aspect also read the video
+// geometry and display matrix. ffmpeg prints them in the input header it
+// logs at info level:
 //
 //	Input #0, matroska,webm, from '/media/movie.mkv':
 //	  Duration: 01:52:10.03, start: 11.400000, bitrate: 8123 kb/s
@@ -27,6 +29,18 @@ type inputInfo struct {
 	Formats []string
 	// StartSeconds is the container's start time, zero when it has none.
 	StartSeconds float64
+	// AspectRatio and Rotation describe the first playable video's display
+	// geometry before ffmpeg applies its display matrix.
+	AspectRatio float64
+	Rotation    float64
+}
+
+func (i inputInfo) displayAspect() float64 {
+	aspect := i.AspectRatio
+	if math.Abs(math.Abs(math.Remainder(i.Rotation, 180))-90) < 0.01 && aspect > 0 {
+		return 1 / aspect
+	}
+	return aspect
 }
 
 // keyframeSeekingFormats are the containers whose index lets the concat
@@ -52,11 +66,18 @@ func probeArgs(input string) []string {
 
 // inputHeaderParser reads the input header of a probe's log.
 type inputHeaderParser struct {
-	info     inputInfo
-	inHeader bool
+	info                                inputInfo
+	inHeader                            bool
+	videoSeen, videoSideData, inputDone bool
 }
 
+var (
+	videoSizePattern = regexp.MustCompile(`(?:^|,\s+)(\d+)x(\d+)(?:\s|,|$)`)
+	videoDARPattern  = regexp.MustCompile(`DAR ([0-9.]+):([0-9.]+)`)
+)
+
 func (p *inputHeaderParser) line(line string) {
+	p.videoGeometry(line)
 	if rest, ok := strings.CutPrefix(line, "Input #0, "); ok {
 		if formats, _, ok := strings.Cut(rest, ", from '"); ok {
 			p.info.Formats = strings.Split(formats, ",")
@@ -81,6 +102,46 @@ func (p *inputHeaderParser) line(line string) {
 	start, _, _ = strings.Cut(start, ",")
 	if seconds, err := strconv.ParseFloat(strings.TrimSpace(start), 64); err == nil && finite(seconds) {
 		p.info.StartSeconds = seconds
+	}
+}
+
+func (p *inputHeaderParser) videoGeometry(line string) {
+	if strings.HasPrefix(line, "Output #") || strings.HasPrefix(line, "Stream mapping:") {
+		p.inputDone = true
+	}
+	if p.inputDone {
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "Stream #0:") {
+		p.videoSideData = false
+		if p.videoSeen || !strings.Contains(trimmed, ": Video:") || strings.Contains(trimmed, "(attached pic)") {
+			return
+		}
+		p.videoSeen, p.videoSideData = true, true
+		if size := videoSizePattern.FindStringSubmatch(trimmed); size != nil {
+			w, _ := strconv.ParseFloat(size[1], 64)
+			h, _ := strconv.ParseFloat(size[2], 64)
+			if h > 0 {
+				p.info.AspectRatio = w / h
+			}
+		}
+		if dar := videoDARPattern.FindStringSubmatch(trimmed); dar != nil {
+			w, _ := strconv.ParseFloat(dar[1], 64)
+			h, _ := strconv.ParseFloat(dar[2], 64)
+			if w > 0 && h > 0 {
+				p.info.AspectRatio = w / h
+			}
+		}
+		return
+	}
+	if p.videoSideData {
+		if value, ok := strings.CutPrefix(trimmed, "displaymatrix: rotation of "); ok {
+			value, _, _ = strings.Cut(value, " degrees")
+			if rotation, err := strconv.ParseFloat(value, 64); err == nil && finite(rotation) {
+				p.info.Rotation = rotation
+			}
+		}
 	}
 }
 

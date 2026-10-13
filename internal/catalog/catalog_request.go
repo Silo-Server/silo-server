@@ -45,4 +45,14 @@ type CatalogRequest struct {
 	// preference edited mid-pagination cannot order later pages differently than
 	// the order already advertised to the client. Nil resolves normally.
 	ResolvedSort *QuerySort
+	// SearchMediaScope, when set, replaces Query.MediaScope for a text search
+	// on the query source. It carries search-only scopes such as
+	// MediaScopeVideoWithEpisodes, whose item types span media items and the
+	// episode catalog; Query.MediaScope then holds the scope every other read
+	// of the request uses.
+	SearchMediaScope string
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: an overlay rule on a
+	// field or with not_in_last that /api/v2 added is refused. ParseCatalogRequest
+	// sets it unless the caller opts in to ExtendedRules.
+	V1Rules bool
 }

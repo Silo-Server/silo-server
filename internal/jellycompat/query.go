@@ -37,6 +37,8 @@ type itemsQuery struct {
 	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
+	isNotFolder            bool // Filters=IsNotFolder or IsFolder=false: leaf items only
+	includesOnlyLeafTypes  bool // IncludeItemTypes names Episode and no Series or Season
 	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
 	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
 	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
@@ -70,6 +72,7 @@ type itemsQuery struct {
 	minPremiereDate         string // YYYY-MM-DD
 	maxPremiereDate         string // YYYY-MM-DD
 	countOnly               bool   // Limit=0 was sent: only TotalRecordCount is wanted
+	limitDefaulted          bool   // Limit was absent, so limit holds the default page size
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -99,10 +102,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.seasonNumber = new(n)
 		}
 	}
-	if raw := q.Get("EnableImageTypes"); raw != "" {
+	// Jellyfin Web repeats the parameter once per type, so every value counts.
+	// A list with no types means every type, as in Jellyfin.
+	if kinds := splitCommaValues(q.Values("EnableImageTypes")); len(kinds) > 0 {
 		result.enableImageTypes = map[string]bool{}
-		for kind := range strings.SplitSeq(raw, ",") {
-			result.enableImageTypes[strings.ToLower(strings.TrimSpace(kind))] = true
+		for _, kind := range kinds {
+			result.enableImageTypes[strings.ToLower(kind)] = true
 		}
 	}
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
@@ -160,6 +165,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	}
 
 	result.countOnly = strings.TrimSpace(q.Get("Limit")) == "0"
+	result.limitDefaulted = strings.TrimSpace(q.Get("Limit")) == ""
 	result.nameLessThan = strings.TrimSpace(q.Get("NameLessThan"))
 	result.nameStartsWithOrGreater = strings.TrimSpace(q.Get("NameStartsWithOrGreater"))
 	for _, raw := range splitCommaValues(q.Values("ExcludeItemIds")) {
@@ -190,6 +196,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.itemTypes = effectiveItemTypes(rawItemTypes, rawExcludedItemTypes)
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
+	includedTypes := mapIncludeItemTypes(rawItemTypes)
+	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
+		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
@@ -206,6 +215,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.hasRootFilter = hasAnyNonEmptyParam(q, jellyfinRootFilterParams)
 	result.isFavorite = hasFilter(q.Get("Filters"), "IsFavorite") || parseBool(q.Get("IsFavorite"), false)
 	result.isResumable = hasFilter(q.Get("Filters"), "IsResumable")
+	result.isNotFolder = hasFilter(q.Get("Filters"), "IsNotFolder") || strings.EqualFold(strings.TrimSpace(q.Get("IsFolder")), "false")
 
 	if hasFilter(q.Get("Filters"), "IsPlayed") {
 		result.isPlayed = new(true)
@@ -736,8 +746,16 @@ func parseRequestedFields(raw string) map[string]bool {
 // (catalog SQL performance overhaul plan §3.2 part b), it can be removed.
 var fieldsRequiringDetail = parseRequestedFields("RemoteTrailers,ProviderIds,People,Chapters,MediaStreams,MediaSources")
 
+// Lowercased Fields keys for the list path's file-backed video size.
+const (
+	fieldWidth  = "width"
+	fieldHeight = "height"
+	fieldIsHD   = "ishd"
+)
+
 // fieldsServedByList enumerates Fields values that mapping.go's itemFromList
-// can populate — gated by `if allFields || fields[X]` blocks. Anything outside
+// can populate — gated by `if allFields || fields[X]` blocks — plus the
+// file-backed ones applyListFileFields fills in afterwards. Anything outside
 // this set AND outside fieldsRequiringDetail is silently dropped from
 // list-path responses (no detail fetch is triggered to fill it).
 //
@@ -754,6 +772,9 @@ var fieldsServedByList = map[string]struct{}{
 	"productionlocations": {},
 	"criticrating":        {},
 	"mediasourcecount":    {},
+	fieldWidth:            {},
+	fieldHeight:           {},
+	fieldIsHD:             {},
 	"providerids":         {},
 }
 
@@ -898,4 +919,21 @@ func parsePremiereDateBound(raw string, isMin bool) string {
 // rails can discard filters. Unfiltered rails keep their episode-aware semantics.
 func (q itemsQuery) hasIntersectingFilters() bool {
 	return len(q.genres) > 0 || len(q.years) > 0 || q.hasCompatBrowseFilters() || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+}
+
+// hasMemberFilters reports whether the request narrows results by catalog
+// fields, search, or user state.
+func (q itemsQuery) hasMemberFilters() bool {
+	return q.hasIntersectingFilters() || q.searchTerm != "" || q.isFavorite || q.isPlayed != nil || q.isResumable
+}
+
+// allowsItemType reports whether the IncludeItemTypes/ExcludeItemTypes filter,
+// if any, admits the native item type.
+func (q itemsQuery) allowsItemType(itemType string) bool {
+	return !q.hasItemTypeFilter || itemTypesContain(q.itemTypes, itemType)
+}
+
+// allowsVideo reports whether the MediaTypes filter, if any, admits video.
+func (q itemsQuery) allowsVideo() bool {
+	return !q.mediaTypesExplicit || q.mediaTypesSet["video"]
 }

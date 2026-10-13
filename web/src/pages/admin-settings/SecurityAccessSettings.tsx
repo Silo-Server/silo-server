@@ -25,7 +25,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import {
   SETTINGS_CONTROL_WIDTH,
   SETTINGS_NUMBER_WIDTH,
@@ -357,7 +357,7 @@ export default function SecurityAccessSettings() {
           <SettingField
             label="Refresh token expiry"
             type="duration"
-            description="How long someone stays signed in, e.g. 30d."
+            description="How long someone stays signed in, e.g. 30d. Also how long an account whose sign-in provider can't re-check it keeps its API keys and Audiobookshelf sessions without signing in through the provider."
             value={form.getValue("auth.refresh_token_expiry")}
             onChange={(v) => form.setValue("auth.refresh_token_expiry", v)}
             restartRequired={restartKeys.has("auth.refresh_token_expiry")}

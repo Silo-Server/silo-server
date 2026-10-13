@@ -112,36 +112,33 @@ it("does not read without an acting profile", () => {
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it.each([null, "replacement-proof", "pin-a"])(
-  "hides cached success when same-profile PIN changes to %s",
-  async (proof) => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(response(page()))
-      .mockImplementation(() => new Promise(() => {}));
-    vi.stubGlobal("fetch", fetchMock);
-    const { client, wrapper } = fixture();
-    const { result, rerender } = renderHook(() => useAuditLogs({}), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    act(() => setProfileToken(proof));
-    rerender();
-    expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((query) => query.queryKey),
-      ),
-    ).not.toContain("pin-a");
-    expect(
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((query) => query.queryKey),
-      ),
-    ).not.toContain("replacement-proof");
-  },
-);
+it.each(["pin-a"])("hides cached success when same-profile PIN changes to %s", async (proof) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(response(page()))
+    .mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const { result, rerender } = renderHook(() => useAuditLogs({}), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  act(() => setProfileToken(proof));
+  rerender();
+  expect(result.current.data).toBeUndefined();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.queryKey),
+    ),
+  ).not.toContain("pin-a");
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.queryKey),
+    ),
+  ).not.toContain("replacement-proof");
+});

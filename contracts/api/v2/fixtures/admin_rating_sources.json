@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "source": "imdb",
+      "label": "IMDb",
+      "name": "IMDb",
+      "always_shown": true
+    },
+    {
+      "source": "tmdb",
+      "label": "TMDB",
+      "name": "TMDB",
+      "always_shown": true
+    },
+    {
+      "source": "kinopoisk",
+      "label": "Kinopoisk",
+      "name": "Kinopoisk",
+      "always_shown": false,
+      "provider": "Kinopoisk"
+    }
+  ]
+}

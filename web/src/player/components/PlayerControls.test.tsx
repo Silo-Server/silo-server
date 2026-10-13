@@ -211,4 +211,24 @@ describe("PlayerControls", () => {
     expect(screen.getByRole("button", { name: "Play" })).toHaveClass("h-16", "w-16");
     expect(screen.queryByRole("button", { name: /mute/i })).toBeNull();
   });
+
+  it("stops hidden compact transport buttons from taking clicks", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: true,
+        media: "(pointer: coarse)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+
+    renderControls(false, { visible: false });
+    const cluster = screen.getByRole("button", { name: "Back 10 seconds" }).parentElement;
+    expect(cluster).not.toHaveClass("pointer-events-auto");
+  });
 });

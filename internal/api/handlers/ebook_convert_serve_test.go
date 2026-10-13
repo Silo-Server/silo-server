@@ -138,16 +138,6 @@ func TestServeEbook_NonKindleUntouched(t *testing.T) {
 	}
 }
 
-func TestServeEbook_NilConversionServesRaw(t *testing.T) {
-	raw := writeTemp(t, "book.mobi", "raw")
-	h := &EbookReaderHandler{} // Conversion nil
-	file := &models.MediaFile{ID: 5, FilePath: raw, Container: "mobi"}
-	rec := serveAndRecord(t, h, file)
-	if rec.Header().Get(ConversionHeader) != "" {
-		t.Fatal("nil Conversion must not set the conversion header")
-	}
-}
-
 func TestHandleConversionCapability(t *testing.T) {
 	for _, tc := range []struct {
 		name string

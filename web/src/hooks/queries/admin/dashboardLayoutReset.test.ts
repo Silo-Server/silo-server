@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import { useSaveAdminDashboardLayout, useResetAdminDashboardLayout } from "./dashboardLayout";
+import { useResetAdminDashboardLayout } from "./dashboardLayout";
 const response = () => new Response(null, { status: 204 });
 function fixture() {
   const client = new QueryClient({
@@ -102,32 +102,4 @@ it("does not invalidate another authority after late deletion acknowledgement", 
   await act(async () => release(response()));
   await waitFor(() => expect(result.current.isError).toBe(true));
   expect(invalidate).not.toHaveBeenCalled();
-});
-
-it("keeps reset behind an in-flight legacy save in the shared mutation scope", async () => {
-  let finish!: () => void;
-  const writes: string[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((_url: unknown, init: RequestInit) => {
-      writes.push(init.method!);
-      if (init.method === "PUT")
-        return new Promise<Response>((resolve) => {
-          finish = () => resolve(response());
-        });
-      return Promise.resolve(response());
-    }),
-  );
-  const { result } = renderHook(
-    () => ({ save: useSaveAdminDashboardLayout(), reset: useResetAdminDashboardLayout() }),
-    fixture(),
-  );
-  act(() => {
-    result.current.save.mutate({ version: 1, entries: [] }, '"A"');
-    result.current.reset.mutate();
-  });
-  await waitFor(() => expect(writes).toEqual(["PUT"]));
-  await act(async () => finish());
-  await waitFor(() => expect(result.current.reset.isSuccess).toBe(true));
-  expect(writes).toEqual(["PUT", "DELETE"]);
 });

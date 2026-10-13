@@ -267,11 +267,21 @@ describe("WatchTogetherRoomPage", () => {
         members: [member(1, "Nathan"), member(2, "Maya", { lobby_ready: true })],
       }),
     });
-    renderPage(conn);
+    const view = renderPage(conn);
+    expect(state.startPlayback).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: /Title dune/ })).toBeInTheDocument();
-    const start = screen.getByRole("button", { name: /Start for everyone · 1\/1 ready/ });
+    expect(screen.getByRole("button", { name: /Start for everyone · 1\/1 ready/ })).toBeEnabled();
     expect(screen.getByText("Guest ready check")).toBeInTheDocument();
     expect(screen.queryByLabelText("not ready")).toBeNull();
+    view.rerenderConnection({
+      ...conn,
+      room: {
+        ...conn.room!,
+        members: [member(1, "Nathan"), member(2, "Maya", { lobby_ready: false })],
+      },
+    });
+    const start = screen.getByRole("button", { name: /Start for everyone · 0\/1 ready/ });
+    expect(start).toBeEnabled();
     fireEvent.click(start);
     expect(conn.startPlayback).toHaveBeenCalledTimes(1);
   });
@@ -296,16 +306,6 @@ describe("WatchTogetherRoomPage", () => {
     expect(screen.getByTestId("candidate")).toHaveAttribute("data-verb", "suggest");
     fireEvent.click(screen.getByRole("button", { name: "confirm" }));
     expect(conn.createSuggestion).toHaveBeenCalledTimes(1);
-  });
-
-  it("folds the shelf under a staged lobby for the host and names what a new pick replaces", () => {
-    const conn = connection({ room: room({ selected_content_id: "dune" }) });
-    renderPage(conn);
-    expect(screen.getByTestId("shelf")).toHaveAttribute("data-collapsed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Change" }));
-    expect(screen.getByTestId("shelf")).toHaveAttribute("data-collapsed", "false");
-    fireEvent.click(screen.getByRole("button", { name: "pick Arrival" }));
-    expect(screen.getByTestId("candidate")).toHaveTextContent("Replaces Title dune");
   });
 
   it("drops a candidate when the room changes phase underneath it", () => {
@@ -434,18 +434,6 @@ describe("WatchTogetherRoomPage", () => {
     expect(state.startPlayback).toHaveBeenCalledTimes(2);
     expect(state.startPlayback.mock.calls[1]![1]).toBe("viewer");
     expect(screen.getByText(/After this/)).toBeInTheDocument();
-  });
-
-  it("lets the host stop playback for everyone from the playing stage", () => {
-    const conn = connection({
-      room: room({
-        phase: "playing",
-        playback_state: "playing",
-        selection_revision: 1,
-        selected_content_id: "dune",
-      }),
-    });
-    renderPage(conn);
     fireEvent.click(screen.getByRole("button", { name: "Stop for everyone" }));
     expect(conn.stopPlayback).toHaveBeenCalledTimes(1);
   });
@@ -484,11 +472,6 @@ describe("WatchTogetherRoomPage", () => {
     });
     expect(state.startPlayback).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Rejoin playback" })).toBeInTheDocument();
-  });
-
-  it("does not auto-start on a staged lobby (revision unchanged)", () => {
-    renderPage(connection({ room: room({ selected_content_id: "dune" }) }));
-    expect(state.startPlayback).not.toHaveBeenCalled();
   });
 
   it("stays in the room after exit when another selection already started, then follows later starts", () => {

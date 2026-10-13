@@ -29,6 +29,7 @@ const (
 	SourceMDBList        Source = "mdblist"
 	SourceTMDBDiscover   Source = "tmdb_discover"
 	SourceTMDBCollection Source = "tmdb_collection"
+	SourceTMDBList       Source = "tmdb_list"
 )
 
 // MediaKind labels the dominant media type the template returns; the UI uses
@@ -57,6 +58,13 @@ type TraktSpec struct {
 
 // MDBListSpec is the MDBList-specific portion of a template.
 type MDBListSpec struct {
+	URL string `json:"url"`
+}
+
+// TMDBListSpec is the portion of a template that follows a public TMDB list.
+// An empty URL is a "bring your own list" placeholder: the admin UI asks for
+// the list URL before creating the collection.
+type TMDBListSpec struct {
 	URL string `json:"url"`
 }
 
@@ -116,6 +124,7 @@ type Template struct {
 	MDBList             *MDBListSpec        `json:"mdblist,omitempty"`
 	TMDBDiscover        *TMDBDiscoverSpec   `json:"tmdb_discover,omitempty"`
 	TMDBCollection      *TMDBCollectionSpec `json:"tmdb_collection,omitempty"`
+	TMDBList            *TMDBListSpec       `json:"tmdb_list,omitempty"`
 }
 
 // Bundle is an ordered set of built-in templates that can be applied together
@@ -125,6 +134,19 @@ type Bundle struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	TemplateIDs []string `json:"template_ids"`
+}
+
+// BundleWithTemplates pairs a bundle with its templates in bundle order.
+type BundleWithTemplates struct {
+	Bundle
+	Templates []Template
+}
+
+// NeedsSetup reports whether applying the template creates a collection that
+// cannot sync until an admin sets its source: the TMDB Franchise placeholder
+// ships without a TMDB collection ID.
+func (t Template) NeedsSetup() bool {
+	return t.Source == SourceTMDBCollection && (t.TMDBCollection == nil || t.TMDBCollection.CollectionID <= 0)
 }
 
 // Catalog is the listing returned by the API: templates grouped by category

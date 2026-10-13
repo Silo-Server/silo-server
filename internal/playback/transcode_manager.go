@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -42,7 +44,8 @@ type sessionReconstructor interface {
 
 type atomicSessionReconstructor interface {
 	RollbackReconstructedToneMap(expected *Session) bool
-	ConfirmReconstructedToneMap(expected *Session, mode tonemap.Mode) *Session
+	CaptureReconstructedExecution(sessionID string) (*Session, uint64)
+	ConfirmReconstructedExecution(expected *Session, revision uint64, mode tonemap.Mode, encoderHWAccel string) *Session
 }
 
 // TranscodeManager owns the transcode-session lifecycle shared by every playback
@@ -63,7 +66,8 @@ type TranscodeManager struct {
 	Config func() TranscodeRuntimeConfig
 	// LogSinkFn returns the ffmpeg log sink for reconstructed processes.
 	LogSinkFn func() FFmpegLogSink
-	// JWTSecretFn returns the bearer used for remote transcode-node DELETEs.
+	// JWTSecretFn returns the shared secret that signs remote transcode-node
+	// DELETEs.
 	JWTSecretFn func() string
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
@@ -265,6 +269,18 @@ func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL strin
 	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
+}
+
+// StopRemoteTranscodeAfterFailure stops a remote job after a call to its node
+// failed. When the node could not be reached, the stop runs in the background:
+// waiting on an unreachable host would hold up the next candidate, and a node
+// that answers again by then still drops a job it may have started.
+func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeNodeURL string, err error) {
+	if nodepool.IsConnectFailure(err) {
+		go m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+		return
+	}
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
 }
 
 // CancelRemoteTranscode synchronously confirms that a remote process no longer
@@ -546,6 +562,9 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	if !ok {
 		return transcodeLoadResult{status: SessionLoadFailed}
 	}
+	// Capture before reading the snapshot so a concurrent replacement cannot
+	// authorize this reconstruction to publish stale facts onto its successor.
+	expected, revision := atomicSessions.CaptureReconstructedExecution(sessionID)
 	session, err := getSession(sessionID)
 	var inserted *Session
 	if err != nil {
@@ -560,12 +579,15 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 		if !ok || session == nil {
 			return transcodeLoadResult{status: SessionMissing}
 		}
+		if inserted != nil {
+			expected, revision = inserted, 0
+		}
 	}
 	if requestUserID != 0 && session.UserID != requestUserID {
 		return transcodeLoadResult{status: SessionForbidden}
 	}
 	if runtime := m.GetTranscodeSession(sessionID); runtime != nil {
-		return m.completeTranscodeLoad(atomicSessions, getSession, session, inserted, runtime)
+		return m.completeTranscodeLoad(atomicSessions, getSession, session, expected, revision, runtime)
 	}
 	// Remote transcodes keep running on their owning node; only the playback
 	// Session needs reconstructing on this API process. A reconstructed session
@@ -573,7 +595,7 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	// defers it so the live executor's confirmation wins when a runtime exists.
 	if session.TranscodeNodeURL != "" {
 		if inserted != nil {
-			current := atomicSessions.ConfirmReconstructedToneMap(inserted, card.ToneMapMode)
+			current := atomicSessions.ConfirmReconstructedExecution(inserted, 0, card.ToneMapMode, card.EffectiveEncoderHWAccel())
 			if current == nil {
 				return transcodeLoadResult{status: SessionMissing}
 			}
@@ -583,7 +605,7 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 	}
 	if session.PlayMethod != PlayTranscode {
 		if inserted != nil {
-			atomicSessions.ConfirmReconstructedToneMap(inserted, card.ToneMapMode)
+			atomicSessions.ConfirmReconstructedExecution(inserted, 0, card.ToneMapMode, card.EffectiveEncoderHWAccel())
 		}
 		return transcodeLoadResult{session: session, status: SessionLoaded}
 	}
@@ -598,17 +620,19 @@ func (m *TranscodeManager) doLoadOrReconstructTranscode(
 		}
 		return transcodeLoadResult{status: SessionUnavailable, err: reconstructErr}
 	}
-	return m.completeTranscodeLoad(atomicSessions, getSession, session, inserted, runtime)
+	return m.completeTranscodeLoad(atomicSessions, getSession, session, expected, revision, runtime)
 }
 
 func (m *TranscodeManager) completeTranscodeLoad(
 	atomicSessions atomicSessionReconstructor,
 	getSession func(string) (*Session, error),
-	session, inserted *Session,
+	session, expected *Session,
+	revision uint64,
 	runtime *TranscodeSession,
 ) transcodeLoadResult {
-	if inserted != nil {
-		current := atomicSessions.ConfirmReconstructedToneMap(inserted, runtime.Opts().ToneMapMode)
+	if expected != nil {
+		opts := runtime.Opts()
+		current := atomicSessions.ConfirmReconstructedExecution(expected, revision, opts.ToneMapMode, opts.EffectiveEncoderHWAccel())
 		if current == nil {
 			m.CloseTranscodeSessionIf(session.ID, runtime, "")
 			return transcodeLoadResult{status: SessionMissing}
@@ -671,34 +695,35 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		toneMapMode = ""
 	}
 	s := &Session{
-		ID:                     card.SessionID,
-		UserID:                 card.UserID,
-		ProfileID:              card.ProfileID,
-		MediaFileID:            card.MediaFileID,
-		StartedAt:              card.OriginalStartedAt,
-		PlayMethod:             method,
-		BasePlayMethod:         method,
-		TranscodeNodeURL:       card.TranscodeNodeURL,
-		TranscodeTransportID:   card.TranscodeTransportID,
-		RoutingNetworkProvider: card.RoutingNetworkProvider,
-		StreamLocation:         card.StreamLocation,
-		RoutingWorkload:        card.RoutingWorkload,
-		RoutingExecution:       card.RoutingExecution,
-		RoutingExecutionNodeID: card.RoutingExecutionNodeID,
-		RoutingEgress:          card.RoutingEgress,
-		RoutingEgressNodeID:    card.RoutingEgressNodeID,
-		AudioTrackIndex:        card.AudioTrackIndex,
-		TranscodeAudio:         card.TranscodeAudio,
-		RemuxDVMode:            card.RemuxDVMode,
-		TargetResolution:       card.TargetResolution,
-		TargetVideoCodec:       card.TargetCodecVideo,
-		TargetAudioCodec:       card.TargetCodecAudio,
-		SourceAudioChannels:    card.SourceAudioChannels,
-		TargetAudioChannels:    card.TargetAudioChannels,
-		TargetAudioBitrateKbps: card.TargetAudioBitrateKbps,
-		TargetBitrateKbps:      card.TargetBitrateKbps,
-		TranscodeHWAccel:       card.HWAccel,
-		ToneMapMode:            toneMapMode,
+		ID:                            card.SessionID,
+		UserID:                        card.UserID,
+		ProfileID:                     card.ProfileID,
+		MediaFileID:                   card.MediaFileID,
+		StartedAt:                     card.OriginalStartedAt,
+		PlayMethod:                    method,
+		BasePlayMethod:                method,
+		TranscodeNodeURL:              card.TranscodeNodeURL,
+		TranscodeTransportID:          card.TranscodeTransportID,
+		RoutingNetworkProvider:        card.RoutingNetworkProvider,
+		StreamLocation:                card.StreamLocation,
+		RoutingWorkload:               card.RoutingWorkload,
+		RoutingExecution:              card.RoutingExecution,
+		RoutingExecutionNodeID:        card.RoutingExecutionNodeID,
+		RoutingEgress:                 card.RoutingEgress,
+		RoutingEgressNodeID:           card.RoutingEgressNodeID,
+		AudioTrackIndex:               card.AudioTrackIndex,
+		TranscodeAudio:                card.TranscodeAudio,
+		RemuxDVMode:                   card.RemuxDVMode,
+		RemuxResumeLeadingPictureDrop: card.RemuxResumeLeadingPictureDrop,
+		TargetResolution:              card.TargetResolution,
+		TargetVideoCodec:              card.TargetCodecVideo,
+		TargetAudioCodec:              card.TargetCodecAudio,
+		SourceAudioChannels:           card.SourceAudioChannels,
+		TargetAudioChannels:           card.TargetAudioChannels,
+		TargetAudioBitrateKbps:        card.TargetAudioBitrateKbps,
+		TargetBitrateKbps:             card.TargetBitrateKbps,
+		TranscodeHWAccel:              card.EffectiveEncoderHWAccel(),
+		ToneMapMode:                   toneMapMode,
 		// Client metadata survives the restart so the admin views keep the
 		// client label and Jellyfin identification for the session's lifetime.
 		ClientName:       normalizeClientMetadataValue(card.ClientName, 128),
@@ -1118,6 +1143,20 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
+// remoteTranscodeControlClient sends stop requests to transcode nodes. Playback
+// paths call the stop synchronously, so a stop aimed at a dead host must give
+// up as quickly as the start that found it dead: it uses the same connect bound
+// as playback's other node calls.
+var remoteTranscodeControlClient = func() *http.Client {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.DialContext = nodepool.NodeDialContext()
+	return &http.Client{Transport: transport}
+}()
+
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
@@ -1136,9 +1175,11 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
+	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
+		return fmt.Errorf("sign remote transcode delete: %w", err)
+	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := remoteTranscodeControlClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}

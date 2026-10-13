@@ -1,18 +1,19 @@
 package catalog
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestQueryExecutor_NamePrefix_PushedIntoWHERE asserts that when AccessFilter
-// carries a NamePrefix, the resulting paged SQL contains a prefix-anchored
-// dual-column LIKE predicate: first arm matches the idx_media_items_sort_key
-// expression (migration 102), second arm matches LOWER(title) /
-// idx_media_items_search_exact_title (migration 001). Both arms are required
-// so items with a curated sort_title that differs from title (e.g.
-// title="The Office", sort_title="Office, The") are not silently dropped on
-// prefix="the". The LIKE pattern argument is anchored with no leading wildcard.
+// carries a NamePrefix, the resulting paged SQL contains a prefix-anchored LIKE
+// on the sort key title sorting orders by, and nothing else.
+// A raw LOWER(title) arm would list title="The Office" (sort_title
+// "Office, The") under both T and O. The LIKE pattern argument is anchored with
+// no leading wildcard.
 func TestQueryExecutor_NamePrefix_PushedIntoWHERE(t *testing.T) {
 	exec := &QueryExecutor{Scope: "movie", BaseRelationSQL: "media_items mi"}
 	access := AccessFilter{NamePrefix: "Star"}
@@ -22,14 +23,11 @@ func TestQueryExecutor_NamePrefix_PushedIntoWHERE(t *testing.T) {
 		t.Fatalf("buildPreviewPageSQL returned error: %v", err)
 	}
 
-	// First arm: sort-key expression matching idx_media_items_sort_key.
 	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
-		t.Fatalf("expected sort-key LIKE arm matching idx_media_items_sort_key; got %q", sql)
+		t.Fatalf("expected LIKE on the title sort key; got %q", sql)
 	}
-	// Second arm: LOWER(title) matching idx_media_items_search_exact_title;
-	// required so curated sort_title doesn't drop title-prefix matches.
-	if !strings.Contains(sql, "LOWER(mi.title) LIKE") {
-		t.Fatalf("expected LOWER(mi.title) LIKE arm; got %q", sql)
+	if strings.Contains(sql, "LOWER(mi.title) LIKE") {
+		t.Fatalf("prefix must not match the raw title alongside the sort key; got %q", sql)
 	}
 	if strings.Contains(sql, "LIKE '%") {
 		t.Fatalf("expected LIKE pattern to be parameterized (no leading literal wildcard); got %q", sql)
@@ -78,33 +76,29 @@ func TestQueryExecutor_NamePrefix_UsesEpisodeSortKeyForEpisodeScope(t *testing.T
 	}
 }
 
-// TestBrowseFilters_NamePrefix_BothArmsSargable asserts that the dual-column
-// LIKE in BrowseRepository's WHERE clause uses an expression that matches
-// idx_media_items_sort_key (migration 102) on the first arm and
-// idx_media_items_search_exact_title (migration 001, on LOWER(title)) on the
-// second arm. Both arms must be index-using; otherwise the planner falls back
-// to a seqscan on /Items?NameStartsWith=X queries against ~200K-row catalogs.
+// TestBrowseFilters_NamePrefix_MatchesSortKeyOnly asserts that the prefix LIKE
+// in BrowseRepository's WHERE clause uses the same sort key as the title
+// ORDER BY and does not also match LOWER(title): the letter rail must put
+// "The Hobbit" (sort_title "Hobbit, The") under H only.
 //
 // Regression guard for the post-perf-overhaul code review (2026-05): the
-// initial first-arm form was LOWER(COALESCE(NULLIF(BTRIM(sort_title),”), ”))
-// which fell back to ” instead of title and matched no index expression.
-func TestBrowseFilters_NamePrefix_BothArmsSargable(t *testing.T) {
+// initial form was LOWER(COALESCE(NULLIF(BTRIM(sort_title),”), ”)) which
+// fell back to ” instead of title and matched no index expression.
+func TestBrowseFilters_NamePrefix_MatchesSortKeyOnly(t *testing.T) {
 	_, where, _, earlyEmpty := filterWhereClauseForSource(
 		BrowseFilters{NamePrefix: "Star"}, "media_items mi", "")
 	if earlyEmpty {
 		t.Fatalf("unexpected earlyEmpty for NamePrefix-only filter")
 	}
-	// First arm matches idx_media_items_sort_key.
 	if !strings.Contains(where, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
-		t.Fatalf("expected sort-key LIKE arm matching idx_media_items_sort_key; got %s", where)
+		t.Fatalf("expected LIKE on the title sort key; got %s", where)
 	}
-	// Second arm matches idx_media_items_search_exact_title.
-	if !strings.Contains(where, "LOWER(mi.title) LIKE") {
-		t.Fatalf("expected LOWER(mi.title) LIKE arm; got %s", where)
+	if strings.Contains(where, "LOWER(mi.title) LIKE") {
+		t.Fatalf("prefix must not match the raw title alongside the sort key; got %s", where)
 	}
 	// Reject the previous broken form that used '' as the COALESCE fallback.
 	if strings.Contains(where, "BTRIM(mi.sort_title), ''), ''))") {
-		t.Fatalf("first arm still uses '' fallback (defeats idx_media_items_sort_key); got %s", where)
+		t.Fatalf("sort key still uses '' fallback (defeats idx_media_items_sort_key); got %s", where)
 	}
 }
 
@@ -126,6 +120,43 @@ func TestEscapePrefixForLike(t *testing.T) {
 		got := escapePrefixForLike(tc.in)
 		if got != tc.want {
 			t.Errorf("escapePrefixForLike(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestFilterCatalogNamePrefix_MatchesSortKeyOnly keeps the in-memory prefix
+// filter (relevance search, exact-order collections, offset pages) in step with
+// sortTitlePrefixCondition, so offset and cursor pages agree on the letter.
+func TestFilterCatalogNamePrefix_MatchesSortKeyOnly(t *testing.T) {
+	hobbit := &models.MediaItem{ContentID: "hobbit", Title: "The Hobbit", SortTitle: "Hobbit, The"}
+	hobgoblins := &models.MediaItem{ContentID: "hobgoblins", Title: "Hobgoblins"}
+	titanic := &models.MediaItem{ContentID: "titanic", Title: "Titanic", SortTitle: "  "}
+	// SQL BTRIM strips spaces only, so a tab-led sort title keeps its tab.
+	tabbed := &models.MediaItem{ContentID: "tabbed", Title: "Heat", SortTitle: "\tHeat"}
+	items := []*models.MediaItem{hobbit, nil, hobgoblins, titanic, tabbed}
+
+	for _, tc := range []struct {
+		prefix string
+		want   []string
+	}{
+		{prefix: "", want: []string{"hobbit", "", "hobgoblins", "titanic", "tabbed"}},
+		{prefix: "H", want: []string{"hobbit", "hobgoblins"}},
+		{prefix: " t ", want: []string{"titanic"}},
+		{prefix: "the", want: []string{}},
+	} {
+		var got []string
+		for _, item := range filterCatalogNamePrefix(items, tc.prefix) {
+			if item == nil {
+				got = append(got, "")
+				continue
+			}
+			got = append(got, item.ContentID)
+		}
+		if got == nil {
+			got = []string{}
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("filterCatalogNamePrefix(%q) = %v, want %v", tc.prefix, got, tc.want)
 		}
 	}
 }

@@ -12,12 +12,13 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	const secret = "artifact-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/downloads/artifacts/artifact-1" || r.Header.Get("Authorization") != "Bearer "+secret {
+		if r.URL.Path != "/downloads/artifacts/artifact-1" || !nodeauthtest.Signed(r, secret) {
 			t.Errorf("origin request = %s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 			http.Error(w, "unexpected origin request", http.StatusBadRequest)
 			return
@@ -92,7 +93,7 @@ func TestServiceRequeuesReadyArtifactWhenRemoteFileIsMissing(t *testing.T) {
 	downloadRepo := NewRepository(pool)
 	if err := downloadRepo.Create(ctx, &Download{
 		ID: downloadID, UserID: userID, MediaFileID: fileID,
-		ContentID: "missing-remote-content", Kind: KindQueued, Status: StatusCompleted,
+		ContentID: "missing-remote-content", Kind: KindQueued, Status: StatusReady,
 		Format: FormatTranscode, ArtifactID: artifact.ID, FileSize: 23,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}); err != nil {

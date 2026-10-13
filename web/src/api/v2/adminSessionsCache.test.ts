@@ -17,6 +17,7 @@ it("shares the captured key while keeping account and profile caches distinct", 
   expect(client.getQueryData(adminSessionsKey(primary))).toEqual(["primary-session"]);
   setProfileId("child");
   expect(client.getQueryData(adminSessionsKey(captureProfileRequestContext()))).toBeUndefined();
+  setProfileId("primary");
   setAccessToken("other-account");
   expect(client.getQueryData(adminSessionsKey(captureProfileRequestContext()))).toBeUndefined();
   expect(client.getQueryData(key)).toEqual(["primary-session"]);

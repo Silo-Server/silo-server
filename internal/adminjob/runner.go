@@ -31,6 +31,16 @@ type ArtifactStore interface {
 
 const remoteCatalogImportTimeout = 10 * time.Minute
 
+const (
+	// imageCacheCleanupMaxStalledClaims bounds how long a cleanup keeps
+	// yielding without deleting anything, e.g. while storage writes are
+	// fenced or a delete hangs: twelve slices, an hour by default.
+	imageCacheCleanupMaxStalledClaims = 12
+	// A cleanup job's row carries every prefix, so each progress event
+	// reloads and publishes megabytes; record progress sparingly.
+	imageCacheCleanupProgressInterval = 10 * time.Second
+)
+
 // Maximum wall-clock time a single admin job execution may run before its
 // context is cancelled. This is the safety net that prevents a hung
 // operation (e.g. an unreachable S3 endpoint) from blocking the job queue
@@ -38,7 +48,7 @@ const remoteCatalogImportTimeout = 10 * time.Minute
 // actual scope.
 const (
 	deleteLibraryTimeout       = 2 * time.Hour
-	imageCacheCleanupTimeout   = 2 * time.Hour
+	imageCacheCleanupSlice     = 5 * time.Minute
 	LibraryRefreshTimeout      = 6 * time.Hour // also bounds each library in the full refresh task
 	templateBundleApplyTimeout = 2 * time.Hour
 	storageTransitionTimeout   = 7 * 24 * time.Hour
@@ -59,6 +69,7 @@ type Runner struct {
 	storageTransition          storageTransitionExecutor
 	storageTransitionCommitted func(context.Context) error
 	realtimeHub                *notifications.Hub
+	imageCacheCleanupSlice     time.Duration
 	pollInterval               time.Duration
 	cleanupInterval            time.Duration
 	heartbeatInterval          time.Duration
@@ -246,7 +257,8 @@ func (r *Runner) runNext() {
 		observation: observation, workCtx: workCtx,
 		repo: r.repo.withClaim(job), exporter: r.exporter, store: r.store,
 		itemRefresh: r.itemRefresh, libraryRefresh: r.libraryRefresh, libraryDelete: r.libraryDelete,
-		imageCacheCleanup: r.imageCacheCleanup, templateBundleApply: r.templateBundleApply, storageTransition: r.storageTransition,
+		imageCacheCleanup: r.imageCacheCleanup, imageCacheCleanupSlice: r.imageCacheCleanupSlice,
+		templateBundleApply: r.templateBundleApply, storageTransition: r.storageTransition,
 		storageTransitionCommitted: r.storageTransitionCommitted,
 		realtimeHub:                r.realtimeHub, heartbeatInterval: r.heartbeatInterval, retention: r.retention, cancelRegistry: r.cancelRegistry,
 		storageRestart: r.storageRestart, stop: r.stop,
@@ -546,7 +558,9 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		result.ImageCleanupJobID = cleanupJob.ID
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Library deletion completed",
 		ProgressCurrent: 5,
@@ -556,7 +570,7 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to mark library deletion complete", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) queueImageCacheCleanup(ctx context.Context, createdByUserID int, result *DeleteLibraryResult) *models.AdminJob {
@@ -599,42 +613,88 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.executionContext(), imageCacheCleanupTimeout)
+	// Earlier claims recorded how far they got and what they deleted. Continue
+	// from there, whether the last claim yielded or its worker stopped
+	// heartbeating: starting over would repeat work that a large library
+	// cannot finish within any single claim.
+	total := len(req.Prefixes)
+	start := min(max(job.ProgressCurrent, 0), total)
+	var earlier ImageCacheCleanupResult
+	_ = json.Unmarshal(job.ResultPayload, &earlier)
+	totals := func(deleted ImageCacheCleanupResult) ImageCacheCleanupResult {
+		deleted.DeletedPrefixes += earlier.DeletedPrefixes
+		deleted.DeletedS3Objects += earlier.DeletedS3Objects
+		return deleted
+	}
+
+	// The cleanup has no overall time limit. Each claim works for at most one
+	// slice and then yields, so the runner can claim catalog, refresh and
+	// deletion jobs in between; the next claim continues where this one stops.
+	slice := r.imageCacheCleanupSlice
+	if slice <= 0 {
+		slice = imageCacheCleanupSlice
+	}
+	ctx, cancel := context.WithTimeout(r.executionContext(), slice)
 	defer cancel()
 
 	heartbeatStop := make(chan struct{})
 	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
 	defer close(heartbeatStop)
 
-	progress := func(current, total int, message string) {
-		if err := r.repo.UpdateProgress(ctx, job.ID, current, total, message); err != nil {
+	var lastUpdate time.Time
+	progress := func(next int, deleted ImageCacheCleanupResult) {
+		if next != total && time.Since(lastUpdate) < imageCacheCleanupProgressInterval {
+			return
+		}
+		lastUpdate = time.Now()
+		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
+		if err := r.repo.UpdateProgressResult(ctx, job.ID, next, total, message, totals(deleted)); err != nil {
 			slog.Warn("admin jobs: failed to update image cache cleanup progress", "job_id", job.ID, "error", err)
 			return
 		}
 		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
 	}
 
-	result, err := r.imageCacheCleanup.Execute(ctx, req, progress)
-	if err != nil {
-		msg := err.Error()
-		if ctx.Err() != nil {
-			msg = fmt.Sprintf("timed out after %s: %s", imageCacheCleanupTimeout, msg)
-		}
-		r.failJob(job.ID, 0, len(req.Prefixes), "Image cache cleanup failed", msg)
-		return
-	}
+	next, deleted, err := r.imageCacheCleanup.Execute(ctx, req, start, progress)
+	result := totals(deleted)
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
-		ResultPayload:   result,
-		Message:         "Cached image cleanup completed",
-		ProgressCurrent: len(req.Prefixes),
-		ProgressTotal:   len(req.Prefixes),
-		ExpiresAt:       time.Now().UTC().Add(r.retention),
-	}); err != nil {
-		slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
-		return
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	switch {
+	case err == nil:
+		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
+			ResultPayload:   result,
+			Message:         "Cached image cleanup completed",
+			ProgressCurrent: total,
+			ProgressTotal:   total,
+			ExpiresAt:       time.Now().UTC().Add(r.retention),
+		}); err != nil {
+			slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
+			return
+		}
+		r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
+	case errors.Is(err, context.DeadlineExceeded):
+		// A prefix cut off by the deadline may still have lost objects;
+		// that is progress, and the next claim deletes the rest.
+		if next == start && deleted.DeletedS3Objects == 0 {
+			result.StalledClaims = earlier.StalledClaims + 1
+			if result.StalledClaims >= imageCacheCleanupMaxStalledClaims {
+				r.failJobWithResult(job.ID, next, total, "Image cache cleanup failed",
+					fmt.Sprintf("no cached image deleted in %d consecutive claims of %s", result.StalledClaims, slice), result)
+				return
+			}
+			slog.Warn("admin jobs: image cache cleanup deleted nothing this claim", "job_id", job.ID,
+				"prefix_index", next, "stalled_claims", result.StalledClaims)
+		}
+		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
+		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result); err != nil {
+			slog.Warn("admin jobs: failed to yield image cache cleanup", "job_id", job.ID, "error", err)
+			return
+		}
+		r.publishJobByID(finishCtx, notifications.TypeJobProgress, job.ID)
+	default:
+		r.failJobWithResult(job.ID, next, total, "Image cache cleanup failed", err.Error(), result)
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
@@ -713,7 +773,9 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		return
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Library metadata refresh completed",
 		ProgressCurrent: current,
@@ -723,7 +785,7 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to complete library refresh", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
@@ -776,7 +838,9 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 		return
 	}
 
-	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Collection defaults applied",
 		ProgressCurrent: lastCurrent,
@@ -786,7 +850,7 @@ func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to complete template bundle apply", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) requeueStaleJobs() {
@@ -880,7 +944,9 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		return
 	}
 
-	if err := r.repo.Complete(uploadCtx, job.ID, CompleteJobInput{
+	finishCtx, finishCancel := r.finalizeContext()
+	defer finishCancel()
+	if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 		ResultPayload:     summary,
 		Message:           "Catalog export completed",
 		ProgressCurrent:   lastProgress.Total,
@@ -893,7 +959,7 @@ func (r *Runner) executeCatalogExport(job *models.AdminJob) {
 		slog.Warn("admin jobs: failed to mark export complete", "job_id", job.ID, "error", err)
 		return
 	}
-	r.publishJobByID(uploadCtx, notifications.TypeJobCompleted, job.ID)
+	r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 }
 
 func (r *Runner) executeCatalogImport(job *models.AdminJob) {
@@ -1217,7 +1283,7 @@ func (r *Runner) failJob(id string, current, total int, message, errorMessage st
 }
 
 func (r *Runner) failJobWithResult(id string, current, total int, message, errorMessage string, result any) {
-	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
+	ctx, cancel := r.finalizeContext()
 	defer cancel()
 
 	if err := r.repo.Fail(ctx, id, FailJobInput{
@@ -1235,7 +1301,7 @@ func (r *Runner) failJobWithResult(id string, current, total int, message, error
 }
 
 func (r *Runner) cancelJob(id string, current, total int, message string) {
-	ctx, cancel := context.WithTimeout(r.executionContext(), 30*time.Second)
+	ctx, cancel := r.finalizeContext()
 	defer cancel()
 	if err := r.repo.UpdateProgress(ctx, id, current, total, message); err != nil {
 		slog.Warn("admin jobs: failed to update cancellation progress", "job_id", id, "error", err)
@@ -1253,6 +1319,14 @@ func (r *Runner) cancelJob(id string, current, total int, message string) {
 			slog.Warn("admin jobs: failed to publish job cancellation", "job_id", id, "error", err)
 		}
 	}
+}
+
+// finalizeContext bounds recording a job's outcome. It never derives from the
+// job's execution context: once that context has timed out or been canceled,
+// the write would fail, the row would stay running, and stale recovery would
+// run the job again.
+func (r *Runner) finalizeContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.executionContext(), 30*time.Second)
 }
 
 func (r *Runner) executionContext() context.Context {

@@ -91,15 +91,20 @@ func TestPlaybackDeliveryFailureAfterBytesAborts(t *testing.T) {
 }
 
 func TestPlaybackDecisionV2ProjectsOnlyLocalMediaURLs(t *testing.T) {
-	for _, url := range []string{"/api/v1/stream/session?st=opaque%2Btoken", "/api/v1/playback/transcode/session/master.m3u8?st=opaque%2Btoken", "https://silo.example.test/opaque"} {
-		in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{Stream: playback.StreamV3{URL: url}}}
+	for _, tc := range []struct{ path, want string }{
+		{"/api/v1/stream/session?st=opaque%2Btoken", "/api/v2/stream/session?st=opaque%2Btoken"},
+		{"/api/v1/playback/transcode/session/master.m3u8?st=opaque%2Btoken", "/api/v2/playback/transcode/session/master.m3u8?st=opaque%2Btoken"},
+		{"https://silo.example.test/opaque", "https://silo.example.test/opaque"},
+		{"/stream/s/subtitles/0.vtt?st=a%2Fb&file_id=7", "/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb&file_id=7"},
+		{"/stream/s/subtitles/0/fonts?st=a%2Fb", "/api/v2/stream/s/subtitles/0/fonts?st=a%2Fb"},
+		{"/playback/transcode/s/master.m3u8?st=a%2Fb", "/api/v2/playback/transcode/s/master.m3u8?st=a%2Fb"},
+		{"https://stream.example/api/v1/stream/s?st=a%2Fb", "https://stream.example/api/v1/stream/s?st=a%2Fb"},
+		{"/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb", "/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb"},
+	} {
+		in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{Stream: playback.StreamV3{URL: tc.path}}}
 		out := playbackDecision(in)
-		want := url
-		if strings.HasPrefix(url, "/api/v1/") {
-			want = Prefix + strings.TrimPrefix(url, "/api/v1")
-		}
-		if out.PlaybackPlan.Stream.URL != want || in.PlaybackPlan.Stream.URL != url {
-			t.Fatalf("projection changed source or signed query: %q %q", out.PlaybackPlan.Stream.URL, in.PlaybackPlan.Stream.URL)
+		if out.PlaybackPlan.Stream.URL != tc.want || in.PlaybackPlan.Stream.URL != tc.path {
+			t.Fatalf("projection of %q = %q, want %q; source = %q", tc.path, out.PlaybackPlan.Stream.URL, tc.want, in.PlaybackPlan.Stream.URL)
 		}
 	}
 }
@@ -241,19 +246,5 @@ func TestPlaybackDecisionV2EmptySubtitleInventoryIsArray(t *testing.T) {
 				t.Fatal("projection mutated the source inventory")
 			}
 		})
-	}
-}
-
-func TestPlaybackV2MediaURLPreservesSignedDelivery(t *testing.T) {
-	for _, tc := range []struct{ path, want string }{
-		{"/stream/s/subtitles/0.vtt?st=a%2Fb&file_id=7", "/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb&file_id=7"},
-		{"/stream/s/subtitles/0/fonts?st=a%2Fb", "/api/v2/stream/s/subtitles/0/fonts?st=a%2Fb"},
-		{"/playback/transcode/s/master.m3u8?st=a%2Fb", "/api/v2/playback/transcode/s/master.m3u8?st=a%2Fb"},
-		{"https://stream.example/api/v1/stream/s?st=a%2Fb", "https://stream.example/api/v1/stream/s?st=a%2Fb"},
-		{"/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb", "/api/v2/stream/s/subtitles/0.vtt?st=a%2Fb"},
-	} {
-		if got := playbackV2MediaURL(tc.path); got != tc.want {
-			t.Errorf("projection of %q = %q, want %q", tc.path, got, tc.want)
-		}
 	}
 }

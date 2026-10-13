@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Languages } from "lucide-react";
+import { EyeOff, Languages } from "lucide-react";
 
 interface DetailOverviewProps {
   overview: string;
@@ -8,6 +8,9 @@ interface DetailOverviewProps {
   clamp?: boolean;
   translating?: boolean;
   onTranslate?: () => void;
+  /** Spoiler protection: show a reveal button instead of the text. */
+  hidden?: boolean;
+  onReveal?: () => void;
 }
 
 export default function DetailOverview({
@@ -16,6 +19,8 @@ export default function DetailOverview({
   clamp = false,
   translating = false,
   onTranslate,
+  hidden = false,
+  onReveal,
 }: DetailOverviewProps) {
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -32,14 +37,29 @@ export default function DetailOverview({
     const observer = new ResizeObserver(measure);
     observer.observe(text);
     return () => observer.disconnect();
-  }, [clamp, expanded, overview]);
+  }, [clamp, expanded, overview, hidden]);
+
+  if (hidden) {
+    return (
+      <div className="detail-hero-description max-w-2xl">
+        <button
+          type="button"
+          onClick={onReveal}
+          className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 text-sm transition-colors"
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          Description hidden until you watch. Show it
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="detail-hero-description max-w-2xl">
       <p
         ref={textRef}
         className={`text-muted-foreground leading-7 ${
-          compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[15px]"
+          compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? "line-clamp-3" : ""} ${
           translating ? "animate-pulse opacity-50" : ""
         }`}

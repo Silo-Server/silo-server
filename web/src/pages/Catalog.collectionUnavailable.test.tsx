@@ -13,12 +13,15 @@ const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
   useCatalogFilters: () => ({ data: undefined, isLoading: false }),
   useCatalogMetadataFilters: () => ({ data: undefined, isLoading: false }),
 }));
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 vi.mock("@/hooks/useCanRequest", () => ({
@@ -26,6 +29,10 @@ vi.mock("@/hooks/useCanRequest", () => ({
 }));
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: () => ({ data: undefined, isLoading: false }),
+  useRequestFeatureStatus: () => ({ data: undefined }),
+}));
+vi.mock("@/hooks/queries/watchlistTitles", () => ({
+  useWatchlistTitles: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 vi.mock("@/components/ItemGrid", () => ({ default: () => <div data-testid="item-grid" /> }));
 vi.mock("@/components/catalog/CatalogFiltersPanel", () => ({ default: () => null }));

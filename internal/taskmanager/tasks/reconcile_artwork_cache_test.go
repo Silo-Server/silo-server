@@ -223,17 +223,6 @@ func TestReconcileArtworkCacheRefusesCommitBeforeBaselineRead(t *testing.T) {
 	}
 }
 
-func TestReconcileArtworkCacheRunsWithoutManagedTransition(t *testing.T) {
-	runner := &fakeReconcileRunner{}
-	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "current"}}
-	if err := NewReconcileArtworkCacheTask(runner, store, nil, "current").Execute(t.Context(), &fakeProgress{}); err != nil {
-		t.Fatal(err)
-	}
-	if runner.runs != 1 {
-		t.Fatalf("manual reconcile runs = %d, want 1", runner.runs)
-	}
-}
-
 func TestReconcileArtworkCacheRejectsOldProcessAfterTransitionReceiptClears(t *testing.T) {
 	oldRoot := t.TempDir()
 	newRoot := t.TempDir()

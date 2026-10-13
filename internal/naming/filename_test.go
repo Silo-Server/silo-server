@@ -1,6 +1,9 @@
 package naming
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestDetectSeriesRoot(t *testing.T) {
 	tests := []struct {
@@ -420,6 +423,65 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: true,
 		},
 		{
+			// #1642: Sonarr adds the show's TVDB ID to series folders, so a
+			// TVDB-only tag isn't movie evidence; the episode token decides.
+			name:                    "mixed library tvdb-only show folder keeps episode token",
+			path:                    "/mixed/Show (2024) {tvdb-12345}/Show S01E03.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show (2024) {tvdb-12345}",
+			wantTitle:               "Show",
+			wantYear:                2024,
+			wantSeason:              1,
+			wantEpisode:             3,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A release name repeating the show's title and year still has its
+			// episode token decide in a TVDB-only folder.
+			name:                    "mixed library tvdb-only show folder with release-named episode is series",
+			path:                    "/mixed/Show (2024) {tvdb-12345}/Show.2024.S01E03.1080p.WEB-DL.mkv",
+			libraryType:             "mixed",
+			wantType:                "series",
+			wantRoot:                "/mixed/Show (2024) {tvdb-12345}",
+			wantTitle:               "Show",
+			wantYear:                2024,
+			wantSeason:              1,
+			wantEpisode:             3,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// The title check still applies to a TVDB-only folder, so a file
+			// repeating the folder's title and year is movie evidence.
+			name:                    "mixed library tvdb-only movie folder stays movie",
+			path:                    "/mixed/Movie (2020) {tvdb-12345}/Movie (2020).mkv",
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/mixed/Movie (2020) {tvdb-12345}",
+			wantTitle:               "Movie",
+			wantYear:                2020,
+			wantEpisodePattern:      false,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
+		},
+		{
+			// ...even when that title looks like an episode code.
+			name:                    "mixed library tvdb-only movie folder with episode-like title stays movie",
+			path:                    "/mixed/s01e03 (2020) {tvdb-12345}/s01e03 (2020).mkv",
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/mixed/s01e03 (2020) {tvdb-12345}",
+			wantTitle:               "s01e03",
+			wantYear:                2020,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
+		},
+		{
 			name:                    "mixed library obvious movie folder beats episode token",
 			path:                    "/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
 			libraryType:             "mixed",
@@ -750,5 +812,34 @@ func TestEpisodePatternAgreesAcrossClassifiers(t *testing.T) {
 			t.Errorf("%q: type = %q (inference) and %q (path context)",
 				filePath, assignment.InferredType, ctx.Type)
 		}
+	}
+}
+
+// TestMixedLibraryTVDBTaggedShowFolderIsSeries covers #1642 end to end: two
+// episodes in a TVDB-tagged show folder with no season folder become one
+// series group, not a single movie group.
+func TestMixedLibraryTVDBTaggedShowFolderIsSeries(t *testing.T) {
+	paths := []string{
+		"/mixed/Show (2024) {tvdb-12345}/Show S01E03.mkv",
+		"/mixed/Show (2024) {tvdb-12345}/Show S01E04.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "mixed", 1, nil)
+	keys := map[string]bool{}
+	for _, filePath := range paths {
+		assignment, ok := assignments[filepath.Clean(filePath)]
+		if !ok {
+			t.Fatalf("no root assignment for %q", filePath)
+		}
+		if assignment.InferredType != "series" {
+			t.Fatalf("%q: InferredType = %q, want series", filePath, assignment.InferredType)
+		}
+		group := InferGroupIdentity(filePath, "mixed", assignment)
+		if group.BaseType != "series" {
+			t.Fatalf("%q: group BaseType = %q (key %q), want series", filePath, group.BaseType, group.ContentGroupKey)
+		}
+		keys[group.ContentGroupKey] = true
+	}
+	if len(keys) != 1 {
+		t.Fatalf("episodes landed in %d groups %v, want one series group", len(keys), keys)
 	}
 }

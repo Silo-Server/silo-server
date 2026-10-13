@@ -818,7 +818,7 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 		if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{Restart: true}); err != nil {
 			return fmt.Errorf("record plugin restart: %w", err)
 		}
-		s.invalidateInstallationCache()
+		s.InvalidateInstallationCache()
 		if installation, err := s.loadInstallation(ctx, installationID, true); err == nil {
 			// This host restarts synchronously below; record the new
 			// generation on its entry so the next reconcile does not

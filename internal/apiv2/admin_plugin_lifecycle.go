@@ -64,11 +64,11 @@ func adminPluginLifecycleProblem(err error) error {
 	return adminPluginMutationProblem(err)
 }
 
-func adminPluginInstallationOutput(view handlers.PluginInstallationView, err error) (*AdminPluginInstallationOutput, error) {
+func (reg *Registry) adminPluginInstallationOutput(view handlers.PluginInstallationView, err error) (*AdminPluginInstallationOutput, error) {
 	if err != nil {
 		return nil, adminPluginLifecycleProblem(err)
 	}
-	out, err := adminPluginInstallationOf(view)
+	out, err := reg.adminPluginInstallationOf(view)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -102,7 +102,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		if !hasCatalog && strings.TrimSpace(input.ArchiveURL) == "" {
 			return nil, validationProblem(locationBody+".archive_url", codeRequired, "Supply archive_url or repository_id, plugin_id and version.")
 		}
-		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.CreateAdminPluginInstallation(ctx, input))
+		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.CreateAdminPluginInstallation(ctx, input))
 	})
 	update := op(http.MethodPut, "/{id}", "updateAdminPluginInstallation", "Assign enabled and/or update_policy on one installation. Disabling stops the running plugin first. Repeating the same assignment converges on one stored row.", RetrySafetyNaturalIdempotent)
 	update.Errors = append(update.Errors, http.StatusNotFound, http.StatusConflict)
@@ -120,7 +120,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		if in.Body.Enabled == nil && in.Body.UpdatePolicy == nil {
 			return nil, validationProblem(locationBody, codeRequired, "Supply enabled or update_policy.")
 		}
-		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.UpdateAdminPluginInstallation(ctx, id, handlers.PluginInstallationUpdateInput{Enabled: in.Body.Enabled, UpdatePolicy: in.Body.UpdatePolicy}))
+		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.UpdateAdminPluginInstallation(ctx, id, handlers.PluginInstallationUpdateInput{Enabled: in.Body.Enabled, UpdatePolicy: in.Body.UpdatePolicy}))
 	})
 	apply := op(http.MethodPost, "/{id}/update", "applyAdminPluginUpdate", "Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry.", RetrySafetyNonRetryable)
 	apply.Errors = append(apply.Errors, http.StatusNotFound, http.StatusConflict)
@@ -132,7 +132,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.ApplyAdminPluginUpdate(ctx, id))
+		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.ApplyAdminPluginUpdate(ctx, id))
 	})
 	restart := op(http.MethodPost, "/{id}/restart", "restartAdminPluginInstallation", "Stop the installation's process and, for a resident plugin (one the server supervises, such as a network access provider), start it again with a fresh failure budget; the response's runtime reports the outcome, including a launch that failed. A non-resident plugin is only stopped and launches on its next use. A disabled installation is 409. Repeating the request converges on one running process.", RetrySafetyNaturalIdempotent)
 	restart.Errors = append(restart.Errors, http.StatusNotFound, http.StatusConflict)
@@ -144,7 +144,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.RestartAdminPluginInstallation(ctx, id))
+		return reg.adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.RestartAdminPluginInstallation(ctx, id))
 	})
 	remove := op(http.MethodDelete, "/{id}", "deleteAdminPluginInstallation", "Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry.", RetrySafetyNonRetryable)
 	remove.DefaultStatus = http.StatusNoContent

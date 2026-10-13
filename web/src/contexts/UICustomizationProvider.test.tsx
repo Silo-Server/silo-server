@@ -11,39 +11,10 @@ const mocks = vi.hoisted(() => ({
   useSettingsCapabilities: vi.fn(),
 }));
 
-vi.mock("@/hooks/queries/settingValues", () => ({
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/settingValues")>()),
   useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
   useSettingsCapabilities: (...args: unknown[]) => mocks.useSettingsCapabilities(...args),
-  settingsCapabilitiesSupportKey: (
-    capabilities:
-      | {
-          api_version: number;
-          manifest_revision: number;
-          supports_batched_effective?: boolean;
-          supports_idempotent_writes?: boolean;
-        }
-      | undefined,
-  ) =>
-    capabilities?.api_version === 1 &&
-    capabilities.manifest_revision >= 5 &&
-    capabilities.supports_batched_effective === true &&
-    capabilities.supports_idempotent_writes === true,
-  settingsCapabilitiesSupportAtomicShortcuts: (
-    capabilities:
-      | {
-          api_version: number;
-          manifest_revision: number;
-          supports_batched_effective?: boolean;
-          supports_idempotent_writes?: boolean;
-          supports_atomic_shortcuts?: boolean;
-        }
-      | undefined,
-  ) =>
-    capabilities?.api_version === 1 &&
-    capabilities.manifest_revision >= 5 &&
-    capabilities.supports_batched_effective === true &&
-    capabilities.supports_idempotent_writes === true &&
-    capabilities.supports_atomic_shortcuts === true,
 }));
 
 import { UICustomizationProvider } from "./UICustomizationProvider";
@@ -138,34 +109,6 @@ describe("UICustomizationProvider capability gating", () => {
       }),
     );
     expect(screen.getByRole("status")).toHaveAttribute("data-supported", "true");
-    expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "false");
-  });
-
-  it("fails closed without batched reads and idempotent replay", () => {
-    mocks.useSettingsCapabilities.mockReturnValue({
-      data: {
-        api_version: 1,
-        manifest_revision: 5,
-        contract_etag: "revision-five-incomplete",
-        supports_idempotent_writes: true,
-        supports_atomic_shortcuts: true,
-      },
-      isLoading: false,
-      isError: false,
-    });
-
-    render(
-      <UICustomizationProvider>
-        <Probe />
-      </UICustomizationProvider>,
-    );
-
-    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enabled: false,
-      }),
-    );
-    expect(screen.getByRole("status")).toHaveAttribute("data-supported", "false");
     expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "false");
   });
 

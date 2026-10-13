@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setAccessToken, setRefreshToken } from "@/api/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -43,6 +44,8 @@ const triggers = [
   ["recommendations", useTriggerRecommendations],
 ] as const;
 it.each(triggers)("sends %s once after 401 without refresh or replay", async (suffix, hook) => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { calls, wrapper } = setup(
     () =>
       new Response(

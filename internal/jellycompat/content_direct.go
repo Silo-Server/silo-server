@@ -322,10 +322,11 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 			continue
 		}
 		lib := upstreamUserLibrary{
-			ID:         f.ID,
-			Name:       f.Name,
-			Type:       f.Type,
-			PosterPath: f.PosterPath,
+			ID:                 f.ID,
+			Name:               f.Name,
+			Type:               f.Type,
+			PosterPath:         f.PosterPath,
+			RealtimeMonitoring: f.RealtimeMonitoring,
 		}
 		if f.PosterPath != "" && s.posterPresigner != nil {
 			ttl := s.presignTTL
@@ -346,11 +347,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 // AllowedLibraryIDs means unrestricted (all enabled libraries); a non-nil but
 // empty allowlist grants access to no libraries at all.
 func (s *directContentService) accessibleFolders(ctx context.Context, filter catalog.AccessFilter) ([]*models.MediaFolder, error) {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return nil, nil
-		}
-		return s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
+	libraryIDs, none := filter.LibraryScope(nil)
+	if none {
+		return nil, nil
+	}
+	if libraryIDs != nil {
+		return s.folderRepo.ListByIDs(ctx, libraryIDs)
 	}
 	return s.folderRepo.GetEnabled(ctx)
 }
@@ -1414,6 +1416,10 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 		BackdropPath:      mi.BackdropPath,
 		BackdropThumbhash: mi.BackdropThumbhash,
 		LogoPath:          mi.LogoPath,
+		BannerPath:        mi.BannerPath,
+		ThumbPath:         mi.ThumbPath,
+		ClearArtPath:      mi.ClearArtPath,
+		DiscPath:          mi.DiscPath,
 		UpdatedAt:         mi.UpdatedAt,
 		Runtime:           mi.Runtime,
 		SeasonCount:       mi.SeasonCount,
@@ -1428,6 +1434,8 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 
 func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	versions := append([]catalog.FileVersion(nil), d.Versions...)
+	// applyListFileFields picks the same first version in SQL; keep the two
+	// orders in step.
 	sort.SliceStable(versions, func(i, j int) bool {
 		return compatPrimaryVideoTrack(versions[i]).Width > compatPrimaryVideoTrack(versions[j]).Width
 	})
@@ -1452,6 +1460,11 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		PosterURL:        d.PosterURL,
 		BackdropURL:      d.BackdropURL,
 		LogoURL:          d.LogoURL,
+		BannerURL:        d.BannerURL,
+		ThumbURL:         d.ThumbURL,
+		ClearArtURL:      d.ClearArtURL,
+		DiscURL:          d.DiscURL,
+		BackdropURLs:     d.BackdropURLs,
 		Studios:          d.Studios,
 		Countries:        d.Countries,
 		SeasonCount:      d.SeasonCount,
@@ -1468,6 +1481,12 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		Crew:             d.Crew,
 		Videos:           d.Videos,
 		Extras:           d.Extras,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         d.BannerPath,
+		ThumbPath:          d.ThumbPath,
+		ClearArtPath:       d.ClearArtPath,
+		DiscPath:           d.DiscPath,
+		ExtraBackdropPaths: d.ExtraBackdropPaths,
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}
@@ -1492,6 +1511,7 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
 	// playback.show_forced_subtitles defaults to true.
 	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
+	detail.SubtitleTrackSignature = d.EffectiveSubtitleTrackSignature
 	return detail
 }
 

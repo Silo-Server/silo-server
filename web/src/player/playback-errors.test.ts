@@ -17,6 +17,25 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("tells an unreadable file apart from one that has not been scanned", () => {
+    const unreadable = describePlanTerminal({
+      reason: "source_unreadable",
+      message: "The source file could not be read; it appears to be empty or damaged.",
+      retryable: false,
+    });
+    expect(unreadable.title).toBe("This file can't be played");
+    expect(unreadable.message).toContain("empty or damaged");
+    expect(unreadable.message).not.toMatch(/scan finishes/);
+
+    expect(
+      describePlanTerminal({
+        reason: "source_metadata_incomplete",
+        message: "The source is missing video metadata required for a validated playback route.",
+        retryable: true,
+      }).title,
+    ).toBe("This file hasn't finished scanning");
+  });
+
   it("describes disabled audio transcoding", () => {
     expect(
       describePlanTerminal({
@@ -182,6 +201,17 @@ describe("describePlaybackTransportError", () => {
       title: "Playback unavailable",
       message: "You do not have permission to play this item.",
     });
+  });
+
+  it("does not call a failed change to a playing stream a failure to start", () => {
+    const error = new PlayerFetchError(502, "Bad Gateway");
+
+    expect(describePlaybackTransportError(error)?.message).toBe(
+      "Silo could not start playback right now. Please try again.",
+    );
+    expect(describePlaybackTransportError(error, "update")?.message).toBe(
+      "Silo could not update playback right now. Please try again.",
+    );
   });
 
   it("ignores 4xx statuses it has nothing specific to say about", () => {

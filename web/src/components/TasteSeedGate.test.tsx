@@ -88,22 +88,13 @@ describe("taste-seed gate and banner", () => {
     vi.unstubAllGlobals();
   });
 
-  it("asks the favorites endpoint for one card per Home mount", async () => {
+  it("refetches the one-card page when a media-surface refresh lands", async () => {
     const limits = stubFavorites(listFavoritesOk);
 
     const client = renderHome();
     await waitFor(() => expect(client.isFetching()).toBe(0));
     await screen.findByText("home");
-
-    // The gate and the banner only need to know whether any favorite exists.
     expect(limits).toEqual([1]);
-  });
-
-  it("refetches the one-card page when a media-surface refresh lands", async () => {
-    const limits = stubFavorites(listFavoritesOk);
-
-    const client = renderHome();
-    await waitFor(() => expect(limits).toHaveLength(1));
 
     // Favorite toggles, realtime user_state events, and catalog sweeps all
     // refresh the favorites prefix; the gate must still hear about them.
@@ -129,15 +120,6 @@ describe("taste-seed gate and banner", () => {
 
     expect(screen.getByText("home")).toBeTruthy();
     expect(screen.queryByText("taste seed")).toBeNull();
-  });
-
-  it("shows the banner only to a profile that skipped the picker and has no favorites", async () => {
-    setTasteSeedDismissed("p-owner");
-    stubFavorites(noFavorites);
-
-    renderHome();
-
-    await screen.findByText("Personalize your home");
   });
 
   it("hides the banner once the profile favorites something", async () => {

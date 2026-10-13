@@ -42,6 +42,7 @@ import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -95,12 +96,19 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  const showAdminActivity = useIsActingAdmin();
+  const criticalContentLoaded = useCriticalContentLoaded();
+  // The indicator's four requests wait for Home's first rows (see startupPriority).
+  const showAdminActivity = useIsActingAdmin() && criticalContentLoaded;
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   const isHomePath = location.pathname === "/";
+  // Only Home marks its own first content; every other page releases the
+  // deferred widgets as soon as it mounts.
+  useEffect(() => {
+    if (!isHomePath) markCriticalContentLoaded();
+  }, [isHomePath]);
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");
@@ -116,7 +124,19 @@ export default function Layout({ children }: LayoutProps) {
     })();
   const isRecommendationsRoute = location.pathname === "/recommendations";
   const isCalendarRoute = location.pathname === "/calendar";
-  const isRequestDetailRoute = /^\/requests\/(movie|series)\//.test(location.pathname);
+  // The Requests hub, its Discover row pages, and its studio/network/genre
+  // browse pages lay out their own gutter so text rows line up with
+  // MediaCarousel's edge padding.
+  const isRequestsRoute =
+    /^\/requests\/?$/.test(location.pathname) ||
+    location.pathname.startsWith("/requests/browse/") ||
+    location.pathname.startsWith("/requests/discover/");
+  // A title outside the library gets the item page's treatment. The old
+  // /requests/movie/… and /requests/series/… links redirect there, so they
+  // keep it too rather than expanding the sidebar for one frame.
+  const isTitleRoute =
+    location.pathname.startsWith("/title/") ||
+    /^\/requests\/(movie|series)\//.test(location.pathname);
   // A watch-party room owns its own full-height layout; the hub does not.
   const isWatchPartyRoomRoute = /^\/rooms\/(?!join$)[^/]+$/.test(location.pathname);
   const needsNoPadding =
@@ -124,7 +144,8 @@ export default function Layout({ children }: LayoutProps) {
     isWatchPartyRoomRoute ||
     isLibraryRoute ||
     isItemRoute ||
-    isRequestDetailRoute ||
+    isRequestsRoute ||
+    isTitleRoute ||
     isSearchLandingRoute ||
     isRecommendationsRoute ||
     isCalendarRoute;
@@ -132,7 +153,7 @@ export default function Layout({ children }: LayoutProps) {
   // Cold item routes commit a lightweight shell while the sidebar collapses.
   // A detail already cached before navigation skips that gate and renders on
   // the destination's first frame.
-  const isDetailImmersion = isItemRoute || isPersonRoute;
+  const isDetailImmersion = isItemRoute || isPersonRoute || isTitleRoute;
   const targetDetailImmersion = isDetailImmersion;
   const visualDetailImmersion = useImmediateSidebarCollapse(targetDetailImmersion);
   const {
@@ -379,6 +400,7 @@ export default function Layout({ children }: LayoutProps) {
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
+          data-sticky-header
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
@@ -454,7 +476,9 @@ export default function Layout({ children }: LayoutProps) {
           {needsNoPadding ? (
             children
           ) : (
-            <div className="relative z-10 px-4 py-4 sm:px-6 lg:px-10 lg:py-8 xl:px-12">
+            // `--page-gutter` is published so fixed page chrome (the collection
+            // editor's save bar) can line up with this content column.
+            <div className="relative z-10 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:py-8 lg:[--page-gutter:2.5rem] xl:[--page-gutter:3rem]">
               {children}
             </div>
           )}

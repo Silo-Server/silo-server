@@ -26,6 +26,7 @@ import {
   type PrimaryMenuItem,
 } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
+import { TitleArtSettingsGroup } from "./TitleArtSettingsGroup";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 
@@ -432,6 +433,8 @@ export default function InterfaceSettings() {
           </div>
         ) : null}
       </SettingsGroup>
+
+      <TitleArtSettingsGroup />
 
       <SettingsGroup
         title="Primary menu"

@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -322,35 +324,35 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 		candidate := candidates[0]
 		spec := movieTailSpec(candidate)
 		switch status {
-		case ArtifactFailed:
-			err = repo.RecordArtifactFailure(ctx, ArtifactFailure{
-				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
+		case mediaartifact.StatusFailed:
+			err = repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
+				MediaFileID: candidate.FileID, Key: spec.key, Identity: spec.window.identity(candidate),
 				RecordedBy: "node-a", Error: "timeout",
 			})
-		case ArtifactUnusable:
-			err = repo.UpsertArtifact(ctx, Artifact{
-				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
-				Status: ArtifactUnusable, Detail: tailDetailSparse,
+		case mediaartifact.StatusUnusable:
+			err = repo.UpsertArtifact(ctx, mediaartifact.Artifact{
+				MediaFileID: candidate.FileID, Key: spec.key, Identity: spec.window.identity(candidate),
+				Status: mediaartifact.StatusUnusable, Detail: tailDetailSparse,
 			})
 		case tailDetailNoVideo:
 			// Stored from probe metadata by an earlier build.
-			err = repo.UpsertArtifact(ctx, Artifact{
-				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
-				Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+			err = repo.UpsertArtifact(ctx, mediaartifact.Artifact{
+				MediaFileID: candidate.FileID, Key: spec.key, Identity: spec.window.identity(candidate),
+				Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
 			})
 		default:
-			err = repo.UpsertArtifact(ctx, Artifact{
-				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
-				Status: ArtifactComplete, PayloadFormat: creditsTailFormat, ItemCount: 1, Payload: []byte{1},
+			err = repo.UpsertArtifact(ctx, mediaartifact.Artifact{
+				MediaFileID: candidate.FileID, Key: spec.key, Identity: spec.window.identity(candidate),
+				Status: mediaartifact.StatusComplete, PayloadFormat: creditsTailFormat, ItemCount: 1, Payload: []byte{1},
 			})
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	store("newer", ArtifactComplete)
-	store("older", ArtifactUnusable)
-	store("mixed", ArtifactFailed)
+	store("newer", mediaartifact.StatusComplete)
+	store("older", mediaartifact.StatusUnusable)
+	store("mixed", mediaartifact.StatusFailed)
 	if got, want := f.listed(t, repo, "node-a"), []string{"scannerCredits"}; !slices.Equal(got, want) {
 		t.Fatalf("candidates after analysis %v, want %v", got, want)
 	}
@@ -367,9 +369,9 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 	// An episode tail stored for a file does not count as its movie tail.
 	candidates, _ = repo.ListMovieCandidatesForFile(ctx, f.files["scannerCredits"])
 	episode := episodeTailSpec(candidates[0])
-	if err := repo.UpsertArtifact(ctx, Artifact{
-		MediaFileID: candidates[0].FileID, ArtifactKey: episode.key, ArtifactIdentity: movieTailSpec(candidates[0]).window.identity(candidates[0]),
-		Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+	if err := repo.UpsertArtifact(ctx, mediaartifact.Artifact{
+		MediaFileID: candidates[0].FileID, Key: episode.key, Identity: movieTailSpec(candidates[0]).window.identity(candidates[0]),
+		Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -382,6 +384,20 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 	}
 	if got, want := f.listed(t, repo, "node-a"), []string{"newer", "scannerCredits"}; !slices.Equal(got, want) {
 		t.Fatalf("candidates after replacing a file %v, want %v", got, want)
+	}
+	// Chapter credits keep a movie listed even with its tail stored, so a
+	// chapter rule change can withdraw them.
+	store("newer", mediaartifact.StatusComplete)
+	if got, want := f.listed(t, repo, "node-a"), []string{"scannerCredits"}; !slices.Equal(got, want) {
+		t.Fatalf("candidates with the replaced file's tail stored %v, want %v", got, want)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET credits_start = 6700, credits_end = 7200,
+		credits_markers_source = $2, credits_markers_algorithm = $3 WHERE id = $1`,
+		f.files["newer"], models.MarkerSourceScanner, CreditsChapterAlgorithm); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.listed(t, repo, "node-a"), []string{"newer", "scannerCredits"}; !slices.Equal(got, want) {
+		t.Fatalf("candidates with chapter credits over a stored tail %v, want %v", got, want)
 	}
 }
 

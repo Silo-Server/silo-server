@@ -1,6 +1,7 @@
-# Email invitation API
+# Invitation API
 
-These v2 operations manage email-bound bearer-token invitations. Ordinary signup
+These v2 operations manage bearer-token invitations: emailed invitations bound
+to one address, and link invitations whose invitee enters an address at accept. Ordinary signup
 invite codes use the separate auth/signup contract. Administrator operations
 require an acting administrator. Public lookup and acceptance use the invitation
 rate-limit bucket. Capability responses use `Cache-Control: private, no-cache` and an `ETag`, and support conditional requests. Other responses use `Cache-Control: no-store`, including credentials
@@ -10,7 +11,7 @@ and claim links. No raw claim token is retained for response replay.
 | --- | --- | --- |
 | GET | `/invitations/capabilities` | Public support and profile-store capability |
 | GET | `/invitations/{token}` | Claim-screen details for an eligible token |
-| POST | `/invitations/{token}/accept` | Atomically create the bound account; report login separately |
+| POST | `/invitations/{token}/accept` | Atomically create the account; report login separately |
 | GET | `/admin/invitations/capabilities` | Administrator support and profile-store capability |
 | GET | `/admin/invitations` | Bounded administrator history page |
 | GET | `/admin/invitations/{id}` | Administrator metadata, without a claim token or digest |
@@ -24,15 +25,27 @@ transaction capability, including its notification wrapper. It is false for
 SQLite; profileless acceptance remains available. Capability is not a live
 storage health check. A claim lookup's `acceptance_available` is false when that
 particular invitation requires an unsupported default profile. The route remains
-present and a refused operation returns a typed capability problem.
+present and a refused operation returns a typed capability problem. The
+administrator capability adds `email_delivery`: whether email is configured, so
+an invitation can be created with `delivery: "email"`. The public capability
+does not disclose it.
 
-Public lookup returns `email`, `inviter_name`, `server_name`, `expires_at`,
-`show_tour`, and `acceptance_available`. Unknown, revoked, expired, and consumed
+Public lookup returns `email`, `email_required`, `note`, `inviter_name`,
+`server_name`, `expires_at`, `show_tour`, and `acceptance_available`. An
+invitation bound to no address, as one created with `delivery: "link"` is, has
+`email_required: true` and an empty `email`; the claim screen asks for an
+address. A link returned for manual delivery because email was not configured
+stays bound to its address. `note` is the inviter's note, empty when none. Unknown, revoked, expired, and consumed
 tokens return the same `404 not_found`. Real storage errors return a safe server
 error rather than being disguised as missing tokens.
 
-Acceptance takes `{password}` and returns **201** after the account and invitation
-commit. Passwords require at least eight characters and at most 72 UTF-8 bytes.
+Acceptance takes `{password}`, plus `email` when the lookup reported
+`email_required`, and returns **201** after the account and invitation commit.
+Passwords require at least eight characters and at most 72 UTF-8 bytes. `email`
+is ignored for an emailed invitation. For a link invitation, a missing or invalid
+address returns `422 validation_failed` at `body.email`, and an address that
+already has an account returns `409 conflict`. Neither consumes the invitation;
+the invitee can correct the address and accept again.
 Its body is `{status: "accepted", login_status, username, tokens?}`:
 
 - `signed_in` includes the ordinary v2 token pair and typed account.
@@ -43,7 +56,8 @@ Its body is `{status: "accepted", login_status, username, tokens?}`:
 A lost commit response remains uncertain. The invitation token is single-use;
 it is not an idempotency key or a way to replay a lost credential response.
 
-Administrator creation takes `email`, optional `role` (default `user`), optional
+Administrator creation takes optional `delivery`, `email`, optional `role`
+(default `user`), optional
 string `access_group_id`, optional string-ID array `library_ids`, optional
 `create_profile` and `show_tour` (both default true), and optional `note`.
 Omitted library IDs inherit access; `[]` is an explicit empty override. Omit
@@ -52,16 +66,45 @@ Default-profile requests are refused before effects when unsupported. Only the
 server Owner may create or resend an invitation with role `admin`; another
 administrator receives `403 permission_denied`.
 
+`delivery` chooses how the link reaches the invitee:
+
+- `link`: create a link invitation to share. `email` must be omitted; nothing is
+  emailed.
+- `email`: `email` is required and the link is emailed. When email is not
+  configured the request returns `409 capability_not_configured` and creates
+  nothing.
+- omitted: `email` is required; the link is emailed when email is configured and
+  otherwise returned for manual delivery (`not_configured`).
+
 Create and resend both return **201**, with `Location` pointing to the new
 administrator metadata resource. The body contains `invitation`, `claim_url`,
 and `delivery_status`:
 
 - `sent`: the configured sender returned success; recipient delivery is not guaranteed.
 - `not_configured`: no email was sent; offer manual delivery of the returned link.
+- `not_requested`: a link invitation; nothing was emailed.
 - `failed_or_unknown`: the invitation committed but SMTP failed or its result was
   uncertain. The new link is still active and the previous link is revoked.
   Offer the returned link and an explicit administrator decision; do not retry
   the POST automatically.
+
+Invitation metadata carries `delivery`: `link`, `email_sent`,
+`email_unconfirmed` (the send failed or its outcome is uncertain; the link
+still works), or `unknown` for invitations created before delivery was recorded.
+A pending link invitation has an empty `email`; once accepted, `email` is the
+address the account took.
+
+Resend takes an optional body with the same `delivery` choice:
+
+- `link`: replace the link and email nothing. An emailed invitation keeps its
+  address, so the invitee still signs up with it; only the emailed link stops
+  working. The response reports `not_requested`.
+- `email`: email the new link. Returns `409 capability_not_configured` when email
+  is not configured and `422 validation_failed` at `body.delivery` for a link
+  invitation, which has no address; neither replaces the invitation.
+- omitted, or no body: a link invitation gets a new link and nothing is
+  emailed; an invitation with an address is emailed when email is configured
+  and otherwise returned for manual delivery (`not_configured`).
 
 Claim URLs appear only in creation/replacement responses. Lists and metadata
 reads contain neither the raw token, its digest, nor a reusable link. Clients

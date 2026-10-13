@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setProfileId } from "@/api/client";
 import type { PersonSearchMediaScope } from "@/api/v2/people";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { usePersonSearch } from "./people";
+import { usePersonSearch } from "./personSearch";
 
 beforeEach(() => {
   installPolicyStorageMocks();

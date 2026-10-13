@@ -58,7 +58,8 @@ lookups. Clients must reconnect with a newly minted credential. This is bounded
 revocation detection, not an instantaneous revocation guarantee.
 
 The selected message protocol retains the existing event frames (`hello`,
-`subscribe`, `subscribed`, `snapshot`, `event`, `error`) and per-channel payloads.
+`subscribe`, `subscribed`, `snapshot`, `event`, `error`) and per-channel payloads,
+plus the server-sent `access_changed` frame described below.
 The shared event implementation still applies channel eligibility, the subscribe
 grace period, inbound frame limits, snapshots, ping/pong and delivery filtering.
 The handshake version does not rewrite another domain's event payload.
@@ -67,6 +68,63 @@ connection results and frames after that authority changes.
 
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
+
+### Access changes
+
+When the recheck finds that the login session is still valid but the access the
+ticket was minted under has changed, the server sends one text frame and then a
+close frame:
+
+```json
+{"type":"access_changed"}
+```
+
+The close code is `4001` with reason `access_changed`. Access has changed when
+the account role, the effective role (an admin account's profile stopped or
+started being the primary profile), or the fingerprint of the resolved viewer
+scope differs from the ticket's, or the profile is no longer verified. The
+scope covers the visible libraries, content-rating limits, playback-quality and
+bitrate limits, and `access_policy_revision`, which a group move, a permission,
+role or quality change, and a group quality edit all bump. It also covers the
+profile's metadata-language and hidden-library preferences and the server's
+unrated-content setting, so changing those sends the signal too. A revoked or
+expired login session and a disabled or deleted account still close the
+connection without it.
+
+On either the frame or the close code, a client refetches the data the viewer's
+access decides (libraries, home sections, search, item details, collections,
+and the account's own permissions) and reconnects at once with a newly minted
+ticket; no backoff is needed. If the ticket mint, or any other request, answers
+`403` `profile_verification_required`, the profile token no longer verifies
+the profile and the client returns to profile selection or PIN entry. An access
+change does not cause that by itself: a profile token is bound to the profile's
+own PIN, so only a change to that PIN ends it. Clients
+that ignore unknown frame types and close codes keep today's behavior: they
+reconnect and pick up the new access on their next requests. Playback that
+already started keeps its stream token until the next start.
+
+After a role change the access token the client holds was minted under the old
+role, so the ticket mint for the reconnect answers `401` `token_refresh_required`
+(see [auth-api.md](auth-api.md#access-tokens-after-a-role-change)). The client
+refreshes the session, mints the ticket again with the new token, and does not
+sign out. The new ticket carries the new role, so the socket does not close
+again for the same change.
+
+The bridge events socket never sends this frame. It picks its channels once, at
+the handshake: an admin account gets the administrator channels and other
+accounts' events only while it is the acting admin (see
+[api-contract.md](architecture/api-contract.md)), judged on the handshake's
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. Any
+other profile on the account, such as a child profile, connects with the user
+channels. A rejected ticket (expired, reused, or for another account) leaves the
+connection unbound and judged as acting with no profile, so on a household with
+a PIN-protected or limited profile it also gets the user channels until the
+client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
+without a frame once the session ends, the account's role differs from the
+token's, or a connection holding the administrator channels is no longer the
+acting admin or that check fails.
+The playback-control and Watch Together sockets share the recheck but still
+close without a frame or dedicated code when it fails.
 
 ### Owner-bound playback control handshake (v2)
 
@@ -106,7 +164,9 @@ receiving registration still owns the lane, through the existing command
 tracker and stop-completion paths. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
 access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
-`result`, event) are unchanged from the bridge socket.
+`result`, event) are unchanged from the bridge socket. A client message larger
+than 64 KiB closes the connection with `1009` (message too big); the bridge
+socket applies the same limit.
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
 `protocol` only when this server serves the handshake. The web player mints
@@ -314,7 +374,7 @@ Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchToget
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
-The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
+The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. On both versions a client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the same disconnect callback. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 
 The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Existing room-proof expiry ends access; it is not automatically renewed or rebound. Native adoption and exact caller inventories remain separate gates. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
 
@@ -491,3 +551,21 @@ for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
+
+### `marker_thumbnail_ready` (native v2, negotiated)
+
+Only playback attempts that opted into `marker_thumbnails_v1` at start receive
+this event. Its payload contains `session_id`, numeric `file_id`, `kind`,
+`start_seconds`, `end_seconds`, `thumbnail_url`, optional `thumbnail_thumbhash`,
+and `thumbnail_capture_seconds` (equal to marker start). It is sent only after
+durable, snapshot-fenced persistence and protected URL resolution.
+
+Consumers match the active session/file and exact kind/range before merging the
+image; they discard events for other versions or edited occurrences. Failed
+event delivery leaves the canonical v2 watch/marker read available. The existing
+`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+
+Marker thumbnail readiness uses the playback event bus to reach sessions on
+other API replicas. Each serving replica resolves a protected image URL and
+checks the session's negotiated feature before delivery. Subscribers do not
+rebroadcast events; retired image references cannot acquire new URLs.

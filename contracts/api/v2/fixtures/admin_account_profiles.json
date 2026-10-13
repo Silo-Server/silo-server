@@ -2,7 +2,13 @@
   "items": [
     {
       "id": "profile-1",
-      "name": "Parent"
+      "name": "Parent",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "id": "profile-2",
+      "name": "Guest",
+      "last_seen_at": null
     }
   ],
   "page": {

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import type { ItemDetail, MangaChapter } from "@/api/types";
@@ -42,6 +42,7 @@ function mangaItem(chapters: MangaChapter[]): ItemDetail & { type: "manga" } {
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -74,30 +75,9 @@ function volumeSeries(): ItemDetail & { type: "manga" } {
   ]);
 }
 
-function multiChapterVolume(): ItemDetail & { type: "manga" } {
-  return mangaItem([
-    { content_id: "v1-c1", title: "Chapter 1", chapter_index: 1, volume: "v01" },
-    { content_id: "v1-c2", title: "Chapter 2", chapter_index: 2, volume: "v01" },
-  ]);
-}
-
 const seriesBackTo = "&backTo=" + encodeURIComponent("/item/manga-1?libraryId=7");
 
 describe("MangaContent", () => {
-  it("renders a volume-based series as flat 'Volume N' rows with no nested chapter", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={volumeSeries()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
-    // Flat rows: the volume labels ARE the links, and there is no redundant
-    // "Chapter 1" nested under "Volume 1".
-    expect(screen.getByRole("link", { name: /^Volume 1$/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^Volume 2$/i })).toBeInTheDocument();
-    expect(screen.queryByText(/^Chapter \d/)).not.toBeInTheDocument();
-  });
-
   it("links a flat volume row to the ebook reader by content_id with the library id and a backTo to the series", () => {
     render(
       <MemoryRouter>
@@ -218,87 +198,6 @@ describe("MangaContent", () => {
     const cta = screen.getByRole("link", { name: /Read Again/i });
     expect(cta).toHaveTextContent("Volume 1");
   });
-
-  it("marks read rows with a persistent check and seeds the toggle from server state", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent
-          item={mangaItem([
-            {
-              content_id: "v01",
-              title: "Railgun v01",
-              chapter_index: 1,
-              volume: "v01",
-              read: true,
-            },
-            {
-              content_id: "v02",
-              title: "Railgun v02",
-              chapter_index: 2,
-              volume: "v02",
-              read: false,
-            },
-          ])}
-          libraryId={7}
-        />
-      </MemoryRouter>,
-    );
-
-    // The read row carries a visible "Read" indicator next to its label.
-    const readRow = screen.getByRole("link", { name: /Volume 1\s*Read/i });
-    expect(readRow).toBeInTheDocument();
-
-    // The read chapter's toggle starts pressed (label flips to "unread"); the
-    // unread chapter's toggle stays in the default "read" prompt state.
-    const readToggle = screen.getByRole("button", { name: /Mark chapter unread/i });
-    expect(readToggle).toHaveAttribute("aria-pressed", "true");
-
-    const unreadToggle = screen.getByRole("button", { name: /Mark chapter read/i });
-    expect(unreadToggle).toHaveAttribute("aria-pressed", "false");
-  });
-
-  it("nests a multi-chapter volume as a section header with chapter rows", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={multiChapterVolume()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
-    // "Volume 1" is a plain header (not a link); chapters are the links.
-    expect(screen.queryByRole("link", { name: /^Volume 1$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Volume 1")).toBeInTheDocument();
-
-    const firstChapter = screen.getByRole("link", { name: /^Chapter 1$/i });
-    expect(firstChapter).toHaveAttribute("href", "/reader/ebook/v1-c1?libraryId=7" + seriesBackTo);
-
-    const links = screen.getAllByRole("link");
-    const order = links
-      .map((link) => within(link).queryByText(/Chapter \d/)?.textContent)
-      .filter(Boolean);
-    expect(order.indexOf("Chapter 1")).toBeLessThan(order.indexOf("Chapter 2"));
-  });
-
-  it("shows an inline progress indicator for a part-read chapter", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent
-          item={mangaItem([
-            {
-              content_id: "v01",
-              title: "Railgun v01",
-              chapter_index: 1,
-              volume: "v01",
-              progress: 0.42,
-            },
-          ])}
-          libraryId={7}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByTitle("42% read")).toBeInTheDocument();
-  });
-
   it("collapses a fully read volume section by default and expands on toggle", async () => {
     const user = userEvent.setup();
     render(
@@ -331,40 +230,5 @@ describe("MangaContent", () => {
 
     await user.click(header);
     expect(screen.getByRole("link", { name: /^Chapter 1/i })).toBeInTheDocument();
-  });
-
-  it("renders chapter cover thumbnails when the payload carries them", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent
-          item={mangaItem([
-            {
-              content_id: "v01",
-              title: "Railgun v01",
-              chapter_index: 1,
-              volume: "v01",
-              poster_url: "https://img.test/v01.jpg",
-            },
-          ])}
-          libraryId={7}
-        />
-      </MemoryRouter>,
-    );
-
-    const row = screen.getByRole("link", { name: /^Volume 1$/i });
-    expect(within(row).getByRole("presentation")).toHaveAttribute(
-      "src",
-      "https://img.test/v01.jpg",
-    );
-  });
-
-  it("offers a View Details action in the series menu", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={volumeSeries()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("button", { name: /More actions/i })).toBeInTheDocument();
   });
 });

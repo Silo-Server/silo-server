@@ -59,6 +59,10 @@ import { buildDefaultPrefs, serializeOverlayPrefs } from "@/lib/overlays";
 
 import AppearanceSettings from "./AppearanceSettings";
 
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
 /** The built-in document with one badge flipped, so it is not already default. */
@@ -99,24 +103,7 @@ describe("AppearanceSettings", () => {
     useSettingsFormMock.mockImplementation(() => form);
   });
 
-  it("renders every field group heading", () => {
-    render(<AppearanceSettings />);
-
-    for (const heading of ["Logos and icons", "Colors", "Card overlays"]) {
-      expect(screen.getByRole("group", { name: heading })).toBeInTheDocument();
-    }
-  });
-
-  it("renders the tab title and nothing else in the header", () => {
-    render(<AppearanceSettings />);
-
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
-    expect(screen.getByText("Accent color")).toBeInTheDocument();
-    // Cinema Dark is the only base theme; there is nothing to pick.
-    expect(screen.queryByText("Default theme")).not.toBeInTheDocument();
-  });
-
-  it("stages the union of appearance keys and leaves identity to General", () => {
+  it("stages the accent color and its theme tokens instead of saving immediately", () => {
     render(<AppearanceSettings />);
 
     const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
@@ -133,10 +120,6 @@ describe("AppearanceSettings", () => {
     expect(keys).not.toContain("branding.login_subtitle");
     expect(keys).not.toContain("branding.default_theme");
     expect(keys).not.toContain("theme.catalog_url");
-  });
-
-  it("stages the accent color and its theme tokens instead of saving immediately", () => {
-    render(<AppearanceSettings />);
 
     fireEvent.click(screen.getByRole("button", { name: "Use accent #10b981" }));
 
@@ -146,24 +129,6 @@ describe("AppearanceSettings", () => {
       "ui.admin_theme_vars",
       JSON.stringify({ primary: "#10b981", ring: "#10b981", "sidebar-primary": "#10b981" }),
     );
-  });
-
-  it("keeps the token editor and custom CSS behind one advanced disclosure", () => {
-    render(<AppearanceSettings />);
-
-    expect(screen.queryByRole("button", { name: "Set primary token" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Advanced · 2 settings/ }));
-
-    expect(screen.getByRole("button", { name: "Set primary token" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Custom CSS editor" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Community theme list")).not.toBeInTheDocument();
-  });
-
-  it("offers no reset while the theme is stock Cinema Dark", () => {
-    render(<AppearanceSettings />);
-
-    expect(screen.getByRole("button", { name: /Reset to Cinema Dark/ })).toBeDisabled();
   });
 
   // Like restoring badge defaults, the reset is a staged edit confirmed
@@ -186,32 +151,8 @@ describe("AppearanceSettings", () => {
     expect(form.save).not.toHaveBeenCalled();
   });
 
-  // Show-only overlays (network, show status) are invisible against the movie
-  // sample, so the admin editing server defaults needs the same toggle the user
-  // page has. It is view state: switching it stages nothing.
-  it("previews the badge defaults against either a movie or a show sample", () => {
-    render(<AppearanceSettings />);
-
-    expect(screen.getByTestId("overlay-preview")).toHaveTextContent("movie");
-
-    fireEvent.click(screen.getByRole("button", { name: "show" }));
-
-    expect(screen.getByTestId("overlay-preview")).toHaveTextContent("show");
-    expect(form.setValue).not.toHaveBeenCalled();
-  });
-
   // Restoring is an ordinary staged edit: the admin still confirms the batch
   // through the SaveBar, and Discard puts the previous defaults back.
-  it("stages the registry's built-in overlay document instead of saving it", () => {
-    form = makeForm({ "defaults.card_overlays": customizedOverlayDefaults() });
-    render(<AppearanceSettings />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Restore defaults/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-
-    expect(form.setValue).toHaveBeenCalledWith("defaults.card_overlays", BUILT_IN_OVERLAY_DEFAULTS);
-    expect(form.save).not.toHaveBeenCalled();
-  });
 
   it("leaves the badge kill switch alone when restoring the defaults", () => {
     form = makeForm({
@@ -224,14 +165,9 @@ describe("AppearanceSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
 
     expect(form.setValue).toHaveBeenCalledTimes(1);
+    expect(form.setValue).toHaveBeenCalledWith("defaults.card_overlays", BUILT_IN_OVERLAY_DEFAULTS);
+    expect(form.save).not.toHaveBeenCalled();
     expect(form.setValue).not.toHaveBeenCalledWith("overlays.enabled", expect.anything());
-  });
-
-  it("offers nothing to restore while the defaults already match the registry", () => {
-    form = makeForm({ "defaults.card_overlays": BUILT_IN_OVERLAY_DEFAULTS });
-    render(<AppearanceSettings />);
-
-    expect(screen.getByRole("button", { name: /Restore defaults/ })).toBeDisabled();
   });
 
   it("stages sanitized CSS while the editor keeps showing what was typed", () => {

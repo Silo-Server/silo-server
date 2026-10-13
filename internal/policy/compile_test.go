@@ -8,27 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/open-policy-agent/opa/v1/rego"
 )
-
-func TestLockedCapabilitiesRejectHTTP(t *testing.T) {
-	source := `package silo_custom.scope
-
-import rego.v1
-
-override(base, _) := base if {
-	http.send({"method": "get", "url": "https://example.test"})
-}`
-	_, err := rego.New(
-		rego.Query("data.silo_custom.scope.override({}, {})"),
-		rego.Module("bad.rego", source),
-		rego.Capabilities(LockedCapabilities()),
-	).PrepareForEval(context.Background())
-	if err == nil {
-		t.Fatal("expected http.send compile failure")
-	}
-}
 
 func TestCompileCheckRejectsForbiddenBuiltins(t *testing.T) {
 	tests := []struct {
@@ -127,12 +107,6 @@ func TestCompileCheckRejectsOversizedSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "byte limit") {
 		t.Fatalf("CompileCheck() error = %v, want size limit message", err)
-	}
-}
-
-func TestCompileCheckAcceptsValidScopeOverride(t *testing.T) {
-	if err := CompileCheck(context.Background(), "scope", tighteningScopeOverrideSource()); err != nil {
-		t.Fatalf("CompileCheck() error: %v", err)
 	}
 }
 

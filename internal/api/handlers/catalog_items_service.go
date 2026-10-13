@@ -38,8 +38,9 @@ type SortMetricsView = sortMetricsResponse
 // CatalogFiltersView is the facet document of a catalog scope.
 type CatalogFiltersView = catalogFiltersResponse
 
-// CatalogFacetSearchView is a facet typeahead answer.
-type CatalogFacetSearchView = catalogFacetSearchResponse
+// CatalogFacetSearchView is a v2 facet typeahead answer; see
+// catalog.CatalogFacetSearchResult for what each field holds.
+type CatalogFacetSearchView = catalog.CatalogFacetSearchResult
 
 // CatalogQueryView is one page of the JSON-body catalog query.
 type CatalogQueryView = browseResponse
@@ -98,6 +99,23 @@ func (h *CatalogHandler) Browse(ctx context.Context, v ItemViewer, req catalog.C
 	}
 	items := h.catalogItemResponses(ctx, v, result.Items, catalogSortMetricField(req, result), playableTargetLibraryIDs(req), v.Access)
 	return catalogBrowseView(result, items), nil
+}
+
+// LetterIndex answers the letter index of a title-ordered query-source
+// browse; see catalog.CatalogResolver.LetterIndex.
+func (h *CatalogHandler) LetterIndex(ctx context.Context, v ItemViewer, req catalog.CatalogRequest) (catalog.LetterIndex, error) {
+	if h == nil || h.resolver == nil {
+		return catalog.LetterIndex{}, apiError(http.StatusInternalServerError, "internal_error", "Catalog is not configured")
+	}
+	// Numbering every match sorts the whole result; bound it like a distant
+	// window seek.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	index, err := h.resolver.LetterIndex(ctx, req, v.Access)
+	if err != nil {
+		return catalog.LetterIndex{}, catalogResolveError(ctx, err, false)
+	}
+	return index, nil
 }
 
 // catalogResolveError keeps grouped and ordinary catalog resolution on the
@@ -194,24 +212,25 @@ func (h *CatalogHandler) Filters(ctx context.Context, v ItemViewer, req catalog.
 	return view, nil
 }
 
-// SearchFacet answers a prefix typeahead over one filter facet. limit is
+// SearchFacet answers a v2 typeahead over one filter facet. limit is
 // already validated and clamped by the caller.
-func (h *CatalogHandler) SearchFacet(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, facet, prefix string, limit int) (CatalogFacetSearchView, error) {
+func (h *CatalogHandler) SearchFacet(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, facet, q string, limit int) (CatalogFacetSearchView, error) {
 	if h == nil || h.resolver == nil || h.itemsH == nil {
 		return CatalogFacetSearchView{}, apiError(http.StatusInternalServerError, "internal_error", "Catalog is not configured")
 	}
-	result, err := h.resolver.SearchFacet(ctx, req, v.Access, facet, prefix, limit)
+	result, err := h.resolver.SearchFacet(ctx, req, v.Access, facet, q, limit)
 	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
-			return CatalogFacetSearchView{}, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-		return CatalogFacetSearchView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
+		return CatalogFacetSearchView{}, facetSearchError(err)
 	}
-	matches := result.Matches
-	if matches == nil {
-		matches = []string{}
+	return *result, nil
+}
+
+// facetSearchError maps a facet typeahead failure to its API error.
+func facetSearchError(err error) error {
+	if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
-	return CatalogFacetSearchView{Matches: matches, HasMore: result.HasMore}, nil
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
 }
 
 // QueryItems answers one page of the JSON-body catalog query. The limit is

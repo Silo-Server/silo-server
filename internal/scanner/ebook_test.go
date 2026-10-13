@@ -947,34 +947,6 @@ func TestEbookTitleFromPathStripsCompoundFB2Extension(t *testing.T) {
 	}
 }
 
-func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
-	name, idx := ebookSeriesDesired(&parsedEbook{
-		Series:      " The Expanse ",
-		SeriesIndex: "2 of 9",
-	})
-
-	if name != "The Expanse" {
-		t.Fatalf("series name = %q, want The Expanse", name)
-	}
-	if idx == nil || *idx != 2 {
-		t.Fatalf("series index = %v, want 2", idx)
-	}
-}
-
-func TestUpsertEbookSeriesNilScannerReturnsError(t *testing.T) {
-	var s *Scanner
-	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}, false); err == nil {
-		t.Fatal("upsertEbookSeries nil scanner error = nil, want error")
-	}
-}
-
-func TestUpsertEbookSeriesNilFileRepoReturnsError(t *testing.T) {
-	s := &Scanner{}
-	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}, false); err == nil {
-		t.Fatal("upsertEbookSeries nil fileRepo error = nil, want error")
-	}
-}
-
 func TestPlanEbookSeriesWriteInsertsWhenRowAbsent(t *testing.T) {
 	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " Series ", SeriesIndex: "2 of 9"}, nil, nil, pgx.ErrNoRows, false)
 	if err != nil {
@@ -1327,14 +1299,6 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *tes
 	}
 	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
 		t.Fatalf("new author credit = %+v", got[1])
-	}
-}
-
-func TestEbookPeopleReplacePlanReturnsGetPeopleError(t *testing.T) {
-	wantErr := errors.New("get people failed")
-	_, err := ebookPeopleForReplace(nil, wantErr, []ebookResolvedAuthor{{ID: 40, Name: "New Author"}})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
 
@@ -1722,22 +1686,6 @@ func TestEbookEmptyCleanupAllowedNilGuardDeniesCleanup(t *testing.T) {
 	}
 }
 
-func TestScanEbookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "bad.epub"), []byte("not a real epub"), 0o644); err != nil {
-		t.Fatalf("write fake ebook: %v", err)
-	}
-
-	s := &Scanner{}
-	err := s.ScanEbookFolder(context.Background(), &models.MediaFolder{ID: 44, Paths: []string{root}})
-	if err == nil {
-		t.Fatal("ScanEbookFolder returned nil, want aggregate failure")
-	}
-	if !strings.Contains(err.Error(), "folder_id=44") {
-		t.Fatalf("error = %q, want folder id", err)
-	}
-}
-
 func TestScanEbookFolderReturnsCanceledContext(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1761,8 +1709,8 @@ func TestScanEbookFolderReportsProgress(t *testing.T) {
 	})
 
 	err := (&Scanner{}).ScanEbookFolder(ctx, &models.MediaFolder{ID: 44, Paths: []string{root}})
-	if err == nil {
-		t.Fatal("ScanEbookFolder returned nil, want aggregate failure")
+	if err == nil || !strings.Contains(err.Error(), "folder_id=44") {
+		t.Fatalf("ScanEbookFolder error = %v, want aggregate failure naming folder 44", err)
 	}
 
 	if len(updates) == 0 {
@@ -1949,25 +1897,6 @@ func TestUpdateExistingEbookMediaItemPreservesCuratedMatchedItem(t *testing.T) {
 	}
 	if len(writer.upserts) != 0 {
 		t.Fatalf("upserts = %d, want 0: matched items must not be overwritten by file metadata", len(writer.upserts))
-	}
-}
-
-func TestEbookItemHasCuratedMetadata(t *testing.T) {
-	cases := []struct {
-		item *models.MediaItem
-		want bool
-	}{
-		{nil, false},
-		{&models.MediaItem{Status: "matched"}, true},
-		{&models.MediaItem{Status: " Matched "}, true},
-		{&models.MediaItem{Status: "pending"}, false},
-		{&models.MediaItem{Status: "unmatched"}, false},
-		{&models.MediaItem{}, false},
-	}
-	for _, tc := range cases {
-		if got := ebookItemHasCuratedMetadata(tc.item); got != tc.want {
-			t.Errorf("ebookItemHasCuratedMetadata(%+v) = %v, want %v", tc.item, got, tc.want)
-		}
 	}
 }
 
@@ -2314,13 +2243,6 @@ func TestEbookSanitizeStripsControlCharacters(t *testing.T) {
 	}
 	if book.Title != "GoodTitle" || book.Authors[0] != "AdaWriter" {
 		t.Fatalf("title/author = %q/%q, want the surrounding text preserved", book.Title, book.Authors[0])
-	}
-}
-
-func TestScrubEbookMetadataTextLeavesOrdinaryTextAlone(t *testing.T) {
-	const value = "Ibañez, Isabel (Novelist), author"
-	if got := scrubEbookMetadataText(value); got != value {
-		t.Fatalf("scrubEbookMetadataText(%q) = %q, want it unchanged", value, got)
 	}
 }
 

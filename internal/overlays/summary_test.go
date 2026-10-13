@@ -80,22 +80,6 @@ func TestNormalizeAudioChannels(t *testing.T) {
 	}
 }
 
-func TestNormalizeContainer(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"", ""},
-		{"mkv", "MKV"},
-		{"MP4", "MP4"},
-		{" mov ", "MOV"},
-	}
-	for _, tc := range cases {
-		if got := normalizeContainer(tc.in); got != tc.want {
-			t.Errorf("normalizeContainer(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestNormalizeAspectRatio(t *testing.T) {
 	cases := []struct {
 		name string

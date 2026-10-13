@@ -1,0 +1,26 @@
+name: CI tools
+description: Select CI jobs, lint changed packages, or validate their final results.
+inputs:
+  operation:
+    description: One of plan, lint, or check.
+    required: true
+outputs:
+  go:
+    description: Whether the Go jobs are required.
+    value: ${{ steps.tools.outputs.go }}
+  web:
+    description: Whether the Web jobs are required.
+    value: ${{ steps.tools.outputs.web }}
+runs:
+  using: composite
+  steps:
+    - id: tools
+      shell: bash
+      env:
+        CI_OPERATION: ${{ inputs.operation }}
+      run: |
+        case "$CI_OPERATION" in
+          plan|check) python3 "$GITHUB_ACTION_PATH/select-jobs.py" "$CI_OPERATION" ;;
+          lint) bash "$GITHUB_ACTION_PATH/../../../scripts/lint-changed.sh" ;;
+          *) echo "::error::Unknown CI tools operation"; exit 1 ;;
+        esac

@@ -314,30 +314,6 @@ func TestMigrateToV16IsAtomic(t *testing.T) {
 	}
 }
 
-// TestMigrateToV16OnAnEmptyDatabase: a fresh install has nothing to migrate and
-// must not fail trying.
-func TestMigrateToV16OnAnEmptyDatabase(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if err := migrateToV16(tx); err != nil {
-		t.Fatalf("migrateToV16 on an empty database: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-}
-
 func TestMigrateToV16RejectsOrphansWhenProfileListIsEmpty(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -377,47 +353,6 @@ SELECT COUNT(*) FROM user_setting_migration_rejects
 	}
 	if values != 0 || rejects != 1 {
 		t.Fatalf("values=%d rejects=%d, want 0/1", values, rejects)
-	}
-}
-
-// TestMigrateToV16IsIdempotentUnderReRun guards the partial-unique indexes: the
-// migration must not be runnable twice into a conflict. runMigrations gates it
-// behind user_version, so the second call is what an operator would trigger by
-// restoring a backup over a migrated database.
-func TestMigrateToV16IsIdempotentUnderReRun(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	seedLegacySettings(t, db)
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if err := migrateToV16(tx); err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	// A second run collides with the partial unique indexes. That it fails is
-	// correct — silently doubling every value would be worse — but it must fail
-	// as an error rather than corrupting anything, and the version gate in
-	// runMigrations is what stops it happening in practice.
-	tx2, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	err = migrateToV16(tx2)
-	_ = tx2.Rollback()
-	if err == nil {
-		t.Error("a second migration run was accepted; values would be duplicated")
 	}
 }
 

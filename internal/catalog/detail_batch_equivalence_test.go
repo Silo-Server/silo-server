@@ -218,9 +218,9 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		`, contentID, source, score, votes)
 	}
 	imdbVotes := int64(673852)
-	insertRatingSource(movieA, models.RatingSourceMDBList, 86, nil)
+	insertRatingSource(movieA, "mdblist", 86, nil)
 	insertRatingSource(movieA, models.RatingSourceIMDB, 81, &imdbVotes)
-	insertRatingSource(series, models.RatingSourceLetterboxd, 80, nil)
+	insertRatingSource(series, "letterboxd", 80, nil)
 
 	// A local extra on movieA backed by a live media_files row: exercises the
 	// batched extraRepo.ListWithFilesByParentIDs prefetch against the per-item
@@ -341,7 +341,7 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	}
 	if got := batch[movieA]; len(got.RatingSources) != 2 ||
 		got.RatingSources[0].Source != models.RatingSourceIMDB || got.RatingSources[0].Votes == nil || *got.RatingSources[0].Votes != imdbVotes ||
-		got.RatingSources[1].Source != models.RatingSourceMDBList || got.RatingSources[1].Votes != nil {
+		got.RatingSources[1].Source != "mdblist" || got.RatingSources[1].Votes != nil {
 		t.Fatalf("movieA rating sources prefetch mismatch: %#v", got.RatingSources)
 	}
 	if got := batch[series]; len(got.RatingSources) != 1 || got.RatingSources[0].Score != 80 {

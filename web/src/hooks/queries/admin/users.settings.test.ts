@@ -16,6 +16,7 @@ import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   useAdminDeviceOverrides,
   useAdminUserDeviceSettings,
+  useAdminUserSettingCounts,
   useAdminUserSettings,
   useDeleteAdminUserSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
@@ -98,7 +99,7 @@ describe("admin canonical settings hooks", () => {
     vi.unstubAllGlobals();
   });
 
-  it("lists non-device values from /settings/values with stringified values", async () => {
+  it("lists every value from /settings/values, device rows included, as strings", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input) => {
@@ -131,7 +132,31 @@ describe("admin canonical settings hooks", () => {
         value: "true",
         updated_at: undefined,
       },
+      {
+        key: "player.audio_sync_ms",
+        scope: "profile_device",
+        profile_id: "p1",
+        device_id: "tv-1",
+        value: "250",
+        updated_at: "2026-07-28T11:00:00Z",
+      },
     ]);
+  });
+
+  it("counts account and device settings from the account's values alone", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe("/api/v2/admin/users/7/settings/values?limit=200");
+      return jsonResponse(valuesResponse);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useAdminUserSettingCounts(7), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current).toMatchObject({ account: 2, device: 1, isError: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("derives device overrides from the same list, enriched with names", async () => {
@@ -301,6 +326,28 @@ describe("admin canonical settings hooks", () => {
       value: JSON.stringify({ poster_size: "large", caption: "artwork" }),
     });
     await waitFor(() => expect(update.result.current.isSuccess).toBe(true));
+  });
+
+  it("writes a device-scoped value at its profile and device", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      expect(init?.method).toBe("PUT");
+      expect(String(input)).toBe(
+        "/api/v2/admin/users/7/settings/values/player.audio_sync_ms?scope=profile_device&profile_id=p1&device_id=tv-1",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({ value: 0 });
+      return jsonResponse({ key: "player.audio_sync_ms", scope: "profile_device", value: 0 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useUpdateAdminUserSetting(), { wrapper: createWrapper() });
+    result.current.mutate({
+      userId: 7,
+      key: "player.audio_sync_ms",
+      identity: { scope: "profile_device", profileId: "p1", deviceId: "tv-1" },
+      value: "0",
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("deletes a user setting at its exact scope", async () => {

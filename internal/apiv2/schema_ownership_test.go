@@ -13,7 +13,7 @@ var approvedDomainSchemaTypes = map[string]string{
 	"github.com/Silo-Server/silo-server/internal/auth":                  "APIKeyScope",
 	"github.com/Silo-Server/silo-server/internal/catalog":               "AudiobookDetailExtension AudiobookNarration AudiobookPerson AudiobookRelatedContent AudiobookRelatedItem AudiobookSeriesGroup CastCredit CrewCredit EbookDetailExtension ItemExtraInfo ItemVideoInfo MangaChapter MangaDetailExtension Marker SubtitleInfo VersionChapter VersionSubtitleTrack",
 	"github.com/Silo-Server/silo-server/internal/catalogseed":           "ImportResult PathRewrite",
-	"github.com/Silo-Server/silo-server/internal/collections/templates": "Bundle BundleCatalog Catalog CategoryGroup MDBListSpec TMDBCollectionSpec TMDBDiscoverSpec TMDBSpec Template TraktSpec",
+	"github.com/Silo-Server/silo-server/internal/collections/templates": "Bundle BundleCatalog Catalog CategoryGroup MDBListSpec TMDBCollectionSpec TMDBDiscoverSpec TMDBListSpec TMDBSpec Template TraktSpec",
 	"github.com/Silo-Server/silo-server/internal/diagnostics":           "IngestResult",
 	"github.com/Silo-Server/silo-server/internal/downloads":             "OfflineAudioTrack OfflineChapter OfflineIdentity OfflineIntegrity OfflineSubtitle SkippedDownload SkippedManifest",
 	"github.com/Silo-Server/silo-server/internal/historyimport":         "ExternalUser",

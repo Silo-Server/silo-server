@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useAuth } from "@/hooks/useAuth";
 import { useProfiles } from "@/hooks/queries/profiles";
 import {
   useCreateHistoryImportRun,
+  useHistoryImportCapability,
   useHistoryImportRun,
   useHistoryImportRuns,
   type PersonalImportRun,
@@ -28,6 +30,7 @@ import {
   createPlexPin,
   buildPlexAuthURL,
   getPreferredPlexServerURL,
+  getPlexFallbackURLs,
   type BrowserPlexServer,
 } from "@/lib/plexAuth";
 import {
@@ -38,6 +41,7 @@ import {
   type SourceType,
 } from "./HistoryImportSettings.utils";
 import { cn } from "@/lib/utils";
+import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
 
@@ -87,7 +91,16 @@ export default function HistoryImportSettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useCurrentProfile();
+  const { user } = useAuth();
   const { data: profiles = [] } = useProfiles();
+  // The server lets the primary profile import into any profile on the
+  // account, on an admin account too; every other profile, including a
+  // non-primary profile on an admin account, imports only into itself.
+  const canImportForOthers = isActingAdmin(user, profile) || profile?.is_primary === true;
+  const profileNames = useMemo(
+    () => new Map(profiles.map((item) => [item.id, item.name])),
+    [profiles],
+  );
   const { data: sources = [], isLoading: sourcesLoading } = useHistoryImportSources();
   const { data: recentRuns = [] } = useHistoryImportRuns();
 
@@ -128,7 +141,10 @@ export default function HistoryImportSettings() {
 
   const displayRun = activeRun ?? recentRuns[0] ?? null;
   const pending = loginMutation.isPending || createRunMutation.isPending || plexAuthPending;
-  const effectiveProfileId = profileId || profile?.id || "";
+  const effectiveProfileId = canImportForOthers
+    ? profileId || profile?.id || ""
+    : (profile?.id ?? "");
+  const startError = createRunMutation.error;
   const returnedPlexAuth = searchParams.get("plex_auth");
   const returnedPlexPinId = searchParams.get("plex_pin_id");
   const returnedPlexPinCode = searchParams.get("plex_pin_code");
@@ -154,6 +170,13 @@ export default function HistoryImportSettings() {
   const selectedPlexOAuthServerURL = selectedPlexOAuthServer
     ? getPreferredPlexServerURL(selectedPlexOAuthServer)
     : "";
+  // The server races these and keeps the first that answers, so a server whose
+  // preferred address is blocked by a reverse proxy still imports.
+  const { data: importCapability } = useHistoryImportCapability();
+  const selectedPlexOAuthFallbackURLs =
+    selectedPlexOAuthServer && importCapability?.plex_connection_fallback
+      ? getPlexFallbackURLs(selectedPlexOAuthServer)
+      : [];
 
   useEffect(() => {
     if (returnedPlexAuth !== "1") {
@@ -278,6 +301,9 @@ export default function HistoryImportSettings() {
           profile_id: effectiveProfileId,
           source: "plex",
           plex_base_url: selectedPlexOAuthServerURL,
+          ...(selectedPlexOAuthFallbackURLs.length > 0
+            ? { plex_base_urls: selectedPlexOAuthFallbackURLs }
+            : {}),
           plex_token: selectedPlexOAuthServer.accessToken,
           plex_account_token: plexAccountToken || undefined,
         });
@@ -620,23 +646,43 @@ export default function HistoryImportSettings() {
         <div className="border-border/40 flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="w-full space-y-2 sm:max-w-[280px]">
             <Label>Import into profile</Label>
-            <Select value={effectiveProfileId} onValueChange={setProfileId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a profile" />
-              </SelectTrigger>
-              <SelectContent>
-                {profiles.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {canImportForOthers ? (
+              <Select value={effectiveProfileId} onValueChange={setProfileId}>
+                <SelectTrigger aria-label="Import into profile">
+                  <SelectValue placeholder="Choose a profile" />
+                </SelectTrigger>
+                <SelectContent>
+                  {profiles.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                The history goes into your profile
+                {profile?.name ? `, ${profile.name}` : ""}. Only the primary profile can import into
+                other profiles.
+              </p>
+            )}
           </div>
-          <Button onClick={handleStartImport} disabled={!canStart || pending} className="sm:px-8">
+          <Button
+            onClick={() => void handleStartImport().catch(() => undefined)}
+            disabled={!canStart || pending}
+            className="sm:px-8"
+          >
             {createRunMutation.isPending ? "Starting\u2026" : "Start Import"}
           </Button>
         </div>
+        {startError && (
+          <p role="alert" className="text-destructive text-sm">
+            {/* The server's reason is shown as is: a profile that can't import for
+                others only ever targets itself, so its 403 is some other refusal
+                (demo mode, say), and the cross-profile refusal already explains itself. */}
+            {startError.message}
+          </p>
+        )}
       </SettingsGroup>
 
       {/* ── Latest import ───────────────────────────────── */}
@@ -674,6 +720,7 @@ export default function HistoryImportSettings() {
               <HistoryRunCard
                 key={run.id}
                 run={run}
+                profileName={canImportForOthers ? profileNames.get(run.profile_id) : undefined}
                 active={run.id === (activeRunId ?? recentRuns[0]?.id)}
                 onClick={() => setActiveRunId(run.id)}
               />
@@ -965,10 +1012,13 @@ function MetricCard({
 
 function HistoryRunCard({
   run,
+  profileName,
   active,
   onClick,
 }: {
   run: PersonalImportRun;
+  /** The profile the run imported into, shown to those who import for several. */
+  profileName?: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -1000,6 +1050,7 @@ function HistoryRunCard({
         <div>
           <div className="text-sm font-medium">
             {isEmby ? "Emby" : isJellyfin ? "Jellyfin" : "Plex"} import
+            {profileName && <span className="text-muted-foreground"> into {profileName}</span>}
           </div>
           <div className="text-muted-foreground text-xs">
             {formatRelativeTime(run.created_at)}

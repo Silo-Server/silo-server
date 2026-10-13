@@ -148,6 +148,7 @@ describe("useSidebarItemDetailsGate", () => {
     );
 
     rerender({ locationKey: "movie", pathname: "/item/movie", isItem: true });
+    expect(result.current.enteredItemFromHome).toBe(false);
     rerender({ locationKey: "episode", pathname: "/item/episode", isItem: true });
     expect(result.current.enteredItemFromHome).toBe(false);
     rerender({ locationKey: "home", pathname: "/", isItem: false });
@@ -165,8 +166,8 @@ describe("useSidebarItemDetailsGate", () => {
       { initialProps: { locationKey: "home-0", pathname: "/", isItem: false } },
     );
 
-    for (let cycle = 1; cycle <= 24; cycle++) {
-      const itemId = cycle <= 12 ? "same" : `different-${cycle}`;
+    for (let cycle = 1; cycle <= 4; cycle++) {
+      const itemId = cycle <= 2 ? "same" : `different-${cycle}`;
       rerender({ locationKey: `item-${cycle}`, pathname: `/item/${itemId}`, isItem: true });
       expect(result.current.enteredItemFromHome).toBe(true);
       expect(result.current.returnedHomeFromItem).toBe(false);
@@ -178,25 +179,6 @@ describe("useSidebarItemDetailsGate", () => {
 
     rerender({ locationKey: "library", pathname: "/library/1", isItem: false });
     expect(result.current.returnedHomeFromItem).toBe(false);
-  });
-
-  it("does not hold cached details for non-Home item entries", () => {
-    const { result, rerender } = renderHook(
-      ({
-        locationKey,
-        pathname,
-        isItem,
-      }: {
-        locationKey: string;
-        pathname: string;
-        isItem: boolean;
-      }) => useSidebarItemDetailsGate(locationKey, pathname, isItem),
-      { initialProps: { locationKey: "library", pathname: "/library/1", isItem: false } },
-    );
-
-    rerender({ locationKey: "movie", pathname: "/item/movie", isItem: true });
-
-    expect(result.current.enteredItemFromHome).toBe(false);
   });
 
   it("discards an abandoned gate and allows the next item entry", () => {

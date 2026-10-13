@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -73,9 +72,18 @@ type Service struct {
 	lister      SubtitleLister
 	files       MediaFileResolver
 	notifier    Notifier // optional
-	ffmpegPath  string
-	logger      *slog.Logger
-	runner      *jobrunner.Runner
+	// externalTimings applies sidecar timing corrections to sidecar sources;
+	// optional.
+	externalTimings subtitles.ExternalTimingLookup
+	ffmpegPath      string
+	logger          *slog.Logger
+	runner          *jobrunner.Runner
+}
+
+// SetExternalTimings makes a sidecar source carry its timing correction, as
+// a stored source does. Call it before Recover.
+func (s *Service) SetExternalTimings(timings subtitles.ExternalTimingLookup) {
+	s.externalTimings = timings
 }
 
 // UpdateConfig swaps the service config. Safe for concurrent use; running
@@ -129,7 +137,24 @@ func NewService(
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool { return s.config().TranslateReady() }
+func (s *Service) Enabled(ctx context.Context) bool {
+	cfg, _ := s.translationConfig(ctx)
+	return cfg.TranslateReady()
+}
+
+func (s *Service) translationConfig(ctx context.Context) (Config, *llm.Config) {
+	cfg := s.config()
+	if cfg.TextConfigSource == nil || !cfg.TranslateEnabled {
+		return cfg, nil
+	}
+	text, err := cfg.TextConfigSource(ctx)
+	if err != nil || !text.TextConfigured() {
+		cfg.TranslateEnabled = false
+		return cfg, nil
+	}
+	cfg.ChatModel = text.ChatModel
+	return cfg, new(text)
+}
 
 // TranscribeEnabled reports whether ASR subtitle generation can currently run.
 func (s *Service) TranscribeEnabled() bool {
@@ -151,6 +176,10 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	// Snapshot once so the job's model provenance is internally consistent
 	// even if the config reloads mid-enqueue.
 	cfg := s.config()
+	var textConfig *llm.Config
+	if req.Kind == JobKindTranslate || req.Kind == JobKindTranscribeTranslate {
+		cfg, textConfig = s.translationConfig(ctx)
+	}
 	jobModel := cfg.ChatModel
 	switch req.Kind {
 	case JobKindTranslate:
@@ -224,7 +253,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		return nil, err
 	}
 
-	s.dispatch(*job)
+	s.dispatch(*job, textConfig)
 	return job, nil
 }
 
@@ -269,8 +298,11 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 }
 
 // dispatch launches a bounded background goroutine to run the job.
-func (s *Service) dispatch(job Job) {
+func (s *Service) dispatch(job Job, textConfig *llm.Config) {
 	s.runner.Dispatch(job.ID, func(ctx context.Context) {
+		if textConfig != nil {
+			ctx = llm.WithTextConfig(ctx, *textConfig)
+		}
 		s.run(ctx, &job)
 	}, func(ctx context.Context) {
 		_ = s.repo.FailJob(ctx, job.ID, JobStatusCancelled, "cancelled before start")
@@ -372,7 +404,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 
 	audioIdx := job.SourceIndex
 	if audioIdx < 0 {
-		audioIdx = defaultAudioTrackIndex(file.AudioTracks)
+		audioIdx = playback.SelectAudioTrack(file.AudioTracks, "", nil)
 	}
 	if audioIdx >= len(file.AudioTracks) {
 		s.finishWithError(ctx, job, fmt.Errorf("%w: audio track index out of range", ErrInvalidRequest))
@@ -594,17 +626,6 @@ func (s *Service) finishTranslatedTrack(
 	return true
 }
 
-// defaultAudioTrackIndex returns the index of the default-flagged audio
-// track, falling back to the first track.
-func defaultAudioTrackIndex(tracks []models.AudioTrack) int {
-	for i, t := range tracks {
-		if t.Default {
-			return i
-		}
-	}
-	return 0
-}
-
 func transcribedReleaseName(lang string) string {
 	name := aitranslate.LanguageDisplayName(lang)
 	if name == "" {
@@ -677,7 +698,8 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if !isParsableTextFormat(ext.Format) {
 			return nil, "", fmt.Errorf("%w: external %s", ErrSourceUnsupported, ext.Format)
 		}
-		data, err := os.ReadFile(ext.Path)
+		// Translate the corrected timing clients see, so the output inherits it.
+		data, err := playback.LoadExternalSubtitle(ctx, s.externalTimings, file.ID, ext)
 		if err != nil {
 			return nil, "", fmt.Errorf("read external subtitle: %w", err)
 		}
@@ -716,9 +738,14 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if !isParsableTextFormat(string(dl.Format)) {
 			return nil, "", fmt.Errorf("%w: downloaded %s", ErrSourceUnsupported, dl.Format)
 		}
-		_, data, err := s.store.GetSubtitleContent(ctx, dl.ID)
+		source, data, err := s.store.GetSubtitleContent(ctx, dl.ID)
 		if err != nil {
 			return nil, "", fmt.Errorf("fetch source subtitle: %w", err)
+		}
+		// Translate the corrected timing clients see, so the output inherits it.
+		data, err = subtitles.DeliveryBytes(source, data)
+		if err != nil {
+			return nil, "", err
 		}
 		cues, err := ParseCues(data)
 		if err != nil {

@@ -181,7 +181,9 @@ func (s *MetadataService) ensureAnchoredIdentityRepairTargetEpisodeLinks(
 	contentID string,
 ) error {
 	if err := s.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
-		queueErr := s.RequestStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
+		// The refresh retries the relink, so it is queued even for parked
+		// episode debt.
+		queueErr := s.queueStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
 		slog.WarnContext(ctx, "metadata: anchored repair episode relink failed", "component", "metadata",
 			"content_id", contentID,
 			"error", err,
@@ -534,20 +536,6 @@ func (s *MetadataService) repairAnchoredIdentityMismatchGroup(
 	}
 	if !claimsReconciled {
 		return false, nil
-	}
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM media_item_libraries membership
-		WHERE membership.content_id = $1
-		  AND membership.media_folder_id = $2
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM media_files source_file
-			WHERE source_file.content_id = membership.content_id
-			  AND source_file.media_folder_id = membership.media_folder_id
-			  AND source_file.missing_since IS NULL
-		  )
-	`, candidate.SourceContentID, candidate.FolderID); err != nil {
-		return false, fmt.Errorf("cleaning anchored repair source membership: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

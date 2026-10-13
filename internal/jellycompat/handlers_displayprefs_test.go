@@ -13,27 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestDefaultDisplayPreferencesIncludesRequiredImageDimensions(t *testing.T) {
-	dto := defaultDisplayPreferences("default", "Wholphin")
-
-	body, err := json.Marshal(dto)
-	if err != nil {
-		t.Fatalf("marshal default display preferences: %v", err)
-	}
-
-	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil {
-		t.Fatalf("unmarshal default display preferences: %v", err)
-	}
-
-	if _, ok := raw["PrimaryImageHeight"]; !ok {
-		t.Fatal("PrimaryImageHeight missing from display preferences JSON")
-	}
-	if _, ok := raw["PrimaryImageWidth"]; !ok {
-		t.Fatal("PrimaryImageWidth missing from display preferences JSON")
-	}
-}
-
 func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 	store := newJellycompatUserStore(t)
 	if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "secondary", Name: "Secondary"}); err != nil {
@@ -182,6 +161,15 @@ func TestDisplayPreferencesReadThenSaveKeepsSkipDefaults(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &fields); err != nil {
+		t.Fatalf("decode display preferences fields: %v", err)
+	}
+	for _, name := range []string{"PrimaryImageHeight", "PrimaryImageWidth"} {
+		if _, ok := fields[name]; !ok {
+			t.Fatalf("%s missing from display preferences JSON", name)
+		}
+	}
 	var dto displayPreferencesDTO
 	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
 		t.Fatalf("decode: %v", err)

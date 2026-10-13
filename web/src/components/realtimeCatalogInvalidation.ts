@@ -1,5 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { adminKeys, libraryKeys, sectionKeys } from "@/hooks/queries/keys";
+import {
+  adminKeys,
+  calendarKeys,
+  collectionKeys,
+  downloadKeys,
+  episodeKeys,
+  libraryKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -39,6 +48,32 @@ export function invalidateCatalogState(
     queryKey: adminKeys.stats(),
     refetchType: allowDashboardRefetch ? "active" : "none",
   });
+}
+
+/**
+ * Refetches everything the viewer's access decides: which libraries and titles
+ * they see (home, browse, search, details, people, collections, calendar) and
+ * what they may do with them (requests, downloads). Runs when the events
+ * socket reports that the account's access group, permissions, playback
+ * quality or role changed.
+ */
+export function invalidateAccessDependentState(
+  queryClient: QueryClient,
+  options: Pick<CatalogInvalidationOptions, "allowDashboardRefetch">,
+) {
+  invalidateCatalogState(queryClient, {
+    allowDashboardRefetch: options.allowDashboardRefetch,
+    includeLibraryLists: true,
+  });
+  for (const queryKey of [
+    collectionKeys.all,
+    episodeKeys.all,
+    calendarKeys.all,
+    requestKeys.all,
+    downloadKeys.all,
+  ]) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
 }
 
 /**

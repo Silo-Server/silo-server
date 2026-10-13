@@ -1,28 +1,30 @@
 import { cn } from "@/lib/utils";
-import type { OverlayPreviewVariant } from "./OverlayPreviewCard";
+import { OVERLAY_PREVIEW_VARIANTS, type OverlayPreviewVariant } from "@/lib/overlays";
 
 interface OverlayPreviewVariantToggleProps {
   value: OverlayPreviewVariant;
   onChange: (value: OverlayPreviewVariant) => void;
+  /** The samples offered; defaults to all of them. */
+  variants?: readonly OverlayPreviewVariant[];
   className?: string;
 }
-
-const VARIANTS: readonly OverlayPreviewVariant[] = ["movie", "show"];
 
 /**
  * Pill pair that picks which sample data <OverlayPreviewCard /> renders. Shared
  * by the user Card Overlays page and the admin defaults editor so both can
- * preview show-only overlays (network, show status) while editing. The choice
+ * preview show-only overlays (network, show status) and the request status of
+ * a watchlist title the library doesn't have yet while editing. The choice
  * is local view state on both surfaces and is deliberately never persisted.
  */
 export function OverlayPreviewVariantToggle({
   value,
   onChange,
+  variants = OVERLAY_PREVIEW_VARIANTS,
   className,
 }: OverlayPreviewVariantToggleProps) {
   return (
     <div className={cn("flex gap-1.5", className)} role="group" aria-label="Preview sample">
-      {VARIANTS.map((variant) => (
+      {variants.map((variant) => (
         <button
           key={variant}
           type="button"

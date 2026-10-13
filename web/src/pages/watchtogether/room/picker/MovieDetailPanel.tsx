@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Bookmark, X } from "lucide-react";
+import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -125,10 +126,7 @@ export function MovieDetailPanel({
   if (item?.year ?? card.year) meta.push(String(item?.year ?? card.year));
   if (item?.runtime) meta.push(formatRuntimeMinutes(item.runtime));
   if (item?.content_rating) meta.push(item.content_rating);
-  const ratings: string[] = [];
-  if (item?.rating_imdb) ratings.push(`IMDb ${item.rating_imdb.toFixed(1)}`);
-  if (item?.rating_tmdb) ratings.push(`TMDB ${item.rating_tmdb.toFixed(1)}`);
-  if (item?.rating_rt_critic) ratings.push(`RT ${Math.round(item.rating_rt_critic)}%`);
+  const ratings = item?.ratings ?? [];
 
   return (
     <div className="surface-panel-subtle relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
@@ -196,13 +194,13 @@ export function MovieDetailPanel({
       <div className="overlay-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
         {ratings.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {ratings.map((r) => (
-              <span
-                key={r}
-                className="bg-surface-raised text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium"
-              >
-                {r}
-              </span>
+            {ratings.map((rating) => (
+              <RatingEntry
+                key={rating.source}
+                rating={rating}
+                size="sm"
+                className="bg-surface-raised text-muted-foreground rounded-full px-2 py-0.5"
+              />
             ))}
           </div>
         ) : null}

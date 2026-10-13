@@ -73,6 +73,9 @@ var restartRequiredKeys = map[string]bool{
 	// the watch-sync OAuth flows always read both credentials live.
 	"tmdb.api_key": true,
 
+	// The LAN discovery responder starts once with the API listener.
+	ServerLANDiscoverySettingKey: true,
+
 	// Compat listeners and session stores.
 	"audiobookshelf_compat.enabled": true,
 	// public_url / server_name / emulated_server_version are read live per

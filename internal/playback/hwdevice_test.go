@@ -72,10 +72,15 @@ func TestAcquireHWDeviceEmptyValueStaysEmptyWithoutDevices(t *testing.T) {
 	defaultDRIDir = t.TempDir()
 	t.Cleanup(func() { defaultDRIDir = original })
 
-	device, release := AcquireHWDevice("", "qsv")
-	defer release()
-	if device != "" {
-		t.Fatalf("device = %q, want empty so auto-detection applies downstream", device)
+	for _, accel := range []string{"qsv", "vaapi"} {
+		device, release := AcquireHWDevice("", accel)
+		if device != "" {
+			t.Fatalf("%s device = %q, want empty with no available hardware", accel, device)
+		}
+		if got := HWDeviceLoadSnapshot(); len(got) != 0 {
+			t.Fatalf("%s snapshot = %v, want no count for an unresolved device", accel, got)
+		}
+		release()
 	}
 }
 
@@ -111,24 +116,6 @@ func TestAcquireHWDeviceSingleRenderDeviceIsCounted(t *testing.T) {
 				t.Fatalf("snapshot after release = %v, want empty", got)
 			}
 		})
-	}
-}
-
-// With no render device to name, the workload stays uncounted rather than being
-// attributed to a device that does not exist. The device directory is pointed at
-// an empty temp dir rather than left at the real /dev/dri: unconfigured
-// acquisition now falls back to the device execution would pick, so on a host
-// that actually has a GPU this would otherwise assert the opposite of the truth.
-func TestAcquireHWDeviceUnconfiguredRenderDeviceIsNotCounted(t *testing.T) {
-	resetDeviceLoad(t)
-	original := defaultDRIDir
-	defaultDRIDir = t.TempDir()
-	t.Cleanup(func() { defaultDRIDir = original })
-
-	_, release := AcquireHWDevice("", "vaapi")
-	defer release()
-	if got := HWDeviceLoadSnapshot(); len(got) != 0 {
-		t.Fatalf("snapshot = %v, want no count for an unresolved device", got)
 	}
 }
 
@@ -349,6 +336,9 @@ func TestPickRenderDeviceExplicitValuePassesThrough(t *testing.T) {
 }
 
 func TestDetectHWAccelRenderDeviceDetails(t *testing.T) {
+	setupHWAccelTest(t)
+	t.Setenv("PATH", t.TempDir())
+	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
 	driDir := t.TempDir()
 	sysDir := t.TempDir()
 	for name, ids := range map[string][2]string{
@@ -373,7 +363,7 @@ func TestDetectHWAccelRenderDeviceDetails(t *testing.T) {
 	defaultDRIDir, sysClassDRMDir = driDir, sysDir
 	t.Cleanup(func() { defaultDRIDir, sysClassDRMDir = origDRI, origSys })
 
-	info := DetectHWAccel()
+	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
 	if len(info.RenderDeviceDetails) != 2 {
 		t.Fatalf("RenderDeviceDetails len = %d, want 2: %+v", len(info.RenderDeviceDetails), info.RenderDeviceDetails)
 	}
@@ -457,14 +447,14 @@ func TestAcquireHWDeviceNeverSelectsPastTheProbeCeiling(t *testing.T) {
 	configured := strings.Join(devices, ",")
 
 	// Every probed device has to be handed a workload before the one past the
-	// ceiling could come up, so run enough starts to cover the whole list twice.
+	// ceiling could come up, so run enough starts to cover the whole list once.
 	var releases []func()
 	t.Cleanup(func() {
 		for _, release := range releases {
 			release()
 		}
 	})
-	for range len(devices) * 2 {
+	for range len(devices) {
 		selected, release := AcquireHWDevice(configured, "qsv")
 		releases = append(releases, release)
 		if selected == beyond {

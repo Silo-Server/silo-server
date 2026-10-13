@@ -25,6 +25,9 @@ var (
 	// answers to. It is a client input problem, not an upstream failure, so the
 	// API layer answers 404 instead of 500.
 	ErrUnknownProvider = errors.New("unknown subtitle provider")
+	// ErrInvalidSubtitleID reports a provider result ID that is not in the
+	// shape the provider's search returns; no provider request was made.
+	ErrInvalidSubtitleID = errors.New("invalid subtitle id")
 )
 
 // Manager orchestrates subtitle search and download across providers.
@@ -215,6 +218,11 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
 	}
+	// Providers bound their own reads; this check keeps any provider from
+	// storing a subtitle larger than an upload may be.
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("download from %s: %w: %d bytes, limit %d", req.ProviderName, ErrSubtitleTooLarge, len(data), MaxUploadSize)
+	}
 
 	return m.StoreSubtitle(ctx, StoreSubtitleRequest{
 		MediaFileID:     req.MediaFileID,
@@ -276,6 +284,9 @@ type SubtitleMetadataPatch struct {
 	Language        *string
 	ReleaseName     *string
 	HearingImpaired *bool
+	// Timing replaces the stored timing correction. It must pass
+	// ValidateTiming, and the subtitle format must support retiming.
+	Timing *Timing
 }
 
 // SubtitleRevisionConflict reports the current row after a guarded write loses a race.
@@ -358,6 +369,15 @@ func (m *Manager) UpdateDownloadedSubtitleWithRevision(ctx context.Context, id i
 		return nil, ErrSubtitleNotFound
 	}
 	update := SubtitleMetadataUpdate{HearingImpaired: patch.HearingImpaired, ExpectedRevision: revision}
+	if patch.Timing != nil {
+		if err := ValidateTiming(*patch.Timing); err != nil {
+			return nil, err
+		}
+		if !SupportsRetime(sub.Format) {
+			return nil, fmt.Errorf("%w: %q", ErrTimingUnsupported, sub.Format)
+		}
+		update.Timing = new(patch.Timing.Normalized())
+	}
 	if patch.Language != nil {
 		language, err := NormalizeLanguageCode(*patch.Language)
 		if err != nil {

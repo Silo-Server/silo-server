@@ -55,22 +55,6 @@ func assertUserSettingsEnvelope(t *testing.T, env evt.Envelope, wantKey, wantSco
 	}
 }
 
-func TestSetValuePublishesUserSettingsEvent(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
-	events, unsubscribe := handler.EventsHub.Subscribe()
-	defer unsubscribe()
-
-	rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile", []byte(`{"value":"ja"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	env := receiveUserSettingsEvent(t, events)
-	assertUserSettingsEnvelope(t, env, "playback.subtitle_language", "profile")
-}
-
 func TestDeleteValuePublishesUserSettingsEvent(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
 	handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
@@ -81,7 +65,7 @@ func TestDeleteValuePublishesUserSettingsEvent(t *testing.T) {
 		"scope=profile", []byte(`{"value":"ja"}`)); rec.Code != http.StatusOK {
 		t.Fatalf("seeding PUT = %d: %s", rec.Code, rec.Body.String())
 	}
-	<-events // drain the write's own event
+	assertUserSettingsEnvelope(t, receiveUserSettingsEvent(t, events), "playback.subtitle_language", "profile")
 
 	rec := routeValues(t, handler, http.MethodDelete, "playback.subtitle_language",
 		"scope=profile", nil)

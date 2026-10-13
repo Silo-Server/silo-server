@@ -86,6 +86,11 @@ func TestNotificationInboxCutoffReplayAndTies(t *testing.T) {
 	fresh := "00000000-0000-0000-0000-000000000003"
 	insert(low, profile, stamp)
 	insert(high, profile, stamp)
+	// Inserts receive distinct timestamps from the ordering trigger. Historical
+	// rows can share a timestamp, so set up that tie after insertion.
+	if _, err := p.Exec(ctx, `UPDATE notification_deliveries SET created_at=$1 WHERE id IN ($2,$3)`, stamp, low, high); err != nil {
+		t.Fatal(err)
+	}
 	insert(uuid.NewString(), other, stamp)
 	cutoff, err := r.InboxCutoff(ctx, profile)
 	if err != nil || cutoff.ID != high {

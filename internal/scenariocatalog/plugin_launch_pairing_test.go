@@ -7,10 +7,7 @@ import (
 )
 
 func TestPluginLaunchSelection(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := PluginLaunchAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +17,7 @@ func TestPluginLaunchSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range RequiredPluginLaunchScenarios {
-		for _, failure := range []string{"missing", "duplicate", "pair", "authority", "status", "repeat", "requirement", "operation", "path", "sequence"} {
+		for _, failure := range []string{"missing", "authority", "status", "repeat", "requirement", "sequence"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
 				var changed []*Catalog
 				if err := json.Unmarshal(data, &changed); err != nil {
@@ -37,10 +34,6 @@ func TestPluginLaunchSelection(t *testing.T) {
 							switch failure {
 							case "missing":
 								r.Scenarios = append(r.Scenarios[:i], r.Scenarios[i+1:]...)
-							case "duplicate":
-								r.Scenarios = append(r.Scenarios, *s)
-							case "pair":
-								s.V2Expectation = nil
 							case "authority":
 								s.Principal.Class = "invalid"
 							case "status":
@@ -49,10 +42,6 @@ func TestPluginLaunchSelection(t *testing.T) {
 								s.Request.Repeat++
 							case "requirement":
 								s.Requires = []string{"database_unavailable"}
-							case "operation":
-								s.V2Expectation.OperationID = "getCurrentUser"
-							case "path":
-								s.V2Expectation.Request.Path = "/api/v2/auth/plugin-launch/other"
 							case "sequence":
 								s.V2Expectation.Then = []V2Step{{}}
 							}

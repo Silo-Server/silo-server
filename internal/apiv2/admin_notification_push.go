@@ -31,6 +31,7 @@ type AdminNotificationPushTestResult struct {
 	AttemptID      ID     `json:"attempt_id"`
 	PushDeviceID   ID     `json:"push_device_id"`
 	ServerDeviceID ID     `json:"server_device_id"`
+	DeliveryID     ID     `json:"delivery_id,omitempty" doc:"The target profile's newest notification, which the test push carried so the device shows its real text; absent when the profile has no notification and the device can show only generic text."`
 	Outcome        string `json:"outcome"`
 	RelayRequestID string `json:"relay_request_id,omitempty"`
 	UpstreamStatus *int   `json:"upstream_status,omitempty"`
@@ -49,7 +50,7 @@ func registerAdminNotificationPush(reg *Registry) {
 		{"apple", testAdminApplePushOperation, true},
 		{"fcm", testAdminAndroidPushOperation, false},
 	} {
-		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/notifications/push/"+platform.path+"/test", platform.operation, "admin", "Dispatch one test push notification and report its current delivery outcome."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/notifications/push/"+platform.path+"/test", platform.operation, "admin", "Dispatch one test push carrying the target profile's newest notification and report its current delivery outcome."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 		Register(reg, op, func(ctx context.Context, in *AdminNotificationPushTestInput) (*AdminNotificationPushTestOutput, error) {
 			svc := reg.deps.AdminNotificationPush
 			if svc == nil {
@@ -72,7 +73,7 @@ func registerAdminNotificationPush(reg *Registry) {
 					return nil, serviceProblem(err)
 				}
 			}
-			return &AdminNotificationPushTestOutput{Body: AdminNotificationPushTestResult{AttemptID: ID(view.AttemptID), PushDeviceID: ID(view.PushDeviceID), ServerDeviceID: ID(view.ServerDeviceID), Outcome: view.Outcome, RelayRequestID: view.RelayRequestID, UpstreamStatus: view.UpstreamStatus, UpstreamReason: view.UpstreamReason, FailureMessage: view.FailureMessage}}, nil
+			return &AdminNotificationPushTestOutput{Body: AdminNotificationPushTestResult{AttemptID: ID(view.AttemptID), PushDeviceID: ID(view.PushDeviceID), ServerDeviceID: ID(view.ServerDeviceID), DeliveryID: ID(view.DeliveryID), Outcome: view.Outcome, RelayRequestID: view.RelayRequestID, UpstreamStatus: view.UpstreamStatus, UpstreamReason: view.UpstreamReason, FailureMessage: view.FailureMessage}}, nil
 		})
 	}
 }

@@ -1,0 +1,14 @@
+{
+  "revision": "7adbf3cc98d9654da106868d0c95ee6205d4a822876cd50b9d27015adad0f691",
+  "state": "available",
+  "available": true,
+  "identities": true,
+  "admin_identities": true,
+  "break_glass": true,
+  "connection_test": true,
+  "live_provider_changes": true,
+  "provider_recheck": true,
+  "credentials_linking": true,
+  "network_sign_in": true,
+  "network_link_keeps_password": true
+}

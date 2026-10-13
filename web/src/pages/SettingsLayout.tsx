@@ -19,6 +19,7 @@ import {
   MonitorSmartphone,
   PanelTop,
   KeyRound,
+  Bookmark,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -27,6 +28,7 @@ import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SettingsOverviewNav } from "@/components/settings/SettingsOverviewNav";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -45,6 +47,8 @@ interface NavItem {
   keywords?: readonly string[];
   settings?: readonly { label: string; description?: string; keywords?: readonly string[] }[];
   primaryOrAdmin?: boolean;
+  /** Listed only while the server has requests turned on. */
+  requiresRequests?: boolean;
 }
 
 interface NavSection {
@@ -59,6 +63,9 @@ const settingIndex = (...labels: string[]) => labels.map((label) => ({ label }))
  * reading-width cap would squeeze them instead of helping.
  */
 const WIDE_SETTINGS_PAGES = new Set(["devices"]);
+// On a phone the app shell and the page shell already pad the page, so these
+// pages drop the pane's own side padding to keep their rows readable.
+const FLUSH_ON_PHONE_SETTINGS_PAGES = new Set(["home-screen"]);
 
 /**
  * Grouped by the question a person arrives with, not by which service stores
@@ -146,7 +153,7 @@ const NAV_SECTIONS: NavSection[] = [
         path: "devices",
         label: "Your Devices",
         icon: MonitorSmartphone,
-        description: "Per-device quality, HDR, and audio or subtitle sync.",
+        description: "Per-device quality, HDR, sync, and the profile this browser opens.",
         keywords: [
           "devices",
           "tv",
@@ -159,8 +166,15 @@ const NAV_SECTIONS: NavSection[] = [
           "dolby vision",
           "sound delay",
           "lip sync",
+          "who's watching",
+          "profile picker",
+          "remember profile",
+          "launch",
         ],
         settings: settingIndex(
+          "Profile at launch",
+          "Remember last profile",
+          "Ask who's watching",
           "Preferred quality",
           "Maximum bitrate",
           "HDR",
@@ -182,7 +196,7 @@ const NAV_SECTIONS: NavSection[] = [
         path: "interface",
         label: "Navigation & Cards",
         icon: PanelTop,
-        description: "Your primary menu, poster size, and card captions.",
+        description: "Your primary menu, poster size, card captions, and title art.",
         keywords: [
           "navigation",
           "menu",
@@ -193,6 +207,9 @@ const NAV_SECTIONS: NavSection[] = [
           "hide year",
           "artwork only",
           "preset",
+          "title art",
+          "logo",
+          "clearlogo",
         ],
         settings: settingIndex(
           "Card preset",
@@ -201,6 +218,9 @@ const NAV_SECTIONS: NavSection[] = [
           "Title & metadata",
           "Title only",
           "Artwork only",
+          "Title pages",
+          "Show title art",
+          "Apply to all devices",
           "Primary menu",
           "Choose destination or shortcut",
           "Add to menu",
@@ -260,11 +280,20 @@ const NAV_SECTIONS: NavSection[] = [
         label: "Home Screen",
         icon: LayoutDashboard,
         description: "Which rows appear on Home, and in what order.",
-        keywords: ["sections", "rows", "continue watching", "next up", "library order"],
+        keywords: [
+          "home rows",
+          "sections",
+          "rows",
+          "continue watching",
+          "next up",
+          "library order",
+        ],
         settings: settingIndex(
-          "Scope",
-          "Sections",
-          "Reset section customizations",
+          "Home rows",
+          "Hide watched items",
+          "Export layout",
+          "Import layout",
+          "Reset Home",
           "Continue Watching",
           "Next Up",
           "Recently Added",
@@ -278,6 +307,15 @@ const NAV_SECTIONS: NavSection[] = [
         description: "Re-tune the taste profile behind your recommendations.",
         keywords: ["taste profile", "recommendations", "ratings", "likes", "dislikes"],
         settings: settingIndex("Refine your taste profile", "Taste profile", "Recommendations"),
+      },
+      {
+        path: "requests",
+        label: "Requests",
+        icon: Bookmark,
+        description: "Whether adding to your watchlist also requests the title.",
+        keywords: ["watchlist", "request", "discover", "auto request"],
+        settings: settingIndex("Request titles I add to my watchlist"),
+        requiresRequests: true,
       },
       {
         path: "libraries",
@@ -398,6 +436,23 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Account",
     items: [
       {
+        path: "sessions",
+        label: "Signed-in sessions",
+        icon: MonitorSmartphone,
+        description: "See active sign-ins and sign out a browser or app.",
+        primaryOrAdmin: true,
+        keywords: [
+          "sessions",
+          "active",
+          "client",
+          "device",
+          "last seen",
+          "sign out",
+          "revoke",
+          "security",
+        ],
+      },
+      {
         path: "account",
         label: "Account",
         icon: KeyRound,
@@ -506,17 +561,23 @@ export default function SettingsLayout() {
   const segments = location.pathname.split("/");
   const activeSegment = segments[2] || null;
   const canManageProfiles = actingAdmin || profile?.is_primary === true;
+  const requestsEnabled = useRequestFeatureStatus().data?.requests_enabled === true;
   // Most settings pages are a single column of rows and read best measured.
   // A page that is itself two panes needs the room, so it opts out.
   const wideSetting = activeSegment ? WIDE_SETTINGS_PAGES.has(activeSegment) : false;
+  const flushOnPhone = activeSegment ? FLUSH_ON_PHONE_SETTINGS_PAGES.has(activeSegment) : false;
 
   const visibleSections = useMemo(
     () =>
       NAV_SECTIONS.map((section) => ({
         ...section,
-        items: section.items.filter((item) => !item.primaryOrAdmin || canManageProfiles),
+        items: section.items.filter(
+          (item) =>
+            (!item.primaryOrAdmin || canManageProfiles) &&
+            (!item.requiresRequests || requestsEnabled),
+        ),
       })).filter((section) => section.items.length > 0),
-    [canManageProfiles],
+    [canManageProfiles, requestsEnabled],
   );
 
   const filteredSections = useMemo(
@@ -596,7 +657,7 @@ export default function SettingsLayout() {
                 </nav>
               </aside>
 
-              <div className="min-w-0 flex-1 p-4 sm:p-6">
+              <div className={cn("min-w-0 flex-1 p-4 sm:p-6", flushOnPhone && "max-sm:px-0")}>
                 <div className={cn("w-full", wideSetting ? "max-w-none" : "max-w-3xl")}>
                   <Outlet />
                 </div>

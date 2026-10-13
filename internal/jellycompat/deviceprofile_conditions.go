@@ -13,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
+const codecProfileTargetVideo = "video"
+
 type codecProfileCompatibility struct {
 	VideoSupported bool
 	AudioSupported bool
@@ -100,7 +102,68 @@ func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVer
 	if tag != "" {
 		values["videocodectag"] = conditionValue{text: tag}
 	}
-	return p.codecProfileCompatibilityWithValues(version, audioStreamIndex, values, "mp4", true)
+	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, "mp4", true,
+		func(conditions []ProfileCondition, values conditionValues) bool {
+			return hlsRemuxConditionsMatch(conditions, values, version)
+		})
+}
+
+func hlsRemuxConditionsMatch(conditions []ProfileCondition, values conditionValues, version catalog.FileVersion) bool {
+	for _, condition := range conditions {
+		if conditionMatches(condition, values) || hlsRemuxDV8HDR10BaseLayerConditionMatches(condition, version) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// hlsRemuxDV8HDR10BaseLayerConditionMatches recognizes the precise device
+// declaration used by Jellyfin clients that can decode a DV8.1 HDR10-base
+// stream in an HLS fMP4 remux. It deliberately never treats the source as
+// HDR10: the client must name both DOVI and HDR10 in one positive range
+// condition, and every negative or unrelated condition remains exact.
+func hlsRemuxDV8HDR10BaseLayerConditionMatches(condition ProfileCondition, version catalog.FileVersion) bool {
+	if !isPositiveVideoRangeCondition(condition) || !hlsRemuxDV8HDR10BaseLayerEligible(version) {
+		return false
+	}
+	return stringInConditionSet("DOVI", condition.Value) && stringInConditionSet("HDR10", condition.Value)
+}
+
+func isPositiveVideoRangeCondition(condition ProfileCondition) bool {
+	if normalizeConditionToken(condition.Property) != "videorangetype" {
+		return false
+	}
+	switch normalizeConditionToken(condition.Condition) {
+	case "equals", "equalsany", "incollection":
+		return true
+	default:
+		return false
+	}
+}
+
+func hlsRemuxDV8HDR10BaseLayerEligible(version catalog.FileVersion) bool {
+	video := compatPrimaryVideoTrack(version)
+	codec := strings.ToLower(strings.TrimSpace(video.Codec))
+	if codec == "" {
+		codec = strings.ToLower(strings.TrimSpace(version.CodecVideo))
+	}
+	if codec != compatVideoCodecHEVC && codec != compatVideoCodecH265 ||
+		video.DVProfile != 8 || video.DVBLCompatID != 1 ||
+		!video.DVConfigPresent || !video.DVBLCompatIDPresent || !video.DVBLPresent ||
+		video.DVELPresent ||
+		!strings.EqualFold(compatVideoRangeType(video, version.HDR), "DOVIWithHDR10") {
+		return false
+	}
+
+	// Match native planning: legacy tracks with no EL field are single-layer
+	// only when no EL is present; an explicit unknown, MEL, or FEL fails closed.
+	switch strings.ToLower(strings.TrimSpace(video.DVEnhancementLayer)) {
+	case "", compatClientNone:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p DeviceProfile) codecProfileCompatibilityWithValues(
@@ -110,9 +173,20 @@ func (p DeviceProfile) codecProfileCompatibilityWithValues(
 	container string,
 	useSubContainer bool,
 ) codecProfileCompatibility {
+	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, container, useSubContainer, conditionsMatch)
+}
+
+func (p DeviceProfile) codecProfileCompatibilityWithMatcher(
+	version catalog.FileVersion,
+	audioStreamIndex *int,
+	values conditionValues,
+	container string,
+	useSubContainer bool,
+	matchConditions func([]ProfileCondition, conditionValues) bool,
+) codecProfileCompatibility {
 	compat := codecProfileCompatibility{VideoSupported: true, AudioSupported: true}
 	for _, profile := range p.ContainerProfiles {
-		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) && !conditionsMatch(profile.Conditions, values) {
+		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) && !matchConditions(profile.Conditions, values) {
 			compat.VideoSupported = false
 			compat.AudioSupported = false
 		}
@@ -129,7 +203,11 @@ func (p DeviceProfile) codecProfileCompatibilityWithValues(
 		if !conditionsMatch(profile.ApplyConditions, values) {
 			continue
 		}
-		if conditionsMatch(profile.Conditions, values) {
+		conditionsMatchProfile := conditionsMatch
+		if target == codecProfileTargetVideo {
+			conditionsMatchProfile = matchConditions
+		}
+		if conditionsMatchProfile(profile.Conditions, values) {
 			continue
 		}
 
@@ -229,6 +307,50 @@ func conditionsOnlyTargetAudio(conditions []ProfileCondition) bool {
 	return true
 }
 
+// encodeOutputConditionValues are the condition values of a planned encode.
+// Unlike a scanned file's, an encode's unknown reference-frame count gets no
+// FFmpeg 7 stand-in (see buildConditionValues): the encoder chooses it.
+func encodeOutputConditionValues(output catalog.FileVersion, audioStreamIndex *int) conditionValues {
+	values := buildConditionValues(output, audioStreamIndex)
+	if compatPrimaryVideoTrack(output).ReferenceFrames <= 0 {
+		delete(values, conditionPropertyRefFrames)
+	}
+	return values
+}
+
+// Normalized condition properties of the facts an encoder chooses.
+const (
+	conditionPropertyRefFrames    = "refframes"
+	conditionPropertyVideoProfile = "videoprofile"
+	conditionPropertyVideoLevel   = "videolevel"
+)
+
+// encodeOutputConditionsMatch matches conditions against a planned H.264
+// encode. Its reference frames are the encoder's choice and Silo does not yet
+// pass a client's limit to the encoder, so, as Jellyfin's StreamBuilder treats
+// a RefFrames rule (ApplyTranscodingConditions), the rule is an encode target
+// rather than a refusal. The streaming libx264 presets use one reference
+// frame. An optional rule on the stated profile or level is an encode target
+// too: Jellyfin applies it the same way, and before the encode stated them it
+// passed as unknown, so a client that sends one with a high bitrate limit
+// keeps its transcode. Every other rule, and a required profile or level
+// rule, is checked as usual.
+func encodeOutputConditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
+	for _, condition := range conditions {
+		property := normalizeConditionToken(condition.Property)
+		if _, known := values[property]; !known && property == conditionPropertyRefFrames {
+			continue
+		}
+		if !condition.IsRequired && (property == conditionPropertyVideoProfile || property == conditionPropertyVideoLevel) {
+			continue
+		}
+		if !conditionMatches(condition, values) {
+			return false
+		}
+	}
+	return true
+}
+
 func conditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
 	for _, condition := range conditions {
 		if !conditionMatches(condition, values) {
@@ -279,9 +401,10 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		"isinterlaced":   {text: strconv.FormatBool(video.Interlaced)},
 	}
 
-	// Everything below is only inserted when Silo actually knows the value.
-	// An absent key falls through to conditionMatches' IsRequired handling,
-	// mirroring how Jellyfin's ConditionProcessor treats a null value.
+	// Everything below is only inserted when Silo actually knows the value,
+	// except a scanned file's reference frames (see below). An absent key
+	// falls through to conditionMatches' IsRequired handling, mirroring how
+	// Jellyfin's ConditionProcessor treats a null value.
 	if strings.TrimSpace(video.Profile) != "" {
 		values["videoprofile"] = conditionValue{text: video.Profile}
 	}
@@ -290,6 +413,18 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 	}
 	if refFrames := intConditionValue(video.ReferenceFrames); refFrames.hasNum {
 		values["refframes"] = refFrames
+	} else {
+		// FFmpeg 8.1 reports a stream's reference frames only while reading
+		// frames, so no scanned file carries a count (see mediaprobe.Stream).
+		// Under FFmpeg 7, ffprobe reported the decoder default of 1 for every
+		// file, Jellyfin recorded that 1, and clients tuned their rules to it:
+		// Moonfin requires RefFrames <= 4 from 1900 pixels wide. A planned
+		// encode does not get this stand-in (see encodeOutputConditionValues).
+		// Failing such a rule here would force an encode of every HD H.264
+		// file those clients direct play on Jellyfin, so evaluate it against
+		// the same 1. Reading max_num_ref_frames from the SPS at scan time
+		// would replace this with the real count.
+		values["refframes"] = intConditionValue(1)
 	}
 	if width := intConditionValue(video.Width); width.hasNum {
 		values["width"] = width
@@ -388,13 +523,8 @@ func compatAudioTrack(version catalog.FileVersion, streamIndex *int) models.Audi
 			return version.AudioTracks[audioIndex]
 		}
 	}
-	for _, track := range version.AudioTracks {
-		if track.Default {
-			return track
-		}
-	}
 	if len(version.AudioTracks) > 0 {
-		return version.AudioTracks[0]
+		return version.AudioTracks[playback.SelectAudioTrack(version.AudioTracks, "", nil)]
 	}
 	return models.AudioTrack{Codec: version.CodecAudio}
 }

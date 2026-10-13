@@ -65,6 +65,7 @@ func registerSubtitleUploads(reg *Registry) {
 	upload := op("/subtitles/upload", "uploadSubtitle")
 	upload.ServiceBacked = true
 	upload.DemoRestricted = true
+	upload.HouseholdProfileGate = true
 	upload.RetrySafety = RetrySafetyNonRetryable
 	upload.Description = "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
 	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
@@ -94,7 +95,7 @@ func registerSubtitleUploads(reg *Registry) {
 		if row == nil {
 			return nil, NewProblem(TypeInternalError, "Subtitle upload returned no result.")
 		}
-		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: storedSubtitleView(*row)}}, nil
+		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: reg.storedSubtitleWithSync(ctx, *row)}}, nil
 	})
 	detect := op("/subtitles/detect-language", "detectSubtitleLanguage")
 	detect.RetrySafety = RetrySafetyNaturalIdempotent

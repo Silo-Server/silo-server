@@ -101,6 +101,7 @@ it("clears creation-only secret and mutation data on close", async () => {
   );
   const { client } = mount();
   await screen.findByText("Automation");
+  expect(screen.getByText("sa_12345678…")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Copy API key/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Create Key" }));
   fireEvent.change(screen.getByLabelText("Label"), { target: { value: "New" } });
@@ -199,41 +200,6 @@ it("discards the editor on profile change", async () => {
   state.profile = "other";
   view.refresh();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-});
-it("labels the key's tier as a rate limit and shows each option's limits", async () => {
-  vi.mocked(v2).mockImplementation((op, options) => {
-    if (op === "GET /api/v2/admin/rate-limits/config")
-      return reply(
-        options,
-        {
-          enabled: true,
-          tiers: {
-            standard: { requests_per_second: 20, requests_per_minute: 1200, burst: 20 },
-            elevated: { requests_per_second: 100, requests_per_minute: 6000, burst: 100 },
-          },
-        },
-        { ETag: '"limits"' },
-      );
-    if (op === "GET /api/v2/admin/rate-limits/status") return reply(options, { active: true });
-    return baseline(op, options);
-  });
-  mount();
-  const table = await screen.findByRole("table");
-  expect(within(table).getByRole("columnheader", { name: "Rate limit" })).toBeTruthy();
-  expect(within(table).queryByRole("columnheader", { name: "Tier" })).toBeNull();
-  expect(within(table).getByRole("cell", { name: "Standard" })).toBeTruthy();
-
-  fireEvent.click(screen.getByRole("button", { name: "Edit rate limit for Automation" }));
-  const dialog = await screen.findByRole("dialog");
-  expect(within(dialog).getByText("Edit API key rate limit")).toBeTruthy();
-  expect(within(dialog).getByText(/current rate limit: Standard/)).toBeTruthy();
-  expect(within(dialog).getByText(/doesn't change what the key can access/)).toBeTruthy();
-  await waitFor(() =>
-    expect(within(dialog).getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
-      "Standard — 20 requests/s, 1,200/min",
-    ),
-  );
-  expect(within(dialog).getByRole("button", { name: "Save rate limit" })).toBeTruthy();
 });
 
 it("offers the Owner's keys only to the Owner", async () => {

@@ -88,53 +88,7 @@ for (const [action, useHook] of [
     expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
     expect(result.current.variables?.name).toBe("Synthetic");
   });
-  it(`${action} refuses a queued command after PIN replacement`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => {
-      setProfileToken("pin-b");
-      onlineManager.setOnline(true);
-    });
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-  it.each([401, "network"])(`${action} does not replay %s under global retry3`, async (failure) => {
-    const fetchMock =
-      failure === "network"
-        ? vi.fn().mockRejectedValue(new Error("private"))
-        : vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 401 })));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-  it(`${action} fences late node observation and invalidation`, async () => {
-    let finish!: (r: Response) => void;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            finish = resolve;
-          }),
-      ),
-    );
-    const { client, wrapper } = fixture();
-    const invalidate = vi.spyOn(client, "invalidateQueries");
-    const { result } = renderHook(useHook, { wrapper });
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(finish).toBeTypeOf("function"));
-    act(() => setProfileId("b"));
-    await act(async () => finish(reply(observation(action))));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(invalidate).not.toHaveBeenCalled();
-    expect(result.current.data).toBeUndefined();
-  });
+
   it(`actual node row ${action} action dispatches once and waits for response`, async () => {
     let finish!: (r: Response) => void;
     const writes: string[] = [];
@@ -183,5 +137,102 @@ it.each([null, "pin-b"])(
     rerender();
     expect(result.current.data).toBeUndefined();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  },
+);
+
+it(`check refuses a queued command after PIN replacement`, async () => {
+  onlineManager.setOnline(false);
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useCheckNodeHealth, fixture());
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(result.current.isPaused).toBe(true));
+  act(() => {
+    setProfileToken("pin-b");
+    onlineManager.setOnline(true);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([401, "network"])(`check does not replay %s under global retry3`, async (failure) => {
+  const fetchMock =
+    failure === "network"
+      ? vi.fn().mockRejectedValue(new Error("private"))
+      : vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 401 })));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useCheckNodeHealth, fixture());
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it(`check fences late node observation and invalidation`, async () => {
+  let finish!: (r: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  const { client, wrapper } = fixture();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const { result } = renderHook(useCheckNodeHealth, { wrapper });
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  act(() => setProfileId("b"));
+  await act(async () => finish(reply(observation("check"))));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(invalidate).not.toHaveBeenCalled();
+  expect(result.current.data).toBeUndefined();
+});
+
+it.each([
+  [false, "Drain Synthetic", "drain"],
+  [true, "Resume Synthetic", "resume"],
+] as const)(
+  "node row drain action (requested=%s) posts %s once and shows the drain line",
+  async (requested, label, path) => {
+    const writes: string[] = [];
+    const listed: StreamNode = {
+      ...node,
+      active_jobs: 2,
+      drain_requested: requested,
+      drain_state: requested ? "draining" : "none",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init: RequestInit) => {
+        if (init.method === "POST") {
+          writes.push(String(url));
+          return Promise.resolve(
+            reply({
+              node_id: "17",
+              drain_requested: !requested,
+              drain_state: requested ? "none" : "draining",
+              active_jobs: 2,
+            }),
+          );
+        }
+        return Promise.resolve(reply({ items: [listed], page: { has_more: false } }));
+      }),
+    );
+    const { wrapper: Wrapper } = fixture();
+    render(
+      <MemoryRouter>
+        <Wrapper>
+          <AdminNodes />
+        </Wrapper>
+      </MemoryRouter>,
+    );
+    const button = await screen.findByRole("button", { name: label });
+    if (requested) expect(screen.getByText("Draining · 2 transcodes left")).toBeInTheDocument();
+    else expect(screen.queryByText(/Draining ·/)).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toContain(`/api/v2/admin/nodes/17/${path}`);
   },
 );

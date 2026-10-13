@@ -1,6 +1,10 @@
 package intromarkers
 
-import "math"
+import (
+	"math"
+
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
+)
 
 // fingerprintWindow is the stretch of a file, in media seconds, whose audio a
 // marker kind fingerprints. Fingerprint points count from Start, so matches
@@ -25,8 +29,8 @@ func (w fingerprintWindow) empty() bool {
 
 // identity is the artifact identity of a fingerprint of this window of the
 // candidate's file.
-func (w fingerprintWindow) identity(candidate Candidate) ArtifactIdentity {
-	return ArtifactIdentity{
+func (w fingerprintWindow) identity(candidate Candidate) mediaartifact.Identity {
+	return mediaartifact.Identity{
 		FileHash:           candidate.FileHash,
 		FileSize:           candidate.FileSize,
 		DurationSeconds:    candidate.DurationSeconds,

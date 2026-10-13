@@ -126,6 +126,14 @@ type collectionResponsePart struct {
 	ReleaseDate string `json:"release_date"`
 }
 
+// listResponse is the wire format of one /list/{id} page. Unlike the
+// discovery endpoints, a list pages its entries under "items".
+type listResponse struct {
+	Page       int              `json:"page"`
+	TotalPages int              `json:"total_pages"`
+	Items      []TrendingResult `json:"items"`
+}
+
 type mediaMovieResponse struct {
 	ID           int     `json:"id"`
 	Title        string  `json:"title"`
@@ -146,6 +154,13 @@ type mediaTVResponse struct {
 	FirstAirDate string  `json:"first_air_date"`
 	Popularity   float64 `json:"popularity"`
 	VoteAverage  float64 `json:"vote_average"`
+}
+
+// findResponse is TMDB's /find/{external_id} payload. Only the movie and TV
+// result lists matter here; people, episodes and seasons are ignored.
+type findResponse struct {
+	MovieResults []mediaMovieResponse `json:"movie_results"`
+	TVResults    []mediaTVResponse    `json:"tv_results"`
 }
 
 type mediaMultiSearchResponse struct {
@@ -171,34 +186,50 @@ type apiError struct {
 // MediaType is Silo-facing: "movie" or "series". Series-specific fields are
 // zero-valued for movies and vice versa.
 type MediaDetail struct {
-	MediaType           string
-	ID                  int
-	IMDbID              string
-	TVDBID              int
-	Title               string
-	OriginalTitle       string
-	Tagline             string
-	Overview            string
-	PosterPath          string
-	BackdropPath        string
-	ReleaseDate         string
-	Year                int
-	Runtime             int
-	Genres              []string
-	VoteAverage         float64
-	VoteCount           int
-	Status              string
-	Homepage            string
-	ContentRating       string
+	MediaType     string
+	ID            int
+	IMDbID        string
+	TVDBID        int
+	Title         string
+	OriginalTitle string
+	Tagline       string
+	Overview      string
+	PosterPath    string
+	BackdropPath  string
+	ReleaseDate   string
+	Year          int
+	Runtime       int
+	Genres        []string
+	VoteAverage   float64
+	VoteCount     int
+	Status        string
+	Homepage      string
+	ContentRating string
+	// USCertification is the US rating alone (the one GetCertification
+	// reports); ContentRating falls back to other countries for display.
+	USCertification string
+	// Certifications holds every country's certifications, keyed by ISO
+	// 3166-1 code, for readers that fall back to a title's own country.
+	Certifications      map[string][]string
 	ProductionCompanies []string
 	OriginalLanguage    string
 	KeywordIDs          []int
+	// GenreIDs, CompanyIDs (movies) and NetworkIDs (series) are TMDB's stable
+	// identifiers for Genres, ProductionCompanies and Networks, whose names
+	// follow the configured language. OriginCountries holds ISO 3166-1 codes.
+	GenreIDs        []int
+	CompanyIDs      []int
+	NetworkIDs      []int
+	OriginCountries []string
 
 	NumberOfSeasons  int
 	NumberOfEpisodes int
 	FirstAirDate     string
 	LastAirDate      string
 	Networks         []string
+	// Seasons lists a series' seasons as TMDB knows them, specials (season
+	// 0) included.
+	Seasons []SeasonSummary
 
 	Cast            []MediaCastMember
 	Director        string
@@ -217,6 +248,23 @@ type MediaCastMember struct {
 
 // genreEntry / companyEntry / networkEntry / personEntry mirror small object
 // shapes from the TMDB JSON. They're internal to the decode path.
+// SeasonSummary is one season of a series.
+type SeasonSummary struct {
+	Number       int
+	Name         string
+	EpisodeCount int
+	AirDate      string
+	PosterPath   string
+}
+
+type seasonEntry struct {
+	SeasonNumber int    `json:"season_number"`
+	Name         string `json:"name"`
+	EpisodeCount int    `json:"episode_count"`
+	AirDate      string `json:"air_date"`
+	PosterPath   string `json:"poster_path"`
+}
+
 type genreEntry struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -312,6 +360,7 @@ type movieDetailResponse struct {
 		Results  []idEntry `json:"results"`  // tv
 	} `json:"keywords"`
 	Genres              []genreEntry                  `json:"genres"`
+	OriginCountry       []string                      `json:"origin_country"`
 	VoteAverage         float64                       `json:"vote_average"`
 	VoteCount           int                           `json:"vote_count"`
 	Status              string                        `json:"status"`
@@ -342,11 +391,13 @@ type tvDetailResponse struct {
 		Results  []idEntry `json:"results"`  // tv
 	} `json:"keywords"`
 	Genres          []genreEntry               `json:"genres"`
+	OriginCountry   []string                   `json:"origin_country"`
 	VoteAverage     float64                    `json:"vote_average"`
 	VoteCount       int                        `json:"vote_count"`
 	Status          string                     `json:"status"`
 	Homepage        string                     `json:"homepage"`
 	Networks        []networkEntry             `json:"networks"`
+	Seasons         []seasonEntry              `json:"seasons"`
 	CreatedBy       []personEntry              `json:"created_by"`
 	Credits         *creditsResponse           `json:"credits"`
 	ExternalIDs     *ExternalIDs               `json:"external_ids"`

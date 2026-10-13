@@ -769,6 +769,22 @@ var builtinTemplates = []Template{
 		MDBList:             &MDBListSpec{URL: ""},
 	},
 
+	// ── Custom TMDB List ───────────────────────────────────────────────────
+	// "Bring your own URL" counterpart of Custom MDBList for public lists on
+	// themoviedb.org. TMDB has no list search, so the form only takes a URL.
+	{
+		ID:                  "tmdb_list_custom",
+		Title:               "Custom TMDB List",
+		Description:         "Paste any public TMDB list URL to seed a synced collection.",
+		Icon:                "🎞️",
+		Category:            CategoryCustom,
+		Source:              SourceTMDBList,
+		MediaKind:           MediaMixed,
+		DefaultLimit:        builtinDefaultLimit,
+		DefaultSyncSchedule: "0 6 * * *",
+		TMDBList:            &TMDBListSpec{URL: ""},
+	},
+
 	// ── Popular by Genre (TMDB Discover) ─────────────────────────────────────
 	// 5000s band. Each entry runs TMDB's /discover/movie endpoint sorted by
 	// popularity.desc with a 300-vote floor to keep emerging-but-thin titles

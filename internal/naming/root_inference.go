@@ -30,6 +30,7 @@ type RootAssignment struct {
 	LegacyRootPath         string
 	LegacyType             string
 	HasFolderIDs           bool
+	HasFileIDs             bool
 	HasSeasonStructure     bool
 	HasMovieEvidence       bool
 	HasEpisodePattern      bool
@@ -264,6 +265,9 @@ func inferFileRootAssignment(
 	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
 		assignment.HasFolderIDs = true
 	}
+	// Recorded for every file: an override can still force the root's final
+	// type, so callers apply the movie-only rule once that type is known.
+	assignment.HasFileIDs = FileNameHasProviderTag(filePath)
 
 	return assignment
 }
@@ -279,8 +283,8 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 
 	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(dirParts) > 1)
-	_, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, allowNumericSeason, seriesLibrary)
-	hasSeasonStructure, _ := detectSeasonStructure(dirParts, hasEpisodePattern || seriesLibrary, libraryRoot != "")
+	_, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, libraryRoot != "", allowNumericSeason, seriesLibrary)
+	hasSeasonStructure, _ := detectSeasonStructure(dirParts, nameNoExt, hasEpisodePattern || seriesLibrary, libraryRoot != "")
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(parentBase)
 	if parentDir == libraryRoot {
 		parentTitle, parentYear, parentTrusted = "", 0, false
@@ -382,7 +386,7 @@ func normalizeInferLibraryType(value string) string {
 }
 
 func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	found, _ := detectSeasonStructure(parts, allowNumeric)
+	found, _ := detectSeasonStructure(parts, "", allowNumeric, false)
 	return found
 }
 
@@ -402,8 +406,9 @@ func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 	clean := filepath.Clean(filePath)
 	baseName := filepath.Base(clean)
 	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	parts := directorySegmentsWithinRoot(clean, deepestContainingLibraryRoot(clean, libraryRoots))
-	if _, ok := parseEpisodeToken(nameNoExt, parts, false); !ok {
+	libraryRoot := deepestContainingLibraryRoot(clean, libraryRoots)
+	parts := directorySegmentsWithinRoot(clean, libraryRoot)
+	if _, ok := parseEpisodeToken(nameNoExt, parts, libraryRoot != "", false); !ok {
 		return false
 	}
 	for i, part := range parts {
@@ -411,7 +416,8 @@ func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 		if i > 0 {
 			parent = parts[i-1]
 		}
-		if _, ok := seasonDirectoryNumber(part, parent, false); ok {
+		topLevel := libraryRoot != "" && i == 0 && mayBeShowFolder(part, nameNoExt)
+		if _, ok := seasonDirectoryNumber(part, parent, false, topLevel); ok {
 			return true
 		}
 	}
@@ -422,8 +428,20 @@ func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeas
 	if hasSeasonStructure {
 		return false
 	}
-	if ParseFolderIDs(parentBase) != nil {
-		return true
+	// A TMDB or IMDb tag is movie evidence by itself. A TVDB-only tag isn't:
+	// Sonarr adds the show's TVDB ID to series folders, and TVDB lists series
+	// and movies alike (#1642). In such a folder an episode token in the file
+	// name decides, even in a release name that repeats the show's title and
+	// year ("Show.2024.S01E03.1080p"), unless the folder's own title is shaped
+	// like an episode code ("s01e03 (2020)"), which only a movie would carry.
+	// Otherwise the folder falls through to the title check below.
+	if hints := ParseFolderIDs(parentBase); hints != nil {
+		if hints.TmdbID != "" || hints.ImdbID != "" {
+			return true
+		}
+		if hasExplicitEpisodeToken(nameNoExt) && !hasExplicitEpisodeToken(stripInferProviderTags(parentBase)) {
+			return false
+		}
 	}
 	parentTitle, parentYear, trusted := parseInferFolderTitleYear(parentBase)
 	if parentTitle == "" || (!trusted && parentYear == 0) {

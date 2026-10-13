@@ -3,7 +3,7 @@ package apiv2
 func invitationFixtureCases() []fixtureCase {
 	cases := []fixtureCase{
 		{name: "invitation_capabilities", operationID: "getInvitationCapabilities", method: "GET", path: "/api/v2/invitations/capabilities", status: 200, schema: "InvitationCapabilities"},
-		{name: "admin_invitation_capabilities", operationID: "getAdminInvitationCapabilities", method: "GET", path: "/api/v2/admin/invitations/capabilities", headers: actingRequestAdmin, status: 200, schema: "InvitationCapabilities"},
+		{name: "admin_invitation_capabilities", operationID: "getAdminInvitationCapabilities", method: "GET", path: "/api/v2/admin/invitations/capabilities", headers: actingRequestAdmin, status: 200, schema: "AdminInvitationCapabilities"},
 		{name: "invitation_lookup", operationID: "lookupInvitation", method: "GET", path: "/api/v2/invitations/pending", status: 200, schema: "InvitationLookup"},
 		{name: "invitation_accepted", operationID: "acceptInvitation", method: "POST", path: "/api/v2/invitations/pending/accept", body: `{"password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},
 		{name: "invitation_accepted_sign_in_required", operationID: "acceptInvitation", method: "POST", path: "/api/v2/invitations/sign-in-required/accept", body: `{"password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},

@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,6 +56,9 @@ type ChainEntry struct {
 	ContentLevel         string // "movie", "series", "season", "episode", or "" (legacy)
 	Priority             int
 	Enabled              bool
+	// Local marks a builtin-host provider (the local tier, see local_tier.go).
+	// Reads fill it in; SetChain works it out itself and ignores it.
+	Local bool
 }
 
 // ChainRepository provides operations for the library_provider_chains table.
@@ -68,13 +76,21 @@ func (r *ChainRepository) Pool() *pgxpool.Pool {
 	return r.pool
 }
 
-// SetChain replaces the entire provider chain for a given media folder.
+// SetChain replaces the entire provider chain for a given media folder. Each
+// content level is stored with its builtin (local) entries first, whatever
+// order or priorities the caller sent.
 func (r *ChainRepository) SetChain(ctx context.Context, folderID int, entries []ChainEntry) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("beginning chain transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	builtin, err := builtinInstallationIDs(ctx, tx)
+	if err != nil {
+		return err
+	}
+	entries = pinLocalTier(entries, func(e ChainEntry) bool { return builtin[e.PluginInstallationID] })
 
 	_, err = tx.Exec(ctx, "DELETE FROM library_provider_chains WHERE media_folder_id = $1", folderID)
 	if err != nil {
@@ -107,10 +123,12 @@ func (r *ChainRepository) SetChain(ctx context.Context, folderID int, entries []
 // exist, falls back to legacy flat entries (content_level = ”).
 func (r *ChainRepository) GetChain(ctx context.Context, folderID int, contentLevel string) ([]ChainEntry, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT plugin_installation_id, capability_id, capability_type, content_level, priority, enabled
-		 FROM library_provider_chains
-		 WHERE media_folder_id = $1 AND content_level = $2
-		 ORDER BY priority ASC`,
+		`SELECT c.plugin_installation_id, c.capability_id, c.capability_type, c.content_level, c.priority, c.enabled,
+		        COALESCE(pi.kind = 'builtin', false)
+		 FROM library_provider_chains c
+		 LEFT JOIN plugin_installations pi ON pi.id = c.plugin_installation_id
+		 WHERE c.media_folder_id = $1 AND c.content_level = $2
+		 ORDER BY c.priority ASC`,
 		folderID, contentLevel,
 	)
 	if err != nil {
@@ -121,7 +139,7 @@ func (r *ChainRepository) GetChain(ctx context.Context, folderID int, contentLev
 	var entries []ChainEntry
 	for rows.Next() {
 		var e ChainEntry
-		if err := rows.Scan(&e.PluginInstallationID, &e.CapabilityID, &e.CapabilityType, &e.ContentLevel, &e.Priority, &e.Enabled); err != nil {
+		if err := rows.Scan(&e.PluginInstallationID, &e.CapabilityID, &e.CapabilityType, &e.ContentLevel, &e.Priority, &e.Enabled, &e.Local); err != nil {
 			return nil, fmt.Errorf("scanning chain entry: %w", err)
 		}
 		entries = append(entries, e)
@@ -144,10 +162,12 @@ func (r *ChainRepository) GetChain(ctx context.Context, folderID int, contentLev
 // GetAllChainEntries returns every chain entry for a folder, across all content levels.
 func (r *ChainRepository) GetAllChainEntries(ctx context.Context, folderID int) ([]ChainEntry, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT plugin_installation_id, capability_id, capability_type, content_level, priority, enabled
-		 FROM library_provider_chains
-		 WHERE media_folder_id = $1
-		 ORDER BY content_level, priority ASC`,
+		`SELECT c.plugin_installation_id, c.capability_id, c.capability_type, c.content_level, c.priority, c.enabled,
+		        COALESCE(pi.kind = 'builtin', false)
+		 FROM library_provider_chains c
+		 LEFT JOIN plugin_installations pi ON pi.id = c.plugin_installation_id
+		 WHERE c.media_folder_id = $1
+		 ORDER BY c.content_level, c.priority ASC`,
 		folderID,
 	)
 	if err != nil {
@@ -158,7 +178,7 @@ func (r *ChainRepository) GetAllChainEntries(ctx context.Context, folderID int) 
 	var entries []ChainEntry
 	for rows.Next() {
 		var e ChainEntry
-		if err := rows.Scan(&e.PluginInstallationID, &e.CapabilityID, &e.CapabilityType, &e.ContentLevel, &e.Priority, &e.Enabled); err != nil {
+		if err := rows.Scan(&e.PluginInstallationID, &e.CapabilityID, &e.CapabilityType, &e.ContentLevel, &e.Priority, &e.Enabled, &e.Local); err != nil {
 			return nil, fmt.Errorf("scanning chain entry: %w", err)
 		}
 		entries = append(entries, e)
@@ -307,11 +327,16 @@ func ResolveChainWithChecker(
 		return nil, fmt.Errorf("getting chain for folder %d: %w", folderID, err)
 	}
 
-	// Filter to only enabled entries.
+	// Filter to only enabled entries. A local entry the admin switched off
+	// stays off in the fallback below, which would otherwise bring the
+	// default-enabled local tier back.
 	var enabledEntries []ChainEntry
+	localOff := make(map[capabilityKey]bool)
 	for _, e := range chainEntries {
 		if e.Enabled {
 			enabledEntries = append(enabledEntries, e)
+		} else if e.Local {
+			localOff[capabilityKey{e.PluginInstallationID, e.CapabilityID}] = true
 		}
 	}
 	chainEntries = enabledEntries
@@ -320,11 +345,17 @@ func ResolveChainWithChecker(
 		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool, checker), nil
 	}
 
-	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker)
+	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker, localOff)
 	if err != nil {
 		return nil, err
 	}
 	return providers, nil
+}
+
+// capabilityKey identifies one installation's metadata capability.
+type capabilityKey struct {
+	installationID int
+	capabilityID   string
 }
 
 // CapabilityInfo holds the fields needed to construct a provider from plugin tables.
@@ -340,6 +371,12 @@ type CapabilityInfo struct {
 	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
 	// into the bulk enrichment pass. See extractBulkLookupLimit.
 	BulkLookupLimit int
+	// RatingSources are the rating sources of its own the capability declares
+	// (rating_sources), beyond Silo's built-in ones. See extractRatingSources.
+	RatingSources []models.RatingSourceDefinition
+	// Builtin marks a builtin-host capability: the local tier, which always
+	// runs ahead of remote providers. See local_tier.go.
+	Builtin bool
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
@@ -354,11 +391,11 @@ func resolveEnabledProviders(
 	if err != nil {
 		return nil, err
 	}
-	// Exclude capabilities that opt out of default-enable (e.g. the seeded-
-	// disabled built-in NFO provider). Like the chain-less fallback, an
-	// installed-but-off provider must not activate itself through this
-	// content-level-agnostic path (person refresh); only an admin enabling its
-	// chain row does. Absent/unparseable metadata stays eligible (legacy).
+	// Exclude capabilities that opt out of default-enable (a specialist
+	// plugin). Like the chain-less fallback, an installed-but-off provider
+	// must not activate itself through this content-level-agnostic path
+	// (person refresh); only an admin enabling its chain row does.
+	// Absent/unparseable metadata stays eligible (legacy).
 	eligible := make([]CapabilityInfo, 0, len(caps))
 	for _, c := range caps {
 		if !extractDefaultEnabled(lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)) {
@@ -372,12 +409,14 @@ func resolveEnabledProviders(
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
 // their plugin manifest default_priority for the given content level. Providers
 // without a declared priority are placed last (sorted by installation ID as a tiebreaker).
+// Capabilities in exclude are left out.
 func resolveEnabledProvidersByPriority(
 	ctx context.Context,
 	contentLevel string,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
 	checker InstallationEnabledChecker,
+	exclude map[capabilityKey]bool,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
@@ -395,6 +434,9 @@ func resolveEnabledProvidersByPriority(
 	// single-purpose provider is never invoked for content it does not handle.
 	items := make([]ranked, 0, len(caps))
 	for _, c := range caps {
+		if exclude[capabilityKey{c.PluginInstallationID, c.CapabilityID}] {
+			continue
+		}
 		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)
 		if !providerEligibleForFallback(metadataJSON, contentLevel) {
 			slog.DebugContext(ctx, "skipping metadata provider: not eligible for chain-less fallback", "component", "metadata",
@@ -446,9 +488,10 @@ func providerSupportsLevel(metadataJSON []byte, contentLevel string) bool {
 // the chain-less fallback for contentLevel. The fallback runs not only for
 // chain-less libraries but whenever a level's enabled-filter yields zero
 // entries, so a capability that opts out of being enabled by default
-// (default_enabled=false — e.g. the seeded-disabled built-in NFO provider or a
-// specialist plugin) must not activate itself through it. Absent or
-// unparseable metadata defaults to eligible, preserving legacy behavior.
+// (default_enabled=false, e.g. a specialist plugin) must not activate itself
+// through it. The built-in NFO provider is enabled by default, so a
+// chain-less library reads local metadata. Absent or unparseable metadata
+// defaults to eligible, preserving legacy behavior.
 func providerEligibleForFallback(metadataJSON []byte, contentLevel string) bool {
 	return providerSupportsLevel(metadataJSON, contentLevel) && extractDefaultEnabled(metadataJSON)
 }
@@ -571,6 +614,92 @@ func extractBulkLookupLimit(metadataJSON []byte) int {
 	return min(limit, maxBulkLookupLimit)
 }
 
+// maxDeclaredRatingSources caps how many rating sources one capability may
+// declare, so a plugin cannot crowd a title page.
+const maxDeclaredRatingSources = 8
+
+// maxRatingSourceNameRunes caps a declared source's name, the mark clients
+// show next to its score.
+const maxRatingSourceNameRunes = 24
+
+// maxRatingSourceLabelRunes caps a declared source's label, its full name in
+// the administrator's list; a longer one falls back to the name.
+const maxRatingSourceLabelRunes = 60
+
+// extractRatingSources parses a capability's rating_sources: the ratings it
+// reports under ratings.sources beyond Silo's own IMDb and TMDB. Each entry is
+// {"id", "name", "label", "scale", "percent"}:
+//
+//	"rating_sources": [{"id": "kinopoisk", "name": "Kinopoisk", "scale": 10}]
+//
+// id is a source name (see models.ValidRatingSourceID, compared lowercased)
+// other than imdb or tmdb; rt_critic and rt_audience name the Rotten Tomatoes
+// scores stored in their own columns. name is the plain-text mark clients show
+// next to the score, label an optional longer name for the administrator's
+// list (name when absent), scale the top of the source's own scale (10 shows
+// a stored 72 as 7.2), and percent shows the score as a percentage, which
+// makes the scale 100 whatever the entry says. rt_critic and rt_audience are
+// always percentages. An entry
+// that breaks any of these is dropped on its own; duplicates keep the first;
+// at most maxDeclaredRatingSources are kept. Declared sources stay hidden until
+// an administrator turns them on.
+func extractRatingSources(metadataJSON []byte) []models.RatingSourceDefinition {
+	raw, ok := capabilityMetadataField(metadataJSON, "rating_sources")
+	if !ok {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	var out []models.RatingSourceDefinition
+	seen := make(map[string]struct{}, len(entries))
+	for _, rawEntry := range entries {
+		var entry struct {
+			ID      string  `json:"id"`
+			Name    string  `json:"name"`
+			Label   string  `json:"label"`
+			Scale   float64 `json:"scale"`
+			Percent bool    `json:"percent"`
+		}
+		if err := json.Unmarshal(rawEntry, &entry); err != nil {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(entry.ID))
+		name := strings.TrimSpace(entry.Name)
+		if !models.ValidRatingSourceID(id) || models.IsBuiltinRatingSource(id) {
+			continue
+		}
+		if name == "" || utf8.RuneCountInString(name) > maxRatingSourceNameRunes {
+			continue
+		}
+		// Rotten Tomatoes scores fill the rating_rt_* columns, which hold a
+		// percentage that poster badges show as is.
+		if id == models.RatingSourceRTCritic || id == models.RatingSourceRTAudience {
+			entry.Percent = true
+		}
+		if entry.Percent {
+			entry.Scale = 100
+		}
+		if math.IsNaN(entry.Scale) || entry.Scale <= 0 || entry.Scale > 100 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		label := strings.TrimSpace(entry.Label)
+		if label == "" || utf8.RuneCountInString(label) > maxRatingSourceLabelRunes {
+			label = name
+		}
+		out = append(out, models.RatingSourceDefinition{Source: id, Name: name, Label: label, Scale: entry.Scale, Percent: entry.Percent})
+		if len(out) == maxDeclaredRatingSources {
+			break
+		}
+	}
+	return out
+}
+
 // capabilityMetadataField reads one plugin-declared field from capability
 // metadata JSON. The field may sit at the top level or inside the "metadata"
 // envelope the SDK wraps plugin-declared fields in; the top level wins.
@@ -639,13 +768,13 @@ func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
 func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([]CapabilityInfo, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT pc.plugin_installation_id, pc.capability_id,
-		        COALESCE(pc.metadata->>'display_name', pc.capability_id),
-		        pc.metadata
+		        COALESCE(NULLIF(pc.metadata->>'display_name', ''), pc.capability_id),
+		        pc.metadata, pi.kind = 'builtin'
 		 FROM plugin_capabilities pc
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
 		 WHERE pc.capability_type = 'metadata_provider.v1'
 		   AND pi.enabled = true
-		 ORDER BY pc.plugin_installation_id`)
+		 ORDER BY pc.plugin_installation_id, pc.capability_id`)
 	if err != nil {
 		return nil, fmt.Errorf("listing enabled metadata capabilities: %w", err)
 	}
@@ -655,14 +784,53 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 	for rows.Next() {
 		var c CapabilityInfo
 		var metadataJSON []byte
-		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON); err != nil {
+		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON, &c.Builtin); err != nil {
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+		c.RatingSources = extractRatingSources(metadataJSON)
+		if c.Builtin && len(c.RatingSources) == 0 {
+			c.RatingSources = builtinRatingSources(c.CapabilityID)
+		}
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
+}
+
+// DeclaredRatingSources lists the rating sources the enabled metadata plugins
+// declare (rating_sources), in installation order and then by capability ID.
+// When two capabilities declare the same source, the first names and scales it,
+// and Provider credits every provider that declares it.
+func DeclaredRatingSources(ctx context.Context, pool *pgxpool.Pool) ([]ratingsources.DeclaredSource, error) {
+	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	var out []ratingsources.DeclaredSource
+	providers := map[string][]string{}
+	for _, c := range caps {
+		for _, definition := range c.RatingSources {
+			if _, dup := providers[definition.Source]; !dup {
+				out = append(out, ratingsources.DeclaredSource{RatingSourceDefinition: definition})
+			}
+			if !slices.Contains(providers[definition.Source], c.DisplayName) {
+				providers[definition.Source] = append(providers[definition.Source], c.DisplayName)
+			}
+		}
+	}
+	for i := range out {
+		out[i].Provider = joinNames(providers[out[i].Source])
+	}
+	return out, nil
+}
+
+// joinNames lists provider names for people: "A", "A and B", "A, B and C".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // resolveChainEntries builds Provider instances from explicit chain entries,
@@ -682,7 +850,9 @@ func resolveChainEntries(
 }
 
 // buildProviders constructs Provider instances from capability info, skipping
-// providers whose plugin installation is disabled.
+// providers whose plugin installation is disabled. Builtin (local) providers
+// come first, in their given order, then the rest in theirs: the local tier
+// outranks every remote provider whatever its stored priority.
 func buildProviders(
 	ctx context.Context,
 	caps []CapabilityInfo,
@@ -690,6 +860,7 @@ func buildProviders(
 	pool *pgxpool.Pool,
 	checker InstallationEnabledChecker,
 ) []Provider {
+	local := make([]Provider, 0, 1)
 	providers := make([]Provider, 0, len(caps))
 	for _, c := range caps {
 		enabled, err := installationEnabled(ctx, checker, pool, c.PluginInstallationID)
@@ -713,11 +884,11 @@ func buildProviders(
 					"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)
 				continue
 			}
-			providers = append(providers, provider)
+			local = append(local, provider)
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.RatingSources, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -728,7 +899,7 @@ func buildProviders(
 		}
 		providers = append(providers, provider)
 	}
-	return providers
+	return append(local, providers...)
 }
 
 // installationKindChecker is an optional extension of InstallationEnabledChecker
@@ -778,7 +949,7 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 	}
 	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(metadata->>'display_name', $2), metadata
+		`SELECT COALESCE(NULLIF(metadata->>'display_name', ''), $2), metadata
 		 FROM plugin_capabilities
 		 WHERE plugin_installation_id = $1 AND capability_id = $2 AND capability_type = 'metadata_provider.v1'`,
 		installationID, capabilityID,
@@ -789,5 +960,6 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 	}
 	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
+	info.RatingSources = extractRatingSources(metadataJSON)
 	return info
 }

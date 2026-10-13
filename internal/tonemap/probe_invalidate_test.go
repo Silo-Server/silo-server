@@ -72,11 +72,11 @@ func TestInvalidateProbeCacheSupersedesAnInFlightProbe(t *testing.T) {
 	blocked := make(chan struct{})
 	var runs atomic.Int32
 	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		if runs.Add(1) == 1 {
-			close(started)
-			<-blocked
-		}
 		if len(args) > 0 && args[len(args)-1] == "-filters" {
+			if runs.Add(1) == 1 {
+				close(started)
+				<-blocked
+			}
 			return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n"), nil
 		}
 		if len(args) > 0 && args[len(args)-1] == "-encoders" {
@@ -105,9 +105,9 @@ func TestInvalidateProbeCacheSupersedesAnInFlightProbe(t *testing.T) {
 	}
 	wg.Wait()
 
-	// One command from the blocked flight is enough to prove the second probe
-	// did not simply wait on it: a joined caller would have run none of its own.
-	if got := runs.Load(); got < 2 {
-		t.Fatalf("runner invocations = %d, want the post-invalidation probe to run its own commands", got)
+	// Each probe lists filters once; counting all commands would let a single
+	// probe's encoder listing and conversions masquerade as another probe.
+	if got := runs.Load(); got != 2 {
+		t.Fatalf("probe starts = %d, want a separate post-invalidation probe", got)
 	}
 }

@@ -2,12 +2,16 @@ package apiv2
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
@@ -199,5 +203,74 @@ func TestMethodLabelIsBounded(t *testing.T) {
 	}
 	if line := buf.String(); !strings.Contains(line, `"method":"other"`) || strings.Contains(line, "BREW") {
 		t.Errorf("log line for an invented method: %s", line)
+	}
+}
+
+// zeroCopyWriter stands in for net/http's response writer, whose ReadFrom is
+// the sendfile path, and records how many bytes arrived through it.
+type zeroCopyWriter struct {
+	*httptest.ResponseRecorder
+	readFrom int64
+}
+
+func (w *zeroCopyWriter) ReadFrom(src io.Reader) (int64, error) {
+	n, err := io.Copy(w.ResponseRecorder, src)
+	w.readFrom += n
+	return n, err
+}
+
+func TestObservedMediaResponseKeepsZeroCopyAndCountsBytes(t *testing.T) {
+	buf := captureLogs(t)
+	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+	body := strings.Repeat("x", 64<<10)
+	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The download routes wrap the writer this way before serving a file.
+		wrapped := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		// Hide strings.Reader's WriteTo so io.Copy has to use the writer's ReadFrom.
+		if _, err := io.Copy(wrapped, struct{ io.Reader }{strings.NewReader(body)}); err != nil {
+			t.Errorf("copy: %v", err)
+		}
+	}))
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/file", nil))
+	if inner.readFrom != int64(len(body)) {
+		t.Fatalf("zero-copy bytes = %d, want %d", inner.readFrom, len(body))
+	}
+	if inner.Code != http.StatusOK || !strings.Contains(buf.String(), `"body_bytes":65536`) || !strings.Contains(buf.String(), `"status":200`) {
+		t.Fatalf("status %d, log %s", inner.Code, buf.String())
+	}
+}
+
+func TestObservedCopyFailingOnFirstReadKeepsErrorStatus(t *testing.T) {
+	buf := captureLogs(t)
+	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(w, iotest.ErrReader(io.ErrUnexpectedEOF)); err == nil {
+			t.Error("copy succeeded")
+		}
+		http.Error(w, "upstream failed", http.StatusInternalServerError)
+	}))
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/artwork/poster", nil))
+	if inner.Code != http.StatusInternalServerError || !strings.Contains(buf.String(), `"status":500`) {
+		t.Fatalf("status %d, log %s", inner.Code, buf.String())
+	}
+}
+
+// failingFlushWriter reports a transport error when flushed, as net/http does
+// after a write deadline passes.
+type failingFlushWriter struct{ *httptest.ResponseRecorder }
+
+func (failingFlushWriter) FlushError() error { return errFlushFailed }
+
+var errFlushFailed = errors.New("synthetic flush failure")
+
+func TestObservedFlushReturnsTransportError(t *testing.T) {
+	inner := failingFlushWriter{httptest.NewRecorder()}
+	var got error
+	h := observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = http.NewResponseController(w).Flush()
+	}))
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/file", nil))
+	if !errors.Is(got, errFlushFailed) {
+		t.Fatalf("flush error = %v", got)
 	}
 }

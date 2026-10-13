@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import type { AutoscanAvailableSource, AutoscanScanSourceDescriptor, Library } from "@/api/types";

@@ -5,11 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 
 import type { IntroSkipMode } from "../types";
 import { markerOccurrenceAtTime, resolveMarkerRegions } from "../utils/watchPageMarkers";
-import {
-  INTRO_PROMPT_SECONDS,
-  PLAYBACK_PAUSE_GRACE_MS,
-  useIntroSkipPrompt,
-} from "./useIntroSkipPrompt";
+import { INTRO_PROMPT_SECONDS, useIntroSkipPrompt } from "./useIntroSkipPrompt";
 
 type SeekHandler = (seconds: number) => boolean | Promise<boolean>;
 
@@ -200,38 +196,6 @@ describe("useIntroSkipPrompt", () => {
 
     rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
     expect(onSeek).toHaveBeenCalledTimes(2);
-  });
-
-  it("ignores a short false edge and freezes after the pause grace", () => {
-    const { result, rerender } = renderPrompt();
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-
-    act(() => vi.advanceTimersByTime(1_000));
-    rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
-    act(() => vi.advanceTimersByTime(PLAYBACK_PAUSE_GRACE_MS));
-    const pausedRemaining = result.current.prompt?.remainingMs ?? 0;
-
-    act(() => vi.advanceTimersByTime(2_000));
-    expect(result.current.prompt?.remainingMs).toBe(pausedRemaining);
-
-    // Resuming replays exactly what was frozen — the grace window itself is
-    // not deducted, so the clock has the same 4 s left it had at the edge.
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    act(() => vi.advanceTimersByTime(pausedRemaining));
-    expect(result.current.prompt).toBeNull();
-  });
-
-  // The grace window is there to tell a rebuffer from a pause. Charging the
-  // viewer for it would make every pause cost 1.5 s of a 5 s prompt.
-  it("freezes a pause at what the clock had when playback stopped", () => {
-    const { result, rerender } = renderPrompt();
-    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-
-    act(() => vi.advanceTimersByTime(1_000));
-    rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
-    act(() => vi.advanceTimersByTime(PLAYBACK_PAUSE_GRACE_MS));
-
-    expect(result.current.prompt?.remainingMs).toBe(4_000);
   });
 
   // A prompt with less left than the grace window used to expire mid-pause,

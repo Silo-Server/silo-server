@@ -30,7 +30,7 @@ func validate(t Template) error {
 		if t.TMDB == nil {
 			return errors.New("tmdb spec is required for tmdb source")
 		}
-		if t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
+		if t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDB(*t.TMDB)
@@ -38,7 +38,7 @@ func validate(t Template) error {
 		if t.Trakt == nil {
 			return errors.New("trakt spec is required for trakt source")
 		}
-		if t.TMDB != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
+		if t.TMDB != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTrakt(*t.Trakt, t.RequiresProfile)
@@ -46,7 +46,7 @@ func validate(t Template) error {
 		if t.MDBList == nil {
 			return errors.New("mdblist spec is required for mdblist source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
+		if t.TMDB != nil || t.Trakt != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateMDBList(*t.MDBList)
@@ -54,7 +54,7 @@ func validate(t Template) error {
 		if t.TMDBDiscover == nil {
 			return errors.New("tmdb_discover spec is required for tmdb_discover source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBCollection != nil {
+		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDBDiscover(*t.TMDBDiscover)
@@ -62,10 +62,18 @@ func validate(t Template) error {
 		if t.TMDBCollection == nil {
 			return errors.New("tmdb_collection spec is required for tmdb_collection source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil {
+		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDBCollection(*t.TMDBCollection)
+	case SourceTMDBList:
+		if t.TMDBList == nil {
+			return errors.New("tmdb_list spec is required for tmdb_list source")
+		}
+		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
+			return errors.New("only one source spec may be set")
+		}
+		return validateTMDBList(*t.TMDBList)
 	default:
 		return fmt.Errorf("unknown source %q", t.Source)
 	}
@@ -257,6 +265,19 @@ func validateMDBList(spec MDBListSpec) error {
 	}
 	if _, err := collectionutil.CanonicalMDBListURL(trimmed); err != nil {
 		return fmt.Errorf("mdblist url: %w", err)
+	}
+	return nil
+}
+
+func validateTMDBList(spec TMDBListSpec) error {
+	trimmed := strings.TrimSpace(spec.URL)
+	if trimmed == "" {
+		// Empty URL is allowed; it means the template is a "bring your own
+		// list" placeholder that asks for the list URL.
+		return nil
+	}
+	if _, err := collectionutil.ParseTMDBListURL(trimmed); err != nil {
+		return fmt.Errorf("tmdb_list url: %w", err)
 	}
 	return nil
 }

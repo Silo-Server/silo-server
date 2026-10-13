@@ -1,9 +1,9 @@
-import { MemoryRouter } from "react-router";
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SectionItem } from "@/api/types";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SectionItem } from "@/api/types";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildWatchRouteRequest } from "@/pages/watchRouteHelpers";
 import { takePlaybackIntent } from "@/player/first-frame";
@@ -16,6 +16,12 @@ const playbackMocks = vi.hoisted(() => ({
     toggleActivePlayback: () => void;
   },
   toggleActivePlayback: vi.fn(),
+}));
+
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
 }));
 
 vi.mock("@/hooks/useAmbientColor", () => ({
@@ -76,27 +82,6 @@ function heroMetadata(container: HTMLElement): string[] {
 }
 
 describe("formatHeroMetadata", () => {
-  it("formats episode identity, runtime, and content rating without movie-only metadata", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          type: "episode",
-          season_number: 2,
-          episode_number: 3,
-          year: 2024,
-          runtime: 42,
-          rating_imdb: 7.6,
-          genres: ["Science Fiction", "Drama"],
-          content_rating: " tv-14 ",
-        }),
-      ),
-    ).toEqual([
-      { key: "episode-identity", label: "S2 · E3" },
-      { key: "runtime", label: "42 min" },
-      { key: "content-rating", label: "TV-14" },
-    ]);
-  });
-
   it.each([Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, -1, 0, 10.1])(
     "omits invalid IMDb rating %s",
     (ratingImdb) => {
@@ -127,7 +112,33 @@ describe("formatHeroMetadata", () => {
       ),
     ).toEqual([
       { key: "year", label: "2025" },
-      { key: "imdb", label: "IMDb 10.0" },
+      {
+        key: "rating",
+        label: "IMDb 10.0",
+        rating: { source: "imdb", name: "IMDb", score: 100, display: "10.0" },
+      },
+    ]);
+  });
+
+  it("falls back to the TMDB score when there is no IMDb score", () => {
+    expect(
+      formatHeroMetadata(
+        movieSlide({
+          runtime: undefined,
+          duration_seconds: undefined,
+          rating_imdb: undefined,
+          rating_tmdb: 7.25,
+          genres: [],
+          content_rating: undefined,
+        }),
+      ),
+    ).toEqual([
+      { key: "year", label: "2025" },
+      {
+        key: "rating",
+        label: "TMDB 7.3",
+        rating: { source: "tmdb", name: "TMDB", score: 72.5, display: "7.3" },
+      },
     ]);
   });
 
@@ -168,6 +179,8 @@ describe("formatHeroMetadata", () => {
 
 describe("HeroBanner", () => {
   beforeEach(() => {
+    spoilerPrefs.hideImages = false;
+    spoilerPrefs.hideOverviews = false;
     playbackMocks.controller = null;
     playbackMocks.toggleActivePlayback.mockClear();
     vi.stubGlobal("matchMedia", () => ({
@@ -180,6 +193,55 @@ describe("HeroBanner", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("hides unwatched episode descriptions and reveals started episodes", () => {
+    spoilerPrefs.hideImages = true;
+    spoilerPrefs.hideOverviews = true;
+    const episode = movieSlide({
+      type: "episode",
+      backdrop_url: "/episode-still.jpg",
+      backdrop_is_episode_still: true,
+      overview: "The culprit is revealed",
+      user_state: { played: false, is_favorite: false, in_watchlist: false },
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <HeroBanner items={[episode]} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("The culprit is revealed")).not.toBeInTheDocument();
+    expect(
+      document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
+    ).toContain("blur(24px)");
+
+    rerender(
+      <MemoryRouter>
+        <HeroBanner items={[{ ...episode, position_seconds: 120 }]} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("The culprit is revealed")).toBeInTheDocument();
+    expect(
+      document.querySelector('img[src="/episode-still.jpg"]')?.getAttribute("style"),
+    ).not.toContain("blur(");
+  });
+
+  it("preserves the series backdrop on an unwatched episode", () => {
+    spoilerPrefs.hideImages = true;
+    render(
+      <MemoryRouter>
+        <HeroBanner
+          items={[
+            movieSlide({
+              type: "episode",
+              backdrop_url: "/series-art.jpg",
+              backdrop_is_episode_still: false,
+            }),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector("img")?.getAttribute("style")).not.toContain("blur(");
   });
 
   it("names the ken burns tokens literally so tailwind keeps them", () => {
@@ -414,36 +476,6 @@ describe("HeroBanner", () => {
         (image) => image.style.animation !== "none",
       ),
     ).toHaveLength(1);
-  });
-
-  it("does not render the desktop spotlighting card", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            {
-              content_id: "movie-1",
-              type: "movie",
-              title: "Featured Movie",
-              year: 2025,
-              genres: ["Drama"],
-              status: "matched",
-              rating_imdb: 8.1,
-              overview: "Overview",
-              poster_url: "",
-              poster_thumbhash: "",
-              backdrop_url: "",
-              backdrop_thumbhash: "",
-              logo_url: "",
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("Now spotlighting");
-    expect(markup).toContain("Featured Movie");
-    expect(markup).toContain("More Info");
   });
 
   it("renders editorial metadata in the approved order and caps genres at two", () => {

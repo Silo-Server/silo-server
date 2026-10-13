@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
@@ -247,14 +248,14 @@ func (reg *Registry) recommendationsService() (RecommendationService, *Problem) 
 
 // recommendationRowOf renders a discover row; the cards are the shared
 // section card.
-func recommendationRowOf(v handlers.DiscoverRowView) RecommendationRow {
-	return RecommendationRow{Type: v.Type, Title: v.Label, Kind: v.SectionKind, Key: v.SectionKey, Items: catalogItemsOfSection(v.Items)}
+func recommendationRowOf(v handlers.DiscoverRowView, sel ratingsources.Selection) RecommendationRow {
+	return RecommendationRow{Type: v.Type, Title: v.Label, Kind: v.SectionKind, Key: v.SectionKey, Items: catalogItemsOfSection(v.Items, sel)}
 }
 
-func catalogItemsOfSection(views []handlers.SectionItemView) []CatalogItem {
+func catalogItemsOfSection(views []handlers.SectionItemView, sel ratingsources.Selection) []CatalogItem {
 	items := make([]CatalogItem, 0, len(views))
 	for _, v := range views {
-		items = append(items, catalogItemOfSection(v))
+		items = append(items, catalogItemOfSection(v, sel))
 	}
 	return items
 }
@@ -272,7 +273,7 @@ func (reg *Registry) recommendationCards(ctx context.Context, fetch func(svc Rec
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: NewCollection(catalogItemsOfSection(views))}}, nil
+	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: NewCollection(catalogItemsOfSection(views, reg.ratingSelection(ctx)))}}, nil
 }
 
 func (reg *Registry) listBecauseWatched(ctx context.Context, in *BecauseWatchedInput) (*CatalogItemCollectionOutput, error) {
@@ -306,7 +307,7 @@ func (reg *Registry) getForYouMain(ctx context.Context, in *ForYouInput) (*Recom
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &RecommendationRowOutput{Body: recommendationRowOf(row)}, nil
+	return &RecommendationRowOutput{Body: recommendationRowOf(row, reg.ratingSelection(ctx))}, nil
 }
 
 func (reg *Registry) recommendationRows(ctx context.Context, fetch func(svc RecommendationService, userID int, profileID string) ([]handlers.DiscoverRowView, error)) (*RecommendationRowCollectionOutput, error) {
@@ -323,8 +324,9 @@ func (reg *Registry) recommendationRows(ctx context.Context, fetch func(svc Reco
 		return nil, serviceProblem(err)
 	}
 	rows := make([]RecommendationRow, 0, len(views))
+	sel := reg.ratingSelection(ctx)
 	for _, v := range views {
-		rows = append(rows, recommendationRowOf(v))
+		rows = append(rows, recommendationRowOf(v, sel))
 	}
 	return &RecommendationRowCollectionOutput{Body: RecommendationRowCollection{Collection: NewCollection(rows)}}, nil
 }
@@ -362,7 +364,7 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &RecommendationRowOutput{Body: RecommendationRow{Type: view.Type, Title: view.Label, Kind: view.Kind, Key: view.Key, Items: catalogItemsOfSection(view.Items)}}, nil
+	return &RecommendationRowOutput{Body: RecommendationRow{Type: view.Type, Title: view.Label, Kind: view.Kind, Key: view.Key, Items: catalogItemsOfSection(view.Items, reg.ratingSelection(ctx))}}, nil
 }
 
 func (reg *Registry) listSimilar(ctx context.Context, in *SimilarInput) (*CatalogItemCollectionOutput, error) {
@@ -431,7 +433,7 @@ func (reg *Registry) listTasteSeedItems(ctx context.Context, cursors *Cursors, i
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
-	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: Paginated(catalogItemsOfSection(views), next)}}, nil
+	return &CatalogItemCollectionOutput{Body: CatalogItemCollection{Collection: Paginated(catalogItemsOfSection(views, reg.ratingSelection(ctx)), next)}}, nil
 }
 
 func (reg *Registry) createTasteSeed(ctx context.Context, in *TasteSeedSubmitInput) (*TasteSeedResultOutput, error) {
@@ -476,8 +478,9 @@ func (reg *Registry) getWatchTonight(ctx context.Context, in *WatchTonightInput)
 		return nil, serviceProblem(err)
 	}
 	items := make([]WatchTonightItem, 0, len(view.Items))
+	sel := reg.ratingSelection(ctx)
 	for _, v := range view.Items {
-		items = append(items, WatchTonightItem{CatalogItem: catalogItemOfSection(v.Card()), WatchTonightSource: v.WatchTonightSource})
+		items = append(items, WatchTonightItem{CatalogItem: catalogItemOfSection(v.Card(), sel), WatchTonightSource: v.WatchTonightSource})
 	}
 	return &WatchTonightOutput{Body: WatchTonight{Items: items, IsCold: view.IsCold}}, nil
 }
@@ -512,12 +515,13 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 	}
 	pagingLimited := view.HasMore && len(view.Cards) >= remaining
 	items := make([]WatchTonightCard, 0, len(view.Cards))
+	sel := reg.ratingSelection(ctx)
 	for _, c := range view.Cards {
 		cast := make([]WatchTonightCastMember, 0, len(c.Cast))
 		for _, m := range c.Cast {
 			cast = append(cast, WatchTonightCastMember{Name: m.Name, Character: m.Character, PhotoURL: m.PhotoURL})
 		}
-		items = append(items, WatchTonightCard{CatalogItem: catalogItemOfSection(c.Card()), WatchTonightSource: c.WatchTonightSource, Cast: cast})
+		items = append(items, WatchTonightCard{CatalogItem: catalogItemOfSection(c.Card(), sel), WatchTonightSource: c.WatchTonightSource, Cast: cast})
 	}
 	return &WatchTonightCardPageOutput{Body: WatchTonightCardPage{Items: items, HasMore: view.HasMore, PagingLimited: pagingLimited, IsCold: view.IsCold}}, nil
 }

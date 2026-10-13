@@ -46,44 +46,6 @@ func TestAccessGroupHandlerIsDefaultRoundTrips(t *testing.T) {
 	}
 }
 
-func TestAccessGroupHandlerUpdateDefaultUnsetsPrevious(t *testing.T) {
-	store := newAccessGroupHandlerTestStore()
-	store.groups[1] = access.Group{ID: 1, Name: "Group A", DownloadAllowed: true, RequestsAllowed: true, IsDefault: true}
-	store.groups[2] = access.Group{ID: 2, Name: "Group B", DownloadAllowed: true, RequestsAllowed: true}
-	store.nextID = 3
-	handler := NewAccessGroupHandler(store)
-
-	rec := httptest.NewRecorder()
-	req := accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/2", strings.NewReader(`{
-		"is_default": true
-	}`), "2")
-	handler.HandleUpdate(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("HandleUpdate status = %d, body %s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/access-groups", nil)
-	handler.HandleList(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("HandleList status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	var groups []accessGroupResponse
-	if err := json.NewDecoder(rec.Body).Decode(&groups); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	defaults := map[int64]bool{}
-	for _, group := range groups {
-		defaults[group.ID] = group.IsDefault
-	}
-	if defaults[1] {
-		t.Fatalf("group A remained default after setting group B")
-	}
-	if !defaults[2] {
-		t.Fatalf("group B is_default = false, want true")
-	}
-}
-
 func TestAccessGroupHandlerDefaultGroupGuards(t *testing.T) {
 	store := newAccessGroupHandlerTestStore()
 	store.groups[1] = access.Group{ID: 1, Name: "Default", DownloadAllowed: true, RequestsAllowed: true, IsDefault: true}

@@ -54,20 +54,6 @@ func withBranding(t *testing.T, settings fakeSettings) {
 	t.Cleanup(func() { WebDistFS, Branding = prevFS, prevBranding })
 }
 
-func TestFrontendInjectsServerNameIntoTitle(t *testing.T) {
-	withBranding(t, fakeSettings{branding.KeyServerName: "Acme Media"})
-	rr := httptest.NewRecorder()
-	FrontendHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	if !strings.Contains(rr.Body.String(), "<title>Acme Media</title>") {
-		t.Fatalf("title not branded: %q", rr.Body.String())
-	}
-	// CSP must still be applied to the templated shell.
-	if rr.Header().Get("Content-Security-Policy") != frontendContentSecurityPolicy {
-		t.Fatalf("CSP missing on branded index.html")
-	}
-}
-
 // TestFrontendShellCacheFollowsBrandingChanges guards the rendered-shell
 // cache: one handler instance must re-render (and re-tag) the shell when the
 // branding snapshot changes, not keep serving the first rendering forever.
@@ -80,6 +66,10 @@ func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
 	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/", nil))
 	if !strings.Contains(first.Body.String(), "<title>Acme Media</title>") {
 		t.Fatalf("initial title not branded: %q", first.Body.String())
+	}
+
+	if first.Header().Get("Content-Security-Policy") != frontendContentSecurityPolicy {
+		t.Fatal("CSP missing on branded index.html")
 	}
 
 	// Repeat request with unchanged branding: same ETag (served from cache).

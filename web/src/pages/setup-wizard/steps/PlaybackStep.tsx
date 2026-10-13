@@ -42,7 +42,7 @@ function playbackSummary(
   hwAccel: string,
   probed: HWAccelInfo | undefined,
 ): string | undefined {
-  if (!transcodeEnabled) return "Transcoding off";
+  if (!transcodeEnabled) return "Video transcoding off";
   if (hwAccel === "none") return "Software";
   if (probed?.resolved && probed.resolved !== "none") return formatResolved(probed.resolved);
   return hwAccel === "auto" ? undefined : formatResolved(hwAccel);
@@ -96,9 +96,9 @@ export function PlaybackStep() {
     >
       <StepSection>
         <SettingField
-          label="Transcoding"
+          label="Video transcoding"
           type="toggle"
-          description="Off serves only files clients can already play."
+          description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
           value={transcodeEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("playback.transcode_enabled", v)}
         />
@@ -131,7 +131,7 @@ export function PlaybackStep() {
           type="toggle"
           description="Fast. Uses a validated hardware tone mapper on this server or a transcode node."
           status={statusLine(gpuToneMapStatus)}
-          value={form.getValue("playback.transcode_hardware_tone_map_enabled") || "false"}
+          value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
         />
@@ -139,7 +139,7 @@ export function PlaybackStep() {
           label="On the CPU"
           type="toggle"
           description="Works everywhere, but a single stream can max out several cores."
-          value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
+          value={form.getValue("playback.transcode_software_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
         />

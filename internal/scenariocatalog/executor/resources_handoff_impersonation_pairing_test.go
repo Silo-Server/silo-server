@@ -306,7 +306,7 @@ func (e *Env) checkHandoffPoll(t *testing.T, transport string, reply response, b
 	}
 	token, _ := doc["profile_token"].(string)
 	claims, err := e.profileTok.Validate(token)
-	if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true {
+	if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PINRevision != e.currentPINRevision(user.ID, profilePrimary) || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true {
 		t.Fatal("temporary profile authority invalid")
 	}
 	delete(sessionsNew, access.SessionID)

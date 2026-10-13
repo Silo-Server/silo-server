@@ -17,7 +17,8 @@ import {
   AudioLines,
 } from "lucide-react";
 import { CircleButton } from "./CircleButton";
-import { SeekBar, formatTime } from "./SeekBar";
+import { SeekBar } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";
@@ -32,8 +33,11 @@ import type {
   QualityOption,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
+import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -52,6 +56,10 @@ interface PlayerControlsProps {
   // Seek bar markers
   chapters?: PlayerChapter[];
   regions?: MarkerRegionView[];
+  // Seek bar previews
+  trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
+  onTrickplayError?: () => void;
   // Marker editing
   editing?: boolean;
   activeEditKind?: MarkerKind | null;
@@ -77,6 +85,7 @@ interface PlayerControlsProps {
   onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
+  subtitleSync?: SubtitleSync;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -84,6 +93,7 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -124,6 +134,9 @@ export function PlayerControls({
   buffered,
   chapters,
   regions,
+  trickplay,
+  trickplayUpdatedAt,
+  onTrickplayError,
   editing,
   activeEditKind,
   onRegionEdgeChange,
@@ -147,11 +160,13 @@ export function PlayerControls({
   onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
+  subtitleSync,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  deliveredRecipe,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -225,7 +240,7 @@ export function PlayerControls({
       {compactControls && (
         <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
           <div
-            className="pointer-events-auto flex items-center gap-2"
+            className={`flex items-center gap-2 ${visible ? "pointer-events-auto" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
             {showEpisodeSlots ? (
@@ -299,6 +314,9 @@ export function PlayerControls({
           buffered={buffered}
           chapters={chapters}
           regions={regions}
+          trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
+          onTrickplayError={onTrickplayError}
           editing={editing}
           activeEditKind={activeEditKind}
           onRegionEdgeChange={onRegionEdgeChange}
@@ -336,11 +354,13 @@ export function PlayerControls({
               onSubtitleJobAccepted={onSubtitleJobAccepted}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
+              subtitleSync={subtitleSync}
               audioTracks={audioTracks}
             />
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              deliveredRecipe={deliveredRecipe}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -511,12 +531,14 @@ export function PlayerControls({
                 onSubtitleJobAccepted={onSubtitleJobAccepted}
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
+                subtitleSync={subtitleSync}
                 audioTracks={audioTracks}
               />
 
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                deliveredRecipe={deliveredRecipe}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

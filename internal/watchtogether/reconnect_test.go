@@ -36,6 +36,47 @@ func TestReconnectPreservesPlayingSession(t *testing.T) {
 	}
 }
 
+// A socket renewal re-syncs the member to the room. The room's last command,
+// resent after that sync, would be applied on top of it, projected from when
+// it first ran.
+func TestReconnectSyncSupersedesTheRoomCommand(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &stubRepo{room: baseRoom(now)}
+	s := newServiceForTest(now, repo, &stubSessions{session: &playback.Session{UserID: 8, ProfileID: "guest", MediaFileID: 1}}, &stubFiles{file: &models.MediaFile{ContentID: "movie-1"}}, nil)
+	t.Cleanup(s.Close)
+	live := s.rooms[repo.room.ID]
+	live.command = &TransportCommand{
+		CommandID: "room-play", SelectionRevision: repo.room.SelectionRevision,
+		Action: TransportActionPlay, PlaybackState: RoomPlaybackStatePlaying,
+		ExecuteAt: now.Add(-time.Minute).Format(time.RFC3339Nano), IssuedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	old := new(recordingConn)
+	live.members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", sessionID: "host-session", connection: new(recordingConn), isReady: true, lastCommandID: "room-play"}
+	live.members[buildMemberKey(8, "guest")] = &memberState{userID: 8, profileID: "guest", sessionID: "guest-session", connection: old, isReady: true, lastCommandID: "room-play"}
+
+	s.Disconnect(registrationFor(repo.room.ID, 8, "guest", old), false)
+	conn := new(recordingConn)
+	reg, _, err := s.Connect(t.Context(), repo.room.ID, 8, "guest", conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest-session"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.reconcileRoom(t.Context(), repo.room.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, payload := range conn.payloads {
+		if command, ok := payload["command"].(TransportCommand); ok && command.CommandID == "room-play" {
+			t.Fatal("the room's last command was resent after the reconnect sync")
+		}
+	}
+	if command := lastTransport(t, conn); command.Action != TransportActionPlay || command.SessionID != "guest-session" {
+		t.Fatalf("reconnect sync = %+v", command)
+	}
+}
+
 // A replacement or late-joining stream starts behind a room that keeps
 // playing. It syncs alone, and its startup stall does not pause the others.
 func TestReplacementSessionSyncsWithoutPausingTheRoom(t *testing.T) {

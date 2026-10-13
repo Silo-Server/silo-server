@@ -135,8 +135,9 @@ func (reg *Registry) libraryCollectionPage(ctx context.Context, c *Cursors, in *
 		return nil, collectionProblem(e)
 	}
 	items := make([]CatalogItem, 0, len(v.Items))
+	sel := reg.ratingSelection(ctx)
 	for _, i := range v.Items {
-		items = append(items, catalogItemOfListing(i))
+		items = append(items, catalogItemOfListing(i, sel))
 	}
 	next, e := collectionPageNext(c, scope, v.HasMore, v.Revision, v.Last, v.Query)
 	if e != nil {

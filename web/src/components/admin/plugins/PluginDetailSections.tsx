@@ -139,7 +139,7 @@ export function PluginSettingsPanels({
       {authCapabilities.length > 0 ? (
         <DetailPanel
           title="Sign-in"
-          description="Sign-in providers are registered when the server starts, so saved changes take effect after a restart."
+          description="Changes apply at once. Test the connection and choose the sign-in options on Settings → Sign-in."
         >
           <ul className="divide-y rounded-xl border">
             {authCapabilities.map((capability, index) => {

@@ -250,20 +250,33 @@ func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 }
 
 func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution string) bool {
+	return p.supportsVideoTranscodingOutput(version, channels, videoBitrateKbps, resolution, compatTargetVideoCodec, "ts", false)
+}
+
+// supportsHEVCTranscodingOutput requires an explicit HLS fMP4 profile. HEVC
+// output has no permissive fallback because decode support is not encode-route support.
+func (p DeviceProfile) supportsHEVCTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution string) bool {
+	return p.supportsVideoTranscodingOutput(version, channels, videoBitrateKbps, resolution, compatVideoCodecHEVC, compatContainerMP4, true)
+}
+
+func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution, videoCodec, container string, requireExplicitProfile bool) bool {
 	channels, audioBitrateKbps := playback.ResolveAACOutputV3(channels, 0)
 	output := version
-	output.Container = "ts"
-	output.CodecVideo = compatTargetVideoCodec
+	output.Container = container
+	output.CodecVideo = videoCodec
 	output.CodecAudio = compatTargetAudioCodec
 	output.Bitrate = 0
 	output.HDR = false
 	sourceVideo := compatPrimaryVideoTrack(version)
 	// Source codec levels, reference frames and HDR metadata do not describe
-	// the encoded H264 stream. Profile and level depend on the chosen worker's
-	// encoder; leave them unknown so required conditions remain fail-closed.
-	// Full HDR encodes are separately gated on tone-map availability.
+	// the encoded stream. An H.264 encode states its profile and level (see
+	// h264EncodeFacts); its reference frames stay the encoder's choice (see
+	// encodeOutputConditionsMatch). An HEVC encode's profile, level and
+	// reference frames stay unknown, so required rules on them fail closed and
+	// an uncertain HEVC encode falls back to H.264. Full HDR encodes are
+	// separately gated on tone-map availability.
 	video := models.VideoTrack{
-		Codec: compatTargetVideoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
+		Codec: videoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
 		Width: sourceVideo.Width, Height: sourceVideo.Height,
 		AspectRatio: sourceVideo.AspectRatio, FrameRate: sourceVideo.FrameRate,
 		Interlaced: sourceVideo.Interlaced,
@@ -276,6 +289,9 @@ func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, ch
 			video.Width = int(math.Round(float64(sourceVideo.Width)*float64(height)/float64(sourceVideo.Height)/2)) * 2
 		}
 	}
+	if videoCodec == compatTargetVideoCodec {
+		video.Profile, video.Level = h264EncodeFacts(video, videoBitrateKbps, version)
+	}
 	if videoBitrateKbps > 0 {
 		video.Bitrate = videoBitrateKbps * 1000
 		output.Bitrate = videoBitrateKbps + audioBitrateKbps
@@ -283,38 +299,72 @@ func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, ch
 	output.VideoTracks = []models.VideoTrack{video}
 	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Channels: channels, Bitrate: audioBitrateKbps * 1000}}
 	audioIndex := len(output.VideoTracks)
-	if !p.codecProfileCompatibility(output, &audioIndex).supportsDirectPlay() {
+	// Both encoded outputs use HLS. Apply codec profiles scoped to its
+	// segment container, including Container=hls with SubContainer=mp4/ts.
+	outputValues := encodeOutputConditionValues(output, &audioIndex)
+	matchOutput := conditionsMatch
+	if videoCodec == compatTargetVideoCodec {
+		matchOutput = encodeOutputConditionsMatch
+	}
+	if !p.codecProfileCompatibilityWithMatcher(output, &audioIndex, outputValues, container, true, matchOutput).supportsDirectPlay() {
 		return false
 	}
 
-	if len(p.TranscodingProfiles) == 0 {
+	if len(p.TranscodingProfiles) == 0 && !requireExplicitProfile {
 		return true
 	}
 	for _, profile := range p.TranscodingProfiles {
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		protocol := strings.ToLower(strings.TrimSpace(profile.Protocol))
+		if (requireExplicitProfile && protocol != compatHLSPathSegment) || (!requireExplicitProfile && protocol != "" && protocol != compatHLSPathSegment) {
 			continue
 		}
 		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && channels > maxChannels {
 			continue
 		}
-		if !conditionsMatch(profile.Conditions, buildConditionValues(output, &audioIndex)) {
+		if !matchOutput(profile.Conditions, outputValues) {
 			continue
 		}
-		if !matchesCSV(profile.VideoCodec, compatTargetVideoCodec) {
+		if (requireExplicitProfile && strings.TrimSpace(profile.VideoCodec) == "") || !matchesCSV(profile.VideoCodec, videoCodec) {
 			continue
 		}
 		if !matchesCSV(profile.AudioCodec, compatTargetAudioCodec) {
 			continue
 		}
-		if profile.Container != "" && !matchesCSV(profile.Container, "ts") && !matchesCSV(profile.Container, "mpegts") {
+		if (requireExplicitProfile && strings.TrimSpace(profile.Container) == "") || (profile.Container != "" && !matchesCSV(profile.Container, container) && (container != "ts" || !matchesCSV(profile.Container, "mpegts"))) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+// h264StreamingLevel is the level the streaming libx264 encode is pinned to
+// (playback.appendVideoArgs); other encoders pick a level from the stream.
+const h264StreamingLevel = 41
+
+// h264EncodeFacts states the profile and level of an H.264 encode of video,
+// whose frame size and rate are already the output's. Every H.264 encode
+// here is High profile (playback.H264EncodeProfile). The level is the one the
+// stream needs at the rate the encoder is configured with: a capped encode
+// sets its maximum rate to videoBitrateKbps (appendCappedVBRArgs), whatever
+// the source's rate; an uncapped encode has no rate ceiling and is estimated
+// at the source's H.264-equivalent rate. It is never below the 4.1 the
+// streaming libx264 encode is pinned to, so a rule checks the higher of the
+// two.
+func h264EncodeFacts(video models.VideoTrack, videoBitrateKbps int, source catalog.FileVersion) (profile string, level int) {
+	kbps := videoBitrateKbps
+	if kbps <= 0 {
+		kbps = playback.H264EquivalentKbps(source.Bitrate, source.CodecVideo)
+	}
+	// Not max: this package's max(value, fallback) returns any positive value.
+	level = playback.H264LevelFor(video.Width, video.Height, parseCompatFrameRate(video.FrameRate), kbps)
+	if level < h264StreamingLevel {
+		level = h264StreamingLevel
+	}
+	return playback.H264EncodeProfile, level
 }
 
 // SupportsHLSRemuxForAudioStream reports whether the client accepts the
@@ -336,7 +386,7 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != compatHLSPathSegment {
 			continue
 		}
 		if !matchesCSV(profile.Container, "mp4") ||
@@ -383,7 +433,7 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
-		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != compatHLSPathSegment {
 			continue
 		}
 		if !matchesCSV(profile.Container, "mp4") ||

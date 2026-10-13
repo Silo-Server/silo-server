@@ -5,7 +5,6 @@ import { MemoryRouter } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MediaItemMenu, { buildMediaItemMenuModel, MetadataActionDialogHost } from "./MediaItemMenu";
-import { mediaItemMenuTriggerClassName } from "./mediaItemMenuTrigger";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
@@ -210,42 +209,6 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).not.toContain("Match Item");
   });
 
-  it("shows a continue watching dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Continue Watching",
-    });
-
-    expect(
-      model.some(
-        (item) => item.kind === "action" && item.label === "Remove from Continue Watching",
-      ),
-    ).toBe(true);
-  });
-
-  it("shows a next up dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Next Up",
-    });
-
-    expect(
-      model.some((item) => item.kind === "action" && item.label === "Remove from Next Up"),
-    ).toBe(true);
-  });
-
   it("shows play from beginning for partially watched leaf items", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "episode",
@@ -381,20 +344,6 @@ describe("MediaItemMenu metadata dialogs", () => {
 });
 
 describe("MediaItemMenu trigger visibility", () => {
-  it("leaves reveal rules to the media-card CSS instead of utility classes", () => {
-    const className = mediaItemMenuTriggerClassName();
-
-    expect(className).toContain("media-card-action-trigger");
-    expect(className).not.toContain("pointer-fine:");
-    expect(className).not.toContain("opacity-");
-    expect(className).not.toContain("group-hover");
-    expect(className).not.toContain("group-focus-within");
-    expect(className).not.toContain("backdrop-blur");
-    expect(className).toContain("focus-visible:ring-2");
-    expect(className).toContain("size-6");
-    expect(className).toContain("sm:size-8");
-  });
-
   it("drops pointer focus when the trigger closes the menu so hover exit can hide it", async () => {
     render(
       <MemoryRouter>
@@ -409,6 +358,16 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "More actions" });
+    const className = trigger.className;
+    expect(className).toContain("media-card-action-trigger");
+    expect(className).not.toContain("pointer-fine:");
+    expect(className).not.toContain("opacity-");
+    expect(className).not.toContain("group-hover");
+    expect(className).not.toContain("group-focus-within");
+    expect(className).not.toContain("backdrop-blur");
+    expect(className).toContain("focus-visible:ring-2");
+    expect(className).toContain("size-6");
+    expect(className).toContain("sm:size-8");
     await userEvent.click(trigger);
     expect(screen.getByRole("menu")).toBeTruthy();
 
@@ -445,6 +404,72 @@ describe("MediaItemMenu trigger visibility", () => {
     });
   });
 
+  function renderTriggerMenu() {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+    return screen.getByRole("button", { name: "More actions" });
+  }
+
+  it("opens on a lone click from assistive technology before the menu mounts", async () => {
+    const trigger = renderTriggerMenu();
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // The trigger's wrapper cancels the click so the card link never sees it.
+    expect(fireEvent.click(trigger)).toBe(false);
+
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens on element.click() and closes on the next one", async () => {
+    const trigger = renderTriggerMenu();
+
+    act(() => trigger.click());
+    expect(await screen.findByRole("menu")).toBeTruthy();
+
+    act(() => trigger.click());
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for a pointer press followed by its click", async () => {
+    const trigger = renderTriggerMenu();
+
+    fireEvent.pointerDown(trigger, { pointerId: 4, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    // Some assistive technology pairs a pointerdown with a detail-0 click.
+    fireEvent.pointerDown(trigger, { pointerId: 5, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for Space and Enter", async () => {
+    const trigger = renderTriggerMenu();
+
+    trigger.focus();
+    await userEvent.keyboard(" ");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+  });
+
   it("still returns keyboard focus after a cancelled pointer press inside the menu", async () => {
     render(
       <MemoryRouter>
@@ -469,27 +494,6 @@ describe("MediaItemMenu trigger visibility", () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(trigger);
     });
-  });
-
-  it("renders a matching bottom-left favorite control for poster cards", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.className).toContain("media-card-action-trigger");
-    expect(button.className).toContain("cursor-pointer");
-    expect(button.className).not.toContain("cursor-wait");
-    expect(button.parentElement?.className).toContain("left-2.5");
   });
 
   it("shows matching eye state in the hover control and three-dot menu", async () => {
@@ -790,7 +794,13 @@ describe("MediaItemMenu trigger visibility", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+    const button = screen.getByRole("button", { name: "Add to favorites" });
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.className).toContain("media-card-action-trigger");
+    expect(button.className).toContain("cursor-pointer");
+    expect(button.className).not.toContain("cursor-wait");
+    expect(button.parentElement?.className).toContain("left-2.5");
+    await userEvent.click(button);
 
     expect(mocks.toggleFavorite).toHaveBeenCalledTimes(1);
     expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
@@ -818,6 +828,11 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const button = screen.getByRole("button", { name: "Add to favorites" });
+    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
+    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
+    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
+    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
     fireEvent.pointerDown(button, { pointerId: 7, button: 0, clientX: 120, clientY: 240 });
     fireEvent.pointerUp(button, { pointerId: 7, button: 0, clientX: 128, clientY: 248 });
 
@@ -914,28 +929,6 @@ describe("MediaItemMenu trigger visibility", () => {
     fireEvent.pointerUp(button, { pointerId: 8, button: 0, clientX: 128, clientY: 240 });
 
     expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-  });
-
-  it("does not favorite when a swipe returns near its starting point", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
-    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
-    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
-
-    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
   });
 
   it("keeps the poster heart in sync when favorite state changes through the menu", async () => {
@@ -1129,19 +1122,6 @@ describe("MediaItemMenu long-press action sheet", () => {
     document.documentElement.removeAttribute("data-fine-pointer");
   });
 
-  it("opens the sheet with the full action set after a touch hold", () => {
-    render(<LongPressCard />);
-
-    pressCard();
-    holdPastLongPress();
-
-    const sheet = screen.getByRole("dialog");
-    expect(within(sheet).getByText("Apex")).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
-  });
-
   it("ignores mouse presses so precise pointers keep the hover controls", () => {
     render(<LongPressCard />);
 
@@ -1197,9 +1177,12 @@ describe("MediaItemMenu long-press action sheet", () => {
 
     pressCard();
     holdPastLongPress();
-    fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
-    );
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByText("Apex")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Mark Watched" }));
 
     expect(mocks.toggleWatched).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -1223,5 +1206,74 @@ describe("MediaItemMenu long-press action sheet", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
     ).toBeTruthy();
+  });
+});
+
+describe("MediaItemMenu lazy machinery", () => {
+  function renderMenu() {
+    return render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  const radixRoot = () => document.querySelector('[data-slot="dropdown-menu-trigger"]');
+
+  it("mounts no menu root until the card is used, then opens on the first press", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(radixRoot()).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("data-state", "closed");
+
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(radixRoot()).not.toBeNull();
+    // The visible trigger kept its element and reports the open menu.
+    expect(screen.getByRole("button", { name: "More actions" })).toBe(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("data-state", "open");
+    expect(trigger.getAttribute("aria-controls")).toBe(screen.getByRole("menu").id);
+  });
+
+  it("mounts the menu when the trigger takes focus and opens to the first item by keyboard", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    act(() => trigger.focus());
+    expect(radixRoot()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await userEvent.keyboard("{Enter}");
+
+    const items = screen.getAllByRole("menuitem");
+    await waitFor(() => expect(document.activeElement).toBe(items[0]));
+  });
+
+  it("runs a quick action pressed before the machinery mounted", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Remove from favorites" })).toBeTruthy();
+  });
+
+  it("warms the machinery on mouse hover without opening the menu", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+
+    await waitFor(() => expect(radixRoot()).not.toBeNull());
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

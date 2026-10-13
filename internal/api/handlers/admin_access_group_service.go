@@ -12,6 +12,12 @@ import (
 var ErrInvalidAccessGroup = errors.New("invalid access group configuration")
 var ErrAccessGroupUnavailable = errors.New("access group administration unavailable")
 
+// memberMovingGroupStore deletes a group after moving its members into the
+// default group in the same transaction (access.GroupStore).
+type memberMovingGroupStore interface {
+	DeleteMovingMembers(context.Context, int64, access.GroupPrecondition) error
+}
+
 type guardedAccessGroupStore interface {
 	ListPage(context.Context, *access.GroupPageKey, int) ([]access.Group, bool, error)
 	UpdateConditional(context.Context, int64, access.UpdateGroupInput, access.GroupPrecondition) (*access.Group, error)
@@ -54,12 +60,22 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 	}
 	return s.UpdateConditional(ctx, id, in, guard)
 }
+
+// DeleteAdminAccessGroup deletes a group. Its members move into the default
+// group in the same transaction, so no regular account is left without a
+// group. They stay signed in: the move bumps their access_policy_revision and
+// the next request resolves the default group's policy.
 func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int64, guard access.GroupPrecondition) error {
 	s, ok := guardedGroupStore(h)
 	if !ok {
 		return ErrAccessGroupUnavailable
 	}
-	return s.DeleteConditional(ctx, id, guard)
+	mover, ok := h.store.(memberMovingGroupStore)
+	if !ok {
+		return s.DeleteConditional(ctx, id, guard)
+	}
+	// Set-based, so the group-writer lock is not held for per-member statements.
+	return mover.DeleteMovingMembers(ctx, id, guard)
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {

@@ -149,12 +149,18 @@ func (t *SweepArtworkStorageTask) Execute(ctx context.Context, progress taskmana
 	//
 	// A skipped run did none, and another node is mid-sweep holding the lock:
 	// writing our stale cursor back would drag that node's progress backwards.
-	if !stats.StoppedOnAnomaly && !stats.Skipped {
-		if stats.PrefixDone {
-			t.saveCheckpoint(ctx, artworkSweepCheckpoint{Identity: t.identity, Prefix: nextPrefix(cp.Prefix)})
-		} else {
-			t.saveCheckpoint(ctx, artworkSweepCheckpoint{Identity: t.identity, Prefix: cp.Prefix, Token: stats.NextToken})
-		}
+	//
+	// A page the anomaly guard refused moves the sweep on to the next prefix.
+	// Resuming at that page would refuse it again on every run, and since the
+	// prefixes are walked in turn, the ones after it would never be swept. The
+	// refused prefix is walked again from its start when the cycle comes back
+	// to it, by which time the GC may have caught up with what stopped it.
+	switch {
+	case stats.Skipped:
+	case stats.PrefixDone, stats.StoppedOnAnomaly:
+		t.saveCheckpoint(ctx, artworkSweepCheckpoint{Identity: t.identity, Prefix: nextPrefix(cp.Prefix)})
+	default:
+		t.saveCheckpoint(ctx, artworkSweepCheckpoint{Identity: t.identity, Prefix: cp.Prefix, Token: stats.NextToken})
 	}
 
 	if data, marshalErr := json.Marshal(stats); marshalErr == nil {
@@ -170,8 +176,8 @@ func (t *SweepArtworkStorageTask) Execute(ctx context.Context, progress taskmana
 	}
 
 	progress.Report(100, fmt.Sprintf(
-		"Swept %d objects in %s: %d referenced, %d deleted, %d too new, %d unrecognized",
-		stats.Scanned, cp.Prefix, stats.Referenced, stats.Deleted, stats.TooNew, stats.Unparsable,
+		"Swept %d objects in %s: %d referenced, %d deleted, %d left to artwork GC, %d too new, %d unrecognized",
+		stats.Scanned, cp.Prefix, stats.Referenced, stats.Deleted, stats.LeftToGC, stats.TooNew, stats.Unparsable,
 	))
 	return nil
 }

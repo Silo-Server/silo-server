@@ -55,21 +55,22 @@ func seedPresentStateFixture(ctx context.Context, t *testing.T, label string) pr
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, fx.folderID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{fx.seriesID, fx.unrelatedID})
+		cleanupCtx := context.WithoutCancel(ctx)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM media_folders WHERE id = $1`, fx.folderID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{fx.seriesID, fx.unrelatedID})
 	})
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, status, genres)
+		INSERT INTO media_items (content_id, type, title, status, genres, poster_path, backdrop_path, logo_path)
 		VALUES
-			($1, 'series', 'Target Series', 'matched', '{}'::text[]),
-			($2, 'movie', 'Unrelated Movie', 'matched', '{}'::text[])
+			($1, 'series', 'Target Series', 'matched', '{}'::text[], '', '', ''),
+			($2, 'movie', 'Unrelated Movie', 'matched', '{}'::text[], '', '', '')
 	`, fx.seriesID, fx.unrelatedID); err != nil {
 		t.Fatalf("seed media items: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-		VALUES ($1, $2, 1, 1, 'Episode')
+		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, still_path)
+		VALUES ($1, $2, 1, 1, 'Episode', '')
 	`, fx.episodeID, fx.seriesID); err != nil {
 		t.Fatalf("seed episode: %v", err)
 	}

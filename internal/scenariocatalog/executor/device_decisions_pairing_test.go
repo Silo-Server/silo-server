@@ -296,10 +296,12 @@ func (e *Env) checkDeviceDecisionEffects(t *testing.T, request scenariocatalog.R
 			}
 			sessionsOld, sessionsNew := decode(before["sessions"]), decode(after["sessions"])
 			session := sessionsNew[access.SessionID]
-			if sessionsOld[access.SessionID] != nil || session == nil || len(sessionsNew) != len(sessionsOld)+1 || len(session) != 9 {
-				t.Fatal("poll must create exactly one nine-field session")
+			if sessionsOld[access.SessionID] != nil || session == nil || len(sessionsNew) != len(sessionsOld)+1 || len(session) != 11 {
+				t.Fatal("poll must create exactly one eleven-field session")
 			}
-			for key, value := range map[string]any{"id": access.SessionID, "user_id": float64(user.ID), "device_name": old["device_name"], "ip_address": old["ip_address"], "revoked_at": nil, "impersonator_user_id": nil, "impersonation_started_at": nil} {
+			// The fixture approver signed in with a password, so the device
+			// session carries no provider identity or provider sign-in time.
+			for key, value := range map[string]any{"id": access.SessionID, "user_id": float64(user.ID), "device_name": old["device_name"], "ip_address": old["ip_address"], "revoked_at": nil, "impersonator_user_id": nil, "impersonation_started_at": nil, "identity_id": nil, "provider_since": nil} {
 				if !reflect.DeepEqual(session[key], value) {
 					t.Fatalf("new session %s mismatch", key)
 				}
@@ -318,7 +320,7 @@ func (e *Env) checkDeviceDecisionEffects(t *testing.T, request scenariocatalog.R
 				}
 				token, _ := doc["profile_token"].(string)
 				claims, err := e.profileTok.Validate(token)
-				if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true || old["approved_profile_id"] != profilePrimary {
+				if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PINRevision != e.currentPINRevision(user.ID, profilePrimary) || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true || old["approved_profile_id"] != profilePrimary {
 					t.Fatal("temporary profile authority invalid")
 				}
 				// The fixture is the current account's unlocked primary profile; this does

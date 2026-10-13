@@ -18,6 +18,7 @@ func TestRestartRequired(t *testing.T) {
 		{"userdb.backend", true},
 		{"s3.public_endpoint", true},
 		{"redis.url", true},
+		{RedisDBSettingKey, true},
 		{"recommendations.enabled", true},
 		// Legacy AI aliases classify like their canonical keys.
 		{"subtitle_ai.max_concurrent_jobs", true},
@@ -51,6 +52,8 @@ func TestRestartRequired(t *testing.T) {
 		{"policy.editor_enabled", false},
 		{"allow_4k_transcode", false},
 		{"defaults.card_overlays", false},
+		// The real-time monitor applies the server switch through OnChange.
+		{"scanner.realtime_monitoring", false},
 		// Unknown keys default to live.
 		{"some.future_setting", false},
 	}

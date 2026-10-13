@@ -45,12 +45,60 @@ function effective(overrides: Partial<EffectiveSetting> = {}): EffectiveSetting 
 }
 
 describe("DeviceSettingGroups", () => {
-  it("groups settings under headings a viewer would look under", () => {
-    renderGroups({});
+  it("shows a profile-wide title art choice without offering a device edit", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile",
+        scope: "profile",
+      }),
+    });
 
-    // Scoped to headings: "Subtitles" is also a setting label inside the group.
-    const headings = screen.getAllByRole("heading").map((node) => node.textContent);
-    expect(headings).toEqual(["Picture", "Sound", "Subtitles", "Episodes"]);
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeDisabled();
+    expect(screen.getByText(/Set for all devices on this profile/)).toBeInTheDocument();
+  });
+
+  it("keeps a device's own title art choice resettable while the profile value wins", async () => {
+    const onReset = vi.fn();
+    render(
+      <DeviceSettingGroups
+        settings={{
+          "ui.title_art": effective({
+            key: "ui.title_art",
+            value: true,
+            source: "profile",
+            scope: "profile",
+          }),
+        }}
+        storedOnDevice={{ "ui.title_art": false }}
+        ownerLabel="your"
+        onChange={vi.fn()}
+        onReset={onReset}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeDisabled();
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    expect(
+      screen.getByText(/this device's own choice \(Disabled\) isn't used/),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Use your setting/ }));
+    expect(onReset).toHaveBeenCalledWith("ui.title_art");
+  });
+
+  it("lets a device keep its own title art choice", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).toBeEnabled();
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
   });
 
   // The screen is for people who do not know what a manifest key is. Matching
@@ -77,15 +125,28 @@ describe("DeviceSettingGroups", () => {
     expect(onReset).toHaveBeenCalledWith("player.hdr_enabled");
   });
 
-  it("names the person when the household parent is acting for someone else", () => {
-    renderGroups(
-      {
-        "player.hdr_enabled": effective({ source: "profile_device", scope: "profile_device" }),
-      },
-      { ownerLabel: "Robin's" },
-    );
+  // Beside the control, the reset took width from the description: in the
+  // narrow pane next to the device list the text wrapped a word per line and
+  // the button overlapped it.
+  it("puts the reset under the description, apart from the control", () => {
+    renderGroups({
+      "playback.intro_skip_mode": effective({
+        key: "playback.intro_skip_mode",
+        value: "skip",
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
 
-    expect(screen.getByRole("button", { name: /Use Robin's setting/ })).toBeInTheDocument();
+    const description = screen.getByText(/What Silo does when an intro starts/);
+    const labelColumn = description.parentElement as HTMLElement;
+    const reset = screen.getByRole("button", { name: /Use your setting/ });
+
+    expect(labelColumn).toContainElement(reset);
+    expect(labelColumn).not.toContainElement(screen.getByRole("combobox", { name: "Skip intros" }));
+    expect(
+      description.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("does not offer a reset when nothing is stored on this device", () => {
@@ -95,17 +156,93 @@ describe("DeviceSettingGroups", () => {
     expect(screen.queryByRole("button", { name: /Use your setting/ })).not.toBeInTheDocument();
   });
 
-  it("sends typed values rather than strings", async () => {
-    const { onChange } = renderGroups({
-      "player.hdr_enabled": effective({ value: true, source: "default" }),
+  // After "Use your setting" the row must still say where its value now comes
+  // from, or a reset looks like it did nothing.
+  it("names the profile as the source of a value not changed on this device", () => {
+    renderGroups({
+      "playback.audio_language": effective({
+        key: "playback.audio_language",
+        value: "fr",
+        source: "profile",
+        scope: "profile",
+      }),
     });
 
-    const [firstToggle] = screen.getAllByRole("switch");
-    await userEvent.click(firstToggle!);
+    expect(screen.getByText("From your profile")).toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed here")).not.toBeInTheDocument();
+  });
 
-    expect(onChange).toHaveBeenCalled();
-    const [firstCall] = onChange.mock.calls;
-    expect(typeof firstCall![1]).toBe("boolean");
+  it("names the other profile when acting for someone in the household", () => {
+    renderGroups(
+      {
+        "playback.audio_language": effective({
+          key: "playback.audio_language",
+          value: "fr",
+          source: "profile",
+          scope: "profile",
+        }),
+      },
+      { ownerLabel: "Sam's" },
+    );
+
+    expect(screen.getByText("From Sam's profile")).toBeInTheDocument();
+  });
+
+  it("names the app default when neither the device nor the profile sets a value", () => {
+    renderGroups({ "player.hdr_enabled": effective({ value: true, source: "default" }) });
+
+    expect(screen.getByText("App default")).toBeInTheDocument();
+    expect(screen.queryByText(/From your profile/)).not.toBeInTheDocument();
+  });
+
+  it("shows only the device badge for a value changed on this device", () => {
+    renderGroups({
+      "playback.audio_language": effective({
+        key: "playback.audio_language",
+        value: "de",
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
+  });
+
+  it("does not repeat the source under a profile-wide value", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile",
+        scope: "profile",
+      }),
+    });
+
+    expect(screen.getByText(/Set for all devices on this profile/)).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+  });
+
+  // A household limit replaces the value but keeps the source, so the source
+  // would credit the profile or the default with a value neither set.
+  it("leaves the source to the household limit when the limit narrowed the value", () => {
+    renderGroups({
+      "playback.preferred_quality": effective({
+        key: "playback.preferred_quality",
+        value: "1080p",
+        stored_value: "2160p",
+        source: "profile",
+        scope: "profile",
+        constrained: true,
+        constraint_kind: "ceiling",
+      }),
+    });
+
+    expect(screen.getByText("Household limit")).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
   });
 
   it("offers the three intro modes and writes the selected device override", async () => {
@@ -202,6 +339,9 @@ describe("DeviceSettingGroups", () => {
 
     await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
     const option = await screen.findByRole("option", { name: "10 Mbps" });
+    for (const name of ["200 Mbps", "100 Mbps", "1.5 Mbps", "No limit"]) {
+      expect(screen.getByRole("option", { name })).toBeInTheDocument();
+    }
     await userEvent.click(option);
 
     // Indexed rather than .at(-1): the app tsconfig targets ES2020.
@@ -209,26 +349,6 @@ describe("DeviceSettingGroups", () => {
     const call = calls[calls.length - 1];
     expect(call?.[0]).toBe("playback.max_bitrate_kbps");
     expect(call?.[1]).toBe(10000);
-  });
-
-  // The ladder is filtered by the definition's own range, which tops out at
-  // 200 Mbps. An earlier hardcoded list stopped at 40 and silently capped
-  // people below what their server could already send.
-  it("offers the full range the contract allows", async () => {
-    renderGroups({
-      "playback.max_bitrate_kbps": effective({
-        key: "playback.max_bitrate_kbps",
-        value: null,
-        source: "default",
-      }),
-    });
-
-    await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
-
-    expect(await screen.findByRole("option", { name: "200 Mbps" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "100 Mbps" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "1.5 Mbps" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "No limit" })).toBeInTheDocument();
   });
 
   it("keeps a stored bandwidth value selectable even when it is not a preset", () => {
@@ -316,5 +436,15 @@ describe("DeviceSettingGroups", () => {
     expect(
       screen.getByText(/set for your household and can't be changed here/),
     ).toBeInTheDocument();
+  });
+
+  it("sends typed values rather than strings", async () => {
+    const { onChange } = renderGroups({
+      "player.hdr_enabled": effective({ value: true, source: "default" }),
+    });
+
+    await userEvent.click(screen.getByRole("switch", { name: "HDR" }));
+
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("player.hdr_enabled", false);
   });
 });

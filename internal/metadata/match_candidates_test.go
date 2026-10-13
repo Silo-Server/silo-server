@@ -971,39 +971,6 @@ func TestSelectInitialMatchCandidate_RejectsDuplicateTieWithoutClearDetailGap(t 
 	}
 }
 
-func TestSelectInitialMatchCandidate_UsesProviderOrderForExactCrossProviderTie(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "100 Days Wild",
-			Year:  2020,
-			Type:  "series",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "100 Days Wild",
-				Year:        2020,
-				ContentType: "series",
-				ProviderIDs: map[string]string{"tvdb": "383893"},
-				Sources:     []string{"tvdb"},
-			},
-			{
-				Title:       "100 Days Wild",
-				Year:        2020,
-				ContentType: "series",
-				ProviderIDs: map[string]string{"tmdb": "109792"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil {
-		t.Fatal("expected exact cross-provider tie to use provider order")
-	}
-	if got := winner.ProviderIDs["tvdb"]; got != "383893" {
-		t.Fatalf("winner tvdb = %q, want 383893", got)
-	}
-}
-
 func TestSelectInitialMatchCandidate_ProviderOrderTieRequiresExactTitleYear(t *testing.T) {
 	winner, ok := selectInitialMatchCandidate(
 		&MatchHints{

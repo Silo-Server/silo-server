@@ -36,7 +36,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 		return "", apiError(http.StatusConflict, "conflict", "Marker detection is disabled")
 	}
 	if mode == markers.ModeLocal {
-		return h.refreshItemMarkers(ctx, itemID, "refresh", allMarkerKinds, true)
+		return h.refreshItemMarkers(ctx, itemID, "refresh", allMarkerKinds, localRefreshOptions{followSettings: true, queue: true})
 	}
 	if h.OnlineMarkers == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Online markers are not configured")
@@ -76,11 +76,15 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 		}
 		localKinds = intromarkers.EpisodeMarkerKinds{Intro: kind != intromarkers.MarkerItemMovie, Credits: true}.And(enabled)
 	}
-	if _, loaded := h.inFlight.LoadOrStore(itemID, struct{}{}); loaded {
-		return markerRefreshAlreadyRunning, nil
+	// An online refresh neither queues behind other work on the item nor
+	// lets other work queue behind it.
+	if start, status := h.claimItemRun(itemID, allMarkerKinds, false); !start {
+		return status, nil
 	}
 	go func() {
-		defer h.inFlight.Delete(itemID)
+		// Local requests are not queued behind an online refresh, which
+		// claims every kind, so there is never work to run next.
+		defer h.nextItemRun(itemID)
 		ctx, cancel := context.WithTimeout(h.baseContext, playbackLazyMarkerTimeout)
 		defer cancel()
 		needsLocal := false

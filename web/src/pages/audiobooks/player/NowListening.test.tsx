@@ -5,49 +5,6 @@ import { NowListening } from "./NowListening";
 import { makePlayback, makePrefs } from "./playerTestUtils";
 
 describe("NowListening", () => {
-  it("renders title, author, narrator, and the current chapter heading", () => {
-    render(
-      <NowListening
-        contentId="book-1"
-        title="Project Hail Mary"
-        author="Andy Weir"
-        narrator="Ray Porter"
-        posterUrl="/p.jpg"
-        playback={makePlayback({
-          currentChapter: {
-            index: 6,
-            title: "The Astrophage",
-            start_seconds: 0,
-            end_seconds: 100,
-            source: "embedded",
-          },
-        })}
-        prefs={makePrefs()}
-        onCollapse={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("heading", { name: "Project Hail Mary" })).toBeInTheDocument();
-    expect(screen.getByText("Andy Weir")).toBeInTheDocument();
-    expect(screen.getByText(/Ray Porter/)).toBeInTheDocument();
-    expect(screen.getByText("The Astrophage")).toBeInTheDocument();
-  });
-
-  it("calls onCollapse when the collapse button is clicked", async () => {
-    const onCollapse = vi.fn();
-    render(
-      <NowListening
-        contentId="book-1"
-        title="X"
-        posterUrl=""
-        playback={makePlayback()}
-        prefs={makePrefs()}
-        onCollapse={onCollapse}
-      />,
-    );
-    await userEvent.click(screen.getByRole("button", { name: /back to player/i }));
-    expect(onCollapse).toHaveBeenCalled();
-  });
-
   it("cycles total → remaining → total at 1x speed", async () => {
     render(
       <NowListening

@@ -105,8 +105,9 @@ func TestPlaybackReportRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing.T
 
 // TestPlaybackReportStoppedWithoutPositionRefreshesTasteProfile covers a
 // Stopped report that writes no progress. The play's earlier reports already
-// wrote its progress, and teardown does not run the native stop finalizer, so
-// the Stopped report is the only refresh the play gets.
+// wrote its progress, and the replica handling the stop may not hold the
+// native session whose finish records history, so the Stopped report is the
+// only refresh the play is sure to get.
 func TestPlaybackReportStoppedWithoutPositionRefreshesTasteProfile(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

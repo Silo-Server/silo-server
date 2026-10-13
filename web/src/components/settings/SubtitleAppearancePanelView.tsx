@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { RotateCcw, X } from "lucide-react";
+import { usePercentDraft } from "@/hooks/usePercentDraft";
 import {
   BACKGROUND_STYLE_OPTIONS,
   BG_COLOR_PALETTE,
@@ -59,11 +60,14 @@ export function SubtitleAppearancePanelView({
 }: SubtitleAppearancePanelViewProps) {
   const previewStyles = useMemo(() => computeSubtitleStyles(value), [value]);
 
-  // Close on Escape.
+  // Close on Escape. Blur first: the panel unmounts on close, and React does
+  // not dispatch blur for a removed input, so a typed opacity would be lost.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      onClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -163,6 +167,13 @@ export function SubtitleAppearancePanelView({
                 onChange={(v) => onChange({ fontColor: v })}
               />
             </Row>
+            <Row label="Opacity">
+              <PercentField
+                value={value.textOpacity}
+                onChange={(v) => onChange({ textOpacity: v })}
+                ariaLabel="Text opacity"
+              />
+            </Row>
             <Row label="Outline">
               <ToggleSwitch
                 checked={value.textOutline}
@@ -186,9 +197,11 @@ export function SubtitleAppearancePanelView({
             {value.backgroundStyle === "box" && (
               <>
                 <Row label="Opacity">
-                  <OpacitySlider
+                  <PercentField
+                    min={0}
                     value={value.backgroundOpacity}
                     onChange={(v) => onChange({ backgroundOpacity: v })}
+                    ariaLabel="Background opacity"
                   />
                 </Row>
                 <Row label="Color">
@@ -345,24 +358,39 @@ function ColorSwatchRow({
   );
 }
 
-function OpacitySlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const pct = Math.max(0, Math.min(100, value));
+/** A typed percentage value, for controls where dragging a slider is more
+ * fiddly than just typing the number — opacity wants precision at the low
+ * end where a few percent is the difference between legible and not. */
+function PercentField({
+  value,
+  onChange,
+  min = 1,
+  ariaLabel,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  ariaLabel?: string;
+}) {
+  const { draft, setDraft, commit } = usePercentDraft(value, min, onChange);
+
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-1.5">
       <input
-        type="range"
-        min={0}
+        type="number"
+        inputMode="numeric"
+        min={min}
         max={100}
-        step={5}
-        value={pct}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="player-subtitle-opacity-slider h-1 flex-1 cursor-pointer appearance-none rounded-full"
-        style={{
-          background: `linear-gradient(to right, rgb(255 255 255 / 0.85) 0%, rgb(255 255 255 / 0.85) ${pct}%, rgb(255 255 255 / 0.12) ${pct}%, rgb(255 255 255 / 0.12) 100%)`,
+        value={draft}
+        aria-label={ariaLabel}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
         }}
-        aria-label="Background opacity"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[12.5px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <div className="w-10 text-right font-mono text-[11px] text-white/60 tabular-nums">{pct}%</div>
+      <span className="text-[12.5px] text-white/60">%</span>
     </div>
   );
 }

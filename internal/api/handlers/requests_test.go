@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ type fakeRequestService struct {
 	listNetworksFn func() ([]mediarequests.DiscoverBrandCard, error)
 	listGenresFn   func() ([]mediarequests.DiscoverBrandCard, error)
 	browseFn       func(kind, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	loadOptionsErr error
 }
 
 func (f *fakeRequestService) ListStudios(context.Context, mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error) {
@@ -53,6 +55,14 @@ func (f *fakeRequestService) BrowseNetwork(_ context.Context, _ mediarequests.Vi
 
 func (f *fakeRequestService) BrowseGenre(_ context.Context, _ mediarequests.Viewer, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error) {
 	return f.browseFn("genre", slug, mediaType, sort, page)
+}
+
+func (f *fakeRequestService) Follow(context.Context, mediarequests.Viewer, mediarequests.MediaType, int) (mediarequests.RequestState, error) {
+	return mediarequests.RequestState{}, nil
+}
+
+func (f *fakeRequestService) Unfollow(context.Context, mediarequests.Viewer, mediarequests.MediaType, int) error {
+	return nil
 }
 
 func (f *fakeRequestService) Search(context.Context, mediarequests.Viewer, string, mediarequests.MediaType, int) (*mediarequests.MediaPage, error) {
@@ -144,7 +154,38 @@ func (f *fakeRequestService) DeleteIntegration(context.Context, mediarequests.Vi
 }
 
 func (f *fakeRequestService) LoadIntegrationOptions(context.Context, mediarequests.Viewer, mediarequests.Integration) (map[string][]mediarequests.RouterOption, error) {
-	return nil, nil
+	return nil, f.loadOptionsErr
+}
+
+// The v1 options route keeps its original answer to a failed probe: the
+// field errors the service now returns are for v2 only.
+func TestHandleLoadIntegrationOptionsKeepsV1FailureShape(t *testing.T) {
+	for _, err := range []error{
+		&mediarequests.ProbeValidationError{ValidationError: &mediarequests.ValidationError{FieldErrors: map[string]string{"api_key_ref": "The server rejected this API key."}}},
+		&mediarequests.IntegrationUnreachableError{Detail: "Nothing answered at that address. Check the host and port."},
+	} {
+		h := NewRequestsHandler(&fakeRequestService{loadOptionsErr: err})
+		rec := httptest.NewRecorder()
+		req := authedRequest("POST", "/api/v1/admin/request-integrations/new/options")
+		req.Body = io.NopCloser(strings.NewReader(`{"base_url":"10.0.0.5:8989"}`))
+		h.HandleLoadIntegrationOptions(rec, req)
+		if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "internal_error") {
+			t.Fatalf("%T: status = %d body = %s, want the v1 500", err, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "API key") || strings.Contains(rec.Body.String(), "Nothing answered") {
+			t.Fatalf("%T: v1 body carries the v2 detail: %s", err, rec.Body.String())
+		}
+	}
+
+	// A validation error the router returned itself keeps v1's 400.
+	h := NewRequestsHandler(&fakeRequestService{loadOptionsErr: &mediarequests.ValidationError{FormError: "api key rejected"}})
+	rec := httptest.NewRecorder()
+	req := authedRequest("POST", "/api/v1/admin/request-integrations/new/options")
+	req.Body = io.NopCloser(strings.NewReader(`{"base_url":"http://10.0.0.5:8989"}`))
+	h.HandleLoadIntegrationOptions(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "validation_failed") {
+		t.Fatalf("router validation error: status = %d body = %s, want the v1 400", rec.Code, rec.Body.String())
+	}
 }
 
 func authedRequest(method, target string) *http.Request {
@@ -249,5 +290,29 @@ func TestHandleBrowseGenreRequiresMediaType(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWholeSeriesRequestStateKeepsV1Rule(t *testing.T) {
+	partial := &mediarequests.MediaDetail{MediaType: mediarequests.MediaTypeSeries,
+		Availability: mediarequests.AvailabilityAvailable, Request: mediarequests.RequestState{Requestable: true}}
+	wholeSeriesRequestState(partial)
+	if partial.Request.Requestable || partial.Request.Reason != "already_available" {
+		t.Fatalf("series in the library = %+v, want already_available", partial.Request)
+	}
+
+	requested := &mediarequests.MediaDetail{MediaType: mediarequests.MediaTypeSeries,
+		Availability: mediarequests.AvailabilityAvailable,
+		Request:      mediarequests.RequestState{Status: mediarequests.StatusQueued, Reason: "already_requested"}}
+	wholeSeriesRequestState(requested)
+	if requested.Request.Reason != "already_requested" {
+		t.Fatalf("active request = %+v, want it kept", requested.Request)
+	}
+
+	missing := &mediarequests.MediaDetail{MediaType: mediarequests.MediaTypeSeries,
+		Availability: mediarequests.AvailabilityMissing, Request: mediarequests.RequestState{Requestable: true}}
+	wholeSeriesRequestState(missing)
+	if !missing.Request.Requestable {
+		t.Fatalf("series not in the library = %+v, want requestable", missing.Request)
 	}
 }

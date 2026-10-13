@@ -435,16 +435,31 @@ func TestPrepareTransportV3RemoteCommitDropsThePreviousTransportRecipe(t *testin
 func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	const transportID = "session-node-stop-plan0001-aaaabbbb"
+	requests := make(chan string, 1)
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer node.Close()
 	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
 		transportID: {SessionID: "session-node-stop", TranscodeTransportID: transportID},
 	}}
 	handler.NodeRecipeStore = recipes
 	session := &playback.Session{
 		ID: "session-node-stop", UserID: 7, ProfileID: "profile-1",
-		TranscodeNodeURL: "http://node-1", TranscodeTransportID: transportID,
+		TranscodeNodeURL: node.URL, TranscodeTransportID: transportID,
 	}
 
 	handler.finalizeSessionStop(context.Background(), session, false, "", true)
+
+	select {
+	case request := <-requests:
+		if want := "DELETE /transcode/" + transportID; request != want {
+			t.Fatalf("node request = %q, want %q", request, want)
+		}
+	default:
+		t.Fatal("session stop did not cancel the node transport")
+	}
 
 	if len(recipes.deleted) != 1 || recipes.deleted[0] != transportID {
 		t.Fatalf("recipes deleted on stop = %v, want the session's transport recipe dropped", recipes.deleted)

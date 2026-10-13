@@ -23,7 +23,7 @@ func TestThemeRootObservationPreservesLibraryBoundary(t *testing.T) {
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			observation, ok := ObserveRoot(filepath.Join(tc.root, tc.video), tc.kind, tc.root)
-			if !ok || observation.RootPath != filepath.Join(tc.root, tc.wantRoot) || observation.HasFolderIDs {
+			if !ok || observation.RootPath != filepath.Join(tc.root, tc.wantRoot) || observation.HasProviderIDs {
 				t.Fatalf("video borrowed identity from its library root: %+v, observed=%v", observation, ok)
 			}
 			for _, audio := range []string{"theme.mp3", "theme-music/opening.mp3"} {

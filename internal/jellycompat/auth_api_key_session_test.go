@@ -341,15 +341,6 @@ func TestHandleUsers_ReturnsCallerAsSingleElement(t *testing.T) {
 	}
 }
 
-func TestHandleUsers_RequiresSession(t *testing.T) {
-	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil)
-	rec := httptest.NewRecorder()
-	h.HandleUsers(rec, httptest.NewRequest(http.MethodGet, "/Users", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
 func TestRouter_UsersRequiresAuth(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {

@@ -11,6 +11,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
@@ -163,6 +166,17 @@ func LoadExternalSubtitleRaw(subtitlePath string) ([]byte, error) {
 		return nil, fmt.Errorf("read external subtitle: %w", err)
 	}
 	return data, nil
+}
+
+// LoadExternalSubtitle reads a sidecar subtitle as clients receive it: with
+// the timing correction stored for exactly these bytes applied, if any. A nil
+// timings lookup returns the bytes as they are on disk.
+func LoadExternalSubtitle(ctx context.Context, timings subtitles.ExternalTimingLookup, fileID int, sub models.ExternalSubtitle) ([]byte, error) {
+	data, err := LoadExternalSubtitleRaw(sub.Path)
+	if err != nil {
+		return nil, err
+	}
+	return subtitles.ExternalDeliveryBytes(ctx, timings, fileID, subtitles.SubtitleFormat(sub.Format), data)
 }
 
 // ParseSubtitleTrackParam parses a subtitle track URL parameter that may

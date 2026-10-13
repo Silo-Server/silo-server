@@ -24,6 +24,13 @@ func TestAFTKRTHigh10OverrideIsExactAndPreservesVideo(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
+	withoutFeature := req
+	withoutFeature.ClientFeatures = []string{FeaturePlaybackPlanV3}
+	withoutOptIn := PlanPlaybackV3(PlannerInputV3{Request: withoutFeature, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+	if withoutOptIn.Plan != nil && (withoutOptIn.Plan.Delivery == DeliveryOriginalHTTPV3 || len(withoutOptIn.Plan.AppliedQuirks) != 0) {
+		t.Fatalf("unadvertised quirk applied: %#v", withoutOptIn.Plan)
+	}
+
 	req.ClientPlaybackContext.Device.Model = "AFTKA"
 	withoutExactEvidence := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if withoutExactEvidence.Plan != nil && withoutExactEvidence.Plan.Delivery == DeliveryOriginalHTTPV3 {
@@ -101,29 +108,6 @@ func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	}
 }
 
-func TestDeviceQuirkProtocolRequiresTopLevelFeature(t *testing.T) {
-	file := &models.MediaFile{
-		ID: 42, FilePath: "/media/high10.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
-		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High 10", Level: 52, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 10, VideoRange: "SDR", VideoRangeType: "SDR"}},
-		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
-	}
-	req := quirkRequestV3()
-	req.Capabilities.Containers = []string{"mkv"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVAFTKRTHigh10V3 {
-		t.Fatalf("top-level advertisement: %#v", result)
-	}
-
-	without := quirkRequestV3()
-	without.ClientFeatures = []string{FeaturePlaybackPlanV3}
-	if deviceQuirkProtocolAvailableV3(without) {
-		t.Fatal("quirk protocol enabled without advertisement")
-	}
-}
-
 func TestFirefoxMatroskaAACTimingQuirkIsExact(t *testing.T) {
 	request := validStartRequestV3()
 	request.ClientPlaybackContext.Device = DeviceContextV3{
@@ -174,6 +158,36 @@ func TestPlanAttemptKeyV3DeviceQuirkIsStable(t *testing.T) {
 	}
 	if got := PlanAttemptKeyV3(plan, "9", nil); got != "v3:32a3a37d71bc4f43" {
 		t.Fatalf("key = %q", got)
+	}
+}
+
+// A channel ceiling below the source must not displace the AFTKRT quirk: the
+// quirk's stereo recipe and applied-quirk record still own the conversion.
+func TestAFTKRTEAC3HLSCorrectionSurvivesChannelCeiling(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/eac3.avi", Container: "avi", CodecVideo: "h264", CodecAudio: "eac3",
+		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 8,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080, FrameRate: "24", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 8, Layout: "7.1"}},
+	}
+	req := quirkRequestV3()
+	req.Capabilities.Containers = []string{"mkv"}
+	req.Capabilities.CodecsAudio = []string{"aac", "eac3"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{42}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{}
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.MaxChannels = intPointerV3(6)
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != "copy" || !result.TranscodeAudio || result.TargetAudioChannels != 2 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVAFTKRTEAC3HLSV3 || result.Plan.Claims.Audio.Reason != "device_hls_audio_adaptation" {
+		t.Fatalf("quirks = %#v, audio claim = %#v", result.Plan.AppliedQuirks, result.Plan.Claims.Audio)
+	}
+	if names := SortedTransformationNamesV3(result.Plan.Transformations); len(names) != 1 || names[0] != TransformationAudioToAACV3 {
+		t.Fatalf("transformations = %v, want one %s", names, TransformationAudioToAACV3)
 	}
 }
 

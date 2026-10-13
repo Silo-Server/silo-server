@@ -349,6 +349,24 @@ func TestAdminTaskHistoryAndJobCursorBinding(t *testing.T) {
 	}
 }
 
+// TestJobPollsFollowActingProfile: the job polls outside the admin class
+// give admin reach only to the acting admin. A non-primary profile on the
+// admin's account gets the 404 any other non-owner gets.
+func TestJobPollsFollowActingProfile(t *testing.T) {
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: &models.AdminJob{ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-1", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	h := newTestHandler(t, deps)
+	child := with(bearer(adminToken), "X-Profile-Id", "p-owner")
+	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+	for _, path := range []string{Prefix + "/admin/jobs/transition", Prefix + "/library-jobs/job-1"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", child), TypeNotFound)
+		if rec := do(t, h, http.MethodGet, path, "", primary); rec.Code != http.StatusOK {
+			t.Fatalf("%s as the primary profile: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestAdminJobOwnerReadIsSafe(t *testing.T) {
 	f := newFakeAdminTasks()
 	h := adminTasksTestHandler(t, f)
@@ -360,6 +378,8 @@ func TestAdminJobOwnerReadIsSafe(t *testing.T) {
 }
 
 func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
+	f := newFakeAdminTasks()
+	h := adminTasksTestHandler(t, f)
 	for _, body := range []string{
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","max_runtime_ms":null}]}`,
@@ -369,8 +389,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		`{"triggers":[{"type":"startup"},{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			f := newFakeAdminTasks()
-			h := adminTasksTestHandler(t, f)
+			*f = *newFakeAdminTasks()
 			requireProblem(t, do(t, h, "PUT", Prefix+"/admin/tasks/fixture/triggers", body, with(bearer(adminToken), "If-Match", "*")), TypeValidationFailed)
 			if f.writes != 0 || f.schedule.Revision != 2 {
 				t.Fatalf("null changed schedule: %+v", f)
@@ -383,8 +402,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":0,"max_runtime_ms":0}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			f := newFakeAdminTasks()
-			h := adminTasksTestHandler(t, f)
+			*f = *newFakeAdminTasks()
 			response := do(t, h, "PUT", Prefix+"/admin/tasks/fixture/triggers", body, with(bearer(adminToken), "If-Match", "*"))
 			if response.Code != 200 || f.writes != 1 {
 				t.Fatalf("omission/zero rejected: %d %s", response.Code, response.Body)

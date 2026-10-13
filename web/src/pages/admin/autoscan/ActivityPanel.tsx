@@ -12,11 +12,14 @@ import {
   X,
 } from "lucide-react";
 import type {
+  AutoscanChangeOutcome,
   AutoscanEvent,
+  AutoscanEventChange,
   AutoscanEventScanRun,
   AutoscanEventStatus,
   AutoscanRunningPoll,
   AutoscanScan,
+  AutoscanScanResult,
   AutoscanScanStatus,
   Library,
   ScanRun,
@@ -53,11 +56,7 @@ import {
 } from "@/hooks/queries/useAutoscan";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries, useCancelLibraryScans } from "@/hooks/queries/admin/libraries";
-import {
-  buildPluginDisplayNames,
-  resolveEventSourceName,
-  type SourceLabelLookups,
-} from "@/lib/autoscanLabels";
+import { buildPluginDisplayNames, type SourceLabelLookups } from "@/lib/autoscanLabels";
 import {
   compareActiveScans,
   formatActiveScanMode,
@@ -67,6 +66,8 @@ import {
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
+
+import { eventSourceName } from "./sourceDisplay";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -160,9 +161,8 @@ function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
   return status === "accepted" ? "queued" : status;
 }
 
-// arr-plugin sources fan out one-per-connection under a single generic
-// capability, so resolve every Activity row through the shared label chain:
-// operator label -> connection name -> manifest display_name -> capability_id.
+// Name every Activity row the way the Sources list titles the source, so the
+// two tabs agree on what a source is called.
 type PollSourceRef = {
   source_id?: string | null;
   plugin_id?: string | null;
@@ -170,13 +170,11 @@ type PollSourceRef = {
 };
 
 function pollSourceName(event: PollSourceRef, lookups: SourceLabelLookups): string {
-  return (
-    resolveEventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan"
-  );
+  return eventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan";
 }
 
 function scanSourceName(scan: AutoscanScan, lookups: SourceLabelLookups): string {
-  return resolveEventSourceName(scan, lookups) || "Autoscan";
+  return eventSourceName(scan, lookups) || "Autoscan";
 }
 
 function libraryName(librariesByID: Map<number, Library>, libraryID: number): string {
@@ -232,9 +230,81 @@ function DataTable({ head, children }: { head: ReactNode; children: ReactNode })
   );
 }
 
-function RunList({ runs }: { runs: AutoscanEventScanRun[] }) {
+type ScanResultSummary = { text: string; tone: "skipped" | "errors" | "changes" | "none" };
+
+function plural(count: number, noun: string): string {
+  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Summarizes a completed run's counters. A skipped run did no work because an
+ * overlapping scan of the same scope was already running, which must not read
+ * like a run that found nothing.
+ */
+function summarizeScanResult(result: AutoscanScanResult | undefined): ScanResultSummary | null {
+  if (!result) return null;
+  if (result.skipped > 0) {
+    return { text: "Skipped — overlapping scan in progress", tone: "skipped" };
+  }
+  const parts: string[] = [];
+  if (result.new > 0) parts.push(`${result.new.toLocaleString()} new`);
+  if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated`);
+  if (result.missing > 0) parts.push(`${result.missing.toLocaleString()} missing`);
+  if (result.files_deleted > 0) parts.push(`${plural(result.files_deleted, "file")} removed`);
+  // A scan can drop catalog items whose files were already gone.
+  if (result.items_deleted > 0) parts.push(`${plural(result.items_deleted, "item")} removed`);
+  // A scoped scan can drop a title from this library without deleting it.
+  if (result.memberships_removed > 0)
+    parts.push(`${plural(result.memberships_removed, "title")} removed from library`);
+  if (result.missing_skipped_protected > 0)
+    parts.push(`${result.missing_skipped_protected.toLocaleString()} kept (storage offline)`);
+  if (result.errors > 0) parts.push(plural(result.errors, "error"));
+  if (parts.length === 0) {
+    return {
+      text:
+        result.unchanged > 0
+          ? `No changes · ${result.unchanged.toLocaleString()} unchanged`
+          : "No changes",
+      tone: "none",
+    };
+  }
+  return { text: parts.join(" · "), tone: result.errors > 0 ? "errors" : "changes" };
+}
+
+function ScanResultText({
+  result,
+  className,
+}: {
+  result: AutoscanScanResult | undefined;
+  className?: string;
+}) {
+  const summary = summarizeScanResult(result);
+  if (!summary) return null;
+  return (
+    <span
+      className={cn(
+        "text-xs tabular-nums",
+        summary.tone === "skipped" && "text-amber-500",
+        summary.tone === "errors" && "text-destructive",
+        summary.tone === "changes" && "text-foreground",
+        summary.tone === "none" && "text-muted-foreground",
+        className,
+      )}
+    >
+      {summary.text}
+    </span>
+  );
+}
+
+function RunList({ runs, joinedRuns }: { runs: AutoscanEventScanRun[]; joinedRuns: number }) {
   if (runs.length === 0) {
-    return <span className="text-muted-foreground text-xs">No new scan rows were created.</span>;
+    return (
+      <span className="text-muted-foreground text-xs">
+        {joinedRuns > 0
+          ? "No new scan rows were created. The changes joined scans that were already queued or running."
+          : "No new scan rows were created."}
+      </span>
+    );
   }
   return (
     <div className="space-y-2">
@@ -249,6 +319,7 @@ function RunList({ runs }: { runs: AutoscanEventScanRun[] }) {
             <div className="text-muted-foreground [overflow-wrap:anywhere]">
               {run.path || "Entire library"}
             </div>
+            <ScanResultText result={run.result} className="mt-0.5 block" />
           </div>
           <div className="text-muted-foreground whitespace-nowrap tabular-nums">
             {formatTime(run.completed_at ?? run.started_at ?? run.requested_at)}
@@ -257,6 +328,223 @@ function RunList({ runs }: { runs: AutoscanEventScanRun[] }) {
       ))}
     </div>
   );
+}
+
+const CHANGE_OUTCOME_TONES: Record<AutoscanChangeOutcome, { label: string; className: string }> = {
+  queued: {
+    label: "Queued",
+    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
+  },
+  joined: { label: "Joined scan", className: "border-sky-500/30 bg-sky-500/10 text-sky-500" },
+  suppressed: {
+    label: "Suppressed",
+    className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
+  },
+  unresolved: {
+    label: "Unresolved",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+  },
+  ignored: {
+    label: "Ignored",
+    className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
+  },
+  error: { label: "Error", className: "border-destructive/30 bg-destructive/10 text-destructive" },
+};
+
+function isKnownChangeOutcome(outcome: string): outcome is AutoscanChangeOutcome {
+  return Object.prototype.hasOwnProperty.call(CHANGE_OUTCOME_TONES, outcome);
+}
+
+// An outcome added by a newer server shows its raw value in a neutral badge.
+function ChangeOutcomeBadge({ outcome }: { outcome: AutoscanEventChange["outcome"] }) {
+  const tone = isKnownChangeOutcome(outcome)
+    ? CHANGE_OUTCOME_TONES[outcome]
+    : { label: outcome, className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground" };
+  return (
+    <Badge variant="outline" className={cn("whitespace-nowrap", tone.className)}>
+      {tone.label}
+    </Badge>
+  );
+}
+
+// Plain-language explanations for the resolver's reason codes. Unknown codes
+// fall back to the server's detail text so a new reason still reads sensibly.
+const CHANGE_REASON_TEXT: Record<string, string> = {
+  no_library_match:
+    "No Silo library folder contains this path. Add a path mapping for this source or check the library folders.",
+  subtree_outside_library: "This path is not below a library root.",
+  path_outside_library: "This path is outside the matched library.",
+  path_ambiguous: "This path matches more than one library.",
+  library_disabled: "The matching library is disabled.",
+  library_root_offline: "The library's storage root is not available.",
+  unsupported_extension: "This file type is not supported for the library.",
+  path_permission_denied: "Silo is not allowed to read this path.",
+  path_not_inspectable: "Silo could not inspect this path.",
+  path_not_file_or_dir: "This path is not a file or directory.",
+  path_required: "The source sent an empty path.",
+  resolves_to_library: "The file change resolved to a whole library, so it was not scanned.",
+  enqueue_failed: "The scan could not be queued.",
+};
+
+function changeScopeLabel(change: AutoscanEventChange): string {
+  const mode = change.target_mode
+    ? formatActiveScanMode({ mode: change.target_mode as ScanRun["mode"] })
+    : "Scan";
+  return `${mode} · ${change.target_path || "Entire library"}`;
+}
+
+function ChangeExplanation({
+  change,
+  librariesByID,
+}: {
+  change: AutoscanEventChange;
+  librariesByID: Map<number, Library>;
+}) {
+  const library = change.library_id ? libraryName(librariesByID, change.library_id) : null;
+  switch (change.outcome) {
+    case "queued":
+    case "joined":
+      return (
+        <>
+          <div className="text-muted-foreground [overflow-wrap:anywhere]">
+            {change.outcome === "queued"
+              ? "New scan: "
+              : change.reason === "follow_up_scan"
+                ? "A scan of this scope was already running, so it is scanned again when that scan finishes: "
+                : "Added to a scan that was already queued: "}
+            {changeScopeLabel(change)}
+            {library ? ` in ${library}` : ""}
+          </div>
+          {change.scan_run_id ? (
+            <div className="text-muted-foreground font-mono text-[11px] [overflow-wrap:anywhere]">
+              {change.scan_run_id}
+            </div>
+          ) : null}
+        </>
+      );
+    case "suppressed":
+      return (
+        <div className="text-muted-foreground [overflow-wrap:anywhere]">
+          Already requested within the debounce window, so no new scan was requested
+          {change.target_path ? ` (${change.target_path})` : ""}.
+        </div>
+      );
+    case "error":
+      return (
+        <div className="text-destructive [overflow-wrap:anywhere]">
+          {change.reason === "resolve_failed"
+            ? `Resolving the path failed${change.detail ? `: ${change.detail}` : ""}.`
+            : (CHANGE_REASON_TEXT[change.reason ?? ""] ?? change.detail ?? "Processing failed.")}
+        </div>
+      );
+    default: {
+      const text =
+        CHANGE_REASON_TEXT[change.reason ?? ""] ??
+        change.detail ??
+        change.reason ??
+        "This path was not scanned.";
+      return (
+        <div
+          className={cn(
+            "[overflow-wrap:anywhere]",
+            change.outcome === "unresolved" ? "text-amber-500" : "text-muted-foreground",
+          )}
+        >
+          {text}
+          {library ? ` (${library})` : ""}
+        </div>
+      );
+    }
+  }
+}
+
+function ChangeList({
+  event,
+  librariesByID,
+}: {
+  event: AutoscanEvent;
+  librariesByID: Map<number, Library>;
+}) {
+  if (event.changes.length === 0) {
+    return (
+      <span className="text-muted-foreground text-xs">
+        {event.changes_returned > 0
+          ? "Paths were not recorded for this event."
+          : "The source reported no changes."}
+      </span>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {event.changes.map((change, index) => (
+        <div
+          key={`${index}:${change.source_path}`}
+          className="border-border/70 bg-background/40 grid gap-1.5 rounded-md border px-3 py-2 text-xs sm:grid-cols-[auto_1fr] sm:items-start"
+        >
+          <ChangeOutcomeBadge outcome={change.outcome} />
+          <div className="min-w-0 space-y-0.5">
+            <div className="font-mono [overflow-wrap:anywhere]">{change.source_path}</div>
+            {change.rewritten_path && change.rewritten_path !== change.source_path ? (
+              <div className="text-muted-foreground font-mono [overflow-wrap:anywhere]">
+                <span className="font-sans">Rewritten to </span>
+                {change.rewritten_path}
+              </div>
+            ) : null}
+            <ChangeExplanation change={change} librariesByID={librariesByID} />
+          </div>
+        </div>
+      ))}
+      {event.changes_truncated ? (
+        <p className="text-muted-foreground text-xs">
+          Showing the first {event.changes.length.toLocaleString()} of{" "}
+          {plural(event.changes_returned, "change")}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function EventDetails({
+  event,
+  librariesByID,
+}: {
+  event: AutoscanEvent;
+  librariesByID: Map<number, Library>;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+          Paths
+        </div>
+        <ChangeList event={event} librariesByID={librariesByID} />
+      </div>
+      <div className="space-y-1.5">
+        <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+          Scans created
+        </div>
+        <RunList runs={event.scan_runs} joinedRuns={joinedRunCount(event)} />
+      </div>
+    </div>
+  );
+}
+
+/** Runs the event's changes joined that another event created. */
+function joinedRunCount(event: AutoscanEvent): number {
+  const created = new Set(event.scan_runs.map((run) => run.id));
+  const joined = new Set<string>();
+  for (const change of event.changes) {
+    if (change.outcome === "joined" && change.scan_run_id && !created.has(change.scan_run_id))
+      joined.add(change.scan_run_id);
+  }
+  return joined.size;
+}
+
+function eventDetailsSummary(event: AutoscanEvent): string {
+  const linked = event.scan_runs.length + joinedRunCount(event);
+  // Joined runs are only known from recorded changes, so a truncated log can
+  // omit some; the count is then a lower bound.
+  return `${plural(event.changes_returned, "path")} · ${linked}${event.changes_truncated ? "+" : ""} linked`;
 }
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {
@@ -534,6 +822,7 @@ function ScanHistoryCard({
       <div className="text-muted-foreground mt-3 font-mono text-xs [overflow-wrap:anywhere]">
         {scan.path || "Entire library"}
       </div>
+      <ScanResultText result={scan.result} className="mt-2 block" />
       {scan.error_message ? (
         <div className="text-destructive mt-2 text-xs [overflow-wrap:anywhere]">
           {scan.error_message}
@@ -546,7 +835,7 @@ function ScanHistoryCard({
   );
 }
 
-function ScanHistoryTable({
+export function ScanHistoryTable({
   scans,
   librariesByID,
   lookups,
@@ -574,6 +863,7 @@ function ScanHistoryTable({
             <TableHead>Library</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Scope</TableHead>
+            <TableHead>Result</TableHead>
             <TableHead>Time</TableHead>
             <TableHead>Poll</TableHead>
           </>
@@ -600,6 +890,13 @@ function ScanHistoryTable({
                 </div>
               ) : null}
             </TableCell>
+            <TableCell className="max-w-56">
+              {scan.result ? (
+                <ScanResultText result={scan.result} />
+              ) : (
+                <span className="text-muted-foreground">-</span>
+              )}
+            </TableCell>
             <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
               {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
             </TableCell>
@@ -613,7 +910,15 @@ function ScanHistoryTable({
   );
 }
 
-function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: SourceLabelLookups }) {
+function PollEventCard({
+  event,
+  lookups,
+  librariesByID,
+}: {
+  event: AutoscanEvent;
+  lookups: SourceLabelLookups;
+  librariesByID: Map<number, Library>;
+}) {
   return (
     <div className="border-border rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -637,28 +942,35 @@ function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: Sour
       ) : null}
       <details className="mt-3">
         <summary className="text-muted-foreground cursor-pointer text-xs">
-          {event.scan_runs.length} linked scan {event.scan_runs.length === 1 ? "run" : "runs"}
+          {eventDetailsSummary(event)}
         </summary>
         <div className="mt-2">
-          <RunList runs={event.scan_runs} />
+          <EventDetails event={event} librariesByID={librariesByID} />
         </div>
       </details>
     </div>
   );
 }
 
-function PollEventTable({
+export function PollEventTable({
   events,
   lookups,
+  librariesByID,
 }: {
   events: AutoscanEvent[];
   lookups: SourceLabelLookups;
+  librariesByID: Map<number, Library>;
 }) {
   return (
     <>
       <div className="space-y-3 lg:hidden">
         {events.map((event) => (
-          <PollEventCard key={event.id} event={event} lookups={lookups} />
+          <PollEventCard
+            key={event.id}
+            event={event}
+            lookups={lookups}
+            librariesByID={librariesByID}
+          />
         ))}
       </div>
       <DataTable
@@ -667,7 +979,7 @@ function PollEventTable({
             <TableHead>Status</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Counts</TableHead>
-            <TableHead>Scans</TableHead>
+            <TableHead>Details</TableHead>
             <TableHead>Duration</TableHead>
             <TableHead>Time</TableHead>
           </>
@@ -694,11 +1006,12 @@ function PollEventTable({
             </TableCell>
             <TableCell>
               <details>
-                <summary className="text-muted-foreground cursor-pointer text-xs">
-                  {event.scan_runs.length} linked
+                <summary className="text-muted-foreground cursor-pointer text-xs whitespace-nowrap">
+                  {eventDetailsSummary(event)}
                 </summary>
-                <div className="mt-2 w-[min(42rem,70vw)]">
-                  <RunList runs={event.scan_runs} />
+                {/* Table cells default to nowrap; paths and explanations must wrap. */}
+                <div className="mt-2 max-w-[32rem] min-w-[16rem] whitespace-normal">
+                  <EventDetails event={event} librariesByID={librariesByID} />
                 </div>
               </details>
             </TableCell>
@@ -999,7 +1312,11 @@ export default function ActivityPanel() {
                 lookups={labelLookups}
               />
             ) : (
-              <PollEventTable events={activeRows as AutoscanEvent[]} lookups={labelLookups} />
+              <PollEventTable
+                events={activeRows as AutoscanEvent[]}
+                lookups={labelLookups}
+                librariesByID={librariesByID}
+              />
             )}
 
             <TablePagination

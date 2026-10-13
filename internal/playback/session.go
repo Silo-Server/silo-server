@@ -38,14 +38,17 @@ type Session struct {
 	BasePlayMethod       PlayMethod
 	TranscodeAudio       bool // when true, remux should transcode audio to AAC
 	RemuxDVMode          RemuxDVMode
-	ClientIP             string // resolved client IP for the playback session
-	StreamLocation       string // local/remote policy classification fixed at playback negotiation
-	ClientName           string // reported playback client name, when available
-	ClientVersion        string // reported playback client version, when available
-	ClientBuild          string // opaque reported client build identifier, when available
-	ClientChannel        string // opaque reported client distribution channel, when available
-	ClientUserAgent      string // trimmed request user agent for the playback session
-	IsJellyfinCompat     bool   // immutable origin identity for Jellyfin compatibility sessions
+	// RemuxResumeLeadingPictureDrop freezes the planner's best-effort request
+	// to drop open-GOP leading pictures from a seeked progressive remux.
+	RemuxResumeLeadingPictureDrop bool
+	ClientIP                      string // resolved client IP for the playback session
+	StreamLocation                string // local/remote policy classification fixed at playback negotiation
+	ClientName                    string // reported playback client name, when available
+	ClientVersion                 string // reported playback client version, when available
+	ClientBuild                   string // opaque reported client build identifier, when available
+	ClientChannel                 string // opaque reported client distribution channel, when available
+	ClientUserAgent               string // trimmed request user agent for the playback session
+	IsJellyfinCompat              bool   // immutable origin identity for Jellyfin compatibility sessions
 	// RequireMediaAuthorization distinguishes v3 transports whose session ID is
 	// only a route identifier from legacy HLS transports where that UUID also
 	// acts as the bearer capability. It is live-session state by design: secure
@@ -94,8 +97,14 @@ type Session struct {
 	SubtitleBurnIn     bool
 	SegmentDuration    int // HLS segment length in seconds (cadence)
 
-	Position                   float64
-	IsPaused                   bool
+	Position float64
+	IsPaused bool
+	// StopReported marks a session a client reported stopped without an ID
+	// that could end it (#1454). It only hides the session from the live
+	// admin view: pause state and idle grace are untouched, so a stale stop
+	// can't shorten the lifetime of a play that is really paused. The next
+	// progress report clears it.
+	StopReported               bool
 	HasWebSocket               bool
 	HasRealtimeConnection      bool
 	DisableProgressPersistence bool
@@ -115,40 +124,41 @@ type Session struct {
 // change after a session is created (audio track, client IP, transcode target,
 // and reported bitrate).
 type SessionStreamState struct {
-	PlayMethod                PlayMethod
-	BasePlayMethod            PlayMethod
-	AudioTrackIndex           int
-	TranscodeAudio            bool
-	RemuxDVMode               RemuxDVMode
-	ClientIP                  string
-	ClientName                string
-	ClientVersion             string
-	ClientUserAgent           string
-	StreamBitrateKbps         int
-	TargetResolution          string
-	TargetVideoCodec          string
-	OutputContainer           string
-	OutputProtocol            string
-	TargetAudioCodec          string
-	SourceAudioChannels       int
-	TargetAudioChannels       int
-	TargetAudioBitrateKbps    int
-	TargetBitrateKbps         int
-	TranscodeHWAccel          string
-	ToneMapMode               tonemap.Mode
-	TranscodeNodeURL          string
-	TranscodeTransportID      string
-	TranscodeRouteSet         bool
-	RoutingNetworkProvider    *string
-	RoutingWorkload           string
-	RoutingExecution          string
-	RoutingExecutionNodeID    int
-	RoutingExecutionNodeURL   string
-	RoutingEgress             string
-	RoutingEgressNodeID       int
-	RoutingEgressNodeURL      string
-	RequireMediaAuthorization bool
-	MediaAuthorizationSet     bool
+	PlayMethod                    PlayMethod
+	BasePlayMethod                PlayMethod
+	AudioTrackIndex               int
+	TranscodeAudio                bool
+	RemuxDVMode                   RemuxDVMode
+	RemuxResumeLeadingPictureDrop bool
+	ClientIP                      string
+	ClientName                    string
+	ClientVersion                 string
+	ClientUserAgent               string
+	StreamBitrateKbps             int
+	TargetResolution              string
+	TargetVideoCodec              string
+	OutputContainer               string
+	OutputProtocol                string
+	TargetAudioCodec              string
+	SourceAudioChannels           int
+	TargetAudioChannels           int
+	TargetAudioBitrateKbps        int
+	TargetBitrateKbps             int
+	TranscodeHWAccel              string
+	ToneMapMode                   tonemap.Mode
+	TranscodeNodeURL              string
+	TranscodeTransportID          string
+	TranscodeRouteSet             bool
+	RoutingNetworkProvider        *string
+	RoutingWorkload               string
+	RoutingExecution              string
+	RoutingExecutionNodeID        int
+	RoutingExecutionNodeURL       string
+	RoutingEgress                 string
+	RoutingEgressNodeID           int
+	RoutingEgressNodeURL          string
+	RequireMediaAuthorization     bool
+	MediaAuthorizationSet         bool
 
 	// Byte-affecting transcode recipe fields preserved so an offloaded restart
 	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
@@ -317,8 +327,12 @@ type SessionManager struct {
 	activeGrace          time.Duration
 	pausedGrace          time.Duration
 	expireHooks          []func(*Session)
+	finishHooks          []func(context.Context, *Session)
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
+	// deliveryActivityReader reports media that another node served for a
+	// remote-transport session. See SetDeliveryActivityReader.
+	deliveryActivityReader SessionActivityReader
 	// transportStops holds the stop channels of media transports this replica
 	// is currently serving, keyed by session ID. See WatchTransportStop.
 	transportStops map[string]map[chan struct{}]struct{}
@@ -454,6 +468,17 @@ func (m *SessionManager) AddExpirationHook(fn func(*Session)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.expireHooks = append(m.expireHooks, fn)
+}
+
+// AddFinishHook registers a callback that runs after FinishSession removes a
+// session. The hook executes outside the manager lock.
+func (m *SessionManager) AddFinishHook(fn func(context.Context, *Session)) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finishHooks = append(m.finishHooks, fn)
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
@@ -777,20 +802,33 @@ func (m *SessionManager) RollbackReconstructedToneMap(expected *Session) bool {
 	return true
 }
 
-// ConfirmReconstructedToneMap publishes the executor selected by a successful
+// CaptureReconstructedExecution records the session incarnation and stream
+// revision before a runtime rebuild. The pointer is only an ownership token.
+func (m *SessionManager) CaptureReconstructedExecution(sessionID string) (*Session, uint64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	current := m.sessions[sessionID]
+	if current == nil {
+		return nil, 0
+	}
+	return current, current.streamRevision
+}
+
+// ConfirmReconstructedExecution publishes the executors selected by a successful
 // runtime reconstruction only while expected still owns the session ID. It
 // returns the current session so callers yield to a concurrent legitimate
 // successor instead of overwriting it with stale execution facts.
-func (m *SessionManager) ConfirmReconstructedToneMap(expected *Session, mode tonemap.Mode) *Session {
+func (m *SessionManager) ConfirmReconstructedExecution(expected *Session, revision uint64, mode tonemap.Mode, encoderHWAccel string) *Session {
 	if expected == nil || expected.ID == "" {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current := m.sessions[expected.ID]
-	if current == expected {
-		if current.ToneMapMode != mode {
+	if current == expected && current.streamRevision == revision {
+		if current.ToneMapMode != mode || current.TranscodeHWAccel != encoderHWAccel {
 			current.ToneMapMode = mode
+			current.TranscodeHWAccel = encoderHWAccel
 			current.streamRevision++
 		}
 		m.touchSessionLocked(current)
@@ -819,6 +857,12 @@ func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (Session
 			userID, errors.Join(ErrLimitProviderUnavailable, err))
 	}
 	return limits, nil
+}
+
+// LimitsForUser returns the account-level playback limits admission enforces
+// for userID, so planning can avoid offering routes admission would refuse.
+func (m *SessionManager) LimitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
+	return m.limitsForUser(ctx, userID)
 }
 
 // CheckTranscodingAllowed verifies account-level restrictions before an
@@ -940,8 +984,23 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 
 	s.Position = position
 	s.IsPaused = isPaused
+	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
+	return nil
+}
+
+// MarkStopReported records that a client reported this session stopped
+// without an ID that could end it. It does not count as activity and leaves
+// pause state alone; see Session.StopReported.
+func (m *SessionManager) MarkStopReported(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.StopReported = true
 	return nil
 }
 
@@ -1028,6 +1087,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 		// later remux request fails the profile check. Legacy partial updates
 		// never carry a mode and must not clobber one.
 		s.RemuxDVMode = state.RemuxDVMode
+		s.RemuxResumeLeadingPictureDrop = state.RemuxResumeLeadingPictureDrop
 	} else if state.RemuxDVMode != "" {
 		s.RemuxDVMode = state.RemuxDVMode
 	}
@@ -1076,43 +1136,44 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 // snapshotSessionStreamStateLocked captures replaceable stream fields while the manager lock is held.
 func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 	return SessionStreamState{
-		PlayMethod:                s.PlayMethod,
-		BasePlayMethod:            s.BasePlayMethod,
-		AudioTrackIndex:           s.AudioTrackIndex,
-		TranscodeAudio:            s.TranscodeAudio,
-		RemuxDVMode:               s.RemuxDVMode,
-		ClientIP:                  s.ClientIP,
-		ClientName:                s.ClientName,
-		ClientVersion:             s.ClientVersion,
-		ClientUserAgent:           s.ClientUserAgent,
-		StreamBitrateKbps:         s.StreamBitrateKbps,
-		TargetResolution:          s.TargetResolution,
-		TargetVideoCodec:          s.TargetVideoCodec,
-		OutputContainer:           s.OutputContainer,
-		OutputProtocol:            s.OutputProtocol,
-		TargetAudioCodec:          s.TargetAudioCodec,
-		SourceAudioChannels:       s.SourceAudioChannels,
-		TargetAudioChannels:       s.TargetAudioChannels,
-		TargetAudioBitrateKbps:    s.TargetAudioBitrateKbps,
-		TargetBitrateKbps:         s.TargetBitrateKbps,
-		TranscodeHWAccel:          s.TranscodeHWAccel,
-		ToneMapMode:               s.ToneMapMode,
-		TranscodeNodeURL:          s.TranscodeNodeURL,
-		TranscodeTransportID:      s.TranscodeTransportID,
-		TranscodeRouteSet:         true,
-		RoutingNetworkProvider:    s.RoutingNetworkProvider,
-		RoutingWorkload:           s.RoutingWorkload,
-		RoutingExecution:          s.RoutingExecution,
-		RoutingExecutionNodeID:    s.RoutingExecutionNodeID,
-		RoutingExecutionNodeURL:   s.RoutingExecutionNodeURL,
-		RoutingEgress:             s.RoutingEgress,
-		RoutingEgressNodeID:       s.RoutingEgressNodeID,
-		RoutingEgressNodeURL:      s.RoutingEgressNodeURL,
-		RequireMediaAuthorization: s.RequireMediaAuthorization,
-		MediaAuthorizationSet:     true,
-		SubtitleTrackIndex:        s.SubtitleTrackIndex,
-		SubtitleBurnIn:            s.SubtitleBurnIn,
-		SegmentDuration:           s.SegmentDuration,
+		PlayMethod:                    s.PlayMethod,
+		BasePlayMethod:                s.BasePlayMethod,
+		AudioTrackIndex:               s.AudioTrackIndex,
+		TranscodeAudio:                s.TranscodeAudio,
+		RemuxDVMode:                   s.RemuxDVMode,
+		RemuxResumeLeadingPictureDrop: s.RemuxResumeLeadingPictureDrop,
+		ClientIP:                      s.ClientIP,
+		ClientName:                    s.ClientName,
+		ClientVersion:                 s.ClientVersion,
+		ClientUserAgent:               s.ClientUserAgent,
+		StreamBitrateKbps:             s.StreamBitrateKbps,
+		TargetResolution:              s.TargetResolution,
+		TargetVideoCodec:              s.TargetVideoCodec,
+		OutputContainer:               s.OutputContainer,
+		OutputProtocol:                s.OutputProtocol,
+		TargetAudioCodec:              s.TargetAudioCodec,
+		SourceAudioChannels:           s.SourceAudioChannels,
+		TargetAudioChannels:           s.TargetAudioChannels,
+		TargetAudioBitrateKbps:        s.TargetAudioBitrateKbps,
+		TargetBitrateKbps:             s.TargetBitrateKbps,
+		TranscodeHWAccel:              s.TranscodeHWAccel,
+		ToneMapMode:                   s.ToneMapMode,
+		TranscodeNodeURL:              s.TranscodeNodeURL,
+		TranscodeTransportID:          s.TranscodeTransportID,
+		TranscodeRouteSet:             true,
+		RoutingNetworkProvider:        s.RoutingNetworkProvider,
+		RoutingWorkload:               s.RoutingWorkload,
+		RoutingExecution:              s.RoutingExecution,
+		RoutingExecutionNodeID:        s.RoutingExecutionNodeID,
+		RoutingExecutionNodeURL:       s.RoutingExecutionNodeURL,
+		RoutingEgress:                 s.RoutingEgress,
+		RoutingEgressNodeID:           s.RoutingEgressNodeID,
+		RoutingEgressNodeURL:          s.RoutingEgressNodeURL,
+		RequireMediaAuthorization:     s.RequireMediaAuthorization,
+		MediaAuthorizationSet:         true,
+		SubtitleTrackIndex:            s.SubtitleTrackIndex,
+		SubtitleBurnIn:                s.SubtitleBurnIn,
+		SegmentDuration:               s.SegmentDuration,
 	}
 }
 
@@ -1123,6 +1184,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.AudioTrackIndex = state.AudioTrackIndex
 	s.TranscodeAudio = state.TranscodeAudio
 	s.RemuxDVMode = state.RemuxDVMode
+	s.RemuxResumeLeadingPictureDrop = state.RemuxResumeLeadingPictureDrop
 	s.ClientIP = state.ClientIP
 	s.ClientName = state.ClientName
 	s.ClientVersion = state.ClientVersion
@@ -1213,6 +1275,9 @@ func (m *SessionManager) applyReplacementLocked(
 	}
 
 	s.MediaFileID = replacement.EffectiveMediaFileID
+	// A replacement stream means the play is active again, so a stop mark from
+	// an ID-less stop no longer applies.
+	s.StopReported = false
 	applySessionStreamStateLocked(s, replacement.StreamState)
 	if replacement.PositionSeconds != nil {
 		s.Position = *replacement.PositionSeconds
@@ -1240,6 +1305,8 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 		return ErrSessionReplacementSuperseded
 	}
 	s.MediaFileID = rollback.previousEffectiveMediaFileID
+	// Rolling back a replacement is still an active play, not a stopped one.
+	s.StopReported = false
 	restoreSessionStreamStateLocked(s, rollback.previousStreamState)
 	if rollback.restoreProgress {
 		s.Position = rollback.previousPosition
@@ -1344,40 +1411,6 @@ func (m *SessionManager) SetTranscodeRoute(sessionID string, route TranscodeRout
 	s.TranscodeNodeURL = route.NodeURL
 	s.TranscodeTransportID = route.TransportID
 	s.streamRevision++
-	m.touchSessionLocked(s)
-	return nil
-}
-
-// SetEffectiveMediaFileID updates the currently delivered source file while
-// preserving the originally requested file selection.
-func (m *SessionManager) SetEffectiveMediaFileID(sessionID string, fileID int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	if fileID > 0 {
-		s.MediaFileID = fileID
-	}
-	s.streamRevision++
-	m.touchSessionLocked(s)
-	return nil
-}
-
-// SetWebSocket marks whether a WebSocket liveness connection is active for a session.
-func (m *SessionManager) SetWebSocket(sessionID string, connected bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	s.HasWebSocket = connected
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -1587,6 +1620,29 @@ func (m *SessionManager) StopSession(sessionID string) error {
 	return nil
 }
 
+// FinishSession is StopSession for a play that has ended, as opposed to a
+// session replaced mid-play. The finish hooks run only when this call removed
+// the session, so a retried stop, or one that loses to stale cleanup, runs
+// them at most once per local copy.
+func (m *SessionManager) FinishSession(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return ErrSessionNotFound
+	}
+	finished := *s
+	delete(m.sessions, sessionID)
+	m.stopTransportsLocked(sessionID)
+	hooks := append([]func(context.Context, *Session){}, m.finishHooks...)
+	m.mu.Unlock()
+
+	for _, hook := range hooks {
+		hook(ctx, &finished)
+	}
+	return nil
+}
+
 // GetSession returns the session with the given ID, or ErrSessionNotFound.
 func (m *SessionManager) GetSession(sessionID string) (*Session, error) {
 	m.mu.RLock()
@@ -1728,6 +1784,7 @@ func (m *SessionManager) CleanStale() []*Session {
 // provided grace period. Sessions with an active media transport request are
 // preserved even if they have not emitted a recent heartbeat yet.
 func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*Session {
+	m.refreshDeliveryActivity(activeIdle, pausedIdle)
 	protected := m.refreshCompatActivity(activeIdle, pausedIdle)
 	m.mu.Lock()
 
@@ -1786,9 +1843,10 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 // served by another node.
 //
 // A locally-served stream is held open by an in-flight transport request. A
-// proxy-served one has no such request here, so it is protected only by the
-// client's progress heartbeats — and a gap longer than the active grace would
-// reap it while media is still flowing. The windows are widened rather than
+// proxy-served one has no such request here, so it is protected by the
+// client's progress heartbeats and by the serving node's delivery records (see
+// SetDeliveryActivityReader) — and a gap in both longer than the active grace
+// would reap it while media is still flowing. The windows are widened rather than
 // made infinite: there is no absolute session lifetime cap in this manager, so
 // unconditional immunity would leak a session forever whenever a client
 // disappears without stopping. A client that has gone quiet for this long has

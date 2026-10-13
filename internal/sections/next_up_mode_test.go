@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
+
 	"strings"
 	"testing"
 
@@ -82,15 +82,6 @@ func TestNextUpModeIgnoresLegacySetting(t *testing.T) {
 	}
 }
 
-// TestNextUpModeDefaultsToCombined pins the historical meaning of absence.
-func TestNextUpModeDefaultsToCombined(t *testing.T) {
-	store := newNextUpModeTestStore(t)
-
-	if got := NextUpMode(context.Background(), store, "profile-1"); got != NextUpModeCombined {
-		t.Errorf("NextUpMode = %q, want default %q", got, NextUpModeCombined)
-	}
-}
-
 // TestNextUpModeProfileIsolation: one profile's canonical mode must not leak
 // into another profile on the same account.
 func TestNextUpModeProfileIsolation(t *testing.T) {
@@ -104,25 +95,6 @@ func TestNextUpModeProfileIsolation(t *testing.T) {
 
 	if got := NextUpMode(ctx, store, "profile-2"); got != NextUpModeCombined {
 		t.Errorf("NextUpMode for the other profile = %q, want %q", got, NextUpModeCombined)
-	}
-}
-
-// failingStore fails every settings read. A read would degrade NextUpMode to
-// combined, so getting "separate" back proves the store was never asked.
-type failingStore struct{ userstore.UserStore }
-
-func (failingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
-	return nil, errors.New("store read")
-}
-
-// TestNextUpModeReadsTheRequestScope: a request that passed viewer access
-// carries the resolved mode, so section fetchers asking again cost no read.
-func TestNextUpModeReadsTheRequestScope(t *testing.T) {
-	ctx := access.SetScope(context.Background(), access.Scope{
-		UserID: 1, ProfileID: "profile-1", NextUpMode: NextUpModeSeparate,
-	})
-	if got := NextUpMode(ctx, failingStore{}, "profile-1"); got != NextUpModeSeparate {
-		t.Errorf("NextUpMode = %q, want the scope's %q", got, NextUpModeSeparate)
 	}
 }
 

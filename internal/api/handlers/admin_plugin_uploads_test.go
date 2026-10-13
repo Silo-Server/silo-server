@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -90,20 +91,21 @@ func TestHandleUploadInstallationKeepsBridgeStatuses(t *testing.T) {
 		installations: &plugins.InstallationStore{},
 		service:       &plugins.Service{},
 	}
-	form := func(field string, size int) (*bytes.Buffer, string) {
+	form := func(field string, size int) (io.Reader, string) {
 		var buf bytes.Buffer
 		w := multipart.NewWriter(&buf)
-		part, err := w.CreateFormFile(field, "plugin.zip")
+		_, err := w.CreateFormFile(field, "plugin.zip")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := part.Write(bytes.Repeat([]byte{0x50}, size)); err != nil {
+		header := bytes.Clone(buf.Bytes())
+		buf.Reset()
+		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-		_ = w.Close()
-		return &buf, w.FormDataContentType()
+		return io.MultiReader(bytes.NewReader(header), io.LimitReader(pluginUploadByteReader{}, int64(size)), &buf), w.FormDataContentType()
 	}
-	call := func(body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
+	call := func(body io.Reader, contentType string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/uploads", body)
 		req.Header.Set("Content-Type", contentType)
 		rec := httptest.NewRecorder()
@@ -125,4 +127,14 @@ func TestHandleUploadInstallationKeepsBridgeStatuses(t *testing.T) {
 	assertV1(t, call(bytes.NewBufferString("not multipart"), ct), "Invalid plugin upload")
 	body, ct = form("other", 8)
 	assertV1(t, call(body, ct), "archive upload is required")
+}
+
+// Generate the oversized archive without allocating another full upload buffer.
+type pluginUploadByteReader struct{}
+
+func (pluginUploadByteReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0x50
+	}
+	return len(p), nil
 }

@@ -18,6 +18,9 @@ type AdminPlaybackHistoryFilter struct {
 	MediaItemID string
 	// Completed is nil for every attempt, otherwise the exact flag.
 	Completed *bool
+	// EndedAfter keeps attempts that ended at or after the instant; nil
+	// keeps every attempt.
+	EndedAfter *time.Time
 }
 
 // AdminPlaybackHistoryPageKey is the keyset position of the last row a page
@@ -47,6 +50,11 @@ type AdminPlaybackHistoryRow struct {
 	WatchedSeconds  float64
 	DurationSeconds *float64
 	Completed       bool
+	// SeriesTitle, SeasonNumber and EpisodeNumber describe an episode's
+	// place in its series; empty and nil for anything else.
+	SeriesTitle   string
+	SeasonNumber  *int
+	EpisodeNumber *int
 }
 
 // AdminPlaybackHistoryPage is one keyset page plus whether more rows follow.
@@ -84,6 +92,9 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 	if filter.Completed != nil {
 		add("h.completed = ", *filter.Completed)
 	}
+	if filter.EndedAfter != nil {
+		add("h.ended_at >= ", *filter.EndedAfter)
+	}
 	if after != nil {
 		args = append(args, after.EndedAt, after.SessionID)
 		conditions = append(conditions, fmt.Sprintf("(h.ended_at, h.session_id) < ($%d, $%d)", len(args)-1, len(args)))
@@ -105,11 +116,15 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.ended_at,
 			h.watched_seconds,
 			h.duration_seconds,
-			h.completed
+			h.completed,
+			COALESCE(sm.title, ''),
+			ep.season_number,
+			ep.episode_number
 		FROM admin_playback_history h
 		LEFT JOIN users u ON u.id = h.user_id
 		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id`
+		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
+		LEFT JOIN media_items sm ON sm.content_id = ep.series_id`
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -131,6 +146,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 			&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
 			&row.StartedAt, &row.EndedAt, &row.WatchedSeconds, &row.DurationSeconds, &row.Completed,
+			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
 		); err != nil {
 			rows.Close()
 			return out, err

@@ -401,3 +401,145 @@ func TestHistoryImportInputMessage(t *testing.T) {
 		t.Fatalf("field-name message = %q", got)
 	}
 }
+
+// profileScopedFakeHistoryImports records the acting profile the v2 routes
+// pass to the profile-aware seam and applies the #1336 rule: p-owner may act
+// for every profile, any other profile only for itself.
+type profileScopedFakeHistoryImports struct {
+	*fakeHistoryImports
+	actors []handlers.HistoryImportActor
+}
+
+func (f *profileScopedFakeHistoryImports) mayActForAll(actor handlers.HistoryImportActor) bool {
+	return actor.ProfileID == "p-owner"
+}
+
+func (f *profileScopedFakeHistoryImports) ListImportRunsPageAs(ctx context.Context, actor handlers.HistoryImportActor, after *historyimport.RunKey, limit int) ([]historyimport.Run, bool, error) {
+	f.actors = append(f.actors, actor)
+	runs, more, err := f.ListImportRunsPage(ctx, actor.UserID, after, limit)
+	if err != nil || f.mayActForAll(actor) {
+		return runs, more, err
+	}
+	var own []historyimport.Run
+	for _, run := range runs {
+		if run.ProfileID == actor.ProfileID {
+			own = append(own, run)
+		}
+	}
+	return own, more, nil
+}
+
+func (f *profileScopedFakeHistoryImports) CreateImportRunAs(ctx context.Context, actor handlers.HistoryImportActor, input historyimport.CreateRunInput) (*historyimport.Run, error) {
+	f.actors = append(f.actors, actor)
+	if input.ProfileID != actor.ProfileID && !f.mayActForAll(actor) {
+		return nil, &handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Only the primary profile can import watch history into another profile"}
+	}
+	return f.CreateImportRun(ctx, actor.UserID, input)
+}
+
+func (f *profileScopedFakeHistoryImports) GetImportRunAs(ctx context.Context, actor handlers.HistoryImportActor, runID string) (*historyimport.Run, error) {
+	f.actors = append(f.actors, actor)
+	run, err := f.GetImportRun(ctx, actor.UserID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.ProfileID != actor.ProfileID && !f.mayActForAll(actor) {
+		return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "run not found"}
+	}
+	return run, nil
+}
+
+func profileScopedHistoryImportDeps(fake *profileScopedFakeHistoryImports) Dependencies {
+	deps := historyImportDeps(fake.fakeHistoryImports)
+	deps.HistoryImports = fake
+	return deps
+}
+
+func TestHistoryImportRoutesActForTheRequestProfile(t *testing.T) {
+	fake := &profileScopedFakeHistoryImports{fakeHistoryImports: fixtureHistoryImports()}
+	h := newTestHandler(t, profileScopedHistoryImportDeps(fake))
+	asOwner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	body := `{"profile_id":"p-owner","source":"plex","plex_session_id":"plex-sess","plex_server_id":"abc123","source_id":"1"}`
+	if rec := do(t, h, http.MethodPost, "/api/v2/history-imports/runs", body, asOwner); rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.actors) != 1 || fake.actors[0].UserID != 1 || fake.actors[0].ProfileID != "p-owner" || fake.actors[0].VerifyProfile == nil {
+		t.Fatalf("actors = %+v, want the account and the request's profile", fake.actors)
+	}
+
+	if rec := do(t, h, http.MethodGet, "/api/v2/history-imports/runs", "", asOwner); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodGet, "/api/v2/history-imports/runs/run-2", "", asOwner); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.actors) != 3 {
+		t.Fatalf("list and get did not go through the profile-aware seam: %+v", fake.actors)
+	}
+}
+
+func TestHistoryImportCreateRefusedForAnotherProfileIsForbidden(t *testing.T) {
+	fake := &profileScopedFakeHistoryImports{fakeHistoryImports: fixtureHistoryImports()}
+	h := newTestHandler(t, profileScopedHistoryImportDeps(fake))
+	// No acting profile: only the seam's rule decides, and it refuses.
+	body := `{"profile_id":"p-owner","source":"plex","plex_session_id":"plex-sess","plex_server_id":"abc123","source_id":"1"}`
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", body, bearer(memberToken)), TypePermissionDenied)
+	if fake.lastCreate != nil {
+		t.Fatalf("a refused import was created: %+v", fake.lastCreate)
+	}
+}
+
+// TestHistoryImportCapabilityAndPlexBaseURLs covers the pair a client needs
+// together: the capability that says fallback is honored, and the request
+// member it enables. A server without fallback rejects plex_base_urls as an
+// unknown member, so a client needs the capability before sending it.
+func TestHistoryImportCapabilityAndPlexBaseURLs(t *testing.T) {
+	fake := fixtureHistoryImports()
+	h := newTestHandler(t, historyImportDeps(fake))
+
+	rec := do(t, h, http.MethodGet, Prefix+"/history-imports/capability", "", bearer(memberToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capability: %d %s", rec.Code, rec.Body)
+	}
+	var capability HistoryImportCapability
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil {
+		t.Fatalf("decoding capability: %v (%s)", err, rec.Body)
+	}
+	if capability.State != StateAvailable || !capability.PlexConnectionFallback {
+		t.Fatalf("capability = %+v, want available with fallback", capability)
+	}
+	// A client sizes its list against this number, so it has to be the bound
+	// the service enforces rather than a restated constant.
+	if capability.MaxPlexConnections != historyimport.MaxPlexConnectionCandidates {
+		t.Errorf("max_plex_connections = %d, want %d", capability.MaxPlexConnections, historyimport.MaxPlexConnectionCandidates)
+	}
+
+	body := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_base_urls":["https://relay.plex.direct:443"],"plex_token":"server-token"}`
+	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
+		t.Fatalf("create run: %d %s", rec.Code, rec.Body)
+	}
+	in := fake.lastCreate
+	if in == nil || len(in.PlexBaseURLs) != 1 || in.PlexBaseURLs[0] != "https://relay.plex.direct:443" {
+		t.Fatalf("plex_base_urls did not reach the service: %+v", in)
+	}
+	if in.PlexBaseURL != "https://primary.plex.direct:32400" {
+		t.Errorf("plex_base_url = %q, want the preferred address preserved", in.PlexBaseURL)
+	}
+
+	// The schema bounds the list at what admission checks, counting
+	// plex_base_url, so a client can send everything and let the server filter.
+	urls := func(n int) string {
+		list := make([]string, n)
+		for i := range list {
+			list[i] = fmt.Sprintf("%q", fmt.Sprintf("https://a%d.example", i))
+		}
+		return strings.Join(list, ",")
+	}
+	body = `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections-1) + `]}`
+	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
+		t.Fatalf("create run at the bound: %d %s", rec.Code, rec.Body)
+	}
+	over := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections) + `]}`
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/history-imports/runs", over, bearer(memberToken)), TypeValidationFailed)
+}

@@ -36,3 +36,30 @@ func TestVariantOnlyRewritesOriginalFilename(t *testing.T) {
 		t.Fatalf("Variant() = %q, want %q", got, want)
 	}
 }
+
+func TestOriginalOfNamesTheRevisionsOriginal(t *testing.T) {
+	for key, want := range map[string]string{
+		"tmdb/movies/550/poster/w500.abc123.webp":     "tmdb/movies/550/poster/original.abc123.webp",
+		"tmdb/movies/550/poster/original.abc123.webp": "tmdb/movies/550/poster/original.abc123.webp",
+		"tmdb/movies/550/poster/w500.webp":            "tmdb/movies/550/poster/w500.webp",
+		"w500.abc123.webp":                            "w500.abc123.webp",
+	} {
+		if got := OriginalOf(key); got != want {
+			t.Errorf("OriginalOf(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestIsLocal(t *testing.T) {
+	for key, want := range map[string]bool{
+		"local/movies/1/0badf00d/poster/original.webp": true,
+		"nfo/movies/1/poster/original.webp":            true,
+		"tmdb/movies/1/poster/original.webp":           false,
+		"nfo-extra/movies/1/poster/original.webp":      false,
+		"": false,
+	} {
+		if got := IsLocal(key); got != want {
+			t.Errorf("IsLocal(%q) = %v, want %v", key, got, want)
+		}
+	}
+}

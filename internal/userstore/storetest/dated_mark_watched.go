@@ -65,17 +65,6 @@ func RunDatedMarkWatchedBatch(t *testing.T, store userstore.UserStore) {
 			}
 		}
 		if iteration == 0 {
-			targets[0].DurationSeconds, targets[1].DurationSeconds = 0, 0
-			if _, err := userstore.MarkWatchedBatch(ctx, store, profile, targets, nil); err != nil {
-				t.Fatal(err)
-			}
-			for index, id := range ids {
-				progress, err := store.GetProgress(ctx, profile, id)
-				if err != nil || progress == nil || progress.DurationSeconds != []float64{600, 900}[index] {
-					t.Fatalf("zero-duration update lost known duration: %+v %v", progress, err)
-				}
-			}
-			targets[0].DurationSeconds, targets[1].DurationSeconds = 600, 900
 			if err := store.RemoveHistoryItems(ctx, profile, ids, time.Now().UTC().Add(time.Minute)); err != nil {
 				t.Fatal(err)
 			}

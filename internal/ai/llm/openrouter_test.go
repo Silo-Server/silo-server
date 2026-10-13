@@ -87,6 +87,9 @@ func TestTranscribeRejectsUnusableSegmentsWithoutRetry(t *testing.T) {
 			if err == nil || calls != 1 {
 				t.Fatalf("error = %v, calls = %d; want rejection without retries", err, calls)
 			}
+			if (name == "missing segments" || name == "null segments") && !strings.Contains(err.Error(), "verbose_json") {
+				t.Fatalf("missing segments error = %v, want verbose_json configuration hint", err)
+			}
 		})
 	}
 }

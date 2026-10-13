@@ -233,8 +233,8 @@ func TestInputHeaderParser(t *testing.T) {
 		log  string
 		want inputInfo
 	}{
-		"matroska with a start": {probeHeaderLog("matroska,webm", "11.400000"), inputInfo{Formats: []string{"matroska", "webm"}, StartSeconds: 11.4}},
-		"mp4 starting early":    {probeHeaderLog("mov,mp4,m4a,3gp,3g2,mj2", "-0.042000"), inputInfo{Formats: []string{"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}, StartSeconds: -0.042}},
+		"matroska with a start": {probeHeaderLog("matroska,webm", "11.400000"), inputInfo{Formats: []string{"matroska", "webm"}, StartSeconds: 11.4, AspectRatio: 16.0 / 9}},
+		"mp4 starting early":    {probeHeaderLog("mov,mp4,m4a,3gp,3g2,mj2", "-0.042000"), inputInfo{Formats: []string{"mov", "mp4", "m4a", "3gp", "3g2", "mj2"}, StartSeconds: -0.042, AspectRatio: 16.0 / 9}},
 		"no start":              {"Input #0, avi, from 'a.avi':\n  Duration: N/A, bitrate: N/A\n", inputInfo{Formats: []string{"avi"}}},
 		"no header":             {"[in#0 @ 0x1] Error opening input: No such file or directory\n", inputInfo{}},
 	} {

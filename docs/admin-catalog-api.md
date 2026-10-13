@@ -206,9 +206,17 @@ The web waits on that job; it does not equate submission with completion.
 
 `PATCH /api/v2/admin/items/{id}/metadata` retains the existing partial metadata
 fields, including descriptions, dates, ratings, provider IDs, numbering and
-locked fields. Omitted/null fields preserve values; explicit empty strings,
+locked fields. Omitted fields preserve values. Explicit `null` clears the
+nullable fields: `rating_imdb`, `rating_tmdb`, `rating_rt_critic`,
+`rating_rt_audience`, `release_date`, `first_air_date`, `last_air_date`,
+`air_time`, `air_timezone`, and `air_date`. A target without the field ignores
+it. Clearing a rating also deletes the item's stored score for that source
+(`imdb`, `tmdb`, `rt_critic`, `rt_audience`), which title pages would otherwise
+show in its place. Clearing an episode's air date recomputes the series air
+dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
-IANA timezone. The service tries item, season, then episode ownership and returns
+IANA timezone. Frozen v1 treats `null` like omission and clears nothing. The
+service tries item, season, then episode ownership and returns
 canonical catalog detail after the update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
@@ -274,14 +282,84 @@ analyzed.
 All three return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted
 job, job Location, cluster-wide exclusion, or restart recovery promise. Active
-work is coalesced by item ID within the process: while any local analysis of
-an item runs, another request for that item reports `already_running`, whatever
-kinds it asks for. Successful analysis retains the existing marker-update
+work is coalesced by item ID within the process, and one analysis of an item
+runs at a time. While local analysis of an item runs, a request for kinds that
+analysis, together with any work queued behind it, already covers reports
+`already_running`. A request for further kinds, such as `credits` while an
+intro-only analysis runs, reports `queued` and runs just those kinds once the
+running analysis finishes. While an online `refresh-markers` runs, every other
+request for the item reports `already_running`, and a `refresh-markers` that
+would run online reports `already_running` while local analysis runs. The
+frozen v1 routes also report `already_running` while any analysis of the item
+runs and never queue. Successful analysis retains the existing marker-update
 notifications.
 
 The operations are non-retryable. The web re-detection actions disable mutation
 retries and authentication replay. No native administrator caller or matching
 Jellyfin action exists; playback marker reads remain separate.
+
+## Seek preview administration
+
+These operations require acting-administrator authorization: an administrator
+account and, when `X-Profile-Id` is present, its primary household profile.
+Discover the feature through `GET /api/v2/libraries/capabilities`
+(`getLibraryCapabilities`), whose `trickplay: true` covers the library setting
+and these administration operations. Library `trickplay_supported` separately
+reports whether public asset storage is configured.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /api/v2/admin/items/{id}/trickplay` | `200` with `files`, ordered by file ID |
+| `POST /api/v2/admin/items/{id}/trickplay/regenerate` | `202` with `requeued`, the number of files queued ahead of the backlog |
+| `GET /api/v2/admin/trickplay/libraries` | `200` with `items`, ordered by library ID |
+
+The item ID can name a movie, episode, or series; a series includes all its
+episode files. Each represented episode of a multi-episode file resolves that
+file, including when it is missing. File and library IDs are opaque strings.
+The arrays are complete lists, never null, without pagination.
+
+Each file reports `state`, `servable`, and `failures`, with optional
+`last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
+and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
+unsupported type, or one with previews turned off; `unusable` for an ineligible
+file or a permanent sampling failure; otherwise it reflects `pending`,
+`running`, or `ready`. An eligible file with
+no queue row yet reports `pending`. `servable` independently reports whether
+the current store has a published revision matching the file: previous sheets
+can remain available after a failed or unusable regeneration. Turning previews
+off or disabling the library suppresses availability immediately. Published
+timestamps are canonical UTC instants; widths are pixels, intervals are
+milliseconds, and storage sizes are bytes.
+
+Regeneration queues eligible video files in enabled, opted-in libraries and
+clears their failure backoff. Missing, unprobed, zero-duration, and audio-only
+files are skipped. Running files finish their current attempt. A successful
+response may report `requeued: 0` when no eligible file needs queuing; `202`
+acknowledges persisted queue changes rather than completed extraction. Previous
+published sheets keep serving until replacements publish. There is no
+administrator job resource or replay receipt. Repeating the request after work
+finishes queues another generation, so it is non-retryable; clients must disable
+automatic mutation retries and authentication replay.
+
+The library listing includes enabled video libraries with previews turned on.
+Each entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
+and `sheet_bytes`. Pending counts include failure backoff and eligible files
+not yet reconciled into the queue. A tracked file that becomes missing,
+unprobed, zero-duration, or audio-only counts as `unusable` regardless of its
+persisted queue state. Ineligible files that have never entered the queue do
+not contribute to these counts. Status reads do not alter queue rows. Storage
+sums the retained published sheets; generation counts do not replace each
+file's `servable` value.
+
+The item operations return `404` `not_found` when no associated media file
+exists. Regeneration returns `409` `capability_disabled` when none belongs to an
+enabled, opted-in video library. All three return `503` `dependency_unavailable`
+when the service is unconfigured, and `500` `internal_error` on an unexpected service
+failure, using the common Problem response. Ordinary profiles receive `403`
+`permission_denied`; authentication failures use the common `401` problems.
+Web administration uses these operations. Apple, Android, and Jellyfin have
+no corresponding administration callers; their playback preview reads are
+separate.
 
 ## Marker edit history
 
@@ -380,9 +458,15 @@ This bounds the response, not the provider fetch or normalization work, and
 provides no snapshot or continuation guarantee. The web requests 500 candidates
 and displays the refinement notice when needed.
 
-Apply requires nonempty provider IDs and runs the existing synchronous
-identity-preserving metadata pipeline. It returns `content_id` and `updated`;
-it is not a queued job. Neither web mutation automatically retries or refreshes
+Apply requires nonempty provider IDs and runs the synchronous metadata
+pipeline. It returns `content_id` and `updated`; it is not a queued job. The
+returned `content_id` differs from the path ID when the item moved: a `local-`
+item takes its provider-anchored ID, and an item whose match the choice
+corrects moves to the ID its new identity derives (see
+[deterministic content IDs](architecture/deterministic-content-id.md#re-anchor-on-a-corrected-match)).
+Callers holding the old ID should switch to the returned one. Apply records the
+choice on the item: later refreshes keep it when a local `.nfo` names another
+title, instead of re-matching to the file's `<uniqueid>`. Neither web mutation automatically retries or refreshes
 and replays authentication. Frozen v1 responses and parsing order remain
 unchanged. These administration flows have web consumers; Apple, Android and
 Jellyfin have no corresponding caller in the migration inventory.
@@ -401,8 +485,10 @@ array. No current web, native or Jellyfin consumer needs migration for this rout
 
 `GET /api/v2/admin/items/{id}/images` requires acting-admin access and returns
 `items`, `page`, `current`, and optional `provider_errors`. Pages default to 50
-choices and accept `limit` 1–200. Choice metadata determines a stable order;
-continuation binds the content ID, authority, limit and complete choice digest.
+choices and accept `limit` 1–200. On movie and series lists, local sidecar
+choices come first, in discovery order. Provider choices follow by rating,
+highest first; choice metadata breaks ties, so the order is stable.
+Continuation binds the content ID, authority, limit and complete choice digest.
 Expiring display URLs are excluded from that digest. A provider choice change
 returns `invalid_cursor` and requires reloading. Each page fetches and resolves
 the provider list again; pagination bounds response size, not provider work or
@@ -410,8 +496,31 @@ memory, and stores no server-side snapshot. Provider failures expose generic
 messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
+For a movie or series the list also offers its local sidecar artwork (the
+`poster.jpg`, `fanart.jpg` and similar files a refresh would use), found by
+Silo's own sidecar discovery whether or not the library's metadata chain uses
+the NFO provider. A `file://` URL from any other provider is not offered. These
+choices have `provider_id` `local`, a `file://` `original_url`, and a small
+WebP preview as a `data:` URI in `url`. A file that cannot be read under the
+library-root, symlink and size checks is left out, and `provider_errors`
+reports the failure under `local`. Banner, thumb, clear art and disc art
+sidecars, and image URLs an NFO names, are not offered. When the library's
+provider chain cannot be resolved, the movie or series list still returns `200`
+with its local choices and reports the failure under `chain` in
+`provider_errors`; other lists return `500`. Frozen v1 lists provider choices
+only. See
+[Local NFO metadata](architecture/local-nfo-metadata.md#admin-image-picker).
+
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
-optional `provider_id`. It preserves target validation before remote work,
+optional `provider_id`. An HTTP(S) `original_url` may name a public or
+local-network address; link-local, cloud metadata and other blocked addresses
+are refused (see
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)). A `file://`
+`original_url` is accepted for a movie or series only when the item's sidecar
+discovery offers that file for that image type; anything else returns a `422`
+validation problem. A failure to read or cache an offered file returns `500`.
+Frozen v1 does not accept local files.
+It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication
 failure. Success returns the stored path, thumbhash and available revision/display

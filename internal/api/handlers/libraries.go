@@ -68,6 +68,37 @@ type LibraryHandler struct {
 	EventsHub             *evt.Hub
 	ScanRegistry          *evt.ScanRegistry
 	ScanQueue             libraryScanQueuer
+	// RealtimeMonitor, when set, reconciles real-time library monitoring
+	// right after a library create, update or delete handled on this node.
+	RealtimeMonitor libraryMonitorPoker
+	// Trickplay, when set, queues or removes seek previews right after a
+	// library's trickplay setting changes on this node.
+	Trickplay libraryTrickplayReconciler
+}
+
+// libraryTrickplayReconciler is the slice of *trickplay.Service the library
+// mutations use.
+type libraryTrickplayReconciler interface {
+	ReconcileSoon()
+}
+
+func (h *LibraryHandler) reconcileTrickplay() {
+	if h.Trickplay != nil {
+		h.Trickplay.ReconcileSoon()
+	}
+}
+
+// libraryMonitorPoker is the slice of *librarymonitor.Monitor the library
+// mutations use.
+type libraryMonitorPoker interface {
+	Poke()
+}
+
+// pokeRealtimeMonitor asks the monitor, if any, to reconcile now.
+func (h *LibraryHandler) pokeRealtimeMonitor() {
+	if h.RealtimeMonitor != nil {
+		h.RealtimeMonitor.Poke()
+	}
 }
 
 // pluginInstallationLister provides access to plugin installations and capabilities
@@ -184,6 +215,11 @@ type createLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh; omitted = default (all provider kinds).
 	TrailerKinds []string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 createLibrary operation; the
+	// frozen /api/v1 body never carries it. nil means on.
+	RealtimeMonitoring *bool `json:"-"`
+	// TrickplayEnabled is set only by the v2 createLibrary operation.
+	TrickplayEnabled bool `json:"-"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -199,6 +235,18 @@ type updateLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh (ExtraKind values); empty array disables remote videos.
 	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 updateLibrary operation; the
+	// frozen /api/v1 body never carries it, so v1 updates leave it unchanged.
+	RealtimeMonitoring *bool `json:"-"`
+	// TrickplayEnabled is set only by the v2 updateLibrary operation.
+	TrickplayEnabled *bool `json:"-"`
+}
+
+// affectsTrickplay reports whether the update can change which of the
+// library's files get seek previews: the setting itself, the library type,
+// or whether the library is enabled.
+func (r updateLibraryRequest) affectsTrickplay() bool {
+	return r.TrickplayEnabled != nil || r.Type != nil || r.Enabled != nil
 }
 
 // scanRequest represents the JSON body for POST /scan.
@@ -248,6 +296,13 @@ type libraryResponse struct {
 	ScanWarningCode            *string    `json:"scan_warning_code,omitempty"`
 	ScanWarningMessage         *string    `json:"scan_warning_message,omitempty"`
 	ScanWarningAt              *time.Time `json:"scan_warning_at,omitempty"`
+	// RealtimeMonitoring is read by the v2 library view only; the frozen
+	// /api/v1 response does not carry it.
+	RealtimeMonitoring bool `json:"-"`
+	// TrickplayEnabled and TrickplaySupported are read by the v2 library
+	// view only.
+	TrickplayEnabled   bool `json:"-"`
+	TrickplaySupported bool `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -387,6 +442,8 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ScanWarningCode:            f.ScanWarningCode,
 		ScanWarningMessage:         f.ScanWarningMessage,
 		ScanWarningAt:              f.ScanWarningAt,
+		RealtimeMonitoring:         f.RealtimeMonitoring,
+		TrickplayEnabled:           f.TrickplayEnabled,
 	}
 }
 
@@ -395,6 +452,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *models.MediaFolder) libraryResponse {
 	resp := toLibraryResponse(f)
 	resp.ChapterThumbnailsSupported = h.ArtworkStore != nil
+	resp.TrickplaySupported = h.ArtworkStore != nil
 	if f.PosterPath != "" && h.ArtworkResolver != nil {
 		resp.PosterURL = h.ArtworkResolver.ResolveURLs(ctx, []string{f.PosterPath})[f.PosterPath].URL
 	}
@@ -403,7 +461,7 @@ func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *mod
 
 // HandleListUserLibraries preserves the frozen bridge projection and errors.
 func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.Request) {
-	views, err := h.ListUserLibraries(r.Context(), apimw.GetUserID(r.Context()))
+	views, err := h.ListUserLibraries(r.Context(), apimw.GetUserID(r.Context()), false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -693,7 +751,6 @@ func (h *LibraryHandler) runFolderScanAsync(scanID string, folder *models.MediaF
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -751,7 +808,6 @@ func (h *LibraryHandler) runSubtreeScanAsync(scanID string, folder *models.Media
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -797,7 +853,6 @@ func (h *LibraryHandler) runFileScanAsync(scanID string, folder *models.MediaFol
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 		)
 	}()
 }
@@ -907,9 +962,6 @@ func scanRunResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		resp.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New
@@ -1446,6 +1498,10 @@ type chainLevelEntry struct {
 	ProviderSlug         string `json:"provider_slug"`
 	Priority             int    `json:"priority"`
 	Enabled              bool   `json:"enabled"`
+	// Local marks the built-in local metadata provider (NFO text and sidecar
+	// artwork), which always runs first. v2 exposes it; the frozen v1 shape
+	// does not.
+	Local bool `json:"-"`
 }
 
 // setChainLevelRequest is the JSON body for PUT /libraries/{id}/providers.
@@ -1577,6 +1633,7 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 			candidates = append(candidates, seedCandidate{
 				installationID:   c.PluginInstallationID,
 				capabilityID:     c.CapabilityID,
+				local:            c.Builtin,
 				supportsLevel:    p.SupportsLevel,
 				declaredPriority: p.DefaultPriority,
 				defaultEnabled:   p.DefaultEnabled,
@@ -1594,6 +1651,7 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 type seedCandidate struct {
 	installationID   int
 	capabilityID     string
+	local            bool // builtin-host provider (the local tier): always first
 	supportsLevel    bool // provider handles this content level (declared it, or is a legacy catch-all)
 	declaredPriority int  // manifest default_priority for this level; 0 = level not declared
 	defaultEnabled   bool // manifest default_enabled; false = specialist opts out of auto-enable
@@ -1608,7 +1666,8 @@ type seedCandidate struct {
 // declares no levels at all is parked last and disabled. Keeping an opted-out
 // provider at its declared priority (rather than forcing it last) means that when
 // a user does enable it, it slots in where the manifest intends instead of
-// jumping to the top of the chain.
+// jumping to the top of the chain. A builtin (local) provider goes ahead of all
+// of them, as chain resolution runs it.
 func buildSeededChainEntries(level string, candidates []seedCandidate) []metadata.ChainEntry {
 	ranked := make([]seedCandidate, 0, len(candidates))
 	for _, c := range candidates {
@@ -1619,11 +1678,14 @@ func buildSeededChainEntries(level string, candidates []seedCandidate) []metadat
 			ranked = append(ranked, c)
 		} else {
 			// Legacy provider that declares no levels — park last, disabled.
-			ranked = append(ranked, seedCandidate{installationID: c.installationID, capabilityID: c.capabilityID, supportsLevel: true, declaredPriority: 999, defaultEnabled: false})
+			ranked = append(ranked, seedCandidate{installationID: c.installationID, capabilityID: c.capabilityID, local: c.local, supportsLevel: true, declaredPriority: 999, defaultEnabled: false})
 		}
 	}
 
 	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].local != ranked[j].local {
+			return ranked[i].local
+		}
 		return ranked[i].declaredPriority < ranked[j].declaredPriority
 	})
 
@@ -1636,6 +1698,7 @@ func buildSeededChainEntries(level string, candidates []seedCandidate) []metadat
 			ContentLevel:         level,
 			Priority:             i,
 			Enabled:              c.declaredPriority > 0 && c.defaultEnabled,
+			Local:                c.local,
 		}
 	}
 	return entries

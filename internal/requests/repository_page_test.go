@@ -27,7 +27,10 @@ func TestRequestListKeysetDatabase(t *testing.T) {
  id text PRIMARY KEY, provider text, media_type text, tmdb_id int, tvdb_id int, imdb_id text, title text, year int,
  overview text, poster_path text, backdrop_path text, status text, outcome text,
  requested_by_user_id int, requested_by_profile_id text, is_anime bool,
- last_error text, created_at timestamptz, updated_at timestamptz, approved_at timestamptz, completed_at timestamptz);
+ last_error text, created_at timestamptz, updated_at timestamptz, approved_at timestamptz, completed_at timestamptz,
+ submit_attempts int NOT NULL DEFAULT 0, submit_lease_until timestamptz, next_submit_at timestamptz,
+ outcome_reason text NOT NULL DEFAULT '', routing_facts jsonb NOT NULL DEFAULT '{}', seasons integer[] NOT NULL DEFAULT '{}',
+ source text NOT NULL DEFAULT 'direct');
  CREATE INDEX ON media_requests (requested_by_user_id, created_at DESC, id DESC)`)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +38,7 @@ func TestRequestListKeysetDatabase(t *testing.T) {
 	stamp := time.Date(2026, 1, 2, 3, 4, 5, 123456000, time.UTC)
 	insert := func(id string, user int, at time.Time) {
 		t.Helper()
-		_, err := pool.Exec(t.Context(), `INSERT INTO media_requests VALUES ($1,'tmdb','movie',1,NULL,'','',NULL,'','','','pending','active',$2,'profile',false,'',$3,$3,NULL,NULL)`, id, user, at)
+		_, err := pool.Exec(t.Context(), `INSERT INTO media_requests VALUES ($1,'tmdb','movie',1,NULL,'','',NULL,'','','','pending','active',$2,'profile',false,'',$3,$3,NULL,NULL,0,NULL,NULL,'','{}','{}','direct')`, id, user, at)
 		if err != nil {
 			t.Fatal(err)
 		}

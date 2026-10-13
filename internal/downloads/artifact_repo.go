@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,12 +13,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
-const artifactColumns = `id, media_file_id, format, params_hash, container, codec_video, codec_audio, audio_recipe_version,
+const artifactColumns = `id, media_file_id, format, params_hash, container, codec_video, codec_audio, audio_recipe_version, track_recipe_version, prepared_audio_tracks,
 	resolution, audio_track_index, target_bitrate_kbps, tone_map_policy, tone_map_mode, tone_map_source_kind, tone_map_recipe_version, tone_map_preflight_required, tone_map_source_revision,
 	tone_map_dv_config_present, tone_map_dv_bl_compat_id_present, tone_map_dv_bl_present, tone_map_dv_rpu_present, output_path,
 	origin_node_id, origin_node_url, origin_node_group, origin_artifact_id, file_size, status, error_message,
 	attempts, max_attempts, lease_owner, lease_expires_at, next_retry_at,
-	created_at, completed_at, last_used_at`
+	created_at, completed_at, last_used_at,
+	started_at, worker_kind, worker_node_id, worker_name,
+	progress_encoded_seconds, progress_duration_seconds, progress_speed, progress_updated_at, progress_unavailable`
 
 // ArtifactRepository provides CRUD + durable-queue operations for
 // download_artifacts.
@@ -46,17 +49,39 @@ func NewArtifactRepository(pool *pgxpool.Pool) *ArtifactRepository {
 func scanArtifact(row pgx.Row) (*Artifact, error) {
 	var a Artifact
 	var leaseOwner *string
+	var preparedAudio []byte
+	var encoded, duration, speed *float64
+	var progressAt *time.Time
 	if err := row.Scan(
-		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio, &a.AudioRecipeVersion,
+		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio, &a.AudioRecipeVersion, &a.TrackRecipeVersion, &preparedAudio,
 		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.ToneMapPolicy, &a.ToneMapMode, &a.ToneMapSourceKind, &a.ToneMapRecipeVersion, &a.ToneMapPreflightRequired, &a.ToneMapSourceRevision,
 		&a.ToneMapDVConfigPresent, &a.ToneMapDVBLCompatIDPresent, &a.ToneMapDVBLPresent, &a.ToneMapDVRPUPresent, &a.OutputPath,
 		&a.OriginNodeID, &a.OriginNodeURL, &a.OriginNodeGroup, &a.OriginArtifactID, &a.FileSize, &a.Status, &a.ErrorMessage,
 		&a.Attempts, &a.MaxAttempts, &leaseOwner, &a.LeaseExpiresAt, &a.NextRetryAt,
 		&a.CreatedAt, &a.CompletedAt, &a.LastUsedAt,
+		&a.StartedAt, &a.WorkerKind, &a.WorkerNodeID, &a.WorkerName,
+		&encoded, &duration, &speed, &progressAt, &a.ProgressUnavailable,
 	); err != nil {
 		return nil, err
 	}
 	a.LeaseOwner = deref(leaseOwner)
+	if progressAt != nil {
+		a.Progress = &ArtifactProgress{UpdatedAt: *progressAt}
+		if encoded != nil {
+			a.Progress.EncodedSeconds = *encoded
+		}
+		if duration != nil {
+			a.Progress.DurationSeconds = *duration
+		}
+		if speed != nil {
+			a.Progress.Speed = *speed
+		}
+	}
+	if len(preparedAudio) > 0 {
+		if err := json.Unmarshal(preparedAudio, &a.PreparedAudioTracks); err != nil {
+			return nil, fmt.Errorf("decoding prepared audio tracks: %w", err)
+		}
+	}
 	return &a, nil
 }
 
@@ -67,15 +92,15 @@ func (r *ArtifactRepository) EnsureQueued(ctx context.Context, a *Artifact) (*Ar
 	if a.ToneMapPolicy == "" {
 		a.ToneMapPolicy = tonemap.PolicyNone
 	}
-	status := queuedArtifactStatus(a.ToneMapMode, a.AudioRecipeVersion)
+	status := queuedArtifactStatus(a.ToneMapMode, a.AudioRecipeVersion, a.TrackRecipeVersion)
 	tag, err := r.pool.Exec(ctx,
 		`INSERT INTO download_artifacts
-			(id, media_file_id, format, params_hash, container, codec_video, codec_audio, audio_recipe_version,
+			(id, media_file_id, format, params_hash, container, codec_video, codec_audio, audio_recipe_version, track_recipe_version,
 			 resolution, audio_track_index, target_bitrate_kbps, tone_map_policy, tone_map_mode, tone_map_source_kind, tone_map_recipe_version, tone_map_preflight_required, tone_map_source_revision,
 			 tone_map_dv_config_present, tone_map_dv_bl_compat_id_present, tone_map_dv_bl_present, tone_map_dv_rpu_present, output_path, status, max_attempts)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		 ON CONFLICT (media_file_id, format, params_hash) DO NOTHING`,
-		a.ID, a.MediaFileID, a.Format, a.ParamsHash, a.Container, a.CodecVideo, a.CodecAudio, a.AudioRecipeVersion,
+		a.ID, a.MediaFileID, a.Format, a.ParamsHash, a.Container, a.CodecVideo, a.CodecAudio, a.AudioRecipeVersion, a.TrackRecipeVersion,
 		a.Resolution, a.AudioTrackIndex, a.TargetBitrateKbps, a.ToneMapPolicy, a.ToneMapMode, a.ToneMapSourceKind, a.ToneMapRecipeVersion, a.ToneMapPreflightRequired, a.ToneMapSourceRevision,
 		a.ToneMapDVConfigPresent, a.ToneMapDVBLCompatIDPresent, a.ToneMapDVBLPresent, a.ToneMapDVRPUPresent, a.OutputPath, status, a.MaxAttempts,
 	)
@@ -83,6 +108,11 @@ func (r *ArtifactRepository) EnsureQueued(ctx context.Context, a *Artifact) (*Ar
 		return nil, false, fmt.Errorf("ensuring artifact: %w", err)
 	}
 	row, err := r.GetByKey(ctx, a.MediaFileID, a.Format, a.ParamsHash)
+	if errors.Is(err, ErrNotFound) && tag.RowsAffected() == 0 {
+		// The conflicting row was deleted (an administrator canceled it)
+		// between the insert and the read; queue a fresh one.
+		return r.EnsureQueued(ctx, a)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -117,8 +147,10 @@ func (r *ArtifactRepository) GetByKey(ctx context.Context, mediaFileID int, form
 	return a, nil
 }
 
-// ClaimNext atomically claims one runnable job: a queued row whose backoff has
-// elapsed, or a running row whose lease has expired (lease stealing). FOR UPDATE
+// ClaimNext atomically claims one runnable job: a queued, unpaused row whose
+// backoff has elapsed, or a running row whose lease has expired (lease
+// stealing). A queued row can carry an unowned lease_expires_at after a pause
+// took it from a worker that may still be running; it waits that out. FOR UPDATE
 // SKIP LOCKED makes concurrent workers (and nodes) safe without double-encoding.
 // Returns ErrNoArtifactJob when nothing is claimable.
 func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease time.Duration) (*Artifact, error) {
@@ -129,17 +161,22 @@ func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease 
 	a, err := scanArtifact(r.pool.QueryRow(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE
+		                  WHEN status IN ('tracks_v1_queued', 'tracks_v1_running') THEN 'tracks_v1_running'
 		                  WHEN status IN ('audio_v2_queued', 'audio_v2_running') THEN 'audio_v2_running'
 		                  WHEN status IN ('tone_map_queued', 'tone_map_running') THEN 'tone_map_running'
 		                  ELSE 'running'
 		              END,
 		     lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
-		     attempts = attempts + 1
+		     attempts = attempts + 1,
+		     started_at = now(), worker_kind = '', worker_node_id = NULL, worker_name = '',
+		     progress_encoded_seconds = NULL, progress_duration_seconds = NULL, progress_speed = NULL,
+		     progress_updated_at = NULL, progress_unavailable = false
 		 WHERE id = (
 		     SELECT id FROM download_artifacts
-		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued') AND (next_retry_at IS NULL OR next_retry_at <= now()))
-		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running') AND lease_expires_at < now())
-		     ORDER BY created_at
+		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND paused_at IS NULL
+		            AND (next_retry_at IS NULL OR next_retry_at <= now()) AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
+		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now())
+		     ORDER BY created_at, id
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )
@@ -164,7 +201,7 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 	}
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts SET lease_expires_at = now() + make_interval(secs => $3)
-		 WHERE id = $1 AND lease_owner = $2 AND status IN ('running', 'tone_map_running', 'audio_v2_running')`,
+		 WHERE id = $1 AND lease_owner = $2 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`,
 		id, owner, leaseSecs,
 	)
 	if err != nil {
@@ -173,26 +210,87 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 	return tag.RowsAffected() > 0, nil
 }
 
-// MarkReady transitions a job to ready, records its size/path, and clears the
-// lease. The write is fenced on (lease_owner, status='running') so a worker that
+// runningArtifactFence limits live-state writes to the current lease owner of
+// a running attempt, so a worker that lost its lease cannot overwrite the
+// state of the attempt that replaced it.
+const runningArtifactFence = `lease_owner = $2 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`
+
+// RecordWorker records where the current attempt executes. nodeID is nil for
+// the API server itself. Returns false when the lease was lost.
+func (r *ArtifactRepository) RecordWorker(ctx context.Context, id, owner, kind string, nodeID *int, name string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET worker_kind = $3, worker_node_id = $4, worker_name = $5,
+		     progress_encoded_seconds = NULL, progress_duration_seconds = NULL, progress_speed = NULL,
+		     progress_updated_at = NULL, progress_unavailable = false
+		 WHERE id = $1 AND `+runningArtifactFence,
+		id, owner, kind, nodeID, name,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact worker: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecordProgress persists the attempt's latest progress reading. Returns
+// false when the lease was lost.
+func (r *ArtifactRepository) RecordProgress(ctx context.Context, id, owner string, p ArtifactProgress) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET progress_encoded_seconds = $3, progress_duration_seconds = $4, progress_speed = $5,
+		     progress_updated_at = now(), progress_unavailable = false
+		 WHERE id = $1 AND `+runningArtifactFence,
+		id, owner, p.EncodedSeconds, p.DurationSeconds, p.Speed,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact progress: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecordProgressUnavailable marks the attempt's worker as unable to report
+// progress, so the admin view can say so instead of waiting for a reading.
+func (r *ArtifactRepository) RecordProgressUnavailable(ctx context.Context, id, owner string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts SET progress_unavailable = true WHERE id = $1 AND `+runningArtifactFence,
+		id, owner,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact progress unavailable: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// MarkReady transitions a job to ready, records its size/path and the audio
+// inventory of a multi-track file (nil otherwise), and clears the lease. The write is fenced on (lease_owner, status='running') so a worker that
 // lost its lease — e.g. a slow encode whose lease expired and was reclaimed by
 // another node — cannot flip a row it no longer owns. Returns false when the
 // fence rejected the write (the lease was lost); the caller must then NOT flip
 // linked downloads, leaving that to the current owner.
-func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, originNodeID int, originNodeURL, originNodeGroup, originArtifactID string, fileSize int64) (bool, error) {
+func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, originNodeID int, originNodeURL, originNodeGroup, originArtifactID string, fileSize int64, preparedAudioTracks []OfflineAudioTrack) (bool, error) {
+	var preparedAudio []byte
+	if preparedAudioTracks != nil {
+		encoded, err := json.Marshal(preparedAudioTracks)
+		if err != nil {
+			return false, fmt.Errorf("encoding prepared audio tracks: %w", err)
+		}
+		preparedAudio = encoded
+	}
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE
+		                  WHEN track_recipe_version <> '' THEN 'tracks_v1_ready'
 		                  WHEN audio_recipe_version <> '' THEN 'audio_v2_ready'
 		                  WHEN tone_map_mode <> '' THEN 'tone_map_ready'
 		                  ELSE 'ready'
 		              END,
 		     output_path = $2, origin_node_id = $3, origin_node_url = $4,
 		     origin_node_group = $5, origin_artifact_id = $6, file_size = $7, error_message = '',
+		     prepared_audio_tracks = $9,
 		     completed_at = now(), last_used_at = now(),
 		     lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL
-		 WHERE id = $1 AND lease_owner = $8 AND status IN ('running', 'tone_map_running', 'audio_v2_running')`,
-		id, outputPath, originNodeID, originNodeURL, originNodeGroup, originArtifactID, fileSize, owner,
+		 WHERE id = $1 AND lease_owner = $8 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`,
+		id, outputPath, originNodeID, originNodeURL, originNodeGroup, originArtifactID, fileSize, owner, preparedAudio,
 	)
 	if err != nil {
 		return false, fmt.Errorf("marking artifact ready: %w", err)
@@ -214,6 +312,7 @@ func (r *ArtifactRepository) MarkFailedOrRetry(ctx context.Context, id, owner, e
 	err = r.pool.QueryRow(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE WHEN attempts >= max_attempts THEN 'failed'
+		                   WHEN status = 'tracks_v1_running' THEN 'tracks_v1_queued'
 		                   WHEN status = 'audio_v2_running' THEN 'audio_v2_queued'
 		                   WHEN status = 'tone_map_running' THEN 'tone_map_queued'
 		                   ELSE 'queued' END,
@@ -221,7 +320,7 @@ func (r *ArtifactRepository) MarkFailedOrRetry(ctx context.Context, id, owner, e
 		     next_retry_at = CASE WHEN attempts >= max_attempts THEN NULL ELSE now() + make_interval(secs => $3) END,
 		     completed_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END,
 		     lease_owner = NULL, lease_expires_at = NULL
-		 WHERE id = $1 AND lease_owner = $4 AND status IN ('running', 'tone_map_running', 'audio_v2_running')
+		 WHERE id = $1 AND lease_owner = $4 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
 		 RETURNING status = 'failed'`,
 		id, errMsg, backoffSecs, owner,
 	).Scan(&terminal)
@@ -232,6 +331,27 @@ func (r *ArtifactRepository) MarkFailedOrRetry(ctx context.Context, id, owner, e
 		return false, false, fmt.Errorf("marking artifact failed/retry: %w", err)
 	}
 	return terminal, true, nil
+}
+
+// DeferJob returns a running job to the queue until after delay without
+// counting the attempt, for a job that could not start for want of space
+// rather than because it failed. msg says why it waits.
+func (r *ArtifactRepository) DeferJob(ctx context.Context, id, owner, msg string, delay time.Duration) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET status = CASE WHEN status = 'tracks_v1_running' THEN 'tracks_v1_queued'
+		                   WHEN status = 'audio_v2_running' THEN 'audio_v2_queued'
+		                   WHEN status = 'tone_map_running' THEN 'tone_map_queued'
+		                   ELSE 'queued' END,
+		     attempts = GREATEST(attempts - 1, 0), error_message = $2,
+		     next_retry_at = now() + make_interval(secs => $3),
+		     lease_owner = NULL, lease_expires_at = NULL
+		 WHERE id = $1 AND lease_owner = $4 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`,
+		id, msg, delay.Seconds(), owner)
+	if err != nil {
+		return false, fmt.Errorf("deferring artifact job: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // reclaimedArtifact reports a row recovered by the startup sweep.
@@ -247,13 +367,14 @@ func (r *ArtifactRepository) ReclaimExpiredLeases(ctx context.Context) ([]reclai
 	rows, err := r.pool.Query(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE WHEN attempts >= max_attempts THEN 'failed'
+		                   WHEN status = 'tracks_v1_running' THEN 'tracks_v1_queued'
 		                   WHEN status = 'audio_v2_running' THEN 'audio_v2_queued'
 		                   WHEN status = 'tone_map_running' THEN 'tone_map_queued'
 		                   ELSE 'queued' END,
 		     lease_owner = NULL, lease_expires_at = NULL,
 		     error_message = CASE WHEN attempts >= max_attempts THEN 'exceeded max attempts after lease expiry' ELSE error_message END,
 		     completed_at = CASE WHEN attempts >= max_attempts THEN now() ELSE completed_at END
-		 WHERE status IN ('running', 'tone_map_running', 'audio_v2_running') AND lease_expires_at < now()
+		 WHERE status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now()
 		 RETURNING id, status = 'failed'`,
 	)
 	if err != nil {
@@ -271,14 +392,16 @@ func (r *ArtifactRepository) ReclaimExpiredLeases(ctx context.Context) ([]reclai
 	return out, rows.Err()
 }
 
-// Requeue forces a ready/failed artifact back to queued (e.g. when its
-// output_path is missing on disk). The deterministic output_path is preserved.
-// Returns ErrNotFound when the row no longer exists (e.g. a concurrent sweep
-// deleted it) so callers never keep using a dead artifact id.
+// Requeue sends a failed or expired artifact back to queued for a fresh
+// attempt. The deterministic output_path is preserved. Returns ErrNotFound
+// when the row no longer exists (a concurrent sweep deleted it) or is no
+// longer failed or expired (another request requeued it first), so a caller
+// never resets a job that is running or ready.
 func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE
+		                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
 		                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
 		                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
 		                  ELSE 'queued'
@@ -286,7 +409,7 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 		     attempts = 0, error_message = '', next_retry_at = NULL,
 		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
 		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
-		 WHERE id = $1`,
+		 WHERE id = $1 AND status IN ('failed', 'expired')`,
 		id,
 	)
 	if err != nil {
@@ -316,18 +439,37 @@ const (
 // inserts the download row, so recovery never retires a row in that window.
 const missingArtifactRetireGrace = 10 * time.Minute
 
-// unusedReadyArtifactPredicate selects ready rows that no active download
+// inFlightLinkPredicate matches a download row (alias d) that still needs its
+// artifact's bytes: it has not been fetched yet or is being fetched. A
+// completed row does not: the device already holds its copy, and a later
+// re-download asks for the file to be prepared again.
+const inFlightLinkPredicate = `d.status NOT IN ('completed', 'cancelled', 'failed', 'revoked')`
+
+// liveLinkPredicate matches a download that still refers to its artifact's
+// recipe: in flight, or finished (its manifest and a prepare-again read the
+// recipe). Only such a link keeps a row that holds no bytes.
+const liveLinkPredicate = `d.status NOT IN ('cancelled', 'failed', 'revoked')`
+
+// unusedReadyArtifactPredicate selects ready rows that no in-flight download
 // references and that nothing has used within the grace interval ($2, seconds).
-// Completed rows count as active because they remain re-downloadable.
-const unusedReadyArtifactPredicate = `a.status IN ('ready', 'tone_map_ready', 'audio_v2_ready')
+const unusedReadyArtifactPredicate = `a.status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')
 	AND a.last_used_at < now() - make_interval(secs => $2)
 	AND NOT EXISTS (SELECT 1 FROM downloads d
-	                WHERE d.artifact_id = a.id AND d.status NOT IN ('cancelled', 'failed', 'revoked'))`
+	                WHERE d.artifact_id = a.id AND ` + inFlightLinkPredicate + `)`
+
+// expireArtifactAssignment moves a ready row to 'expired': its bytes are gone,
+// but the row keeps the frozen recipe so finished devices keep their offline
+// manifest and a re-download can prepare the same file again. The locator is
+// cleared so remote cleanup never mistakes the old node file for a live one;
+// expired_from_node_id keeps where the file was, for the inventory.
+const expireArtifactAssignment = `status = 'expired', expired_from_node_id = NULLIF(origin_node_id, 0),
+	origin_node_id = 0, origin_node_url = '', origin_node_group = '',
+	origin_artifact_id = '', lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL`
 
 // RecoverMissing resolves a ready local artifact whose output file vanished.
-// It deletes the row when no download can use it, so lost output is never
-// rebuilt for nobody. Otherwise it requeues the artifact and returns its
-// linked downloads to preparing in the same transaction, so the caller can
+// It expires the row when no in-flight download needs it, so lost output is
+// never rebuilt for nobody. Otherwise it requeues the artifact and returns its
+// in-flight downloads to preparing in the same transaction, so the caller can
 // publish them. The result is artifactUnchanged when the row is no longer ready.
 func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grace time.Duration) (linked []*Download, result artifactRecovery, err error) {
 	tx, err := r.pool.Begin(ctx)
@@ -336,7 +478,7 @@ func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grac
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	tag, err := tx.Exec(ctx,
-		`DELETE FROM download_artifacts a WHERE a.id = $1 AND `+unusedReadyArtifactPredicate,
+		`UPDATE download_artifacts a SET `+expireArtifactAssignment+` WHERE a.id = $1 AND `+unusedReadyArtifactPredicate,
 		id, grace.Seconds(),
 	)
 	if err != nil {
@@ -347,13 +489,14 @@ func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grac
 		tag, err = tx.Exec(ctx,
 			`UPDATE download_artifacts
 			 SET status = CASE
+			                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
 			                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
 			                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
 			                  ELSE 'queued'
 			              END,
 			     attempts = 0, error_message = '', next_retry_at = NULL,
 			     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
-			 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`,
+			 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')`,
 			id,
 		)
 		if err != nil {
@@ -373,16 +516,17 @@ func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grac
 	return linked, result, nil
 }
 
-// resetLinkedDownloadsForRequeue returns every live download of a requeued
-// artifact to preparing. It runs in the requeue transaction so a download is
-// never left ready while its artifact is back in the prepare queue.
+// resetLinkedDownloadsForRequeue returns every in-flight download of a
+// requeued artifact to preparing. It runs in the requeue transaction so a
+// download is never left ready while its artifact is back in the prepare
+// queue. Completed rows are left alone: the device already holds its copy.
 func resetLinkedDownloadsForRequeue(ctx context.Context, tx pgx.Tx, artifactID string) ([]*Download, error) {
 	rows, err := tx.Query(ctx,
-		`UPDATE downloads
+		`UPDATE downloads d
 		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
 		     error_message = '', updated_at = now()
-		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
-		 RETURNING `+downloadColumns,
+		 WHERE d.artifact_id = $1 AND `+inFlightLinkPredicate+`
+		 RETURNING `+qualifiedColumns(downloadColumns, "d"),
 		artifactID,
 	)
 	if err != nil {
@@ -429,7 +573,7 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 		retireArgs = append(retireArgs, artifact.OriginNodeURL)
 	}
 	tag, err := tx.Exec(ctx,
-		`DELETE FROM download_artifacts a WHERE a.id = $1 AND `+unusedReadyArtifactPredicate+locatorFence,
+		`UPDATE download_artifacts a SET `+expireArtifactAssignment+` WHERE a.id = $1 AND `+unusedReadyArtifactPredicate+locatorFence,
 		retireArgs...,
 	)
 	if err != nil {
@@ -446,6 +590,7 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 	}
 	query := `UPDATE download_artifacts
 		 SET status = CASE
+		                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
 		                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
 		                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
 		                  ELSE 'queued'
@@ -453,7 +598,7 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 		     attempts = 0, error_message = '', next_retry_at = NULL,
 		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
 		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
-		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready') AND origin_node_id = $2 AND origin_artifact_id = $3`
+		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready') AND origin_node_id = $2 AND origin_artifact_id = $3`
 	args := []any{artifact.ID, artifact.OriginNodeID, artifact.OriginArtifactID}
 	if fenceURL {
 		query += ` AND origin_node_url = $4`
@@ -494,22 +639,13 @@ func enqueueRemoteArtifactCleanup(ctx context.Context, tx pgx.Tx, artifact *Arti
 	return nil
 }
 
-// TouchLastUsed bumps last_used_at for LRU accounting (called on serve).
-func (r *ArtifactRepository) TouchLastUsed(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE download_artifacts SET last_used_at = now() WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("touching artifact: %w", err)
-	}
-	return nil
-}
-
 // TouchReady bumps last_used_at only while the artifact is still ready. It
-// returns false when missing-output recovery retired or requeued the row
-// first, so a caller never links a download to an artifact that is gone.
+// returns false when missing-output recovery or expiry changed the row first,
+// so a caller never links or serves an artifact whose bytes are gone.
 func (r *ArtifactRepository) TouchReady(ctx context.Context, id string) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts SET last_used_at = now()
-		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`, id)
+		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')`, id)
 	if err != nil {
 		return false, fmt.Errorf("touching ready artifact: %w", err)
 	}
@@ -525,7 +661,7 @@ func (r *ArtifactRepository) RefreshRemoteLocator(ctx context.Context, artifact 
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET origin_node_url = $2, origin_node_group = $3
-		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')
+		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready')
 		   AND origin_node_id = $4 AND origin_artifact_id = $5`,
 		artifact.ID, artifact.OriginNodeURL, artifact.OriginNodeGroup,
 		artifact.OriginNodeID, artifact.OriginArtifactID,
@@ -539,7 +675,7 @@ func (r *ArtifactRepository) RefreshRemoteLocator(ctx context.Context, artifact 
 // ListReady returns ready artifacts ordered by least-recently-used first.
 func (r *ArtifactRepository) ListReady(ctx context.Context) ([]*Artifact, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+artifactColumns+` FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready', 'audio_v2_ready') ORDER BY last_used_at ASC`)
+		`SELECT `+artifactColumns+` FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready', 'audio_v2_ready', 'tracks_v1_ready') ORDER BY last_used_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing ready artifacts: %w", err)
 	}
@@ -559,57 +695,18 @@ func scanArtifacts(rows pgx.Rows) ([]*Artifact, error) {
 	return out, rows.Err()
 }
 
-// TotalReadyBytes returns the sum of ready artifact sizes (LRU budget input).
-func (r *ArtifactRepository) TotalReadyBytes(ctx context.Context) (int64, error) {
-	var total int64
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(file_size), 0) FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`).Scan(&total); err != nil {
-		return 0, fmt.Errorf("summing ready artifacts: %w", err)
-	}
-	return total, nil
-}
-
-// HasActiveLink reports whether any valid download row — managed or ephemeral
-// (device-less web) — still references the artifact. Completed rows are
-// retained because they remain re-downloadable handles; evicting an artifact a
-// live row references would 404 a download the API advertises as servable.
-func (r *ArtifactRepository) HasActiveLink(ctx context.Context, artifactID string) (bool, error) {
-	var exists bool
-	if err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM downloads
-		 WHERE artifact_id = $1
-		   AND status NOT IN ('cancelled','failed','revoked'))`,
-		artifactID,
-	).Scan(&exists); err != nil {
-		return false, fmt.Errorf("checking artifact links: %w", err)
-	}
-	return exists, nil
-}
-
 // ListFailedBefore returns terminally-failed artifacts cold since cutoff
-// (last_used_at). Their linked downloads were already flipped to 'failed' by
-// reconciliation, so the rows serve nothing and only block re-attempts.
+// (last_used_at). Their waiting downloads were already flipped to 'failed' by
+// reconciliation. A row a finished download still refers to is not listed: an
+// expired file whose re-preparation failed keeps its recipe for that
+// download's manifest and a later prepare-again.
 func (r *ArtifactRepository) ListFailedBefore(ctx context.Context, cutoff time.Time) ([]*Artifact, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+artifactColumns+` FROM download_artifacts
-		 WHERE status = 'failed' AND last_used_at < $1`, cutoff)
+		`SELECT `+artifactColumns+` FROM download_artifacts a
+		 WHERE a.status = 'failed' AND a.last_used_at < $1
+		   AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = a.id AND `+liveLinkPredicate+`)`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("listing failed artifacts: %w", err)
-	}
-	defer rows.Close()
-	return scanArtifacts(rows)
-}
-
-// ListUnlinkedReadyBefore returns ready artifacts referenced by NO download
-// row at all (every linking row deleted) and unused since cutoff. These are
-// pure orphans: nothing can ever serve them again.
-func (r *ArtifactRepository) ListUnlinkedReadyBefore(ctx context.Context, cutoff time.Time) ([]*Artifact, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+artifactColumns+` FROM download_artifacts a
-		 WHERE a.status IN ('ready', 'tone_map_ready', 'audio_v2_ready') AND a.last_used_at < $1
-		   AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = a.id)`, cutoff)
-	if err != nil {
-		return nil, fmt.Errorf("listing unlinked artifacts: %w", err)
 	}
 	defer rows.Close()
 	return scanArtifacts(rows)

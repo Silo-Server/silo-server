@@ -52,6 +52,10 @@ vi.mock("./CatalogFilterSheet", () => ({
   ),
 }));
 
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogFilters: (...args: unknown[]) => mockUseCatalogFilters(...args),
 }));

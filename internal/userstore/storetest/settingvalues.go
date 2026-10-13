@@ -16,9 +16,7 @@ import (
 )
 
 // RunSettingValues runs the canonical settings-contract storage conformance
-// tests. It is exposed separately from RunSuite so each backend can pin this
-// behavior on its own, which is what keeps the PostgreSQL and per-user SQLite
-// stores from drifting on the table the whole contract rests on.
+// tests against both the PostgreSQL and per-user SQLite backends.
 func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("DeviceSettings", func(t *testing.T) { RunDeviceSettings(t, newStore) })
 	t.Run("ExplicitValuesPerScope", func(t *testing.T) {

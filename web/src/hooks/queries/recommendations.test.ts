@@ -10,7 +10,6 @@ import createTasteSeedOk from "../../../../contracts/api/v2/fixtures/create_tast
 import getDiscoverOk from "../../../../contracts/api/v2/fixtures/get_discover_ok.json";
 import getRecommendationSectionOk from "../../../../contracts/api/v2/fixtures/get_recommendation_section_ok.json";
 import getTasteProfileOk from "../../../../contracts/api/v2/fixtures/get_taste_profile_ok.json";
-import getWatchTonightOk from "../../../../contracts/api/v2/fixtures/get_watch_tonight_ok.json";
 import listSimilarOk from "../../../../contracts/api/v2/fixtures/list_similar_ok.json";
 import listTasteSeedItemsOk from "../../../../contracts/api/v2/fixtures/list_taste_seed_items_ok.json";
 import listWatchTonightCardsOk from "../../../../contracts/api/v2/fixtures/list_watch_tonight_cards_ok.json";
@@ -24,7 +23,6 @@ import {
   useSimilarItems,
   useSwipeCards,
   useTasteProfile,
-  useWatchTonight,
 } from "./recommendations";
 import { useSubmitTasteSeed, useTasteSeedItems } from "./tasteSeed";
 
@@ -124,18 +122,6 @@ describe("recommendation reads on the v2 contract", () => {
     expect(result.current.data?.top_genres).toEqual(getTasteProfileOk.top_genres);
     expect(result.current.data?.signal_counts).toEqual(getTasteProfileOk.signal_counts);
     expect(result.current.data?.updated_at).toBe(getTasteProfileOk.updated_at);
-  });
-
-  it("keeps the Watch Tonight source on each mapped card", async () => {
-    stubFetch(() => jsonResponse(getWatchTonightOk));
-
-    const { result } = renderHook(() => useWatchTonight(true), { wrapper: createWrapper() });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.is_cold).toBe(getWatchTonightOk.is_cold);
-    expect(result.current.data?.items.map((i) => [i.content_id, i.watch_tonight_source])).toEqual(
-      getWatchTonightOk.items.map((i) => [i.content_id, i.watch_tonight_source]),
-    );
   });
 
   it("pages swipe cards by excluded ids sent as repeated query keys", async () => {

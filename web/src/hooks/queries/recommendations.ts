@@ -150,16 +150,6 @@ export function useRecommendationSection(kind: string | undefined, key?: string)
 export type WatchTonightResponse = ReturnType<typeof watchTonightFromV2>;
 export type WatchTonightItem = WatchTonightResponse["items"][number];
 
-export function useWatchTonight(enabled: boolean) {
-  return useQuery({
-    queryKey: recKeys.watchTonight(),
-    queryFn: ({ signal }): Promise<WatchTonightResponse> =>
-      v2("GET /api/v2/recommendations/watch-tonight", { signal }).then(watchTonightFromV2),
-    staleTime: 0,
-    enabled,
-  });
-}
-
 export function useRecentlyAdded(days?: number) {
   return useQuery({
     queryKey: [...recKeys.all, "recently-added", days ?? 14],

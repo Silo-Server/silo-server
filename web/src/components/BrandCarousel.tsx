@@ -30,9 +30,10 @@ export default function BrandCarousel({
     : (cards ?? []).map((card) => <BrandCard key={card.slug} kind={kind} card={card} />);
 
   return (
-    <section className="group/carousel relative isolate space-y-3">
-      <div className="flex items-center justify-between px-4 sm:px-6 lg:px-10 xl:px-12">
-        <h2 className="text-muted-foreground text-sm font-semibold tracking-normal">{title}</h2>
+    <section className="group/carousel relative isolate">
+      {/* The same header as MediaCarousel, so brand rows read as rows of the page. */}
+      <div className="mb-3 flex items-end justify-between gap-4 px-4 sm:px-6 lg:px-10 xl:px-12">
+        <h2 className="text-foreground text-xl font-semibold tracking-tight">{title}</h2>
         {isError && onRetry ? (
           <button
             type="button"

@@ -1,7 +1,11 @@
+import { useCallback } from "react";
 import { useParams, useSearchParams } from "react-router";
 import PageBack from "@/components/PageBack";
-import RequestPosterCard from "@/components/RequestPosterCard";
-import { Button } from "@/components/ui/button";
+import RequestResultsGrid, {
+  RequestResultsGridSkeleton,
+  RequestResultsLoadMore,
+} from "@/components/RequestResultsGrid";
+import ScrollToTopButton from "@/components/ScrollToTopButton";
 import {
   Select,
   SelectContent,
@@ -9,17 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useCreateMediaRequest, useRequestBrowse } from "@/hooks/queries/useRequests";
-import { requestInputFromMediaResult } from "@/lib/mediaRequests";
-import type {
-  DiscoverBrowseKind,
-  DiscoverBrowseResponse,
-  RequestMediaResult,
-  RequestMediaType,
-} from "@/api/types";
+import { useRequestBrowse } from "@/hooks/queries/useRequests";
+import { flattenResultPages, pendingPageSize } from "@/lib/mediaRequests";
+import type { DiscoverBrowseKind, DiscoverBrowseResponse, RequestMediaType } from "@/api/types";
 
 type BrowseSort = "popularity" | "vote_average" | "release_date";
 
@@ -38,80 +36,83 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const sort = normalizeSort(searchParams.get("sort"));
-  const rawPage = Number(searchParams.get("page") ?? "1");
-  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const mediaTypeFromQuery = normalizeMediaType(searchParams.get("media_type"));
   const mediaType: RequestMediaType | undefined =
     kind === "studio" ? "movie" : kind === "network" ? "series" : (mediaTypeFromQuery ?? "movie");
 
-  const browse = useRequestBrowse({ kind, slug, mediaType, sort, page });
-  const createRequest = useCreateMediaRequest();
-  const pendingRequestKey = createRequest.variables
-    ? mediaRequestKey(createRequest.variables.media_type, createRequest.variables.tmdb_id)
-    : undefined;
+  const browse = useRequestBrowse({ kind, slug, mediaType, sort });
+  const firstPage = browse.data?.pages[0];
 
-  const title = browse.data?.display_name ?? humanizeSlug(slug);
+  const title = firstPage?.display_name ?? humanizeSlug(slug);
   useDocumentTitle(title ? `${title} - Requests` : "Requests");
 
   function updateSort(next: string) {
     const params = new URLSearchParams(searchParams);
     params.set("sort", next);
-    params.set("page", "1");
+    params.delete("page");
     setSearchParams(params, { replace: true });
   }
 
   function updateMediaType(next: RequestMediaType) {
     const params = new URLSearchParams(searchParams);
     params.set("media_type", next);
-    params.set("page", "1");
+    params.delete("page");
     setSearchParams(params, { replace: true });
   }
 
-  function goToPage(next: number) {
-    const params = new URLSearchParams(searchParams);
-    params.set("page", String(next));
-    setSearchParams(params, { replace: false });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
+  const results = flattenResultPages(browse.data?.pages);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = browse;
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  const kindLabel = kind === "studio" ? "Studio" : kind === "network" ? "Network" : "Genre";
 
-  function submitRequest(item: RequestMediaResult) {
-    createRequest.mutate(requestInputFromMediaResult(item));
-  }
+  // A later page's failure keeps what loaded and offers a retry at the foot,
+  // even when every loaded page was empty.
+  const firstPageFailed = browse.isError && !browse.isFetchNextPageError && results.length === 0;
 
-  const totalPages = browse.data?.total_pages ?? 0;
-  const results = browse.data?.results ?? [];
-
-  if (browse.isError && (browse.error as { status?: number }).status === 404) {
+  if (firstPageFailed && (browse.error as { status?: number }).status === 404) {
     return (
-      <div className="relative space-y-4 py-10 text-center">
+      <div className="relative space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
         <PageBack to="/requests" up />
-        <p className="text-foreground mt-10 text-lg font-semibold sm:mt-12">
-          {kind === "studio" ? "Studio" : kind === "network" ? "Network" : "Genre"} not found.
-        </p>
+        <h1 className="text-foreground mt-10 text-2xl font-bold tracking-tight sm:mt-12 sm:text-3xl">
+          {kindLabel} not found.
+        </h1>
       </div>
     );
   }
 
+  // Laid out like the other "view all" grids (a Discover row, a
+  // recommendation section): back link, title, then the poster grid.
   return (
-    <div className="relative space-y-6 py-6 sm:py-8">
+    <div className="relative space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
       <PageBack to="/requests" up />
-      <div className="mt-10 space-y-4 px-4 sm:mt-12 sm:px-6 lg:px-10 xl:px-12">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-4">
-            <BrowseHeaderTile browse={browse.data} kind={kind} fallback={title} />
-            <div className="min-w-0">
-              <h1 className="text-foreground truncate text-2xl font-semibold">{title}</h1>
-              <p className="text-muted-foreground text-sm">
-                {browse.isLoading
-                  ? "Loading..."
-                  : results.length > 0
-                    ? `Page ${page} of ${totalPages}`
-                    : "No results."}
-              </p>
-            </div>
+      <header className="mt-10 flex flex-wrap items-end justify-between gap-4 sm:mt-12">
+        <div className="flex min-w-0 items-center gap-4">
+          <BrowseHeaderTile browse={firstPage} kind={kind} fallback={title} />
+          <div className="min-w-0">
+            <h1 className="text-foreground truncate text-2xl font-bold tracking-tight sm:text-3xl">
+              {title}
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {browse.isLoading ? "Loading..." : kindLabel}
+            </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {kind === "genre" ? (
+            <Tabs
+              value={mediaType ?? "movie"}
+              onValueChange={(value) => updateMediaType(value as RequestMediaType)}
+            >
+              <TabsList>
+                <TabsTrigger value="movie">Movies</TabsTrigger>
+                <TabsTrigger value="series">Series</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          ) : null}
           <Select value={sort} onValueChange={updateSort}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[160px]" aria-label="Sort by">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
@@ -123,65 +124,34 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
             </SelectContent>
           </Select>
         </div>
+      </header>
 
-        {kind === "genre" ? (
-          <Tabs
-            value={mediaType ?? "movie"}
-            onValueChange={(value) => updateMediaType(value as RequestMediaType)}
-          >
-            <TabsList>
-              <TabsTrigger value="movie">Movies</TabsTrigger>
-              <TabsTrigger value="series">Series</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        ) : null}
-      </div>
+      {browse.isLoading ? (
+        <RequestResultsGridSkeleton />
+      ) : firstPageFailed ? (
+        <p className="text-muted-foreground text-sm">
+          Could not load this browse page. Try a different sort or media type.
+        </p>
+      ) : results.length === 0 && !hasNextPage ? (
+        <p className="text-muted-foreground text-sm">Nothing matched. Try a different sort.</p>
+      ) : (
+        // A page can come back empty, e.g. when a profile's rating limit
+        // filters out every title on it; the foot keeps loading.
+        <>
+          <RequestResultsGrid
+            results={results}
+            pendingCount={isFetchingNextPage ? pendingPageSize(browse.data?.pages) : 0}
+          />
+          <RequestResultsLoadMore
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            isError={browse.isFetchNextPageError}
+            onLoadMore={loadMore}
+          />
+        </>
+      )}
 
-      <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
-        {browse.isLoading ? (
-          <BrowseGridSkeleton />
-        ) : browse.isError ? (
-          <p className="text-muted-foreground text-sm">
-            Could not load this browse page. Try a different sort or media type.
-          </p>
-        ) : results.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Nothing matched. Try a different sort.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-            {results.map((item) => (
-              <RequestPosterCard
-                key={`${item.media_type}-${item.tmdb_id}`}
-                variant="discover"
-                item={item}
-                onRequest={() => submitRequest(item)}
-                isSubmitting={
-                  createRequest.isPending &&
-                  pendingRequestKey === mediaRequestKey(item.media_type, item.tmdb_id)
-                }
-                fluid
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {totalPages > 1 ? (
-        <div className="flex items-center justify-center gap-3 px-4">
-          <Button variant="outline" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-            Prev
-          </Button>
-          <span className="text-muted-foreground text-sm tabular-nums">
-            Page {page} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            disabled={page >= totalPages}
-            onClick={() => goToPage(page + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      ) : null}
+      <ScrollToTopButton />
     </div>
   );
 }
@@ -196,17 +166,20 @@ function BrowseHeaderTile({
   fallback: string;
 }) {
   if (!browse) {
-    return <div className="bg-muted h-16 w-28 rounded-md" aria-hidden />;
+    return <div className="bg-muted h-16 w-28 shrink-0 rounded-md" aria-hidden />;
   }
   if (kind === "genre") {
     return (
-      <div className="bg-muted text-foreground flex h-16 w-28 items-center justify-center rounded-md px-2 text-center text-sm font-semibold">
+      <div
+        className="bg-muted text-foreground flex h-16 w-28 shrink-0 items-center justify-center rounded-md px-2 text-center text-sm font-semibold"
+        aria-hidden
+      >
         {browse.display_name || fallback}
       </div>
     );
   }
   return (
-    <div className="flex h-16 w-28 items-center justify-center overflow-hidden rounded-md bg-gray-800 ring-1 ring-gray-700">
+    <div className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gray-800 ring-1 ring-gray-700">
       {browse.logo_url ? (
         <img
           src={browse.logo_url}
@@ -222,16 +195,6 @@ function BrowseHeaderTile({
   );
 }
 
-function BrowseGridSkeleton() {
-  return (
-    <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
-      {Array.from({ length: 16 }).map((_, idx) => (
-        <Skeleton key={idx} className="aspect-[2/3] w-full rounded-lg" />
-      ))}
-    </div>
-  );
-}
-
 function normalizeSort(value: string | null): BrowseSort {
   return SORT_OPTIONS.some((option) => option.value === value)
     ? (value as BrowseSort)
@@ -240,10 +203,6 @@ function normalizeSort(value: string | null): BrowseSort {
 
 function normalizeMediaType(value: string | null): RequestMediaType | undefined {
   return value === "movie" || value === "series" ? value : undefined;
-}
-
-function mediaRequestKey(mediaType: RequestMediaType, tmdbID: number): string {
-  return `${mediaType}-${tmdbID}`;
 }
 
 function humanizeSlug(slug: string) {
