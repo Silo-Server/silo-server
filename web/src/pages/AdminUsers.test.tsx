@@ -474,14 +474,16 @@ describe("AdminUsers user dialog policy hints", () => {
     expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
     expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
   });
-  // Turns on Max Streams' override in a fresh Create User dialog and fills the
-  // account fields, so only the limit can stop the save.
+  // Overrides Max Streams to 3 in a fresh Create User dialog and fills the
+  // account fields, so only the limit can stop the save. The 3 is the last
+  // valid value a later edit could leave behind.
   async function openCreateWithStreamsOverride(user: ReturnType<typeof userEvent.setup>) {
     mocks.create.mockReset().mockResolvedValue({ id: 11 });
     renderPage();
     const dialog = await openLimits(user, /Add User/);
     // Max Streams is the first field on the Limits tab.
     await user.click(within(dialog).getAllByRole("switch")[0]!);
+    await user.type(within(dialog).getByLabelText("Max Streams"), "3");
     await user.click(within(dialog).getByRole("tab", { name: "Account" }));
     await user.type(within(dialog).getByLabelText("Username"), "newbie");
     await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
@@ -496,6 +498,11 @@ describe("AdminUsers user dialog policy hints", () => {
     await user.clear(within(dialog).getByLabelText("Max Streams"));
 
     await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    // The browser reports a field by firing `invalid` at it.
+    const reported: EventTarget[] = [];
+    dialog
+      .querySelector("form")!
+      .addEventListener("invalid", (event) => reported.push(event.target!), true);
     await user.click(within(dialog).getByRole("button", { name: /save/i }));
 
     expect(mocks.create).not.toHaveBeenCalled();
@@ -503,8 +510,11 @@ describe("AdminUsers user dialog policy hints", () => {
       "aria-selected",
       "true",
     );
-    // The field still shows the edit, not the last valid value.
-    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(null);
+    // The field still shows the edit, not the last valid value, and the
+    // browser points at it.
+    const field = within(dialog).getByLabelText("Max Streams");
+    expect(field).toHaveValue(null);
+    expect(reported).toContain(field);
   });
 
   it("keeps a non-whole limit across a tab switch and still refuses to save it", async () => {

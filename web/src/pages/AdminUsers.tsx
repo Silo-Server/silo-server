@@ -1,4 +1,5 @@
-import { useEffect, useState, useId, useMemo, useRef } from "react";
+import { useState, useId, useMemo, useRef } from "react";
+import { flushSync } from "react-dom";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { AdminUser, CreateUserRequest } from "@/api/types";
@@ -734,15 +735,7 @@ function CreateUserForm({
     new Map(),
   );
   const [dialogTab, setDialogTab] = useState("account");
-  // Set when Save is refused for an invalid limit, so the browser reports the
-  // field once the Limits tab has rendered it.
-  const [reportLimits, setReportLimits] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (!reportLimits || dialogTab !== "limits") return;
-    setReportLimits(false);
-    formRef.current?.reportValidity();
-  }, [reportLimits, dialogTab]);
   function handleInvalidLimitDraftChange(key: LimitPolicyKey, draft: string | undefined) {
     setInvalidLimitDrafts((current) => {
       if (current.get(key) === draft) return current;
@@ -811,8 +804,10 @@ function CreateUserForm({
     // A cleared or half-typed limit is not in the policy state, which still
     // holds the last valid value; saving now would send that instead.
     if (invalidLimitDrafts.size > 0) {
-      setDialogTab("limits");
-      setReportLimits(true);
+      // The Limits fields mount only once the tab has rendered, so render it
+      // now and then let the browser point at the invalid field.
+      flushSync(() => setDialogTab("limits"));
+      formRef.current?.reportValidity();
       return;
     }
     busy.current = true;
