@@ -24,6 +24,8 @@ esac
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/silo-check-go-lint.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT
 
 diff_args=(--name-only -z)
 if [[ "$cached" -eq 1 ]]; then
@@ -33,18 +35,22 @@ fi
 # NUL-delimited, so names git would quote (an accented one, say) come through
 # literally. A read loop rather than mapfile, which macOS's Bash 3.2 lacks;
 # "${array[@]+...}" below for the same reason, as Bash before 4.4 treats an
-# empty array as unset under set -u. R keeps an edited rename in the check.
+# empty array as unset under set -u. R keeps an edited rename in the check,
+# and T includes regular files replaced by symlinks (or the reverse).
+# Materialize Git output so command failures cannot masquerade as no changes.
+git diff "${diff_args[@]}" --diff-filter=ACMRT -- '*.go' >"$scratch/go-files"
 go_files=()
 while IFS= read -r -d '' file; do
 	go_files+=("$file")
-done < <(git diff "${diff_args[@]}" --diff-filter=ACMR -- '*.go')
+done <"$scratch/go-files"
 
 # Deleting Go files can break the code that's left, so deletions alone still
 # run the lint gate; there's nothing of theirs to format.
 deleted=0
+git diff "${diff_args[@]}" --diff-filter=D -- '*.go' >"$scratch/deleted-go"
 while IFS= read -r -d '' _; do
 	deleted=1
-done < <(git diff "${diff_args[@]}" --diff-filter=D -- '*.go')
+done <"$scratch/deleted-go"
 
 if [[ ${#go_files[@]} -eq 0 && "$deleted" -eq 0 ]]; then
 	exit 0
@@ -75,37 +81,30 @@ if [[ -n "$unformatted" ]]; then
 	failed=1
 fi
 
-# worktree_differs reports whether, in a package the commit touches, a Go
-# file in the working tree differs from the index: an unstaged edit, a
-# staged deletion restored on disk, or an untracked file. golangci-lint
-# reads the working tree, so any of these makes it lint something other
-# than the commit.
-worktree_differs() {
-	local dirs=$'\n' file
-	while IFS= read -r -d '' file; do
-		dirs+="$(dirname "$file")"$'\n'
-	done < <(git diff --cached --name-only --no-renames -z -- '*.go')
-	while IFS= read -r -d '' file; do
-		if [[ "$dirs" == *$'\n'"$(dirname "$file")"$'\n'* ]]; then
-			return 0
-		fi
-	done < <(git diff --name-only -z -- '*.go'; git ls-files -z --others --exclude-standard -- '*.go')
-	return 1
-}
-
 if command -v golangci-lint >/dev/null 2>&1; then
-	if [[ "$cached" -eq 1 ]] && worktree_differs; then
+	lint_env=()
+	# The delegate includes the whole branch and reads dependencies, module
+	# files, lint configuration and embedded inputs from the working tree.
+	# Staged package directories alone cannot establish that it checks the
+	# commit. Require all tracked and nonignored inputs to match the index.
+	if [[ "$cached" -eq 1 ]]; then
+		git diff --name-only --no-renames -z -- >"$scratch/unstaged"
+		git ls-files --others --exclude-standard -z >"$scratch/untracked"
+		# Developer-local workspaces are ignored by Git and absent from CI.
+		lint_env=(GOWORK=off)
+	fi
+	if [[ "$cached" -eq 1 ]] && [[ -s "$scratch/unstaged" || -s "$scratch/untracked" ]]; then
 		# With the working tree differing from the commit, lint would pass a
 		# broken commit or block a good one, so refuse rather than guess.
-		printf '%s\n' "Go files in the packages this commit touches differ from what is staged; the lint gate cannot check the commit as staged." >&2
-		printf '%s\n' "Stage or stash them (git stash --keep-index) and commit again." >&2
+		printf '%s\n' "The working tree has unstaged or untracked files; the lint gate cannot check the commit as staged." >&2
+		printf '%s\n' "Stage them or move them aside (git stash push --keep-index --include-untracked) and commit again." >&2
 		failed=1
 	elif ! git rev-parse --verify --quiet "${BASE_REF:-origin/main}" >/dev/null; then
 		# lint-changed.sh diffs against this ref; without it the lint output
 		# would not name the real cause.
 		printf '%s\n' "Cannot lint the commit: base ref '${BASE_REF:-origin/main}' is missing. Run: git fetch origin main (or set BASE_REF)." >&2
 		failed=1
-	elif ! "$repo_root/scripts/lint-changed.sh"; then
+	elif ! env ${lint_env[@]+"${lint_env[@]}"} "$repo_root/scripts/lint-changed.sh"; then
 		# lint-changed.sh reports CI's changed-line findings for the touched
 		# packages. A type-check failure is a real finding and fails too.
 		failed=1
