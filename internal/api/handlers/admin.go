@@ -1622,7 +1622,10 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, adminJobToResponseForClaims(r, job, nil, apimw.GetClaims(r.Context())))
+	// The job already exists; a failed acting-admin lookup only narrows what
+	// the response shows.
+	actingAdmin, _ := apimw.ActingAdmin(r.Context())
+	writeJSON(w, http.StatusAccepted, adminJobToResponseFor(r, job, nil, actingAdmin))
 }
 
 // UpdateItemMetadataRequest contains the fields that can be updated via

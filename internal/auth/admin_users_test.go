@@ -300,11 +300,11 @@ func TestAdminAccountRoleChangeKeepsSessionsAndEndsImpersonationPostgres(t *test
 	}
 	activeRole := func(id string) (string, bool) {
 		t.Helper()
-		role, active, err := sessions.ActiveSessionRole(t.Context(), id)
+		authority, active, err := sessions.ActiveSession(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return role, active
+		return authority.Role, active
 	}
 	if role, active := activeRole(own); !active || role != models.RoleAdmin {
 		t.Fatalf("own session before demotion: role %q active %v", role, active)

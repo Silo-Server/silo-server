@@ -2456,7 +2456,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result. */
+    /** Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result. */
     get: operations["getAdminJob"];
     put?: never;
     post?: never;
@@ -21728,6 +21728,10 @@ export interface components {
       server_name: string;
     };
     ConnectionUpdate: {
+      /** @description Values for the provider's declared connection_settings, keyed by setting key: true or false for a boolean setting. Settings left out keep their current value. */
+      connection_settings?: {
+        [key: string]: unknown;
+      };
       export_favorites_enabled?: boolean;
       export_ratings_enabled?: boolean;
       export_unwatched_enabled?: boolean;
@@ -31328,6 +31332,19 @@ export interface components {
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
     };
+    WatchProviderConnectionSetting: {
+      /** @description The value of a connection that has not changed the setting. */
+      default_value: unknown;
+      description?: string;
+      /** @description The setting's key in connection_settings. */
+      key: string;
+      label: string;
+      /**
+       * @description The value type. boolean is a switch whose value is true or false. A client skips a setting whose type it does not know; the server keeps its value.
+       * @enum {string}
+       */
+      type: "boolean";
+    };
     WatchProviderDeviceAuth: {
       /**
        * Format: date-time
@@ -31350,6 +31367,10 @@ export interface components {
       auth_session_id: string;
     };
     WatchProviderSettings: {
+      /** @description The value of every setting in the provider's connection_settings, keyed by setting key: true or false for a boolean setting. A setting the profile has not changed has its default. Empty when the provider declares none. */
+      connection_settings: {
+        [key: string]: unknown;
+      };
       export_favorites_enabled: boolean;
       /** @description Send the profile's star ratings to the provider (stars times two) and clear removed ones. */
       export_ratings_enabled: boolean;
@@ -31372,6 +31393,8 @@ export interface components {
     WatchProviderSummary: {
       capabilities: components["schemas"]["WatchProviderCapabilities"];
       connection_config_schema?: components["schemas"]["AdminPluginConfigSchema"][];
+      /** @description Settings a profile can change on its connection at any time, shown with the connection's other sync options. Their values are read and written through the connection's settings. Empty when the provider declares none. */
+      connection_settings: components["schemas"]["WatchProviderConnectionSetting"][];
       display_name: string;
       key: string;
     };
@@ -54758,7 +54781,12 @@ export interface operations {
   getAdminJob: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path: {
         id: string;
       };
@@ -54787,6 +54815,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -108673,6 +108710,10 @@ export interface operations {
         /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
         "If-Match"?: string;
         "If-None-Match"?: string;
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
       };
       path: {
         job_id: string;
@@ -108714,6 +108755,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

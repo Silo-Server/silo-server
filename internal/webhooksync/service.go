@@ -236,6 +236,11 @@ func (s *Service) CreateEventLog(ctx context.Context, entry WebhookEventLog) (*W
 	return s.repo.CreateEventLog(ctx, entry)
 }
 
+// MaxWebhookDeliveryBytes is the largest webhook delivery body any receiver
+// accepts. Every receiver route shares it, so the cap cannot depend on which
+// URL alias a provider was configured with.
+const MaxWebhookDeliveryBytes int64 = 10 << 20
+
 var ErrWebhookTooLarge = errors.New("webhook body exceeds limit")
 var ErrWebhookBody = errors.New("invalid webhook body")
 
@@ -244,8 +249,9 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 }
 
 // ProcessWebhookBounded authenticates the receiver secret before reading the body.
-// A positive limit bounds the entire delivery before provider parsing or side effects.
-// Zero preserves the frozen bridge's provider-specific parsing behavior.
+// The limit bounds the entire delivery before provider parsing or side effects;
+// a zero, negative or larger-than-default limit falls back to
+// MaxWebhookDeliveryBytes, so no caller can read an unbounded body.
 func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *http.Request, limit int64) (*ProcessWebhookResult, error) {
 	conn, err := s.repo.GetConnectionBySecret(ctx, secret)
 	if err != nil {
@@ -255,27 +261,31 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		ConnectionID: conn.ID,
 		Provider:     conn.Provider,
 	}
-	if limit > 0 {
-		body, readErr := io.ReadAll(io.LimitReader(r.Body, limit+1))
-		if int64(len(body)) > limit {
-			readErr = ErrWebhookTooLarge
-		} else if readErr != nil {
-			readErr = ErrWebhookBody
-		}
-		if readErr != nil {
-			result.Outcome = OutcomeRejected
-			result.Summary = "Rejected invalid webhook body"
-			result.ErrorMessage = readErr.Error()
-			_ = s.repo.MarkWebhookError(ctx, conn.ID, readErr.Error())
-			return result, readErr
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		defer func() {
-			if r.MultipartForm != nil {
-				_ = r.MultipartForm.RemoveAll()
-			}
-		}()
+	if limit <= 0 || limit > MaxWebhookDeliveryBytes {
+		limit = MaxWebhookDeliveryBytes
 	}
+	// Taken before the body is buffered, so a slow upload cannot make the
+	// delivery look newer than Silo activity written while it arrived.
+	ctx = withWebhookReceivedAt(ctx, time.Now())
+	body, readErr := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if int64(len(body)) > limit {
+		readErr = ErrWebhookTooLarge
+	} else if readErr != nil {
+		readErr = ErrWebhookBody
+	}
+	if readErr != nil {
+		result.Outcome = OutcomeRejected
+		result.Summary = "Rejected invalid webhook body"
+		result.ErrorMessage = readErr.Error()
+		_ = s.repo.MarkWebhookError(ctx, conn.ID, readErr.Error())
+		return result, readErr
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	provider, err := s.provider(conn.Provider)
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Provider configuration failed")

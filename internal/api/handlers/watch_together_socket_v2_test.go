@@ -293,8 +293,8 @@ func TestRoomSocketV2MalformedBeforeConsume(t *testing.T) {
 }
 func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 	h, _, _ := roomSocketHandler(t)
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, PolicyRevision: 1}}
 	h.Validate = newSocketAuthorityValidator(sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return false, true, nil })
 	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", ProfileToken: "original-pin", AccessExpiresAt: time.Now().Add(time.Minute)}

@@ -453,9 +453,16 @@ Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`
 already returned by the previous page. A virtualized client can retain
 `window_cursor` and send it with `seek`, a zero-based result position, to request
 a distant window or return to position zero. Use this path when the preceding
-page's continuation is unavailable; independent distant windows can load in
-parallel without fetching intermediate pages. A seek locates an additional SQL
-ordering boundary; it can scan the sorted prefix and does not have constant cost.
+page's continuation is unavailable; a distant window loads without fetching
+intermediate pages. A seek locates an additional SQL ordering boundary; it can
+scan the sorted prefix and does not have constant cost, so seek to the first
+page of a window and continue the rest with `next_cursor`. In title order on
+`media_items`, the server records the ordering boundary every 256 rows on the
+first seek with a given `window_cursor` and keeps them for five minutes on that
+node; later seeks with that `window_cursor` walk fewer than 256 rows. Each
+title that joins or leaves the result or is retitled in that time, such as one
+a scan links into the library or one a watch-state rule stops matching, shifts
+later positions by one until the boundaries expire.
 The complete browse request has a
 10-second deadline and honors client cancellation. Keep only visible and
 overscan pages active, and cancel requests when the query changes.
@@ -628,10 +635,11 @@ as written, so `name_prefix=e` leaves out "Élite", and `#` has no
 `position` is the zero-based index of the letter's first title in
 `queryCatalogItems` with the same scope and rules, `sort: "title"`, the same
 `order`, and no `query_limit`. Send it as `seek` to load that window. The index
-counts the catalog as it is when the request runs; it takes no `cursor`, so it
-is not fenced to a window cursor's snapshot. Titles added between the two reads,
-such as during a scan, shift later positions and `total` by that many, and the
-next refresh of both reads agrees again. Positions number the rows of the
+counts the catalog as it was when it was built; each server node keeps an index
+for up to two minutes. It takes no `cursor`, so it is not fenced to a window
+cursor's snapshot. Titles added between the two reads,
+such as during a scan, shift later positions and `total` by that many, and both
+reads agree again once a refresh of the index is no longer served from the cache. Positions number the rows of the
 same ordering the pager uses, so they hold under any database collation; when
 the collation interleaves a letter's titles with another's (an accented or
 punctuated title sorted among plain ones), `count` still covers every title

@@ -580,8 +580,10 @@ No browser Origin is required for these server-to-server deliveries.
 
 V2 limits the complete body to 10 MiB before provider parsing or watch-state
 side effects, including bodies with unknown or understated lengths. Oversize
-requests return a 413 `payload_too_large` problem. Multipart resources are cleaned
-up after parsing. The shared application processor retains explicit profile
+requests return a 413 `payload_too_large` problem. The bridge receivers
+(`/api/v1/webhook-sync/webhooks/{secret}` and `/api/v1/plex-sync/webhooks/{secret}`)
+enforce the same 10 MiB limit and answer an oversize delivery with 413
+`payload_too_large`. Multipart resources are cleaned up after parsing. The shared application processor retains explicit profile
 mapping, provider normalization, watch-state behavior and delivery logging with
 bounded sanitized body excerpts. A processed delivery returns bodyless 204,
 including ignored, skipped or unmatched events. Malformed payloads return 400,

@@ -80,6 +80,7 @@
 # sparse first pages reuse one FTS probe, and trigger work stays bounded.
 ./migrations TestMediaSearchDocumentsMigrationPostgres
 ./migrations TestEpisodeSearchRefreshMigrationPostgres
+./migrations TestSkipUnchangedEpisodeCatalogRefreshMigrationPostgres
 ./migrations TestEpisodeExactSearchIndexMigrationPostgres
 ./internal/catalog TestMediaSearchDocumentsPostgres
 ./internal/catalog TestSearchOptimizedAccuracyPostgres
@@ -256,3 +257,8 @@
 ./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
 ./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
+
+# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
+# the frozen legacy bridge alike.
+./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
+./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB

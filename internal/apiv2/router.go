@@ -268,8 +268,10 @@ type Dependencies struct {
 	// HouseholdProfileGate run it after viewer access and fail closed when
 	// it is not wired.
 	HouseholdProfile func(http.Handler) http.Handler
-	// ActingAdmin is the admin-through-primary-profile gate.
-	ActingAdmin func(http.Handler) http.Handler
+	// ActingAdmin decides admin-through-primary-profile. The acting_admin
+	// class gate enforces it, and operations outside that class that widen
+	// what an admin sees read it through apimw.ActingAdmin.
+	ActingAdmin apimw.ActingAdminDecider
 	// PermissionGates maps a permission name (policy.Permission* constants)
 	// to the gate that enforces it.
 	PermissionGates map[string]func(http.Handler) http.Handler
@@ -494,6 +496,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	if deps.ActingAdmin != nil {
+		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
+	}
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
