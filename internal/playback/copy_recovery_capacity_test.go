@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -101,6 +102,9 @@ func (p copyRecoveryProcess) isProbe() bool {
 
 func newCopyRecoverySession(t *testing.T) (*TranscodeManager, *TranscodeSession, <-chan copyRecoveryProcess) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the FFmpeg fixture uses a POSIX shell")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
