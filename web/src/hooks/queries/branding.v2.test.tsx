@@ -42,7 +42,8 @@ it("loads v2 branding before login and follows versioned v2 image URLs", async (
   await waitFor(() => expect(result.current.branding.serverName).toBe("Fixture"));
   expect(result.current.branding.accentColor).toBe("#10b981");
   expect(document.getElementById("silo-accent")?.textContent).toBe(
-    ":root {\n  --primary: #10b981;\n  --ring: #10b981;\n  --sidebar-primary: #10b981;\n}",
+    ":root {\n  --primary: #10b981;\n  --ring: #10b981;\n  --sidebar-primary: #10b981;\n}\n" +
+      'html[data-high-contrast="true"] {\n  --ring: var(--contrast-boost);\n}',
   );
   expect(document.querySelector('link[rel="icon"]')?.getAttribute("href")).toBe(
     "/api/v2/branding/assets/favicon?v=ref.png",
