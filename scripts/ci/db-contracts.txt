@@ -243,3 +243,10 @@
 # first position exactly where the cursor pager and a seek list it.
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
+
+# Deleting a library removes its ID from access groups, account overrides and
+# invitations, without widening an emptied list; a write keeps only existing
+# libraries, even racing the delete; the migration repairs earlier deletes.
+./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
+./migrations TestLibraryDeleteRacingAccessWritePostgres
+./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
