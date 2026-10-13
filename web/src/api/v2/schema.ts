@@ -25794,8 +25794,10 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       read_at: string | null;
-      /** @description A JSON value whose shape is the setting's value_schema in the settings contract. */
-      reason_flags: unknown;
+      /** @description Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize. */
+      reason_flags: {
+        [key: string]: unknown;
+      };
       /** Format: int64 */
       season_number?: number;
       /**

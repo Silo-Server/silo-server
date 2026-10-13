@@ -35525,7 +35525,10 @@
             ]
           },
           "reason_flags": {
-            "description": "A JSON value whose shape is the setting's value_schema in the settings contract."
+            "additionalProperties": true,
+            "description": "Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize.",
+            "type": "object",
+            "x-silo-extension-bag": "notification-reason-flags"
           },
           "season_number": {
             "format": "int64",
