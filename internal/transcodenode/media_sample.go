@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 // handleMediaSample runs one media sampling request with this node's ffmpeg,

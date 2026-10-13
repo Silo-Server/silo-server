@@ -36,7 +36,6 @@ func (s *Service) router() chi.Router {
 	mux.With(workerPathValues).Head("/api/internal/workers/{node}/recipes/{work}", s.recipe)      //nolint:goconst // Route inventory requires literal registrations.
 	mux.With(workerPathValues).Delete("/api/internal/workers/{node}/recipes/{work}", s.closeWork) //nolint:goconst // Route inventory requires literal registrations.
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/revoke", s.closeNode)
-	mux.With(workerPathValues).Post("/api/internal/workers/{node}/tokens", s.token)
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/sources/{grant}/renew", s.renew)
 	if s.options.SourceHandler != nil {
 		mux.With(workerPathValues).Method("GET", "/api/internal/workers/{node}/sources/{grant}", s.options.SourceHandler)
@@ -232,6 +231,10 @@ func (s *Service) currentRecipe(r *http.Request, node Node, work string) (Recipe
 	card.OutputSubdir = ""
 	card.HWDevice = ""
 	card.ToneMapFilter = ""
+	a.Body, err = replaceAliases(a.Body, nil)
+	if err != nil {
+		return RecipeReply{}, err
+	}
 	return RecipeReply{Assignment: a, Recipe: card}, nil
 }
 func (s *Service) recipe(w http.ResponseWriter, r *http.Request) {
@@ -257,82 +260,6 @@ func tokenWork(claims *streamtoken.Claims) string {
 		return claims.SessionID
 	}
 	return ""
-}
-func (s *Service) token(w http.ResponseWriter, r *http.Request) {
-	node, ok := s.authenticate(w, r)
-	if !ok {
-		return
-	}
-	var input struct {
-		Token  string `json:"token"`
-		WorkID string `json:"work_id,omitempty"`
-	}
-	if !decodeBody(w, r, &input) {
-		return
-	}
-	if input.Token == "" || len(input.Token) > 64<<10 || s.options.VerifyToken == nil {
-		http.Error(w, "output authority denied", http.StatusForbidden)
-		return
-	}
-	claims, err := s.options.VerifyToken(r.Context(), input.Token)
-	if err != nil || claims == nil {
-		http.Error(w, "output authority denied", http.StatusForbidden)
-		return
-	}
-	work := tokenWork(claims)
-	if !validWork(work) || input.WorkID != "" && input.WorkID != work || claims.RoutingExecutionNodeID != 0 && claims.RoutingExecutionNodeID != node.ID || strings.TrimRight(claims.TranscodeNode, "/") != node.URL {
-		http.Error(w, "output scope denied", http.StatusForbidden)
-		return
-	}
-	if claims.DownloadArtifactID != "" {
-		a, found, e := s.options.Store.Get(r.Context(), node.ID, work)
-		if e != nil || !found || !s.executionActive(r.Context(), node, a) {
-			http.Error(w, "artifact authority denied", http.StatusForbidden)
-			return
-		}
-		copied := *claims
-		copied.MediaPath = ""
-		copied.OutputSubdir = ""
-		s.replyOutput(w, node, work, a.Generation, copied)
-		return
-	}
-	reply, err := s.currentRecipe(r, node, work)
-	if err != nil {
-		http.Error(w, "output authority denied", http.StatusForbidden)
-		return
-	}
-	card := reply.Recipe
-	if card.UserID != 0 && card.UserID != claims.UserID || card.MediaFileID != 0 && card.MediaFileID != claims.MediaFileID || card.ProfileID != "" && card.ProfileID != claims.ProfileID {
-		http.Error(w, "output ownership denied", http.StatusForbidden)
-		return
-	}
-	copied := *claims
-	copied.MediaPath = card.InputPath
-	copied.OutputSubdir = ""
-	s.replyOutput(w, node, work, reply.Assignment.Generation, copied)
-}
-func (s *Service) replyOutput(w http.ResponseWriter, node Node, work string, generation uint64, claims streamtoken.Claims) {
-	expires := time.Now().Add(5 * time.Minute)
-	if claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
-		http.Error(w, "output token expired", http.StatusForbidden)
-		return
-	}
-	if claims.ExpiresAt.Before(expires) {
-		expires = claims.ExpiresAt.Time
-	}
-	raw, err := json.Marshal(claims)
-	if err != nil {
-		http.Error(w, "output grant unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	encoded, err := workeridentity.EncodeGrant(workeridentity.Grant{Version: 1, Domain: workeridentity.DomainOutputGrant, Audience: node.URL, NodeID: node.ID, WorkID: work, Generation: generation, ExpiresAt: expires.Unix(), Body: raw}, s.options.PrivateKey)
-	if err != nil {
-		http.Error(w, "output grant unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(GrantReply{Grant: encoded})
 }
 func (s *Service) closeWork(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.authenticate(w, r)

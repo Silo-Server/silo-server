@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 	"net/http"
+
 	"github.com/Silo-Server/silo-server/internal/nodehttp"
 
 	"go.opentelemetry.io/otel"

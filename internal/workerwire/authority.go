@@ -130,6 +130,20 @@ func (a *LocalAuthority) Generation(workID string) uint64 {
 	return generation
 }
 
+// ObservedGeneration includes admitted candidates as well as published work.
+// Freshness is checked locally; callers must refresh outside lifecycle locks
+// when a restarted worker has no local artifact ownership information.
+func (a *LocalAuthority) ObservedGeneration(workID string) (uint64, bool) {
+	a.mu.Lock()
+	now := time.Now()
+	revoked := a.expireLocked(now)
+	generation := max(a.active[workID], a.pending[workID])
+	fresh := !a.closed && a.deadline.After(now)
+	a.mu.Unlock()
+	a.notify(revoked)
+	return generation, fresh
+}
+
 // OutputAllowed checks a viewer's prepared-artifact grant independently from
 // the shared artifact's execution lifetime. It never performs a core RPC.
 func (a *LocalAuthority) OutputAllowed(id string) bool {

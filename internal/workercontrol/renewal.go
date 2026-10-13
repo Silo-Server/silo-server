@@ -218,10 +218,9 @@ func (s *sourceRenewals) remove(entry *sourceRenewal) {
 // A prepared artifact no longer needs source authority. Retain its generation
 // for locally verified output grants without retaining source handles/pins.
 func (r *Runtime) completeSourceWork(work string, generation uint64, handles map[string]*workerinput.Handle) {
-	r.discardStaged(work, generation)
-	closeHandles(handles)
-	r.renewals.revoke(work, generation)
 	r.mu.Lock()
+	pending := r.staged[work][generation]
+	delete(r.staged[work], generation)
 	if current := r.generations[work]; current <= generation {
 		if current == generation {
 			delete(r.handles, work)
@@ -229,6 +228,9 @@ func (r *Runtime) completeSourceWork(work string, generation uint64, handles map
 		r.generations[work] = generation
 	}
 	r.mu.Unlock()
+	closeHandles(pending)
+	closeHandles(handles)
+	r.renewals.revoke(work, generation)
 }
 
 func (s *sourceRenewals) prune() {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,12 +17,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
-const workerDatabaseURL = "DATABASE_URL"
+const (
+	workerDatabaseURL       = "DATABASE_URL"
+	standaloneWorkerCommand = "worker"
+)
 
 // runStandaloneWorker executes before bootstrap, including .env loading,
 // decryption-key validation and infrastructure client construction.
 func runStandaloneWorker(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("worker", flag.ContinueOnError)
+	flags := flag.NewFlagSet(standaloneWorkerCommand, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
 	bindingPath := flags.String("binding", "", "protected HTTP worker binding file")
 	listen := flags.String("listen", ":8097", "worker HTTP listen address")
 	scratch := flags.String("scratch", "", "local temporary output directory")
@@ -31,12 +36,15 @@ func runStandaloneWorker(ctx context.Context, args []string) error {
 	hwDevice := flags.String("hw-device", "", "local GPU render device")
 	maxJobs := flags.Int("max-jobs", 0, "operator encoding ceiling; zero is unlimited")
 	if err := flags.Parse(args); err != nil {
+		if printWorkerCommandHelp(flags, err) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 0 || *bindingPath == "" {
 		return errors.New("worker requires --binding and no positional arguments")
 	}
-	for _, name := range []string{workerDatabaseURL, "REDIS_URL", "SECRET_KEY", workerJWTSecret} {
+	for _, name := range []string{workerDatabaseURL, workerRedisURL, workerSecretKey, workerJWTSecret} {
 		if os.Getenv(name) != "" {
 			return fmt.Errorf("worker refuses infrastructure credential environment variable %s", name)
 		}

@@ -1309,6 +1309,15 @@ func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Req
 	}
 	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
 	defer unlock()
+	allowed, err := artifactDeleteAllowed(r.Context(), artifactID)
+	if err != nil {
+		http.Error(w, "artifact delete authority unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !allowed {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	if err := invalidateDownloadArtifactReceipt(path); err != nil {
 		http.Error(w, "failed to remove artifact receipt", http.StatusInternalServerError)
@@ -2616,6 +2625,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// miss into a normal teardown.
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
+	if !s.stopInputScopeMatches(r.Context(), sessionID) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 
 	durableProgressive := false
 	authorityFound := false

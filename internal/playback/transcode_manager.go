@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -1180,7 +1181,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 
-	resp, err := remoteTranscodeControlClient.Do(req)
+	resp, err := nodehttp.Client(remoteTranscodeControlClient).Do(req)
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}

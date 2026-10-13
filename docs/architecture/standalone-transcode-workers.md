@@ -21,6 +21,9 @@ HTTP is an explicit option for trusted local links. HTTPS uses certificate and
 hostname verification. Requests cannot redirect to another origin, use an
 environment proxy or fall back from HTTPS to HTTP. The registered origins are
 exact scheme/host/port origins, without arbitrary URL paths or credentials.
+An enrolled node remains classified as a standalone worker if its stored URL
+is later edited into an invalid origin; dispatch rejects it before transmitting
+a legacy request containing a source path or client token.
 
 Core commands, worker control calls and source reads use separate signature
 domains. Signatures bind the destination, method, escaped path, query, body
@@ -50,6 +53,22 @@ The adapter checks status, ETag, size and returned range before forwarding
 bytes. File replacement, truncated responses, stale grants and cancellation
 fail the operation. Streaming uses fixed 64 KiB buffers; it does not stage the
 whole source file or scale memory with source size.
+
+Native Matroska keyframe indexing also reads admitted HTTP ranges. Its cache
+and saved copy-playback plans bind the stable source identity and revision;
+both check current authority before reuse. Background verification keeps the
+same handle lifetime and never reopens an HTTP URL as a filesystem path.
+Four index readers share source-read admission. Each uses a 2 MiB cache,
+64 KiB read-ahead and ranges of at most 1 MiB by default. A check has a
+two-minute deadline and fetches at most twice the source size, capped at
+64 GiB and one million requests. Network, cancellation and budget failures
+remain retryable and do not cache a permanent missing index. A first start can
+keep FFmpeg's normal playlist when the index is unsupported or exceeds these
+limits. A cold reconstruction of an existing full VOD plan fails retryably on
+transient range, index or reader-limit errors, so it cannot publish a changed
+playlist or record a fallback decision. Unsupported indexes retain the legacy
+fallback. Short fixture parity does not establish indexed-copy performance for
+every source.
 
 The default source grant lasts 120 seconds. Workers renew active handles every
 45 seconds, using at most eight concurrent requests with two-second deadlines.
@@ -93,6 +112,8 @@ work identity and generation. The proxy derives the matching private key from
 its existing secret with a separate domain label. The worker receives only the
 public key and bounded output claims, not the customer secret or the original
 client JWT.
+The standalone verifier also rejects raw customer tokens without forwarding
+them to the core. Its engine accepts only the opaque, core-signed output grant.
 
 Proxies sign each output request, including range and segment acknowledgement
 headers. The worker verifies it locally against the grant and its current
@@ -108,6 +129,15 @@ existing client fingerprint. Proxies validate that bridge before exposing bytes.
 A successful preparation releases source handles while retaining authorized
 artifact output; reading a ready artifact does not require the original source
 to remain present.
+
+Ready artifacts can serve several viewers. The core retains each viewer's
+original token in a bounded output-authority registry and checks current access
+when refreshing the worker's short snapshot lease. Workers receive only opaque
+allowed authority IDs. Revoking one viewer denies their cached grant and stops
+their active response without stopping the shared artifact or another viewer.
+The response checks work generation, authorization epoch, viewer authority and
+the original token expiry while writing. The five-minute grant lifetime governs
+admission; it does not truncate an otherwise authorized long download.
 
 ## Configuration, capacity and observations
 

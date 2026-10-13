@@ -31,7 +31,6 @@ const (
 	DomainSourceRequest  = "silo/worker-source-request/v1"
 	DomainSourceGrant    = "silo/worker-source/v1"
 	DomainExecutionGrant = "silo/worker-execution/v1"
-	DomainOutputGrant    = "silo/worker-output/v1"
 	DomainSnapshotGrant  = "silo/worker-snapshot/v1"
 	DomainConfigGrant    = "silo/worker-config/v1"
 	DomainReportGrant    = "silo/worker-report/v1"

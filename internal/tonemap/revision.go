@@ -2,7 +2,6 @@ package tonemap
 
 import (
 	"context"
-	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -215,7 +216,9 @@ func hashRevisionValue(value string) string {
 func (r SourceRevision) ValidatePathContext(ctx context.Context, path string) error {
 	if workerinput.IsStandalone(ctx) {
 		h, ok := workerinput.Lookup(ctx, path)
-		if !ok || !r.IsZero() && (r.MediaFileID <= 0 || r.FileSize != h.Size()) { return ErrSourceRevisionChanged }
+		if !ok || !r.IsZero() && (r.MediaFileID <= 0 || r.FileSize != h.Size()) {
+			return ErrSourceRevisionChanged
+		}
 		return nil
 	}
 	return r.ValidatePath(path)

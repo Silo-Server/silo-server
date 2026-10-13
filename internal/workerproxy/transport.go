@@ -14,10 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
-	"golang.org/x/sync/singleflight"
 )
 
 type grantKey struct {

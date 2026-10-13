@@ -18,13 +18,13 @@ func TestPreflightWarmCacheRequiresCurrentSourceAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 	source := workerinput.Source{ID: "media", Revision: "revision", URL: "http://core.invalid/source", Grant: "opaque", ETag: `"revision"`, Size: request.SourceRevision.FileSize, WorkID: "work", Generation: 1}
 	handle, err := adapter.Open(t.Context(), source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer handle.Close()
+	defer func() { _ = handle.Close() }()
 	request.InputPath = handle.URL()
 	ctx := workerinput.WithContext(context.Background(), adapter)
 	conversions := 0

@@ -15,6 +15,5 @@ func (g workerGateway) report(w http.ResponseWriter, r *http.Request)      { g.h
 func (g workerGateway) recipe(w http.ResponseWriter, r *http.Request)      { g.handler.ServeHTTP(w, r) }
 func (g workerGateway) closeWork(w http.ResponseWriter, r *http.Request)   { g.handler.ServeHTTP(w, r) }
 func (g workerGateway) revoke(w http.ResponseWriter, r *http.Request)      { g.handler.ServeHTTP(w, r) }
-func (g workerGateway) token(w http.ResponseWriter, r *http.Request)       { g.handler.ServeHTTP(w, r) }
 func (g workerGateway) renew(w http.ResponseWriter, r *http.Request)       { g.handler.ServeHTTP(w, r) }
 func (g workerGateway) source(w http.ResponseWriter, r *http.Request)      { g.handler.ServeHTTP(w, r) }

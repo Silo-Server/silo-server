@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"

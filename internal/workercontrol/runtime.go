@@ -161,6 +161,14 @@ func (r *Runtime) Handler() http.Handler {
 				return
 			}
 		}
+		if request.Method == http.MethodDelete && (strings.HasPrefix(request.URL.Path, "/transcode/") || strings.HasPrefix(request.URL.Path, "/remux/")) {
+			r.serveStop(w, request)
+			return
+		}
+		if request.Method == http.MethodDelete && strings.HasPrefix(request.URL.Path, "/downloads/artifacts/") {
+			r.serveArtifactStop(w, request)
+			return
+		}
 		ctx := request.Context()
 		if work := outputPathWork(request.URL.Path); work != "" {
 			ctx = transcodenode.WithJobIdentity(ctx, work)
@@ -170,26 +178,6 @@ func (r *Runtime) Handler() http.Handler {
 			if generation, err := strconv.ParseUint(request.Header.Get(workeridentity.HeaderGeneration), 10, 64); err == nil {
 				ctx = context.WithValue(ctx, generationContextKey{}, generation)
 			}
-		}
-		if request.Method == http.MethodDelete && (strings.HasPrefix(request.URL.Path, "/transcode/") || strings.HasPrefix(request.URL.Path, "/remux/")) {
-			if err := r.verifyCommand(request); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			work := outputPathWork(request.URL.Path)
-			cutoff, err := strconv.ParseUint(request.Header.Get(workeridentity.HeaderGeneration), 10, 64)
-			if err != nil || request.Header.Get(workeridentity.HeaderWorkID) != work {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			r.mu.Lock()
-			current := r.generations[work]
-			r.mu.Unlock()
-			if cutoff < current {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			ctx = context.WithValue(ctx, commandContextKey{}, r)
 		}
 		local := request.WithContext(workerinput.WithContext(ctx, r.inputs))
 		if outputPathWork(local.URL.Path) != "" && (local.Method == http.MethodGet || local.Method == http.MethodHead) {
@@ -569,14 +557,14 @@ func rewriteInputs(raw json.RawMessage, handles map[string]*workerinput.Handle) 
 		switch typed := value.(type) {
 		case map[string]any:
 			if identity, exists := typed["source_identity"]; exists {
-				input, ok := typed["input_path"].(string)
+				input, ok := typed[inputPathField].(string)
 				h := handles[input]
 				if !ok || h == nil || identity != h.Identity() {
 					return nil, errors.New("prepared source identity mismatch")
 				}
 			}
 			for key, child := range typed {
-				if text, ok := child.(string); ok && (key == "input_path" || key == "input" || key == "media_path") {
+				if text, ok := child.(string); ok && (key == inputPathField || key == "input" || key == "media_path") {
 					h := handles[text]
 					if h == nil {
 						return nil, errors.New("unregistered source input")

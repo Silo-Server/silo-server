@@ -23,6 +23,8 @@ const (
 	workerSubtitleMaxBytes      = 8 << 20
 	workerSubtitleMaxProbeBytes = 1 << 20
 	workerSubtitleTimeout       = 30 * time.Second
+	workerSubtitleNoStdinArg    = "-nostdin"
+	workerSubtitleOutputPipeArg = "pipe:1"
 )
 
 func prepareSubtitleFilterInputContext(ctx context.Context, opts *TranscodeOpts) error {
@@ -61,7 +63,7 @@ func prepareSubtitleFilterInputContext(ctx context.Context, opts *TranscodeOpts)
 	}
 	// No seek or start_at_zero: libass and Silo's copyts video graph consume
 	// original container timestamps, including nonzero starts on restarts.
-	args := []string{ffmpegHideBannerArg, "-nostdin", ffmpegLogLevelArg, ffmpegErrorLogLevel, "-copyts", "-i", opts.InputPath, workerSubtitleMapArg, "0:s:" + strconv.Itoa(opts.SubtitleTrackIndex), workerSubtitleCodecArg, codec, "-f", subtitleFormatASS, "pipe:1"}
+	args := []string{ffmpegHideBannerArg, workerSubtitleNoStdinArg, ffmpegLogLevelArg, ffmpegErrorLogLevel, "-copyts", "-i", opts.InputPath, workerSubtitleMapArg, "0:s:" + strconv.Itoa(opts.SubtitleTrackIndex), workerSubtitleCodecArg, codec, "-f", subtitleFormatASS, workerSubtitleOutputPipeArg}
 	script, err := workerSubtitleOutput(ctx, opts.FFmpegPath, args, workerSubtitleMaxBytes)
 	if err != nil {
 		return fmt.Errorf("stage selected subtitle: %w", err)
@@ -201,9 +203,9 @@ func workerSubtitleFonts(ctx context.Context, input, ffmpeg string) ([]SubtitleF
 	if len(streams) == 0 {
 		return nil, nil
 	}
-	args := []string{ffmpegHideBannerArg, "-nostdin", ffmpegLogLevelArg, ffmpegErrorLogLevel}
+	args := []string{ffmpegHideBannerArg, workerSubtitleNoStdinArg, ffmpegLogLevelArg, ffmpegErrorLogLevel}
 	for _, stream := range streams {
-		args = append(args, "-dump_attachment:"+strconv.Itoa(stream.Index), "pipe:1")
+		args = append(args, "-dump_attachment:"+strconv.Itoa(stream.Index), workerSubtitleOutputPipeArg)
 	}
 	// Attachments live in the container header. Do not traverse the media
 	// duration after dumping the probed extradata.

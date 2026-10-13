@@ -159,7 +159,7 @@ func TestTypedGrantRejectsCrossScopeAndExpiry(t *testing.T) {
 	if decoded.NodeID != 17 || decoded.Generation != 4 || decoded.WorkID != "work" {
 		t.Fatalf("lost grant scope: %+v", decoded)
 	}
-	if _, err = DecodeGrant(token, DomainOutputGrant, g.Audience, pub, now); err == nil {
+	if _, err = DecodeGrant(token, DomainProxyOutputGrant, g.Audience, pub, now); err == nil {
 		t.Fatal("cross-domain grant accepted")
 	}
 	if _, err = DecodeGrant(token, DomainSourceGrant, "https://other.example.test", pub, now); err == nil {

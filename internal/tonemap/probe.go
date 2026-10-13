@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"github.com/Silo-Server/silo-server/internal/executionlease"
-	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"log/slog"
 	"os"
 	"slices"
@@ -15,6 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 
 	"golang.org/x/sync/singleflight"
 )

@@ -140,6 +140,10 @@ func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMes
 		return nil, err
 	}
 	for k, v := range obj {
+		if coreExecutionEnvironment(k) {
+			delete(obj, k)
+			continue
+		}
 		var text string
 		if json.Unmarshal(v, &text) == nil {
 			if next, ok := aliases[text]; ok {
@@ -167,6 +171,17 @@ func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMes
 		}
 	}
 	return json.Marshal(obj)
+}
+
+// These locations and resolved filters belong to the core's execution
+// environment. The worker uses its local operator settings and resolves its
+// own filter from the frozen policy, mode and source facts.
+func coreExecutionEnvironment(key string) bool {
+	switch key {
+	case "output_dir", "output_subdir", "hw_device", "ffmpeg_path", "ffprobe_path", "tone_map_filter":
+		return true
+	}
+	return false
 }
 func inputDigest(path string) string {
 	h := sha256.Sum256([]byte(path))

@@ -3,7 +3,6 @@
 package mediaprobe
 
 import (
-	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )

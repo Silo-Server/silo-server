@@ -218021,98 +218021,6 @@
               "minimum": 1,
               "type": "integer"
             }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_TokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "description": "The core validates the opaque existing customer stream token and issues a scoped asymmetric output grant. Workers never receive the customer JWT signing key.",
-        "retry_safety": "non_retryable",
-        "listener": "worker_control_core",
-        "method": "POST",
-        "path": "/api/internal/workers/{node}/tokens",
-        "handler": "(*internal/workercontrolcore.Service).token",
-        "auth_class": "node_bearer",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "node",
-            "required": true,
-            "schema": {
-              "minimum": 1,
-              "type": "integer"
-            }
           },
           {
             "in": "path",
@@ -218877,98 +218785,6 @@
         "method": "POST",
         "path": "/api/internal/workers/{node}/revoke",
         "handler": "(internal/api.workerGateway).revoke",
-        "auth_class": "delegated",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        }
-      },
-      {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "node",
-            "required": true,
-            "schema": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_TokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "description": "The core validates the opaque existing customer stream token and issues a scoped asymmetric output grant. Workers never receive the customer JWT signing key.",
-        "retry_safety": "non_retryable",
-        "listener": "api",
-        "method": "POST",
-        "path": "/api/internal/workers/{node}/tokens",
-        "handler": "(internal/api.workerGateway).token",
         "auth_class": "delegated",
         "responses": {
           "200": {
@@ -221181,6 +220997,9 @@
           "is_jellyfin_compat": {
             "type": "boolean"
           },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
           "media_file_id": {
             "format": "int64",
             "type": "integer"
@@ -222017,6 +221836,9 @@
           "jti": {
             "type": "string"
           },
+          "kfp": {
+            "type": "boolean"
+          },
           "method": {
             "type": "string"
           },
@@ -222692,18 +222514,6 @@
           "boot_id",
           "nonce",
           "sequence"
-        ],
-        "type": "object"
-      },
-      "workercontrolcore_TokenRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "token": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "token"
         ],
         "type": "object"
       },

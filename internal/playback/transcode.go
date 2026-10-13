@@ -272,6 +272,10 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// workerExecutionContext retains local probe configuration and admission
+	// for bounded probes of generated fragments. It follows the producer's
+	// lifetime and is replaced together with each successful restart.
+	workerExecutionContext context.Context
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -428,7 +432,11 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
+	copyPlan, planErr := resolveCopyPlanResult(ctx, opts, loadCopyKeyframeIndex)
+	if planErr != nil {
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", planErr)
+	}
 	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
@@ -457,6 +465,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
+	}
+	if workerinput.IsStandalone(ctx) {
+		s.workerExecutionContext = ctx
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -2965,6 +2976,17 @@ func (s *TranscodeSession) CloseProcess() error {
 	return s.shutdown(false)
 }
 
+// CancelProcess requests process cancellation without changing directory or
+// job ownership. Lifecycle owners subsequently close and reap the session.
+func (s *TranscodeSession) CancelProcess() {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
@@ -3345,6 +3367,9 @@ func (s *TranscodeSession) restart(
 	s.cmd = cmd
 	s.cancel = cancel
 	s.opts = opts
+	if workerinput.IsStandalone(ctx) {
+		s.workerExecutionContext = ctx
+	}
 	s.running = true
 	s.restarting = nil
 	s.stdinPipe = stdinPipe

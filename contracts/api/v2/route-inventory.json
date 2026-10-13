@@ -27,7 +27,7 @@
       "id": "worker_control_core",
       "entrypoint": "internal/workercontrolcore.(*Service).Handler",
       "description": "Sealed core worker-control service behind the API listener's exact internal gateway routes; node identity, execution and source authority stay on core.",
-      "route_count": 10
+      "route_count": 9
     },
     {
       "id": "operational_metrics",
@@ -45,7 +45,7 @@
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
-      "route_count": 714
+      "route_count": 713
     },
     {
       "id": "api_v2",
@@ -67,8 +67,8 @@
     }
   ],
   "totals": {
-    "routes": 896,
-    "conditional_routes": 706,
+    "routes": 894,
+    "conditional_routes": 705,
     "streaming_routes": 44,
     "websocket_routes": 4
   },
@@ -2798,33 +2798,6 @@
       "source_file": "internal/workercontrolcore/http.go"
     },
     {
-      "listener": "worker_control_core",
-      "namespace": "legacy_unversioned",
-      "method": "POST",
-      "path": "/api/internal/workers/{node}/tokens",
-      "route_group": "/",
-      "handler": "(*internal/workercontrolcore.Service).token",
-      "handler_expr": "s.token",
-      "handler_kind": "method",
-      "handler_resolved": true,
-      "middleware_chain": 30,
-      "auth_class": "node_bearer",
-      "auth_traits": [
-        "node_bearer"
-      ],
-      "conditions": [],
-      "conditional": false,
-      "request_kind": "json",
-      "response_media_kind": "json",
-      "delegates_to": "",
-      "streams": false,
-      "upgrades_websocket": false,
-      "method_origin": "explicit",
-      "success_statuses": null,
-      "error_codes": null,
-      "source_file": "internal/workercontrolcore/http.go"
-    },
-    {
       "listener": "operational_metrics",
       "namespace": "operational",
       "method": "CONNECT",
@@ -4040,35 +4013,6 @@
       "route_group": "/",
       "handler": "(internal/api.workerGateway).renew",
       "handler_expr": "workers.renew",
-      "handler_kind": "method",
-      "handler_resolved": true,
-      "middleware_chain": 1,
-      "auth_class": "delegated",
-      "auth_traits": [
-        "delegated"
-      ],
-      "conditions": [
-        "deps.WorkerHTTP != nil"
-      ],
-      "conditional": true,
-      "request_kind": "unknown",
-      "response_media_kind": "binary",
-      "delegates_to": "",
-      "streams": false,
-      "upgrades_websocket": false,
-      "method_origin": "explicit",
-      "success_statuses": null,
-      "error_codes": null,
-      "source_file": "internal/api/router.go"
-    },
-    {
-      "listener": "api",
-      "namespace": "legacy_unversioned",
-      "method": "POST",
-      "path": "/api/internal/workers/{node}/tokens",
-      "route_group": "/",
-      "handler": "(internal/api.workerGateway).token",
-      "handler_expr": "workers.token",
       "handler_kind": "method",
       "handler_resolved": true,
       "middleware_chain": 1,

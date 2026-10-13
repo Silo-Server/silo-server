@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestProtocolTokenDTOsRetainRuntimeJSONKeys(t *testing.T) {
-	for _, body := range []any{tokenRequest{Token: "opaque"}, outputProtocolRequest{Token: "opaque", NodeURL: "https://worker.example"}} {
+func TestProtocolOutputDTOsRetainRuntimeJSONKeys(t *testing.T) {
+	for _, body := range []any{outputProtocolRequest{Token: "opaque", NodeURL: "https://worker.example"}} {
 		raw, err := json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)

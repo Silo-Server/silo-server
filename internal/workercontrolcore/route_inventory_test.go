@@ -21,9 +21,9 @@ func TestRouteInventoryMatchesSealedCoreRouter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := 8
+		want := 7
 		if withSource {
-			want = 10
+			want = 9
 		}
 		if len(observed) != want {
 			t.Fatalf("source=%v observed=%d want=%d", withSource, len(observed), want)

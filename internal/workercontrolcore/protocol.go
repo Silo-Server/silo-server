@@ -19,7 +19,6 @@ const (
 	protocolReportHandler   = "report"
 	protocolRecipeHandler   = "recipe"
 	protocolCloseHandler    = "closeWork"
-	protocolTokenHandler    = "token"
 	protocolRenewHandler    = "renew"
 	protocolNodeParam       = "node"
 	protocolWorkParam       = "work"
@@ -35,9 +34,6 @@ type snapshotRequest struct {
 }
 type closeRequest struct {
 	Generation uint64 `json:"generation"`
-}
-type tokenRequest struct {
-	Token string `json:"token"`
 }
 type renewRequest struct {
 	WorkID     string `json:"work_id"`
@@ -69,7 +65,6 @@ func ProtocolControls(schemas huma.Registry) []workerprotocol.Operation {
 		{http.MethodHead, protocolRecipePath, protocolRecipeHandler, "The same proof and active-work admission as GET; no response body.", nil},
 		{http.MethodDelete, protocolRecipePath, protocolCloseHandler, "Generation-fenced stop and source release. An uncertain response requires a fresh signed snapshot, rather than assuming the work stopped.", reflect.TypeFor[closeRequest]()},
 		{http.MethodPost, "/api/internal/workers/{node}/revoke", "closeNode", "Revoke this node's active and pending work. Admission is checked before durable generation fencing and source release.", nil},
-		{http.MethodPost, "/api/internal/workers/{node}/tokens", protocolTokenHandler, "The core validates the opaque existing customer stream token and issues a scoped asymmetric output grant. Workers never receive the customer JWT signing key.", reflect.TypeFor[tokenRequest]()},
 		{http.MethodPost, "/api/internal/workers/{node}/sources/{grant}/renew", protocolRenewHandler, "Renew the exact scoped immutable source for an admitted work generation. X-Silo-Source-Grant must match the route grant. The signed Source retains ID, revision, size, ETag, URL and scope. Source TTL is 120 seconds; workers renew after 45 seconds while execution authority remains current.", reflect.TypeFor[renewRequest]()},
 	}
 	var operations []workerprotocol.Operation
@@ -114,7 +109,7 @@ func floatPointer(value float64) *float64 { return &value }
 // authentication; none of these operations becomes a native /api/v2 alias.
 func ProtocolGateway(schemas huma.Registry) []workerprotocol.Operation {
 	operations := ProtocolControls(schemas)
-	names := map[string]string{protocolSnapshotHandler: protocolSnapshotHandler, protocolReportHandler: protocolReportHandler, protocolRecipeHandler: protocolRecipeHandler, protocolCloseHandler: protocolCloseHandler, "closeNode": "revoke", protocolTokenHandler: protocolTokenHandler, protocolRenewHandler: protocolRenewHandler, protocolSourceHandler: "source"}
+	names := map[string]string{protocolSnapshotHandler: protocolSnapshotHandler, protocolReportHandler: protocolReportHandler, protocolRecipeHandler: protocolRecipeHandler, protocolCloseHandler: protocolCloseHandler, "closeNode": "revoke", protocolRenewHandler: protocolRenewHandler, protocolSourceHandler: "source"}
 	for i := range operations {
 		op := &operations[i]
 		name := op.Handler

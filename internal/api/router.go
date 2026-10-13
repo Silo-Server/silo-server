@@ -118,7 +118,7 @@ type Dependencies struct {
 	// WorkerHTTP serves the separately authenticated standalone worker control
 	// and source protocol; it contains no viewer-facing API operations.
 	WorkerHTTP http.Handler
-	Config *config.Config
+	Config     *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
@@ -508,7 +508,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		r.Head("/api/internal/workers/{node}/recipes/{work}", workers.recipe)
 		r.Delete("/api/internal/workers/{node}/recipes/{work}", workers.closeWork)
 		r.Post("/api/internal/workers/{node}/revoke", workers.revoke)
-		r.Post("/api/internal/workers/{node}/tokens", workers.token)
 		r.Post("/api/internal/workers/{node}/sources/{grant}/renew", workers.renew)
 		r.Get("/api/internal/workers/{node}/sources/{grant}", workers.source)
 		r.Head("/api/internal/workers/{node}/sources/{grant}", workers.source)

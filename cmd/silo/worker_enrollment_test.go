@@ -30,6 +30,40 @@ type cliEnrollmentRepo struct {
 	calls  int
 }
 
+func TestWorkerCommandHelpSucceedsBeforeBootstrap(t *testing.T) {
+	for _, name := range []string{workerDatabaseURL, workerRedisURL, workerSecretKey, workerJWTSecret} {
+		t.Setenv(name, "unusable-bootstrap-value")
+	}
+	for _, command := range []struct {
+		name, option string
+		run          func(context.Context, []string) error
+	}{
+		{standaloneWorkerCommand, "-scratch", runStandaloneWorker},
+		{"worker-enroll", "-ticket", runWorkerEnroll},
+		{"worker-enrollment", "-node-id", runWorkerEnrollment},
+	} {
+		t.Run(command.name, func(t *testing.T) {
+			output, err := os.CreateTemp(t.TempDir(), "help")
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := os.Stdout
+			os.Stdout = output
+			t.Cleanup(func() { os.Stdout = previous; _ = output.Close() })
+			if err := command.run(t.Context(), []string{"--help"}); err != nil {
+				t.Fatalf("help reached error/bootstrap handling: %v", err)
+			}
+			if err := output.Close(); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(output.Name())
+			if err != nil || !bytes.Contains(data, []byte("Usage of "+command.name)) || !bytes.Contains(data, []byte(command.option)) || bytes.Contains(data, []byte("unusable-bootstrap-value")) {
+				t.Fatalf("missing or unsafe command help: %q, %v", data, err)
+			}
+		})
+	}
+}
+
 func (r *cliEnrollmentRepo) Redeem(_ context.Context, e workerregistration.Enrollment, key ed25519.PublicKey) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -133,7 +167,7 @@ func TestWorkerEnrollmentCLIUsesLocalSQLAndExportsNoBootstrapCredentials(t *test
 		t.Fatal(err)
 	}
 	defer isolated.Close()
-	if _, err = isolated.Exec(t.Context(), "CREATE TABLE stream_nodes(id INTEGER PRIMARY KEY,url TEXT,type TEXT,enabled BOOLEAN);CREATE TABLE server_settings(key TEXT PRIMARY KEY,value TEXT)"); err != nil {
+	if _, err = isolated.Exec(t.Context(), "CREATE TABLE stream_nodes(id INTEGER PRIMARY KEY,url TEXT,type TEXT,enabled BOOLEAN);CREATE TABLE server_settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE download_artifacts(id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
 	migration, err := os.ReadFile("../../migrations/sql/20261013183440_standalone_http_workers.sql")

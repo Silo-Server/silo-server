@@ -18,10 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/executionlease"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"golang.org/x/sync/singleflight"
 )
 
 // GOOS names this package and its tests compare runtime.GOOS against.

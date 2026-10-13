@@ -19,7 +19,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerregistration"
 )
 
-const workerJWTSecret = "JWT_SECRET"
+const (
+	workerJWTSecret = "JWT_SECRET"
+	workerRedisURL  = "REDIS_URL"
+	workerSecretKey = "SECRET_KEY"
+)
+
+func printWorkerCommandHelp(flags *flag.FlagSet, err error) bool {
+	if !errors.Is(err, flag.ErrHelp) {
+		return false
+	}
+	flags.SetOutput(os.Stdout)
+	flags.Usage()
+	return true
+}
 
 // runWorkerEnrollment is a core-only maintenance command. It reads protected
 // core bootstrap credentials locally and exports only a one-use enrollment
@@ -33,6 +46,9 @@ func runWorkerEnrollment(ctx context.Context, args []string) error {
 	coreURL := flags.String("core-url", "", "override the configured public core origin")
 	allowHTTP := flags.Bool("allow-http", false, "allow HTTP on a trusted network")
 	if err := flags.Parse(args); err != nil {
+		if printWorkerCommandHelp(flags, err) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 0 || *nodeID <= 0 || *output == "" {
@@ -81,12 +97,15 @@ func runWorkerEnroll(ctx context.Context, args []string) error {
 	ticketPath := flags.String("ticket", "", "protected enrollment ticket file")
 	bindingPath := flags.String("binding", "", "new protected worker binding file")
 	if err := flags.Parse(args); err != nil {
+		if printWorkerCommandHelp(flags, err) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 0 || *ticketPath == "" || *bindingPath == "" {
 		return errors.New("worker-enroll requires --ticket and --binding with no positional arguments")
 	}
-	for _, name := range []string{workerDatabaseURL, "REDIS_URL", "SECRET_KEY", workerJWTSecret} {
+	for _, name := range []string{workerDatabaseURL, workerRedisURL, workerSecretKey, workerJWTSecret} {
 		if os.Getenv(name) != "" {
 			return fmt.Errorf("worker refuses infrastructure credential environment variable %s", name)
 		}

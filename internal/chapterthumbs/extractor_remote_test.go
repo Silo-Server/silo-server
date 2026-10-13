@@ -68,7 +68,7 @@ func TestExtractRegisteredRemoteFrameMatchesLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 	workerCtx := workerinput.WithContext(ctx, adapter)
 	handle, err := adapter.Open(workerCtx, workerinput.Source{ID: source.Ref.ID, Revision: source.Ref.Revision, URL: source.URL, Grant: source.Grant,
 		ETag: source.ETag, Size: source.Size, WorkID: source.WorkID, Generation: source.Generation})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 )
 
 // copySegmentPlan is a copy-video session's complete segment list, worked out
@@ -38,34 +40,54 @@ var (
 	loadVerifiedKeyframeIndex = keyframes.LoadVerified
 )
 
+type copyKeyframeIndexLoader func(context.Context, TranscodeOpts) (keyframes.Index, error)
+
+func loadCopyKeyframeIndex(ctx context.Context, opts TranscodeOpts) (keyframes.Index, error) {
+	if workerinput.IsStandalone(ctx) {
+		handle, ok := workerinput.Lookup(ctx, opts.InputPath)
+		if !ok {
+			return keyframes.Index{}, errors.New("keyframe input has no current source authority")
+		}
+		source := admittedKeyframeSource(handle)
+		if opts.Reconstructed {
+			return keyframes.LoadSourceVerified(ctx, source)
+		}
+		return keyframes.LoadSource(ctx, source)
+	}
+	if opts.Reconstructed {
+		return loadVerifiedKeyframeIndex(ctx, opts.InputPath)
+	}
+	return loadKeyframeIndex(opts.InputPath)
+}
+
 // planCopySegments returns the segment plan for a session, or nil when the
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
 // copied, the stream doesn't start at the beginning, or the source has no
 // keyframe index.
 func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+	plan, _ := planCopySegmentsResult(ctx, opts, loadCopyKeyframeIndex)
+	return plan
+}
+
+// A cold standalone rebuild must not turn a transient range, budget, or reader
+// deadline failure into a different playlist than the one its player holds.
+// Unsupported indexes still keep the existing FFmpeg-playlist fallback.
+func planCopySegmentsResult(ctx context.Context, opts TranscodeOpts, load copyKeyframeIndexLoader) (*copySegmentPlan, error) {
 	if !opts.KeyframePlaylist ||
 		!strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0 ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
-		return nil
+		return nil, nil
 	}
-	load := loadKeyframeIndex
-	if opts.Reconstructed {
-		load = func(path string) (keyframes.Index, error) { return loadVerifiedKeyframeIndex(ctx, path) }
-		// A rebuilt session that lost its plan record (a clean shutdown
-		// removes the output directory) may already have served the planned
-		// playlist. The plan follows from the verified index alone, so wait
-		// for the check here rather than fall back to FFmpeg's playlist,
-		// which a player holding the planned one can't follow. Once the
-		// check has run, the index is cached. The check stops if the
-		// rebuild's request goes away (see resolveCopyPlan).
-	}
-	idx, err := load(opts.InputPath)
+	idx, err := load(ctx, opts)
 	if err != nil {
+		if workerinput.IsStandalone(ctx) && opts.Reconstructed && !errors.Is(err, keyframes.ErrNoIndex) {
+			return nil, err
+		}
 		if !errors.Is(err, keyframes.ErrNoIndex) {
 			log.Printf("playback: read keyframe index for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
 		}
-		return nil
+		return nil, nil
 	}
 	segmentSeconds := float64(opts.SegmentDuration)
 	if segmentSeconds <= 0 {
@@ -73,17 +95,27 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan 
 	}
 	starts := keyframes.PlanSegments(idx.Keyframes, segmentSeconds)
 	if len(starts) == 0 || len(starts) > maxSyntheticManifestSegments {
-		return nil
+		return nil, nil
 	}
 	// FFmpeg's last segment ends with the copied video, even when an audio
 	// or subtitle track runs on: the container's duration can be longer.
 	if idx.VideoEnd <= idx.Keyframes[len(idx.Keyframes)-1] {
 		// The video's end is unknown, so the plan can't describe the last
 		// segment.
-		return nil
+		return nil, nil
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
-	return &copySegmentPlan{durations: durations}
+	return &copySegmentPlan{durations: durations}, nil
+}
+
+func admittedKeyframeSource(handle *workerinput.Handle) keyframes.Source {
+	return keyframes.Source{Identity: handle.Identity(), Size: handle.Size(), Context: handle.Context(), Validate: handle.Validate, OpenReader: func(ctx context.Context) (io.ReaderAt, io.Closer, error) {
+		reader, err := handle.ReaderAt(ctx, workerinput.ReaderLimits{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return reader, reader, nil
+	}}
 }
 
 // copyPlanRecordFile keeps a session's planning decision in its output
@@ -91,8 +123,9 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan 
 const copyPlanRecordFile = "keyframe-plan.json"
 
 type copyPlanRecord struct {
-	Planned   bool      `json:"planned"`
-	Durations []float64 `json:"durations,omitempty"`
+	SourceIdentity string    `json:"source_identity,omitempty"`
+	Planned        bool      `json:"planned"`
+	Durations      []float64 `json:"durations,omitempty"`
 }
 
 // resolveCopyPlan returns the plan a session serves. The first start decides
@@ -107,35 +140,75 @@ type copyPlanRecord struct {
 // a planned session copies from the beginning, where FFmpeg cuts the same
 // segments, so the player's earlier segments still match.
 func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+	plan, _ := resolveCopyPlanResult(ctx, opts, loadCopyKeyframeIndex)
+	return plan
+}
+
+func resolveCopyPlanResult(ctx context.Context, opts TranscodeOpts, load copyKeyframeIndexLoader) (*copySegmentPlan, error) {
+	var sourceIdentity string
+	var handle *workerinput.Handle
+	if workerinput.IsStandalone(ctx) {
+		var ok bool
+		handle, ok = workerinput.Lookup(ctx, opts.InputPath)
+		if !ok {
+			return nil, errors.New("keyframe input has no current source authority")
+		}
+		if err := handle.Validate(ctx); err != nil {
+			return nil, err
+		}
+		sourceIdentity = handle.Identity()
+		if opts.OutputDir != "" {
+			for _, name := range []string{copyPlanRecordFile, copyPlanRecordFile + ".tmp"} {
+				if err := workerinput.ValidateOutput(ctx, filepath.Join(opts.OutputDir, name)); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
-		return planCopySegments(ctx, opts)
+		return planCopySegmentsResult(ctx, opts, load)
 	}
 	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
 	if data, err := os.ReadFile(path); err == nil {
 		var rec copyPlanRecord
 		if err := json.Unmarshal(data, &rec); err == nil {
+			if handle != nil {
+				if err := handle.Validate(ctx); err != nil {
+					return nil, err
+				}
+				if rec.SourceIdentity != sourceIdentity {
+					return nil, errors.New("saved keyframe plan belongs to a different source revision")
+				}
+			}
 			if !rec.Planned {
-				return nil
+				return nil, nil
 			}
 			if plan := rec.plan(); plan != nil {
-				return plan
+				return plan, nil
 			}
 		}
 		log.Printf("playback: session %s has an unreadable keyframe plan record; using FFmpeg's playlist", opts.SessionID)
-		return nil
+		return nil, nil
 	}
 
-	// Record the decision whatever the start's fate: StartTranscode launches
-	// FFmpeg even if its caller has gone, and that session serves this
-	// playlist.
-	plan := planCopySegments(ctx, opts)
+	// Persist only completed planning decisions. A transient rebuild failure
+	// must not replace the playlist already held by a player.
+	plan, err := planCopySegmentsResult(ctx, opts, load)
+	if err != nil {
+		return nil, err
+	}
 	if plan == nil && opts.Reconstructed && ctx.Err() != nil {
 		// The rebuild's request went away during the keyframe check. Its
 		// outcome says nothing about the file, so don't record it:
 		// StartTranscode abandons this rebuild, and the next one plans.
-		return nil
+		return nil, ctx.Err()
 	}
-	rec := copyPlanRecord{Planned: plan != nil}
+	if handle != nil {
+		if err := handle.Validate(ctx); err != nil {
+			return nil, err
+		}
+	}
+	rec := copyPlanRecord{Planned: plan != nil, SourceIdentity: sourceIdentity}
 	if plan != nil {
 		rec.Durations = plan.durations
 	}
@@ -150,9 +223,9 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 		// Without a record a rebuilt session can't promise the same
 		// playlist, so don't serve a planned one.
 		log.Printf("playback: record keyframe plan for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
-		return nil
+		return nil, nil
 	}
-	return plan
+	return plan, nil
 }
 
 // plan rebuilds a recorded plan, or nil if the record is inconsistent.

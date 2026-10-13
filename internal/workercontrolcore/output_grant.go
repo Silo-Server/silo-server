@@ -44,6 +44,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		return GrantReply{}, ErrDenied
 	}
 	copied := *claims
+	copied.OutputSubdir = ""
 	var generation uint64
 	var artifactFingerprint, clientFingerprint string
 	if claims.DownloadArtifactID != "" {
@@ -78,7 +79,6 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		}
 		generation = reply.Assignment.Generation
 		copied.MediaPath = card.InputPath
-		copied.OutputSubdir = ""
 	}
 	expires := time.Now().Add(5 * time.Minute)
 	if claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {

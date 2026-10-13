@@ -25,19 +25,24 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 	}
 	count := 0
 	for _, route := range inventory.Routes {
-		if route.Listener != "proxy" && route.Listener != "transcode_node" {
+		workerRoute := route.Listener == "proxy" || route.Listener == "transcode_node" || route.Listener == "worker_control_core" || route.Listener == "api" && strings.HasPrefix(route.Path, "/api/internal/workers/")
+		if !workerRoute {
 			continue
 		}
 		switch route.Path {
-		case "/health", "/ready", "/metrics", "/api/v1/health":
+		case "/health", "/ready", "/metrics":
 			continue
+		case "/api/v1/health":
+			if route.Listener != "transcode_node" {
+				continue
+			}
 		}
 		count++
 		if !described[route.Listener+" "+route.Method+" "+route.Path] {
 			t.Fatal("undescribed worker registration", route.Listener, route.Method, route.Path)
 		}
 	}
-	if count != 50 || len(described) != 50 {
+	if count != 72 || len(described) != 72 {
 		t.Fatal("retained inventory drift", count, len(described))
 	}
 }

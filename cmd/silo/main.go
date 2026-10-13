@@ -697,7 +697,7 @@ func addRedisBootstrapSettings(redisURL string, configured map[string]bool, valu
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "worker" {
+	if len(os.Args) > 1 && os.Args[1] == standaloneWorkerCommand {
 		if err := runStandaloneWorker(context.Background(), os.Args[2:]); err != nil {
 			log.Fatalf("worker: %v", err)
 		}

@@ -47,7 +47,7 @@ func TestWorkerGatewayOnlyExposesDeclaredMethodsAndPaths(t *testing.T) {
 		{"POST", "/api/internal/workers/17/snapshot"}, {"POST", "/api/internal/workers/17/report"},
 		{"GET", "/api/internal/workers/17/recipes/work"}, {"HEAD", "/api/internal/workers/17/recipes/work"},
 		{"DELETE", "/api/internal/workers/17/recipes/work"}, {"POST", "/api/internal/workers/17/revoke"},
-		{"POST", "/api/internal/workers/17/tokens"}, {"POST", "/api/internal/workers/17/sources/grant/renew"},
+		{"POST", "/api/internal/workers/17/sources/grant/renew"},
 		{"GET", "/api/internal/workers/17/sources/grant"}, {"HEAD", "/api/internal/workers/17/sources/grant"},
 	} {
 		w := httptest.NewRecorder()
@@ -56,13 +56,13 @@ func TestWorkerGatewayOnlyExposesDeclaredMethodsAndPaths(t *testing.T) {
 			t.Fatalf("declared %s %s=%d", operation.method, operation.path, w.Code)
 		}
 	}
-	if calls != 12 {
+	if calls != 11 {
 		t.Fatalf("delegated%d declared operations", calls)
 	}
 	for _, operation := range []struct{ method, path string }{
 		{"GET", "/api/internal/workers/enroll"}, {"DELETE", "/api/internal/workers/output-grant"},
 		{"POST", "/api/internal/workers/17/recipes/work"}, {"GET", "/api/internal/workers/17/secrets"},
-		{"GET", "/api/internal/workers/17/sources/grant/more"}, {"GET", "/api/internal/workers/17"},
+		{"POST", "/api/internal/workers/17/tokens"}, {"GET", "/api/internal/workers/17/sources/grant/more"}, {"GET", "/api/internal/workers/17"},
 	} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(operation.method, operation.path, nil))
@@ -70,7 +70,7 @@ func TestWorkerGatewayOnlyExposesDeclaredMethodsAndPaths(t *testing.T) {
 			t.Fatalf("undeclared operation=%d", w.Code)
 		}
 	}
-	if calls != 12 {
+	if calls != 11 {
 		t.Fatal("gateway exposed hidden operations")
 	}
 }

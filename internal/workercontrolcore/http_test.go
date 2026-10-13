@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
@@ -108,15 +106,13 @@ func TestSignedSnapshotReconstructionAndStop(t *testing.T) {
 	}
 }
 
-func TestWrongNodeAndRevokedExecutionCannotObtainOutputGrant(t *testing.T) {
+func TestWrongNodeAndRevokedExecutionCannotObtainRecipe(t *testing.T) {
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
 	_, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	store := NewMemoryStore()
 	node := Node{ID: 7, URL: "https://worker.example", PublicKey: pub, Enabled: true}
 	allow := true
-	service, err := New(Options{Origin: "https://core.example", PrivateKey: coreKey, Nodes: testNodes{[]Node{node}}, Store: store, ExecutionActive: func(_ context.Context, _ Node, _ workerwire.Assignment) bool { return allow }, VerifyToken: func(context.Context, string) (*streamtoken.Claims, error) {
-		return &streamtoken.Claims{SessionID: "work", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, MediaPath: "/private/approved.mp4", RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}, nil
-	}})
+	service, err := New(Options{Origin: "https://core.example", PrivateKey: coreKey, Nodes: testNodes{[]Node{node}}, Store: store, ExecutionActive: func(_ context.Context, _ Node, _ workerwire.Assignment) bool { return allow }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +127,7 @@ func TestWrongNodeAndRevokedExecutionCannotObtainOutputGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := func(path string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "https://core.example/api/internal/workers/"+path+"/tokens", strings.NewReader(`{"token":"verified","work_id":"work"}`))
+		r := httptest.NewRequest("GET", "https://core.example/api/internal/workers/"+path+"/recipes/work", nil)
 		if err := workeridentity.Sign(r, "https://core.example", workeridentity.DomainNodeProof, key, 7, false); err != nil {
 			t.Fatal(err)
 		}
@@ -148,18 +144,18 @@ func TestWrongNodeAndRevokedExecutionCannotObtainOutputGrant(t *testing.T) {
 	}
 	var envelope GrantReply
 	_ = json.Unmarshal(w.Body.Bytes(), &envelope)
-	grant, err := workeridentity.DecodeGrant(envelope.Grant, workeridentity.DomainOutputGrant, node.URL, coreKey.Public().(ed25519.PublicKey), time.Now())
+	grant, err := workeridentity.DecodeGrant(envelope.Grant, "silo/worker-recipe/v1", node.URL, coreKey.Public().(ed25519.PublicKey), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var claims streamtoken.Claims
-	_ = json.Unmarshal(grant.Body, &claims)
-	if claims.MediaPath != "source:media-ref" || grant.Generation != 1 {
+	var recipe RecipeReply
+	_ = json.Unmarshal(grant.Body, &recipe)
+	if recipe.Recipe.InputPath != "source:media-ref" || grant.Generation != 1 {
 		t.Fatal("core media path or wrong generation reached worker")
 	}
 	allow = false
 	if w = request("7"); w.Code == 200 {
-		t.Fatal("revoked recipe still grants output")
+		t.Fatal("revoked execution still grants a recipe")
 	}
 }
 
@@ -239,5 +235,119 @@ func TestNodeProofReplayIsRejectedAcrossCoreInstances(t *testing.T) {
 	}
 	if err := two.VerifyRequest(r, 7, workeridentity.DomainNodeProof); err == nil {
 		t.Fatal("proof replayed on another core")
+	}
+}
+
+func TestStandaloneControlHasNoCustomerTokenResolutionRoute(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, coreKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolutions := 0
+	service, err := New(Options{Origin: "https://core.example", PrivateKey: coreKey, Nodes: testNodes{[]Node{{ID: 7, URL: "https://worker.example", PublicKey: pub, Enabled: true}}}, Store: NewMemoryStore(), VerifyToken: func(context.Context, string) (*streamtoken.Claims, error) {
+		resolutions++
+		return nil, ErrDenied
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://core.example/api/internal/workers/7/tokens", strings.NewReader(`{"token":"customer-jwt"}`))
+	if err := workeridentity.Sign(request, "https://core.example", workeridentity.DomainNodeProof, key, 7, false); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || resolutions != 0 {
+		t.Fatalf("customer-token resolution route remains: status=%d calls=%d", response.Code, resolutions)
+	}
+}
+
+func TestLazySignedRecipeOmitsCorePathsFromAssignmentAndRecipe(t *testing.T) {
+	for _, preexisting := range []bool{false, true} {
+		name := "lazy"
+		if preexisting {
+			name = "stored"
+		}
+		t.Run(name, func(t *testing.T) {
+			pub, key, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, coreKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := NewMemoryStore()
+			node := Node{ID: 7, URL: "https://worker.example", PublicKey: pub, Enabled: true}
+			card := &playback.RecipeCard{SessionID: "work", InputPath: "/private/approved.mp4", OutputSubdir: "/private/core/scratch", HWDevice: "/private/core/render-device", TranscodeNodeURL: node.URL, TargetBitrateKbps: 1234, KeyframePlaylist: true, ThrottleSeconds: 150}
+			service, err := New(Options{Origin: "https://core.example", PrivateKey: coreKey, Nodes: testNodes{[]Node{node}}, Store: store, RecipeStore: &testRecipes{card: card}, Sources: &testSources{store: store}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preexisting {
+				body, err := json.Marshal(card)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(body, &fields); err != nil {
+					t.Fatal(err)
+				}
+				fields["input_path"] = json.RawMessage(`"source:media-ref"`)
+				body, err = json.Marshal(fields)
+				if err != nil {
+					t.Fatal(err)
+				}
+				a, err := store.Begin(t.Context(), workerwire.Assignment{Version: 1, NodeID: node.ID, WorkID: "work", Method: http.MethodPost, Path: transcodeStartPath, Body: body})
+				if err != nil {
+					t.Fatal(err)
+				}
+				a.Sources = map[string]workerwire.Source{"source:media-ref": {Ref: workerwire.SourceRef{ID: "media-ref", Kind: sourceMedia, Revision: "revision"}, NodeID: node.ID, WorkID: "work", Generation: a.Generation}}
+				if err := store.BindInputs(t.Context(), node.ID, a.WorkID, a.Generation, map[string]string{"source:media-ref": inputDigest(card.InputPath)}); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Complete(t.Context(), a); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Activate(t.Context(), node.ID, a.WorkID, a.Generation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			request := httptest.NewRequest(http.MethodGet, "https://core.example/api/internal/workers/7/recipes/work", nil)
+			if err := workeridentity.Sign(request, "https://core.example", workeridentity.DomainNodeProof, key, node.ID, false); err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			service.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("lazy recipe=%d %s", response.Code, response.Body.String())
+			}
+			var envelope GrantReply
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			grant, err := workeridentity.DecodeGrant(envelope.Grant, "silo/worker-recipe/v1", node.URL, coreKey.Public().(ed25519.PublicKey), time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(grant.Body), "/private/") {
+				t.Fatalf("lazy assignment leaked core filesystem environment: %s", grant.Body)
+			}
+			var reply RecipeReply
+			if err := json.Unmarshal(grant.Body, &reply); err != nil {
+				t.Fatal(err)
+			}
+			var assigned playback.RecipeCard
+			if err := json.Unmarshal(reply.Assignment.Body, &assigned); err != nil {
+				t.Fatal(err)
+			}
+			if !assigned.KeyframePlaylist || assigned.ThrottleSeconds != card.ThrottleSeconds || assigned.TargetBitrateKbps != card.TargetBitrateKbps || reply.Recipe.TargetBitrateKbps != card.TargetBitrateKbps || reply.Recipe.InputPath != "source:media-ref" || len(reply.Assignment.Sources) != 1 || card.OutputSubdir == "" || card.HWDevice == "" {
+				t.Fatal("portable recipe lost byte parameters or mutated core-owned recipe")
+			}
+		})
 	}
 }

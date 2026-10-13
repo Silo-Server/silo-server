@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/executionlease"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"golang.org/x/sync/singleflight"
 )
 
 const (

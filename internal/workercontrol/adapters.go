@@ -31,6 +31,7 @@ type localConfig struct {
 const (
 	transcodeMode   = "transcode"
 	generationField = "generation"
+	inputPathField  = "input_path"
 )
 
 func newLocalConfig(options Options) *localConfig {
@@ -171,10 +172,16 @@ func (r *Runtime) currentRecipe(ctx context.Context, workID string) (*playback.R
 type recipeAdapter struct{ runtime *Runtime }
 
 func (a recipeAdapter) Get(ctx context.Context, id string) (*playback.RecipeCard, bool) {
+	if a.runtime.coreStopped(ctx, id) {
+		return nil, false
+	}
 	card, err := a.runtime.currentRecipe(ctx, id)
 	return card, err == nil
 }
 func (a recipeAdapter) Delete(ctx context.Context, id string) error {
+	if a.runtime.coreStopped(ctx, id) {
+		return nil
+	}
 	var ack struct {
 		Accepted bool `json:"accepted"`
 	}
@@ -198,6 +205,9 @@ func (a recipeAdapter) RevokeNode(ctx context.Context, _ string) error {
 func (a recipeAdapter) RevokeNodeID(ctx context.Context, _ int) error { return a.RevokeNode(ctx, "") }
 
 func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.Claims, error) {
+	if strings.Count(token, ".") != 1 {
+		return nil, errors.New("worker output requires a scoped core grant")
+	}
 	r.mu.Lock()
 	entry, cached := r.tokens[token]
 	r.mu.Unlock()
@@ -205,22 +215,12 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 		copy := *entry.claims
 		return &copy, nil
 	}
-	var claims streamtoken.Claims
-	var grant workeridentity.Grant
-	var authorityID string
-	if strings.Count(token, ".") == 1 {
-		decoded, authority, inner, err := r.decodeOutput(token)
-		if err != nil {
-			return nil, err
-		}
-		grant = decoded
-		claims = *inner
-		authorityID = authority.AuthorityID
-	} else {
-		if err := r.callGrant(ctx, "POST", "/tokens", map[string]any{"token": token}, workeridentity.DomainOutputGrant, &claims, &grant); err != nil {
-			return nil, err
-		}
+	grant, authority, inner, err := r.decodeOutput(token)
+	if err != nil {
+		return nil, err
 	}
+	claims := *inner
+	authorityID := authority.AuthorityID
 	workID := claims.TranscodeTransportID
 	if workID == "" {
 		workID = claims.SessionID
