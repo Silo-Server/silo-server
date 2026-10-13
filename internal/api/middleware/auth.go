@@ -25,13 +25,14 @@ type contextKey string
 const claimsKey contextKey = "claims"
 
 // SessionValidator checks a login session on every access-token request.
-// ActiveSessionRole reports whether the session is still active (not revoked
-// or expired) and the current role of the account it belongs to, in one
+// ActiveSession reports whether the session is still active (not revoked or
+// expired) and its authority: the current role of the account it belongs to
+// and, for a remote-playback handoff, the profile it is bound to. It is one
 // lookup; auth.SessionRepository implements it. It answers active=false with
 // no error for a missing, revoked or expired session; an error means the
 // session could not be checked, and the caller must not treat it as ended.
 type SessionValidator interface {
-	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // TokenValidator validates a JWT token string and returns the parsed claims.
@@ -166,7 +167,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
 			if err != nil {
 				writeCredentialCheckUnavailable(w, r, err)
 				return
@@ -175,7 +176,14 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
-			if role != claims.Role {
+			if authority.IsRemotePlayback() {
+				// The session row, not the token, says what a handoff
+				// may do; see remote_playback.go.
+				if !narrowRemotePlayback(r, claims, authority) {
+					writeForbidden(w, "A remote-playback session can only play on its approved profile")
+					return
+				}
+			} else if authority.Role != claims.Role {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
@@ -200,6 +208,55 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// AttachSession is for public routes whose answer depends on whether a
+// signed-in person asks. It puts the claims of a valid login session's
+// access token in the request context, as RequireAuth would, and otherwise
+// lets the request through anonymously: a missing, invalid or expired token,
+// a revoked session, an API key, a session restricted to changing its
+// temporary password, or a session check that cannot run all leave it
+// anonymous. It never refuses a request.
+func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if claims := am.sessionClaims(r); claims != nil {
+			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+				uid := claims.UserID
+				lc.UserID = &uid
+				lc.ImpersonatorUserID = claims.ImpersonatorUserID
+				lc.SessionID = claims.SessionID
+			}
+			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sessionClaims returns the claims of r's access token when it belongs to an
+// active login session, or nil.
+func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
+	token, ok := extractBearerToken(r)
+	if !ok || strings.HasPrefix(token, "sa_") {
+		return nil
+	}
+	claims, err := am.tokenValidator.ValidateToken(token)
+	if err != nil || claims == nil || claims.UserID <= 0 || claims.TokenType != auth.TokenTypeAccess ||
+		claims.PasswordChangeRequired {
+		return nil
+	}
+	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+	if err != nil || !active {
+		return nil
+	}
+	if authority.IsRemotePlayback() {
+		// Public routes take no profile and no allowlist; the narrowed
+		// claims are not the account's own login session.
+		authority.Narrow(claims)
+	} else if authority.Role != claims.Role {
+		return nil
+	}
+	am.sessionLastSeen.Touch(claims.SessionID)
+	return claims
 }
 
 // passwordChangeRoutes are the only routes a session holding a temporary
@@ -267,6 +324,13 @@ type HouseholdProfileRequirement func(ctx context.Context, userID int) (bool, er
 // holder themselves. The viewer gate that runs before it on the admin route
 // groups verifies a PIN-locked declared profile's X-Profile-Token.
 func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) func(http.Handler) http.Handler {
+	return RequireActingAdminWith(NewActingAdminDecider(checkPrimary, requiresProfile))
+}
+
+// RequireActingAdminWith is RequireActingAdmin over a prebuilt decision, so
+// the router can hand the same decider to ProvideActingAdmin and the routes
+// outside the admin groups answer exactly as the gate does.
+func RequireActingAdminWith(decide ActingAdminDecider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
@@ -275,14 +339,14 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile Hous
 				return
 			}
 
-			if claims.Role != "admin" {
+			if claims.Role != models.RoleAdmin {
 				writeForbidden(w, "Admin access required")
 				return
 			}
 
-			allowed, err := actingAdminAllowed(r, claims, checkPrimary, requiresProfile)
+			allowed, err := decide(r.Context(), ActingAdminRequest{Claims: claims, ProfileID: declaredProfileID(r), DeviceID: policyDeviceID(r)})
 			if err != nil {
-				writeInternalError(w, "Failed to verify active profile")
+				writeInternalError(w, activeProfileVerificationFailedMsg)
 				return
 			}
 			if !allowed {
@@ -303,15 +367,18 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile Hous
 // one of the caller's profiles fails closed: otherwise a non-primary session
 // could regain admin powers by sending a bogus X-Profile-Id.
 func actingAdminAllowed(r *http.Request, claims *auth.Claims, checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) (bool, error) {
-	profileID := declaredProfileID(r)
+	return actingAdminAllowedFor(r.Context(), claims, declaredProfileID(r), checkPrimary, requiresProfile)
+}
+
+func actingAdminAllowedFor(ctx context.Context, claims *auth.Claims, profileID string, checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) (bool, error) {
 	if profileID == "" {
-		refused, err := profileLessAdminRefused(r.Context(), claims, requiresProfile)
+		refused, err := profileLessAdminRefused(ctx, claims, requiresProfile)
 		return !refused, err
 	}
 	if checkPrimary == nil {
 		return true, nil
 	}
-	isPrimary, found, err := checkPrimary(r.Context(), claims.UserID, profileID)
+	isPrimary, found, err := checkPrimary(ctx, claims.UserID, profileID)
 	if err != nil {
 		return false, err
 	}
@@ -361,6 +428,7 @@ func GetClaims(ctx context.Context) *auth.Claims {
 // IsAdmin reports whether the context's authenticated user account has the
 // admin role. Returns false when no claims are present. Note this is the
 // account-level role; it says nothing about which household profile is active.
+// To decide whether a request may exercise admin powers, use ActingAdmin.
 func IsAdmin(ctx context.Context) bool {
 	claims := GetClaims(ctx)
 	return claims != nil && claims.Role == "admin"

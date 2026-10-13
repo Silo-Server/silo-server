@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -32,10 +33,11 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	// Resume positions are secondary to the played history: a slow or failing
-	// resume query must not discard it. Cancellation still ends the run.
+	// resume query must not discard it. Cancellation still ends the run, and so
+	// does a source over the size limits.
 	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
 	if err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || errors.Is(err, ErrUpstreamResponseTooLarge) {
 			return nil, nil, err
 		}
 		slog.WarnContext(ctx, "jellyfin history import: resume positions unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
@@ -43,6 +45,9 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		resumable = nil
 	}
 	favorites, err := p.client.FetchItems(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes)
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return nil, nil, err
+	}
 	if err != nil {
 		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
 		warnings = append(warnings, warnJellyfinFavoritesUnavailable)
@@ -60,10 +65,14 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		_, ok := seriesMeta[item.SeriesID]
 		return ok
 	})
-	if extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries); err != nil {
+	extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries)
+	switch {
+	case errors.Is(err, ErrUpstreamResponseTooLarge):
+		return nil, nil, err
+	case err != nil:
 		slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
 		warnings = append(warnings, warnJellyfinFavoriteSeriesUnavailable)
-	} else {
+	default:
 		maps.Copy(seriesMeta, extra)
 	}
 	merged := map[string]Record{}

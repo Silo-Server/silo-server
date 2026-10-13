@@ -27,6 +27,7 @@ func TestOrderedAndroidPushTransport(t *testing.T) {
 	f := new(fakeOrderedPush)
 	deps := pilotDeps(nil, nil)
 	deps.OrderedAndroidPush = f
+	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	h := NewHandler(deps)
 	headers := profileOwner()
 	headers["X-Push-Installation-Key"] = base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
@@ -40,7 +41,7 @@ func TestOrderedAndroidPushTransport(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Generation != "9007199254740993" || f.cmd.UserID != 1 || f.cmd.ProfileID != "p-owner" || f.cmd.DeviceID != "install" || f.cmd.Remove {
+	if receipt.Generation != "9007199254740993" || receipt.ServerID != fixtureServerID || f.cmd.UserID != 1 || f.cmd.ProfileID != "p-owner" || f.cmd.DeviceID != "install" || f.cmd.Remove {
 		t.Fatalf("receipt=%+v", receipt)
 	}
 	if strings.Contains(rec.Body.String(), headers["X-Push-Installation-Key"]) || strings.Contains(rec.Body.String(), strings.Repeat("a", 64)) {

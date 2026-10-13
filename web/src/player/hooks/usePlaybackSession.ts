@@ -8,7 +8,11 @@ import {
   describePlanTerminal,
   describePlaybackTransportError,
 } from "../playback-errors";
-import { isTransientPlayerRequestError, PlayerFetchError } from "../player-fetch";
+import {
+  isPlaybackSessionEndedError,
+  isTransientPlayerRequestError,
+  PlayerFetchError,
+} from "../player-fetch";
 import { useCodecDetection } from "./useCodecDetection";
 import {
   buildClientCapabilitiesV3,
@@ -87,7 +91,11 @@ interface PlaybackSessionState {
   connectionError: string | null;
 }
 
-export type PlaybackConnectionStatus = "connected" | "reconnecting" | "lost";
+/**
+ * `ended` means the server ended the session for good (an administrator
+ * stopped it); the player exits rather than reconnecting.
+ */
+export type PlaybackConnectionStatus = "connected" | "reconnecting" | "lost" | "ended";
 
 // Mid-stream reconnect backoff: 1s, 2s, 4s, 8s, then every 15s, for about two
 // and a quarter minutes in total before the player gives up and asks the
@@ -1254,6 +1262,18 @@ export function usePlaybackSession(
       } catch (err) {
         if (loadSequence !== loadSequenceRef.current) return false;
         if (reconnect) throw err;
+        if (isPlaybackSessionEndedError(err)) {
+          // An administrator ended the session: leave rather than show an
+          // error or recover into a fresh session.
+          setState((current) => ({
+            ...current,
+            replanning: false,
+            connectionStatus: "ended",
+            connectionErrorTitle: null,
+            connectionError: null,
+          }));
+          return false;
+        }
         if (retireSessionOnRefusal) {
           console.error("Failed to refresh playback output", err);
           return false;
@@ -1533,6 +1553,18 @@ export function usePlaybackSession(
         if (adopted || !isCurrent()) return;
       } catch (error) {
         if (!isCurrent()) return;
+        if (isPlaybackSessionEndedError(error)) {
+          endReconnect(false);
+          setState((current) => ({
+            ...current,
+            replacing: false,
+            replanning: false,
+            connectionStatus: "ended",
+            connectionErrorTitle: null,
+            connectionError: null,
+          }));
+          return;
+        }
         if (isRetryableReconnectError(error, "replan")) {
           retryLater();
           return;

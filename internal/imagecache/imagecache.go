@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
+	maxDownloadBytes = metadata.MaxArtworkSourceBytes // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 
@@ -451,6 +451,14 @@ func imageTypeName(t metadata.ImageType) string {
 		return "still"
 	case metadata.ImageProfile:
 		return "profile"
+	case metadata.ImageBanner:
+		return "banner"
+	case metadata.ImageThumb:
+		return "thumb"
+	case metadata.ImageClearArt:
+		return "clearart"
+	case metadata.ImageDisc:
+		return "disc"
 	default:
 		return "unknown"
 	}

@@ -391,7 +391,7 @@ export function StorageStep() {
         />
         <SettingFieldRow
           label="Keep provider artwork"
-          description="Copies posters and backdrops into your artwork storage."
+          description="Copies provider posters and backdrops into your artwork storage. Artwork stored next to your media is copied either way."
         >
           <Switch
             checked={form.getValue("metadata.cache_images") !== "false"}

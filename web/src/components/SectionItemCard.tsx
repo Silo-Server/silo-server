@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
   MEDIA_CARD_CAPTION_CLASS,
@@ -27,13 +27,16 @@ interface SectionItemCardProps {
   libraryId?: number;
   overlayPrefs?: CardOverlayPrefs | null;
   quickActionMode?: CardQuickActionMode;
+  /** On screen in the first row at first paint: load the poster eagerly. */
+  priority?: boolean;
 }
 
-export default function SectionItemCard({
+export default memo(function SectionItemCard({
   item,
   libraryId,
   overlayPrefs = null,
   quickActionMode = "none",
+  priority = false,
 }: SectionItemCardProps) {
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
@@ -66,6 +69,7 @@ export default function SectionItemCard({
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             lazy
+            priority={priority}
           >
             {item.status === "ambiguous" && (
               <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
@@ -155,4 +159,4 @@ export default function SectionItemCard({
       ) : null}
     </div>
   );
-}
+});

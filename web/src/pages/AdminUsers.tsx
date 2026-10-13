@@ -1,21 +1,15 @@
 import { useState, useId, useMemo, useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
+import type { AdminUser, CreateUserRequest } from "@/api/types";
 import {
   useAdminUsers,
   useCreateUser,
-  useUpdateUser,
   useAdminUserCapabilities,
   useAdminPolicyDefaults,
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
-import {
-  accountRoleLabel,
-  canChangeAccessPolicy,
-  canManageAccount,
-  canViewAsAccount,
-} from "@/lib/accountOwner";
+import { accountRoleLabel, canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
@@ -26,9 +20,7 @@ import {
   policyCreateFields,
   policyDefaultSource,
   policyInheritHints,
-  savedUserPolicyInheritHints,
   policyStateFromUser,
-  policyUpdateFields,
 } from "@/components/UserPolicyFields";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
@@ -81,7 +73,7 @@ import {
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
-import { V2ProblemError } from "@/api/v2/request";
+import { userDetailTabSearch } from "./admin-users/detail/userDetailTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import InvitationsTab from "./admin-settings/InvitationsTab";
 import InviteCodesTab from "./admin-settings/InviteCodesTab";
@@ -94,7 +86,6 @@ import {
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 
-const POLICY_LOCKED = "Only the server owner can change an admin's access and limits.";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
 type SortDirection = "asc" | "desc";
@@ -128,7 +119,6 @@ function AdminUsersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeAdminUsersTab(searchParams.get("tab"));
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<AdminUserEditor | null>(null);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUserEditor | null>(null);
   const [impersonatingUser, setImpersonatingUser] = useState<AdminUser | null>(null);
   const [search, setSearch] = useState("");
@@ -177,25 +167,17 @@ function AdminUsersPage() {
     setSortDir(field === "created_at" || field === "last_active_at" ? "desc" : "asc");
   }
 
-  async function loadEditor(u: AdminUser, deleting = false) {
+  async function handleDelete(u: AdminUser) {
     if (busy.current || !available) return;
     busy.current = true;
     setActionError("");
     try {
-      const editor = await getAdminUser(u.id, authority);
-      if (deleting) setConfirmDeleteUser(editor);
-      else {
-        setEditingUser(editor);
-        setDialogOpen(true);
-      }
+      setConfirmDeleteUser(await getAdminUser(u.id, authority));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not load user.");
     } finally {
       busy.current = false;
     }
-  }
-  function handleDelete(u: AdminUser) {
-    void loadEditor(u, true);
   }
 
   function setActiveTab(value: string) {
@@ -283,7 +265,6 @@ function AdminUsersPage() {
             onOpenChange={(open) => {
               if (formBusy.current || (open && !available)) return;
               setDialogOpen(open);
-              if (!open) setEditingUser(null);
             }}
           >
             <DialogTrigger asChild>
@@ -293,17 +274,13 @@ function AdminUsersPage() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
-                <DialogTitle>{editingUser ? "Edit User" : "Create User"}</DialogTitle>
+                <DialogTitle>Create User</DialogTitle>
               </DialogHeader>
-              <UserForm
-                initialEditor={editingUser}
+              <CreateUserForm
                 onBusy={(value) => {
                   formBusy.current = value;
                 }}
-                onClose={() => {
-                  setDialogOpen(false);
-                  setEditingUser(null);
-                }}
+                onClose={() => setDialogOpen(false)}
               />
             </DialogContent>
           </Dialog>
@@ -502,16 +479,13 @@ function AdminUsersPage() {
                           {canManageAccount(u, viewerId, viewerIsOwner) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  aria-label={`Edit ${u.username}`}
-                                  onClick={() => {
-                                    void loadEditor(u);
-                                  }}
-                                >
-                                  <Pencil className="h-3 w-3" aria-hidden="true" />
+                                <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+                                  <Link
+                                    to={`/admin/users/${u.id}${userDetailTabSearch("access")}`}
+                                    aria-label={`Edit ${u.username}`}
+                                  >
+                                    <Pencil className="h-3 w-3" aria-hidden="true" />
+                                  </Link>
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Edit user</TooltipContent>
@@ -527,7 +501,7 @@ function AdminUsersPage() {
                                     size="icon"
                                     className="h-7 w-7"
                                     aria-label={`Delete ${u.username}`}
-                                    onClick={() => handleDelete(u)}
+                                    onClick={() => void handleDelete(u)}
                                   >
                                     <Trash2 className="h-3 w-3" aria-hidden="true" />
                                   </Button>
@@ -727,89 +701,49 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
   return fallback;
 }
 
-function UserForm({
-  initialEditor,
+function CreateUserForm({
   onClose,
   onBusy,
 }: {
-  initialEditor: AdminUserEditor | null;
   onClose: () => void;
   onBusy: (busy: boolean) => void;
 }) {
-  const [editor, setEditor] = useState(initialEditor);
-  const user = editor?.user;
   const [authority] = useState(captureAdminUserAuthority);
   const busy = useRef(false);
   const [error, setError] = useState("");
-  const [conflict, setConflict] = useState(false);
-  const [reloading, setReloading] = useState(false);
-  const [saved, setSaved] = useState(false);
   const capabilities = useAdminUserCapabilities();
   // Only the server Owner may grant the admin role; the server refuses anyone else.
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
-  const adminRoleLocked = !viewerIsOwner && user?.role !== "admin";
-  // No account changes its own role or disables itself; the server refuses
-  // both. The Owner's standing fixes the same fields.
-  const ownAccount = user?.id !== undefined && user?.id === viewerId;
-  // Only the Owner changes an admin's access policy, its own included; the
-  // server refuses anyone else.
-  const policyLocked = user !== undefined && !canChangeAccessPolicy(user, viewerId, viewerIsOwner);
+  const adminRoleLocked = !viewerIsOwner;
   const [createDefaultProfile, setCreateDefaultProfile] = useState(true);
-  async function reload() {
-    if (!editor || busy.current) return;
-    busy.current = true;
-    setReloading(true);
-    onBusy(true);
-    try {
-      setEditor(await getAdminUser(editor.user.id, editor.profileContext));
-      setConflict(false);
-      setError("");
-      if (saved) onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reload user.");
-    } finally {
-      busy.current = false;
-      setReloading(false);
-      onBusy(false);
-    }
-  }
 
   const { data: libraries = [] } = useAdminLibraries();
   const { data: accessGroups = [], isSuccess: accessGroupsLoaded } = useAccessGroups();
   const { data: policyDefaults } = useAdminPolicyDefaults();
-  const [username, setUsername] = useState(user?.username ?? "");
-  const [email, setEmail] = useState(user?.email ?? "");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
-  const [role, setRole] = useState(user?.role ?? "user");
-  const [enabled, setEnabled] = useState(user?.enabled ?? true);
-  const [permissions, setPermissions] = useState<string[]>(
-    user?.permissions ?? [PERMISSION_MARKER_EDIT],
-  );
+  const [role, setRole] = useState("user");
+  const [permissions, setPermissions] = useState<string[]>([PERMISSION_MARKER_EDIT]);
   // Policy fields inherit from the access group unless explicitly overridden.
-  const [policy, setPolicy] = useState(() => policyStateFromUser(user ?? null));
-  const [maxProfiles, setMaxProfiles] = useState<number>(user?.max_profiles ?? 5);
+  const [policy, setPolicy] = useState(() => policyStateFromUser(null));
+  const [maxProfiles, setMaxProfiles] = useState(5);
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
   const requireChangeId = useId();
   const roleId = useId();
-  const enabledId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const maxProfilesId = useId();
   const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
-  const updateMutation = useUpdateUser();
-  const isPending = createMutation.isPending || updateMutation.isPending;
-  // The group picker starts on the account's group. A new account, or an admin
-  // being demoted here, starts on the default group (undefined until picked),
-  // which is where the server would place it anyway. An admin stays ungrouped
-  // (auth.Repository create and update), so the picker is disabled for admins.
-  const [pickedGroupID, setPickedGroupID] = useState<number | null | undefined>(
-    user && user.role !== "admin" ? user.access_group_id : undefined,
-  );
+  // The group picker starts on the default group (undefined until picked),
+  // which is where the server would place the account anyway. An admin stays
+  // ungrouped (auth.Repository create), so the picker is disabled for admins.
+  const [pickedGroupID, setPickedGroupID] = useState<number | null | undefined>(undefined);
   const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
   const selectedGroupID = pickedGroupID === undefined ? defaultGroupID : pickedGroupID;
   const inheritGroupID = effectiveAccessGroupID(role, selectedGroupID);
@@ -820,13 +754,7 @@ function UserForm({
   const hintSource = awaitingDefaultGroup ? "group" : policyDefaultSource(role, inheritGroupID);
   const inheritHints = awaitingDefaultGroup
     ? undefined
-    : (policyInheritHints(role, inheritGroupID, accessGroups, policyDefaults) ??
-      // Until the group or the server defaults load, the saved account's
-      // resolved values stand in, but only for fields it does not override:
-      // an override is not what the field falls back to.
-      (role !== "admin" && user && selectedGroupID === user.access_group_id
-        ? savedUserPolicyInheritHints(user, undefined)
-        : undefined));
+    : policyInheritHints(role, inheritGroupID, accessGroups, policyDefaults);
   // The group to send: none while the default group is still unknown, so the
   // server applies its own default instead of an accidental "no group".
   const groupToSend = awaitingDefaultGroup
@@ -838,8 +766,8 @@ function UserForm({
       : String(selectedGroupID);
   // Creating an account can't choose "no group": the server treats a missing or
   // null group alike and places the account in the default group. Offer it only
-  // when editing, or when there is no default group to show instead.
-  const offerNoGroup = Boolean(user) || awaitingDefaultGroup || defaultGroupID === null;
+  // when there is no default group to show instead.
+  const offerNoGroup = awaitingDefaultGroup || defaultGroupID === null;
   const selectedGroupMissing =
     selectedGroupID !== null &&
     accessGroupsLoaded &&
@@ -849,10 +777,8 @@ function UserForm({
     e.preventDefault();
     if (
       busy.current ||
-      conflict ||
-      saved ||
       !capabilities.data?.available ||
-      (!user && createDefaultProfile && !capabilities.data.default_profile)
+      (createDefaultProfile && !capabilities.data.default_profile)
     )
       return;
     if (!isValidEmail(email)) {
@@ -863,47 +789,23 @@ function UserForm({
     onBusy(true);
     setError("");
     try {
-      if (user && editor) {
-        const body: UpdateUserRequest = {
-          username,
-          email,
-          role,
-          permissions,
-          enabled,
-          max_profiles: maxProfiles,
-          ...(policyLocked ? {} : policyUpdateFields(policy)),
-        };
-        if (groupToSend !== undefined) {
-          body.access_group_id = groupToSend;
-        }
-        if (password) {
-          body.password = password;
-          if (requirePasswordChange) body.require_password_change = true;
-        }
-        await updateMutation.mutateAsync({ editor, body });
-        setSaved(true);
-        await getAdminUser(user.id, editor.profileContext);
-        onClose();
-      } else {
-        const body: CreateUserRequest = {
-          username,
-          email,
-          password,
-          ...(requirePasswordChange ? { require_password_change: true } : {}),
-          role,
-          permissions,
-          create_default_profile: createDefaultProfile,
-          max_profiles: maxProfiles,
-          ...policyCreateFields(policy),
-          ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
-        };
-        await createMutation.mutateAsync({ body, profileContext: authority });
-        createMutation.reset();
-        onClose();
-      }
+      const body: CreateUserRequest = {
+        username,
+        email,
+        password,
+        ...(requirePasswordChange ? { require_password_change: true } : {}),
+        role,
+        permissions,
+        create_default_profile: createDefaultProfile,
+        max_profiles: maxProfiles,
+        ...policyCreateFields(policy),
+        ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
+      };
+      await createMutation.mutateAsync({ body, profileContext: authority });
+      createMutation.reset();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save user.");
-      if (err instanceof V2ProblemError && err.status === 412) setConflict(true);
     } finally {
       busy.current = false;
       onBusy(false);
@@ -913,28 +815,16 @@ function UserForm({
   return (
     <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
       {error && <p role="alert">{error}</p>}
-      {(conflict || saved) && (
-        <div>
-          {saved
-            ? "Saved. Reload the user to confirm the current state."
-            : "Your draft is preserved. Reload before submitting again."}
-          <Button type="button" disabled={reloading} onClick={() => void reload()}>
-            Reload current user
-          </Button>
-        </div>
-      )}
-      {!user && (
-        <label className="mb-3 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={createDefaultProfile}
-            onChange={(event) => setCreateDefaultProfile(event.target.checked)}
-          />
-          Create a default profile
-          {!capabilities.data?.default_profile &&
-            " (unavailable; uncheck to create only the account)"}
-        </label>
-      )}
+      <label className="mb-3 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={createDefaultProfile}
+          onChange={(event) => setCreateDefaultProfile(event.target.checked)}
+        />
+        Create a default profile
+        {!capabilities.data?.default_profile &&
+          " (unavailable; uncheck to create only the account)"}
+      </label>
 
       <Tabs defaultValue="account" className="min-h-0 flex-1">
         <TabsList variant="line" className="border-border mb-4 w-full justify-start border-b pb-1">
@@ -971,93 +861,48 @@ function UserForm({
                   required
                 />
               </div>
-              {user && !user.password_login ? (
-                <div className="space-y-2">
-                  <Label>Password</Label>
-                  <p className="text-muted-foreground text-xs">
-                    An external sign-in provider manages this account's password.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor={passwordId}>
-                    Password {user && "(leave blank to keep current)"}
-                  </Label>
-                  <Input
-                    id={passwordId}
-                    type="password"
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required={!user}
+              <div className="space-y-2">
+                <Label htmlFor={passwordId}>Password</Label>
+                <Input
+                  id={passwordId}
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id={requireChangeId}
+                    checked={requirePasswordChange && password !== ""}
+                    disabled={password === ""}
+                    onCheckedChange={setRequirePasswordChange}
                   />
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id={requireChangeId}
-                      checked={requirePasswordChange && password !== ""}
-                      disabled={password === ""}
-                      onCheckedChange={setRequirePasswordChange}
-                    />
-                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
-                      Require change at {user ? "next" : "first"} sign-in
-                    </Label>
-                  </div>
+                  <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                    Require change at first sign-in
+                  </Label>
                 </div>
-              )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
-                <Select
-                  value={user?.is_owner ? "owner" : role}
-                  onValueChange={setRole}
-                  disabled={user?.is_owner || ownAccount}
-                >
+                <Select value={role} onValueChange={setRole}>
                   <SelectTrigger id={roleId}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {user?.is_owner && <SelectItem value="owner">Owner</SelectItem>}
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="admin" disabled={adminRoleLocked}>
                       Admin
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {ownAccount ? (
-                  <p className="text-muted-foreground text-xs">You can't change your own role.</p>
-                ) : (
-                  adminRoleLocked && (
-                    <p className="text-muted-foreground text-xs">
-                      Only the server owner can grant the admin role.
-                    </p>
-                  )
+                {adminRoleLocked && (
+                  <p className="text-muted-foreground text-xs">
+                    Only the server owner can grant the admin role.
+                  </p>
                 )}
               </div>
             </div>
-            {user && (
-              <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <div>
-                  <div className="text-sm font-medium">Account status</div>
-                  <div className="text-muted-foreground text-xs">
-                    {user.is_owner
-                      ? "The server owner stays an enabled admin."
-                      : ownAccount
-                        ? "You can't disable your own account."
-                        : "Disable access without deleting the user."}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor={enabledId} className="text-xs">
-                    Enabled
-                  </Label>
-                  <Switch
-                    id={enabledId}
-                    checked={enabled}
-                    onCheckedChange={setEnabled}
-                    disabled={user.is_owner || ownAccount}
-                  />
-                </div>
-              </div>
-            )}
           </TabsContent>
 
           <TabsContent value="access" className="mt-0 space-y-4">
@@ -1129,30 +974,22 @@ function UserForm({
                 }
               />
             </div>
-            <fieldset disabled={policyLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
-              {policyLocked && <p className="text-muted-foreground text-xs">{POLICY_LOCKED}</p>}
-              <PolicyAccessFields
-                disabled={policyLocked}
-                state={policy}
-                onChange={setPolicy}
-                source={hintSource}
-                effective={inheritHints}
-                libraries={libraries}
-              />
-            </fieldset>
+            <PolicyAccessFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+              libraries={libraries}
+            />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <fieldset disabled={policyLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
-              {policyLocked && <p className="text-muted-foreground text-xs">{POLICY_LOCKED}</p>}
-              <PolicyLimitFields
-                disabled={policyLocked}
-                state={policy}
-                onChange={setPolicy}
-                source={hintSource}
-                effective={inheritHints}
-              />
-            </fieldset>
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label htmlFor={maxProfilesId}>Max Profiles</Label>
               <Input
@@ -1172,15 +1009,12 @@ function UserForm({
           type="submit"
           className="w-full"
           disabled={
-            isPending ||
-            conflict ||
-            saved ||
-            reloading ||
+            createMutation.isPending ||
             !capabilities.data?.available ||
-            (!user && createDefaultProfile && !capabilities.data.default_profile)
+            (createDefaultProfile && !capabilities.data.default_profile)
           }
         >
-          {isPending ? "Saving..." : "Save"}
+          {createMutation.isPending ? "Saving..." : "Save"}
         </Button>
       </div>
     </form>

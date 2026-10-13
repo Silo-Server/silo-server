@@ -159,6 +159,19 @@ func TestRecipeCardPreservesCopyVideoMPEGTS(t *testing.T) {
 	}
 }
 
+// A rebuilt session must keep serving the keyframe playlist the player has.
+func TestRecipeCardPreservesKeyframePlaylist(t *testing.T) {
+	card := NewRecipeCard(42, "profile-1", 77, "", TranscodeOpts{
+		SessionID: "planned", TargetCodecVideo: "copy", TargetCodecAudio: "copy", KeyframePlaylist: true,
+	})
+	if !card.TranscodeOpts(t.TempDir(), "/usr/bin/ffmpeg", nil).KeyframePlaylist {
+		t.Fatal("stored recipe lost the keyframe playlist")
+	}
+	if back := RecipeCardFromClaims(ptr(card.ToClaims())); !back.KeyframePlaylist {
+		t.Fatal("stream-token recipe lost the keyframe playlist")
+	}
+}
+
 func TestRecipeCardNetworkRouteSurvivesRecovery(t *testing.T) {
 	for _, provider := range []*string{nil, new(""), new("tailscale")} {
 		card := NewDirectRecipeCard("network-route", 42, "profile-1", 77)

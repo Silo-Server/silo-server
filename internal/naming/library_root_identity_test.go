@@ -212,13 +212,13 @@ func TestBareSeasonFolderOnlyCountsAsImmediateParent(t *testing.T) {
 		"/tv/Season/Example.Show.S01E01.mkv":                           "/tv/Season",
 	}
 	for filePath, want := range cases {
-		root, ok := deriveSeriesRoot(filePath, "Example Show", true, false, "/tv")
+		root, ok := deriveSeriesRoot(filePath, true, false, "/tv")
 		if !ok || root.RootPath != want {
 			t.Errorf("%s: root %+v ok=%v, want %q", filePath, root, ok, want)
 		}
 	}
 	// A show named "Season" with a numbered season folder keeps its own name.
-	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", "Season", true, false, "/tv")
+	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", true, false, "/tv")
 	if !ok || root.RootPath != "/tv/Season" {
 		t.Errorf("show named Season: root %+v ok=%v", root, ok)
 	}
@@ -237,11 +237,11 @@ func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
 	if !evidence.HasSeasonStructure {
 		t.Errorf("extractPathEvidence: HasSeasonStructure=false for bare season folder")
 	}
-	if _, ok := firstSeasonNumber([]string{"Example Show", "Season"}, true, true); ok {
+	if _, ok := firstSeasonNumber([]string{"Example Show", "Season"}, "Example.Show.S01E01", true, true); ok {
 		t.Errorf("bare season folder must not supply a season number")
 	}
 	// A bare folder higher up is not season structure.
-	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, "Example Show", true, true); found {
+	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, "Example.Show.S01E01", true, true); found {
 		t.Errorf("ancestor bare season folder counted as season structure")
 	}
 	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
@@ -270,7 +270,7 @@ func TestBareSeasonFolderInsideNumberedSeasonKeepsShow(t *testing.T) {
 		}
 		keys[group.ContentGroupKey] = true
 	}
-	if number, ok := firstSeasonNumber([]string{"Example Show", "Season 2", "Season"}, true, true); !ok || number != 2 {
+	if number, ok := firstSeasonNumber([]string{"Example Show", "Season 2", "Season"}, "Example Show - S02E01", true, true); !ok || number != 2 {
 		t.Errorf("season number %d ok=%v, want 2 from the numbered ancestor", number, ok)
 	}
 }

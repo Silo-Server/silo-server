@@ -81,6 +81,40 @@ type HomeDismissalUpsertInput struct {
 	Body HomeDismissal
 }
 
+// HomeLayoutInput is the getHomeLayout query.
+type HomeLayoutInput struct {
+	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
+	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
+	IncludeItems int    `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	ImageSize    string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default" example:"medium"`
+}
+
+// HomeLayout is the home page's sections in display order and, on request,
+// the cards of the first of them.
+type HomeLayout struct {
+	Sections         []SectionLayoutEntry `json:"sections" doc:"Empty, never null"`
+	IncludedSections []Section            `json:"included_sections" doc:"The first include_items sections with their cards, in display order, each exactly as getHomeSectionItems answers it for the same viewer and image_size. A section whose cards failed to load or were not ready in time is absent; fetch it with getHomeSectionItems. Empty, never null"`
+}
+
+// HomeLayoutOutput is the getHomeLayout response.
+type HomeLayoutOutput struct {
+	Body HomeLayout
+}
+
+// HomeCapabilities is the getHomeCapabilities body.
+type HomeCapabilities struct {
+	Capability
+	IncludeItemsMax int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+}
+
+// HomeCapabilitiesOutput is the getHomeCapabilities response.
+type HomeCapabilitiesOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         HomeCapabilities
+}
+
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
@@ -158,6 +192,7 @@ const (
 	opDismissHomeItem             = "dismissHomeItem"
 	opUndismissHomeItem           = "undismissHomeItem"
 	opGetHomeLayout               = "getHomeLayout"
+	opGetHomeCapabilities         = "getHomeCapabilities"
 	opListHomeSections            = "listHomeSections"
 	opGetHomeSectionItems         = "getHomeSectionItems"
 	opListSectionRecipes          = "listSectionRecipes"
@@ -182,8 +217,10 @@ func registerHome(reg *Registry) {
 	undismissOp.RetrySafety = RetrySafetyNaturalIdempotent
 	Register(reg, undismissOp, reg.undismissHomeItem)
 
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/capabilities", opGetHomeCapabilities, "home",
+		"The home page features this server supports, such as the cards of the first sections on getHomeLayout.")), reg.getHomeCapabilities)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
-		"The home page's section layout for the acting profile, without items.")), reg.getHomeLayout)
+		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), reg.getHomeLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
 		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
@@ -353,7 +390,17 @@ func (reg *Registry) undismissHomeItem(ctx context.Context, in *HomeDismissalInp
 	return nil, nil
 }
 
-func (reg *Registry) getHomeLayout(ctx context.Context, _ *struct{}) (*SectionLayoutOutput, error) {
+func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) (*HomeCapabilitiesOutput, error) {
+	if reg.deps.HomeSections == nil {
+		return &HomeCapabilitiesOutput{Body: HomeCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
+	}
+	return &HomeCapabilitiesOutput{Body: HomeCapabilities{
+		Capability:      Capability{State: StateAvailable},
+		IncludeItemsMax: handlers.MaxHomeLayoutIncludedSections,
+	}}, nil
+}
+
+func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*HomeLayoutOutput, error) {
 	svc, p := reg.homeSections()
 	if p != nil {
 		return nil, p
@@ -361,11 +408,18 @@ func (reg *Registry) getHomeLayout(ctx context.Context, _ *struct{}) (*SectionLa
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayout(ctx)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.ImageSize), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionLayoutOutput{Body: sectionLayoutOf(view)}, nil
+	out := HomeLayout{Sections: sectionLayoutOf(view.Layout).Sections, IncludedSections: make([]Section, 0, len(view.IncludedSections))}
+	if len(view.IncludedSections) > 0 {
+		sel := reg.ratingSelection(ctx)
+		for _, s := range view.IncludedSections {
+			out.IncludedSections = append(out.IncludedSections, sectionOf(s, sel))
+		}
+	}
+	return &HomeLayoutOutput{Body: out}, nil
 }
 
 func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput) (*SectionCollectionOutput, error) {

@@ -199,6 +199,9 @@ type PlaybackConfig struct {
 	SubtitleSyncNodeCapacity int                   `yaml:"-"`
 	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
 	Routing                  PlaybackRoutingPolicy `yaml:"-"`
+	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
+	// from one complete keyframe-planned playlist (#1466).
+	KeyframePlaylist bool `yaml:"-"`
 }
 
 // RedisConfig holds Redis connection settings.
@@ -295,6 +298,8 @@ type RecommendationsConfig struct {
 // transcription (operators often run a dedicated Whisper server). Settings
 // load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
 type AIConfig struct {
+	AuthMode          string `yaml:"-"`
+	ReasoningEffort   string `yaml:"-"`
 	BaseURL           string `yaml:"-"`
 	APIKey            string `yaml:"-"`
 	ChatModel         string `yaml:"-"`
@@ -387,6 +392,9 @@ type MetadataConfig struct {
 	// ImageWorkers is how many artwork encodes run at once. Zero means one
 	// per CPU core.
 	ImageWorkers int `yaml:"-"`
+	// PersonRefreshPerMinute caps background person metadata lookups per API
+	// node (metadata.person_refresh_per_minute).
+	PersonRefreshPerMinute int `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.

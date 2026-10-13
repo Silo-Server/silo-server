@@ -10,7 +10,7 @@ import { useStepSubmit } from "@/pages/setup-wizard/useStep";
 const { mutateAsync, markDone, snapshot, authority } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   markDone: vi.fn(),
-  snapshot: { loaded: true },
+  snapshot: { loaded: true, values: undefined as Record<string, string> | undefined },
   authority: { profileId: "profile-a" },
 }));
 vi.mock("@/pages/setup-wizard/WizardContext", () => ({
@@ -33,7 +33,7 @@ const sensitiveData = { configured: [], managed_by_env: [] };
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerSettings: () => ({
-    data: snapshot.loaded ? settingsData : undefined,
+    data: snapshot.loaded ? (snapshot.values ?? settingsData) : undefined,
     isLoading: false,
   }),
   useAdminSensitiveStatus: () => ({ data: sensitiveData }),
@@ -45,10 +45,39 @@ afterEach(() => {
   mutateAsync.mockReset();
   markDone.mockReset();
   snapshot.loaded = true;
+  snapshot.values = undefined;
   authority.profileId = "profile-a";
 });
 
 describe("useSettingsForm save()", () => {
+  it("hydrates an account's persisted model and effort while retaining unrelated drafts and their guard", async () => {
+    snapshot.values = {
+      "ai.chat_model": "a-model",
+      "ai.reasoning_effort": "high",
+      "branding.server_name": "Silo",
+    };
+    const { result, rerender } = renderHook(() =>
+      useSettingsForm({ keys: ["ai.chat_model", "ai.reasoning_effort", "branding.server_name"] }),
+    );
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+    snapshot.values = {
+      "ai.chat_model": "b-model",
+      "ai.reasoning_effort": "",
+      "branding.server_name": "Silo",
+    };
+    rerender();
+    expect(result.current.getValue("ai.chat_model")).toBe("b-model");
+    expect(result.current.getValue("ai.reasoning_effort")).toBe("");
+    expect(result.current.getValue("branding.server_name")).toBe("Casa");
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+    const conflict = new Error("412 precondition failed");
+    mutateAsync.mockRejectedValue(conflict);
+    await act(async () => {
+      await expect(result.current.save()).rejects.toBe(conflict);
+    });
+    expect(result.current.getValue("branding.server_name")).toBe("Casa");
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+  });
   it("rejects a failed write and keeps the staged draft for retry", async () => {
     const error = new Error("412 precondition failed");
     mutateAsync.mockRejectedValue(error);

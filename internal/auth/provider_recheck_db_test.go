@@ -833,7 +833,7 @@ func TestProviderRecheckRemotePlaybackHandoffChainDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := devices.ApproveRemotePlayback(WithClaims(ctx, &Claims{UserID: env.user.ID, SessionID: approver, TokenType: TokenTypeAccess}),
+	if err := devices.ApproveForProfile(WithClaims(ctx, &Claims{UserID: env.user.ID, SessionID: approver, TokenType: TokenTypeAccess}),
 		DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID, profiles[0].ID); err != nil {
 		t.Fatal(err)
 	}

@@ -59,6 +59,7 @@ import StarRating from "@/components/StarRating";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import type { TitleLink } from "@/lib/titleLinks";
 import VersionDropdown from "./VersionDropdown";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
@@ -167,12 +168,6 @@ export interface ActionBarSecondaryAction {
   pressed?: boolean;
 }
 
-/** An external page for the title, such as IMDb or TMDB. */
-export interface ActionBarLink {
-  label: string;
-  href: string;
-}
-
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
@@ -183,7 +178,8 @@ export interface ActionBarProps {
   /** Replaces the Play action. */
   primaryAction?: ActionBarPrimaryAction;
   secondaryActions?: ActionBarSecondaryAction[];
-  links?: ActionBarLink[];
+  /** The title's pages elsewhere, such as IMDb or TMDB. */
+  links?: TitleLink[];
   playHref?: string;
   playLabel?: string;
   playProgress?: number;
@@ -694,20 +690,6 @@ export default function ActionBar({
           );
         })}
 
-        {links?.map((link) => (
-          <Button
-            key={link.href}
-            asChild
-            variant="glass"
-            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[0.8125rem] font-semibold tracking-wide`}
-          >
-            <a href={link.href} target="_blank" rel="noreferrer">
-              {link.label}
-              <ExternalLink aria-hidden="true" className="size-3.5 opacity-60" />
-            </a>
-          </Button>
-        ))}
-
         {/* ── Watched toggle ─────────────────────────────────── */}
         {watchedLabel && onToggleWatched && (
           <Button
@@ -1101,6 +1083,29 @@ export default function ActionBar({
             />
           )}
         </div>
+      )}
+
+      {/* ── The title on IMDb, TMDB and TVDB ─────────────────── */}
+      {/* A row of its own, so the links never push the library actions
+          (watched, favorite, rating, more) onto another line. */}
+      {links && links.length > 0 && (
+        <ul aria-label="External links" className="detail-external-links flex flex-wrap gap-2">
+          {links.map((link) => (
+            <li key={link.href}>
+              <Button
+                asChild
+                variant="glass"
+                size="sm"
+                className={`${staticGlassActionClass} cursor-pointer rounded-full text-xs font-semibold tracking-wide`}
+              >
+                <a href={link.href} target="_blank" rel="noopener noreferrer">
+                  {link.label} <span className="sr-only">(opens in a new tab)</span>
+                  <ExternalLink aria-hidden="true" className="size-3 opacity-60" />
+                </a>
+              </Button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

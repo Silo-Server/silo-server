@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +36,16 @@ var (
 	ErrDeviceLoginCanceled   = errors.New("device login request canceled by the device")
 )
 
+// QuickConnectAttemptsError refuses a Quick Connect code lookup or decision
+// once the account has spent its attempt budget.
+type QuickConnectAttemptsError struct {
+	RetryAfter time.Duration
+}
+
+func (e *QuickConnectAttemptsError) Error() string {
+	return "too many Quick Connect code attempts"
+}
+
 const (
 	DeviceLoginStatusPending  = "pending"
 	DeviceLoginStatusApproved = "approved"
@@ -42,6 +55,10 @@ const (
 	DeviceLoginStatusExpired  = "expired"
 	DeviceLoginPurposeLogin   = "device_login"
 	DeviceLoginPurposeRemote  = "remote_playback"
+	// DeviceLoginPurposeQuickConnect is a Jellyfin app signing in to the
+	// Jellyfin-compatible API with Quick Connect. Its approval names the
+	// profile the app's session is bound to.
+	DeviceLoginPurposeQuickConnect = "jellyfin_quick_connect"
 
 	deviceLoginTTL           = 15 * time.Minute
 	legacyDeviceLoginTTL     = 10 * time.Minute
@@ -51,9 +68,12 @@ const (
 	browserCodeBytes         = 32
 	userCodeLength           = 8
 	userCodeAttempts         = 5
-	maxDeviceNameLen         = 120
-	maxDevicePlatformLen     = 80
-	maxUserAgentLen          = 256
+	// Jellyfin apps show Quick Connect codes as six digits.
+	quickConnectCodeLength  = 6
+	quickConnectSecretBytes = 32
+	maxDeviceNameLen        = 120
+	maxDevicePlatformLen    = 80
+	maxUserAgentLen         = 256
 
 	// An approver lookup holds a pending code at least this long, so the
 	// device doesn't replace it while someone is approving it...
@@ -119,6 +139,44 @@ type DeviceLoginLookupInput struct {
 	// hold its code (v2 getDeviceLogin). The frozen v1 lookup leaves the row
 	// untouched. Only Lookup reads it.
 	MarkOpened bool
+	// AccountID is the signed-in account making the lookup or decision. A
+	// six-digit Quick Connect code is found only for an account, and every
+	// such attempt spends that account's Quick Connect code budget; without
+	// one the code reads as unknown. The frozen v1 routes never set it, so
+	// they never see a Quick Connect request.
+	AccountID int
+}
+
+// QuickConnectStartInput opens a Jellyfin Quick Connect request with what the
+// app's MediaBrowser authorization header says about it.
+type QuickConnectStartInput struct {
+	// DeviceName is the header's Device, shown to the approver.
+	DeviceName string
+	// AppName is the header's Client, shown as the platform.
+	AppName   string
+	IPAddress string
+	UserAgent string
+}
+
+// QuickConnectStart is the opened request as the Jellyfin app sees it.
+type QuickConnectStart struct {
+	// Secret is the device code: the app polls and collects with it.
+	Secret     string
+	Code       string
+	DeviceName string
+	AppName    string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+}
+
+// QuickConnectState is a Quick Connect request as its app polls it.
+type QuickConnectState struct {
+	Status string
+	// Code is the request's code, derived from the secret (QuickConnectCode).
+	Code       string
+	DeviceName string
+	AppName    string
+	CreatedAt  time.Time
 }
 
 type DeviceLoginInfo struct {
@@ -143,10 +201,13 @@ type DeviceLoginPollResult struct {
 	Opened bool
 	// ExpiresAt is the pending request's current expiry, which approver
 	// lookups can move later than the start answer said. Zero otherwise.
-	ExpiresAt        time.Time
-	TokenPair        *TokenPair
-	User             *models.User
-	ProfileID        string
+	ExpiresAt time.Time
+	TokenPair *TokenPair
+	User      *models.User
+	ProfileID string
+	// ProfileName names the bound profile of a remote-playback or Quick
+	// Connect request.
+	ProfileName      string
 	ProfileToken     string
 	Temporary        bool
 	SessionExpiresAt time.Time
@@ -190,8 +251,14 @@ type DeviceLoginService struct {
 	sessions *SessionRepository
 	stores   userstore.UserStoreProvider
 	profiles *access.ProfileTokenService
-	// newUserCode draws a user code; tests replace it to force a collision.
-	newUserCode func() (string, error)
+	// quickConnectAttempts is the per-account budget for six-digit Quick
+	// Connect codes. Nil allows every attempt.
+	quickConnectAttempts AttemptReserver
+	// newUserCode draws a user code and newQuickConnectSecret a Quick
+	// Connect secret, which fixes its code; tests replace them to force a
+	// collision.
+	newUserCode           func() (string, error)
+	newQuickConnectSecret func() (string, error)
 }
 
 const deviceLoginSelectColumns = `
@@ -216,13 +283,107 @@ func NewDeviceLoginService(
 		return nil
 	}
 	return &DeviceLoginService{
-		pool:        pool,
-		users:       users,
-		jwt:         jwt,
-		sessions:    sessions,
-		stores:      stores,
-		profiles:    profiles,
-		newUserCode: randomUserCode,
+		pool:                  pool,
+		users:                 users,
+		jwt:                   jwt,
+		sessions:              sessions,
+		stores:                stores,
+		profiles:              profiles,
+		newUserCode:           randomUserCode,
+		newQuickConnectSecret: randomQuickConnectSecret,
+	}
+}
+
+// AttemptReserver counts one attempt at a guessable secret under key and
+// reports whether it may go ahead, or how long the key stays locked
+// (ratelimit.AttemptLimiter under ratelimit.QuickConnectCodePolicy).
+type AttemptReserver interface {
+	Reserve(ctx context.Context, key string) (retryAfter time.Duration, ok bool)
+}
+
+// WithQuickConnectAttempts sets the per-account Quick Connect code limiter
+// and returns s.
+func (s *DeviceLoginService) WithQuickConnectAttempts(l AttemptReserver) *DeviceLoginService {
+	s.quickConnectAttempts = l
+	return s
+}
+
+// reserveQuickConnectAttempt spends one of the account's Quick Connect code
+// attempts. Every attempt counts, a hit included, and nothing resets the
+// count: an account that could reset it by looking up a request it opened
+// itself would have no limit.
+func (s *DeviceLoginService) reserveQuickConnectAttempt(ctx context.Context, accountID int) (time.Duration, bool) {
+	if s.quickConnectAttempts == nil {
+		return 0, true
+	}
+	return s.quickConnectAttempts.Reserve(ctx, "quick_connect_code:"+strconv.Itoa(accountID))
+}
+
+// deviceLoginCodes are the secrets drawn for one request.
+type deviceLoginCodes struct {
+	deviceCode, browserCode, userCode, matchCode string
+}
+
+// createWithFreshCodes stores a pending request built from record, drawing
+// its secrets and user code. A user code leaves room for collisions, and
+// user_code_hash is unique across every stored request, so a clash draws
+// fresh codes.
+func (s *DeviceLoginService) createWithFreshCodes(
+	ctx context.Context,
+	record deviceLoginRecord,
+	ttl time.Duration,
+	newDeviceCode func() (string, error),
+	newUserCode func(deviceCode string) (string, error),
+) (deviceLoginCodes, deviceLoginRecord, error) {
+	for attempt := 1; ; attempt++ {
+		var (
+			codes deviceLoginCodes
+			err   error
+		)
+		if codes.deviceCode, err = newDeviceCode(); err != nil {
+			return codes, record, fmt.Errorf("generate device code: %w", err)
+		}
+		// Only the frozen v1 link still carries the browser code; lookups by
+		// it keep working for those links and for links issued before user
+		// codes moved into the URL.
+		if codes.browserCode, err = randomToken(browserCodeBytes); err != nil {
+			return codes, record, fmt.Errorf("generate browser code: %w", err)
+		}
+		if codes.userCode, err = newUserCode(codes.deviceCode); err != nil {
+			return codes, record, fmt.Errorf("generate user code: %w", err)
+		}
+		if codes.matchCode, err = randomMatchCode(); err != nil {
+			return codes, record, fmt.Errorf("generate match code: %w", err)
+		}
+
+		now := time.Now().UTC()
+		record.ID = uuid.New().String()
+		record.DeviceCodeHash = hashDeviceLoginSecret(codes.deviceCode)
+		record.BrowserCodeHash = hashDeviceLoginSecret(codes.browserCode)
+		record.UserCodeHash = hashDeviceLoginSecret(normalizeUserCode(codes.userCode))
+		record.MatchCode = codes.matchCode
+		record.Status = DeviceLoginStatusPending
+		record.ExpiresAt = now.Add(ttl)
+		record.CreatedAt = now
+		record.UpdatedAt = now
+		if record.ClientPurpose == DeviceLoginPurposeQuickConnect {
+			// Six digits are few, so an expired Quick Connect request gives
+			// its code back at once instead of holding it until retention
+			// deletes the row a day later.
+			if _, err := s.pool.Exec(ctx, `
+				DELETE FROM device_login_requests
+				WHERE user_code_hash = $1 AND client_purpose = $2 AND expires_at <= NOW()
+			`, record.UserCodeHash, DeviceLoginPurposeQuickConnect); err != nil {
+				return codes, record, fmt.Errorf("free expired quick connect code: %w", err)
+			}
+		}
+		err = s.create(ctx, record)
+		if err == nil {
+			return codes, record, nil
+		}
+		if !isDuplicateKeyError(err) || attempt >= userCodeAttempts {
+			return codes, record, err
+		}
 	}
 }
 
@@ -231,74 +392,31 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 	if err != nil {
 		return nil, err
 	}
-	// Eight digits leave room for collisions, and user_code_hash is unique
-	// across every stored request, so a clash draws fresh codes.
-	var (
-		deviceCode, userCode, matchCode string
-		record                          deviceLoginRecord
-	)
 	ttl := deviceLoginTTL
 	if input.Legacy {
 		ttl = legacyDeviceLoginTTL
 	}
-	var browserCode string
-	for attempt := 1; ; attempt++ {
-		deviceCode, err = randomToken(deviceCodeBytes)
-		if err != nil {
-			return nil, fmt.Errorf("generate device code: %w", err)
-		}
-		// Only the frozen v1 link still carries the browser code; lookups by
-		// it keep working for those links and for links issued before user
-		// codes moved into the URL.
-		browserCode, err = randomToken(browserCodeBytes)
-		if err != nil {
-			return nil, fmt.Errorf("generate browser code: %w", err)
-		}
-		userCode, err = s.newUserCode()
-		if err != nil {
-			return nil, fmt.Errorf("generate user code: %w", err)
-		}
-		matchCode, err = randomMatchCode()
-		if err != nil {
-			return nil, fmt.Errorf("generate match code: %w", err)
-		}
-
-		now := time.Now().UTC()
-		record = deviceLoginRecord{
-			ID:                 uuid.New().String(),
-			DeviceCodeHash:     hashDeviceLoginSecret(deviceCode),
-			BrowserCodeHash:    hashDeviceLoginSecret(browserCode),
-			UserCodeHash:       hashDeviceLoginSecret(normalizeUserCode(userCode)),
-			MatchCode:          matchCode,
-			DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
-			DevicePlatform:     trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
-			IPAddress:          trimDeviceField(input.IPAddress, 64),
-			RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
-			Status:             DeviceLoginStatusPending,
-			ClientPurpose:      purpose,
-			Temporary:          temporary,
-			ExpiresAt:          now.Add(ttl),
-			CreatedAt:          now,
-			UpdatedAt:          now,
-		}
-		err = s.create(ctx, record)
-		if err == nil {
-			break
-		}
-		if !isDuplicateKeyError(err) || attempt >= userCodeAttempts {
-			return nil, err
-		}
+	codes, record, err := s.createWithFreshCodes(ctx, deviceLoginRecord{
+		DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
+		DevicePlatform:     trimDeviceField(input.DevicePlatform, maxDevicePlatformLen),
+		IPAddress:          trimDeviceField(input.IPAddress, 64),
+		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
+		ClientPurpose:      purpose,
+		Temporary:          temporary,
+	}, ttl, func() (string, error) { return randomToken(deviceCodeBytes) }, func(string) (string, error) { return s.newUserCode() })
+	if err != nil {
+		return nil, err
 	}
 
 	verificationURI := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/") + "/activate"
-	complete := verificationURI + "?code=" + normalizeUserCode(userCode)
+	complete := verificationURI + "?code=" + normalizeUserCode(codes.userCode)
 	if input.Legacy {
-		complete = verificationURI + "?token=" + browserCode
+		complete = verificationURI + "?token=" + codes.browserCode
 	}
 	return &DeviceLoginStartResult{
-		DeviceCode:              deviceCode,
-		UserCode:                userCode,
-		MatchCode:               matchCode,
+		DeviceCode:              codes.deviceCode,
+		UserCode:                codes.userCode,
+		MatchCode:               codes.matchCode,
 		VerificationURI:         verificationURI,
 		VerificationURIComplete: complete,
 		ExpiresAt:               record.ExpiresAt,
@@ -309,6 +427,71 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		ClientPurpose:           record.ClientPurpose,
 		Temporary:               record.Temporary,
 	}, nil
+}
+
+// StartQuickConnect opens a Jellyfin Quick Connect request: a device sign-in
+// request with a six-digit code that the app shows and a signed-in person
+// approves for one of their profiles. It lives as long as a device sign-in
+// request and follows the same lookup, decision and expiry rules.
+func (s *DeviceLoginService) StartQuickConnect(ctx context.Context, input QuickConnectStartInput) (*QuickConnectStart, error) {
+	codes, record, err := s.createWithFreshCodes(ctx, deviceLoginRecord{
+		DeviceName:         fallbackDeviceName(input.DeviceName, input.UserAgent),
+		DevicePlatform:     trimDeviceField(input.AppName, maxDevicePlatformLen),
+		IPAddress:          trimDeviceField(input.IPAddress, 64),
+		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
+		ClientPurpose:      DeviceLoginPurposeQuickConnect,
+	}, deviceLoginTTL, s.newQuickConnectSecret, func(secret string) (string, error) { return QuickConnectCode(secret), nil })
+	if err != nil {
+		return nil, err
+	}
+	return &QuickConnectStart{
+		Secret:     codes.deviceCode,
+		Code:       codes.userCode,
+		DeviceName: record.DeviceName,
+		AppName:    record.DevicePlatform,
+		CreatedAt:  record.CreatedAt,
+		ExpiresAt:  record.ExpiresAt,
+	}, nil
+}
+
+// QuickConnectState reports a Quick Connect request's state to the app that
+// holds its secret, without collecting it. A secret of any other request
+// reads as unknown.
+func (s *DeviceLoginService) QuickConnectState(ctx context.Context, secret string) (*QuickConnectState, error) {
+	record, err := scanDeviceLogin(s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
+		WHERE device_code_hash = $1`, hashDeviceLoginSecret(strings.TrimSpace(secret))))
+	if err != nil {
+		return nil, err
+	}
+	if record.ClientPurpose != DeviceLoginPurposeQuickConnect {
+		return nil, ErrDeviceLoginNotFound
+	}
+	status := record.Status
+	if isDeviceLoginExpired(record) {
+		status = DeviceLoginStatusExpired
+	}
+	return &QuickConnectState{
+		Status:     status,
+		Code:       QuickConnectCode(secret),
+		DeviceName: record.DeviceName,
+		AppName:    record.DevicePlatform,
+		CreatedAt:  record.CreatedAt,
+	}, nil
+}
+
+// QuickConnectPersist stores what collecting a Quick Connect request gives
+// the Jellyfin app, in tx, the transaction that consumes the request. The
+// request is consumed only if it succeeds, so a failed write leaves the
+// request approved for the app to collect again.
+type QuickConnectPersist func(ctx context.Context, tx pgx.Tx, result *DeviceLoginPollResult) error
+
+// CollectQuickConnect exchanges an approved Quick Connect request's secret
+// for a login session of the approving account, once, as a device poll
+// does, and runs persist before the request is consumed. The result names
+// the approved profile. A request in any other state answers with its
+// status and no tokens.
+func (s *DeviceLoginService) CollectQuickConnect(ctx context.Context, secret string, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
+	return s.poll(ctx, secret, true, persist)
 }
 
 func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookupInput) (*DeviceLoginInfo, error) {
@@ -416,14 +599,45 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 	})
 }
 
-// ApproveRemotePlayback approves a temporary device-login request for the
-// caller's already-resolved viewer profile. The handler must obtain profileID
-// from RequireViewerAccess rather than accepting an untrusted body field.
-func (s *DeviceLoginService) ApproveRemotePlayback(
+// ApproveForProfile approves a request that signs its device in as one
+// profile: a temporary remote-playback request, or a Jellyfin Quick Connect
+// request. The handler must obtain profileID from RequireViewerAccess, which
+// has verified the profile's PIN, rather than accepting an untrusted body
+// field.
+func (s *DeviceLoginService) ApproveForProfile(
 	ctx context.Context,
 	input DeviceLoginLookupInput,
 	approverUserID int,
 	profileID string,
+) error {
+	return s.approveForProfile(ctx, input, approverUserID, profileID, DeviceLoginPurposeRemote, DeviceLoginPurposeQuickConnect)
+}
+
+// ApproveQuickConnectAsSession approves a Quick Connect request for the
+// profile of a Jellyfin-compatible session, on behalf of the login session
+// behind it. accessToken is that session's access token, which stands in for
+// the request claims the native API's middleware would provide; it must be
+// the account's own login session, as for every approval.
+func (s *DeviceLoginService) ApproveQuickConnectAsSession(
+	ctx context.Context,
+	code string,
+	accessToken string,
+	profileID string,
+) error {
+	claims, err := s.jwt.ValidateToken(accessToken)
+	if err != nil || claims.TokenType != TokenTypeAccess || claims.UserID <= 0 || !claims.IsOwnLoginSession() {
+		return ErrSessionRevoked
+	}
+	input := DeviceLoginLookupInput{UserCode: code, AccountID: claims.UserID}
+	return s.approveForProfile(WithClaims(ctx, claims), input, claims.UserID, profileID, DeviceLoginPurposeQuickConnect)
+}
+
+func (s *DeviceLoginService) approveForProfile(
+	ctx context.Context,
+	input DeviceLoginLookupInput,
+	approverUserID int,
+	profileID string,
+	purposes ...string,
 ) error {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
@@ -433,7 +647,7 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 	if err != nil {
 		return err
 	}
-	if record.ClientPurpose != DeviceLoginPurposeRemote || !record.Temporary {
+	if !slices.Contains(purposes, record.ClientPurpose) || record.Temporary != (record.ClientPurpose == DeviceLoginPurposeRemote) {
 		return ErrDeviceLoginPurpose
 	}
 	if err := validateDeviceLoginDecision(record); err != nil {
@@ -470,7 +684,7 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 			WHERE id = $1
 				AND status = $6
 				AND client_purpose = $7
-				AND temporary = TRUE
+				AND temporary = $10
 				AND expires_at > NOW()
 		`,
 			record.ID,
@@ -479,12 +693,13 @@ func (s *DeviceLoginService) ApproveRemotePlayback(
 			profileID,
 			now,
 			DeviceLoginStatusPending,
-			DeviceLoginPurposeRemote,
+			record.ClientPurpose,
 			chain.identityID,
 			chain.providerSince,
+			record.Temporary,
 		)
 		if err != nil {
-			return fmt.Errorf("approve remote playback login: %w", err)
+			return fmt.Errorf("approve %s login: %w", record.ClientPurpose, err)
 		}
 		if tag.RowsAffected() == 0 {
 			return s.reloadApprovalState(ctx, tx, record.ID, approverUserID, profileID)
@@ -661,6 +876,14 @@ func deviceLoginPollState(record *deviceLoginRecord) (*DeviceLoginPollResult, er
 }
 
 func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*DeviceLoginPollResult, error) {
+	return s.poll(ctx, deviceCode, false, nil)
+}
+
+// poll advances a request for the device holding its device code. A Jellyfin
+// Quick Connect request is collected only through CollectQuickConnect and
+// every other request only through Poll: a Quick Connect approval grants one
+// profile to a Jellyfin app, not a native session that could pick any.
+func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickConnect bool, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
 	// The approver is immutable once assigned. Read it before taking the
 	// device lock so collection and revocation both lock user -> device;
 	// inserting a session while holding only the device row would invert
@@ -669,6 +892,9 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		WHERE device_code_hash = $1`, hashDeviceLoginSecret(strings.TrimSpace(deviceCode))))
 	if err != nil {
 		return nil, err
+	}
+	if (preview.ClientPurpose == DeviceLoginPurposeQuickConnect) != quickConnect {
+		return nil, ErrDeviceLoginNotFound
 	}
 	if result, err := deviceLoginPollState(preview); result != nil || err != nil {
 		return result, err
@@ -702,11 +928,27 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	if !user.Enabled {
 		return nil, ErrUserDisabled
 	}
+	if quickConnect && user.PasswordChangeRequired {
+		// As for Jellyfin password sign-in: the app cannot run the password
+		// change a temporary password requires. The approval is withdrawn so
+		// the app stops polling instead of retrying until the code expires.
+		if _, err := tx.Exec(ctx, `
+			UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
+			WHERE id = $1`, record.ID, DeviceLoginStatusDenied); err != nil {
+			return nil, fmt.Errorf("withdraw quick connect approval: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit quick connect withdrawal: %w", err)
+		}
+		return nil, ErrPasswordChangeRequired
+	}
 
-	profileID := ""
+	profileID, profileName := "", ""
 	var profile *userstore.Profile
-	if record.ClientPurpose == DeviceLoginPurposeRemote {
-		if !record.Temporary || record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
+	switch record.ClientPurpose {
+	case DeviceLoginPurposeRemote, DeviceLoginPurposeQuickConnect:
+		if record.Temporary != (record.ClientPurpose == DeviceLoginPurposeRemote) ||
+			record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
 			return nil, ErrDeviceLoginNoProfile
 		}
 		profileID = strings.TrimSpace(*record.ApprovedProfileID)
@@ -714,6 +956,7 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		if err != nil {
 			return nil, err
 		}
+		profileName = profile.Name
 	}
 
 	now := time.Now().UTC()
@@ -741,16 +984,26 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		IdentityID:    record.ApprovedIdentityID,
 		ProviderSince: record.ApprovedProviderSince,
 	}
-	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
-		return nil, err
-	}
-
-	pair, err := s.generateTokenPair(Claims{
+	claims := Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              sessionID,
 		PasswordChangeRequired: user.PasswordChangeRequired,
-	})
+	}
+	if record.ClientPurpose == DeviceLoginPurposeRemote {
+		// The handoff is a session of the approved profile alone that ends
+		// at sessionExpiresAt; refresh cannot extend it, and it carries no
+		// admin or account-management powers.
+		session.Purpose = models.SessionPurposeRemotePlayback
+		session.BoundProfileID = profileID
+		session.AbsoluteExpiresAt = &sessionExpiresAt
+		claims = remotePlaybackClaims(claims, &session)
+	}
+	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
+		return nil, err
+	}
+
+	pair, err := s.generateTokenPair(claims)
 	if err != nil {
 		return nil, err
 	}
@@ -789,20 +1042,27 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		return nil, fmt.Errorf("consume device login: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit device login poll: %w", err)
-	}
-
-	return &DeviceLoginPollResult{
+	result := &DeviceLoginPollResult{
 		Status:           "approved",
 		PollAfter:        int(deviceLoginPollInterval.Seconds()),
 		TokenPair:        pair,
 		User:             user,
 		ProfileID:        profileID,
+		ProfileName:      profileName,
 		ProfileToken:     profileToken,
 		Temporary:        record.Temporary,
 		SessionExpiresAt: sessionExpiresAt,
-	}, nil
+	}
+	if persist != nil {
+		if err := persist(ctx, tx, result); err != nil {
+			return nil, fmt.Errorf("store quick connect session: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit device login poll: %w", err)
+	}
+	return result, nil
 }
 
 func (s *DeviceLoginService) generateTokenPair(claims Claims) (*TokenPair, error) {
@@ -817,7 +1077,8 @@ func (s *DeviceLoginService) generateTokenPair(claims Claims) (*TokenPair, error
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		ExpiresIn:    s.jwt.accessExpiresIn(claims),
+		SessionID:    claims.SessionID,
 	}, nil
 }
 
@@ -861,6 +1122,17 @@ func (s *DeviceLoginService) findByLookup(ctx context.Context, input DeviceLogin
 	code := normalizeUserCode(input.UserCode)
 	if code == "" {
 		return nil, "", ErrDeviceLoginNotFound
+	}
+	if IsQuickConnectCode(code) {
+		// Six digits are few enough to guess, so a Quick Connect code is
+		// looked up only for a signed-in account, and every attempt counts
+		// against that account as well as the caller's address.
+		if input.AccountID <= 0 {
+			return nil, "", ErrDeviceLoginNotFound
+		}
+		if retryAfter, ok := s.reserveQuickConnectAttempt(ctx, input.AccountID); !ok {
+			return nil, "", &QuickConnectAttemptsError{RetryAfter: retryAfter}
+		}
 	}
 	record, err := s.getByHash(ctx, "user_code_hash", hashDeviceLoginSecret(code))
 	return record, formatUserCode(code), err
@@ -1140,12 +1412,49 @@ func randomToken(size int) (string, error) {
 }
 
 func randomUserCode() (string, error) {
+	code, err := randomDigits(userCodeLength)
+	if err != nil {
+		return "", err
+	}
+	return formatUserCode(code), nil
+}
+
+// IsQuickConnectCode reports whether a typed code has the length of a Quick
+// Connect code, ignoring spaces and dashes.
+func IsQuickConnectCode(code string) bool {
+	return len(normalizeUserCode(code)) == quickConnectCodeLength
+}
+
+// QuickConnectCode is the six-digit code of the Quick Connect request whose
+// secret is secret. The code is derived from the secret rather than drawn
+// beside it, so the app polling with the secret can be told its code again
+// (Jellyfin apps redraw it from every poll) while the server stores the code
+// only as a hash. The derivation is one-way: the code says nothing about the
+// secret. Like Jellyfin's codes, it has no leading zero, so an app that reads
+// it as a number still shows six digits.
+func QuickConnectCode(secret string) string {
+	sum := sha256.Sum256([]byte("silo-quick-connect-code:" + strings.TrimSpace(secret)))
+	n := binary.BigEndian.Uint64(sum[:8]) % 900000
+	return strconv.FormatUint(100000+n, 10)
+}
+
+// randomQuickConnectSecret draws a Quick Connect secret in Jellyfin's form:
+// 32 random bytes as uppercase hex.
+func randomQuickConnectSecret() (string, error) {
+	buf := make([]byte, quickConnectSecretBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return strings.ToUpper(hex.EncodeToString(buf)), nil
+}
+
+func randomDigits(n int) (string, error) {
 	// Rejection sampling keeps every digit equally likely: bytes at or above
 	// the largest multiple of the alphabet size are drawn again.
 	limit := 256 - 256%len(deviceCodeAlphabet)
-	code := make([]byte, 0, userCodeLength)
-	buf := make([]byte, userCodeLength)
-	for len(code) < userCodeLength {
+	code := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(code) < n {
 		if _, err := rand.Read(buf); err != nil {
 			return "", err
 		}
@@ -1154,12 +1463,12 @@ func randomUserCode() (string, error) {
 				continue
 			}
 			code = append(code, deviceCodeAlphabet[int(b)%len(deviceCodeAlphabet)])
-			if len(code) == userCodeLength {
+			if len(code) == n {
 				break
 			}
 		}
 	}
-	return formatUserCode(string(code)), nil
+	return string(code), nil
 }
 
 func normalizeUserCode(value string) string {

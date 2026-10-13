@@ -50,11 +50,18 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { id: string; items: Array<{ title: string }> } }) => (
+  default: ({
+    section,
+    priority,
+  }: {
+    section: { id: string; items: Array<{ title: string }> };
+    priority?: boolean;
+  }) => (
     <div
       data-kind="section-row"
       data-section-id={section.id}
       data-first-item={section.items[0]?.title}
+      data-priority={String(Boolean(priority))}
     />
   ),
 }));
@@ -423,6 +430,110 @@ describe("Home", () => {
       observers.every((observer) => vi.mocked(observer.disconnect).mock.calls.length > 0),
     ).toBe(true);
     root = createRoot(container);
+  });
+
+  it("renders above-fold rows in the commit their data arrives, without a placeholder", async () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    const responses = new Map<string, (value: unknown) => void>();
+    mockFetchHomeSectionItems.mockImplementation(
+      (sectionId: string) => new Promise((resolve) => responses.set(sectionId, resolve)),
+    );
+    const placeholdersSeen = new Set<string>();
+    const watcher = new MutationObserver((records) => {
+      for (const record of records) {
+        record.addedNodes.forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          const placeholders = [
+            node,
+            ...Array.from(node.querySelectorAll<HTMLElement>("[data-home-section-placeholder]")),
+          ];
+          placeholders.forEach((el) => {
+            if (el.dataset.homeSectionPlaceholder) {
+              placeholdersSeen.add(el.dataset.homeSectionPlaceholder);
+            }
+          });
+        });
+      }
+    });
+    watcher.observe(container, { childList: true, subtree: true });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      for (const id of ["row-1", "row-2", "row-3"]) responses.get(id)?.(homeSection(id));
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-kind="section-row"]').length).toBeGreaterThan(1),
+    );
+    watcher.disconnect();
+
+    expect(placeholdersSeen.has("row-1")).toBe(false);
+    expect(placeholdersSeen.has("row-2")).toBe(false);
+    expect(
+      container.querySelector('[data-section-id="row-1"]')?.getAttribute("data-priority"),
+    ).toBe("true");
+    expect(
+      container.querySelector('[data-section-id="row-2"]')?.getAttribute("data-priority"),
+    ).toBe("false");
+  });
+
+  it("budgets eager rows by layout position, not by which rows load first", async () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        readonly root = null;
+        readonly thresholds = [0];
+        readonly rootMargin = "100% 0px";
+        constructor(_callback: IntersectionObserverCallback) {}
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = () => [];
+      },
+    );
+    const responses = new Map<string, (value: unknown) => void>();
+    mockFetchHomeSectionItems.mockImplementation(
+      (sectionId: string) => new Promise((resolve) => responses.set(sectionId, resolve)),
+    );
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    // The third row answers first; rows one and two still hold the fold.
+    await act(async () => {
+      responses.get("row-3")?.(homeSection("row-3"));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-section-id="row-3"]')).toBeNull();
+    expect(container.querySelector('[data-home-section-placeholder="row-3"]')).not.toBeNull();
   });
 
   it("counts only ready media rows toward the eager paint budget", async () => {

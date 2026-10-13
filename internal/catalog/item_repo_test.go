@@ -902,6 +902,83 @@ func TestRerankFuzzyItemsUsesTokenEditCoverage(t *testing.T) {
 	}
 }
 
+func TestRerankFuzzyItemsIgnoresWordSpacing(t *testing.T) {
+	// "livestream" matches neither "live" nor "stream" on its own, so titles
+	// sharing more separate words with the query used to outrank the film.
+	items := []*models.MediaItem{
+		{ContentID: "volbeat", Title: "Volbeat - Live From Beyond Hell/Above Heaven"},
+		{ContentID: "heaven", Title: "Heaven & Hell: Live From Radio City Music Hall"},
+		{ContentID: "birds", Title: "Angry Birds: Live Stream"},
+		{ContentID: "liza", Title: "Liza: Warden from Hell"},
+		{ContentID: "film", Title: "Livestream from Hell"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Live Stream From Hell", items, nil); err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "film" {
+		t.Fatalf("first result = %q (%s), want Livestream from Hell", items[0].Title, items[0].ContentID)
+	}
+
+	// A typo keeps the title from matching exactly, so the joined words
+	// "live stream" must match "livestream" to rank it first.
+	items = []*models.MediaItem{
+		{ContentID: "volbeat", Title: "Volbeat - Live From Beyond Hell/Above Heaven"},
+		{ContentID: "heaven", Title: "Heaven & Hell: Live From Radio City Music Hall"},
+		{ContentID: "film", Title: "Livestream from Hell"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Live Stream From Hel", items, nil); err != nil { //nolint:misspell
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "film" {
+		t.Fatalf("first result = %q (%s), want Livestream from Hell", items[0].Title, items[0].ContentID)
+	}
+
+	items = []*models.MediaItem{
+		{ContentID: "compound", Title: "Livestream from Hell"},
+		{ContentID: "spaced", Title: "Live Stream from Hell"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Live Stream From Hell", items, nil); err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "spaced" {
+		t.Fatalf("first result = %q (%s), want the title spelled as typed", items[0].Title, items[0].ContentID)
+	}
+
+	items = []*models.MediaItem{
+		{ContentID: "superman", Title: "Superman"},
+		{ContentID: "spider", Title: "Spider"},
+		{ContentID: "spiderman", Title: "Spider-Man: Homecoming"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "spiderman homecoming", items, nil); err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "spiderman" {
+		t.Fatalf("first result = %q (%s), want Spider-Man: Homecoming", items[0].Title, items[0].ContentID)
+	}
+}
+
+func TestScoreFuzzyTitleVariantJoinsWordsWithinTheirTypoAllowance(t *testing.T) {
+	for _, tc := range []struct {
+		query, title string
+		want         int
+	}{
+		{"live stream from hel", "Livestream from Hell", 4}, //nolint:misspell
+		{"spiderman", "Spider-Man", 1},
+		// Joining must not drop a short word that has no typo allowance.
+		{"ed wood", "Wood", 1},
+		{"a spider", "Spider", 1},
+		{"live streem", "Livestream", 2},
+		// Adjacent numbers stay separate words: "1 2" is not "12".
+		{"1 2 monkeys", "Twelve Monkeys", 1},
+		{"12 monkeys", "One Two Monkeys", 1},
+	} {
+		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
+		if got := scoreFuzzyTitleVariant(tc.query, tokens, tc.title).matchedTokens; got != tc.want {
+			t.Errorf("%q vs %q matched %d words, want %d", tc.query, tc.title, got, tc.want)
+		}
+	}
+}
+
 func TestRerankFuzzyItemsUsesBoundedAliases(t *testing.T) {
 	items := []*models.MediaItem{
 		{ContentID: "distractor", Title: "Tokyo Ghoul"},

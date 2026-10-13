@@ -10,11 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -151,6 +153,10 @@ func NewSystem(
 		pushDeviceRepo = NewPushDeviceRepository(pool)
 		pushDeviceService = NewPushDeviceService(pushDeviceRepo, cipher)
 		pushSenderInst = newPushSender(pushDeviceRepo, deliveries, cipher, settings)
+		// Pushes name the identity getServerIdentity reports, read through the
+		// raw settings repo as it is: a SECRET_KEY rotation must not change
+		// who the server is.
+		pushSenderInst.serverID = serveridentity.New(catalog.NewServerSettingsRepo(pool)).ServerID
 		pushDispatcher = newPushDispatcher(pushSenderInst)
 		dispatchers = append(dispatchers, pushDispatcher)
 	}

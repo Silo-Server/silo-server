@@ -335,6 +335,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.ImageWorkers = imageWorkers
+	personRefreshPerMinute, err := intOr(m, MetadataPersonRefreshPerMinuteSettingKey, 120)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Metadata.PersonRefreshPerMinute = personRefreshPerMinute
 	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
 	if err != nil {
 		return nil, err
@@ -352,6 +357,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", playbackSegmentRetentionSettingKey)
 	}
 	cfg.Playback.SegmentRetentionSeconds = segmentRetentionSeconds
+	keyframePlaylist, err := boolOr(m, PlaybackKeyframePlaylistSettingKey, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.KeyframePlaylist = keyframePlaylist
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -491,6 +501,8 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// ASR). The connection settings read ai.* with a fallback to the legacy
 	// subtitle_ai.* rows; the legacy rows are never renamed in SQL because
 	// encrypted values are GCM-bound to their setting key.
+	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
+	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
 	cfg.AI.BaseURL = stringOr(m, "ai.base_url", stringOr(m, "subtitle_ai.base_url", "https://api.openai.com"))
 	cfg.AI.APIKey = stringOr(m, "ai.api_key", stringOr(m, "subtitle_ai.api_key", ""))
 	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))

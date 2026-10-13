@@ -31,6 +31,9 @@ interface DetailHeroProps {
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
+  /** Spoiler protection: keep the overview behind a reveal button. */
+  overviewHidden?: boolean;
+  onRevealOverview?: () => void;
   actions?: ReactNode;
   aside?: ReactNode;
   studioLabel?: string;
@@ -58,6 +61,8 @@ export default function DetailHero({
   overview,
   overviewTranslating = false,
   onTranslateOverview,
+  overviewHidden = false,
+  onRevealOverview,
   actions,
   aside,
   studioLabel,
@@ -124,9 +129,12 @@ export default function DetailHero({
       data-viewport-bounded={isViewportBounded || undefined}
     >
       {topNav}
+      {/* The artwork stops 1px short of the bottom edge, which the fade below
+          covers solidly anyway. At a fractional hero height the edge pixel is
+          only partly covered by the fade, and the artwork bled through as a line. */}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-x-0 top-0 bottom-px"
           style={{
             ...(backdropPlaceholder
               ? {
@@ -301,6 +309,8 @@ export default function DetailHero({
                     clamp={isViewportBounded}
                     translating={overviewTranslating}
                     onTranslate={onTranslateOverview}
+                    hidden={overviewHidden}
+                    onReveal={onRevealOverview}
                   />
                 )}
 

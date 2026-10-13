@@ -205,6 +205,9 @@ type Published struct {
 	SheetBytes    []int
 	Decoder       string
 	Filled        int
+	// Refined counts the cells a repair read again (see
+	// mediasample.SheetFrames); it is logged, not stored.
+	Refined int
 }
 
 // Publish makes the claim's uploaded revision of fileID the one served, and

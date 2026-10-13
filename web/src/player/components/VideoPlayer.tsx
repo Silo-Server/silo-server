@@ -439,6 +439,15 @@ export function VideoPlayer({
   connectionStatusRef.current = connectionStatus;
   const transportFailedForPlanRevisionRef = useRef<number | null>(null);
   const timelineOffsetRef = useRef(0);
+  // Where the direct-play engine's clock starts, in player seconds. Chrome keeps
+  // a Matroska file's container start time (seconds into a TS remux), so its
+  // currentTime runs ahead of the media timeline by that much.
+  const [directPlayOriginSeconds, setDirectPlayOriginSeconds] = useState(0);
+  const planTimelineOffsetRef = useRef(0);
+  // True between loading an original file and learning its clock origin. A
+  // seek in that window is held as pending: written to the element it would
+  // become the default start position and be misread as the origin.
+  const directPlayOriginPendingRef = useRef(false);
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
@@ -854,14 +863,18 @@ export function VideoPlayer({
   const isCopyOriginalHLS = plan.delivery === "server_remux_hls";
 
   // Keep the player-local clock mapped onto the canonical media timeline.
-  const timelineOffsetSeconds = plan.timeline.timeline_offset_seconds;
+  const planTimelineOffset = plan.timeline.timeline_offset_seconds;
+  planTimelineOffsetRef.current = planTimelineOffset;
+  const playsOriginalFile = plan.delivery === "original_http";
+  const timelineOffsetSeconds =
+    planTimelineOffset - (playsOriginalFile ? directPlayOriginSeconds : 0);
   timelineOffsetRef.current = timelineOffsetSeconds;
 
   // Media-time position playback is heading to, for consumers that need a
   // position before the element has media loaded (when currentTime still
   // reads 0): an in-flight seek target, else the session's start position.
   subtitleFetchAnchorRef.current =
-    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, timelineOffsetSeconds);
+    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, planTimelineOffset);
 
   useEffect(() => {
     if (backendDuration > 0) {
@@ -1070,6 +1083,31 @@ export function VideoPlayer({
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
 
+  // Where the media is on the element's clock. While an original file's clock
+  // origin is unknown the element has no position on the stream yet, so that
+  // is where playback is heading.
+  const elementMediaPosition = useCallback((): number | null => {
+    const video = videoRef.current;
+    if (!video) return null;
+    if (directPlayOriginPendingRef.current) return subtitleFetchAnchorRef.current;
+    return toMediaTime(video.currentTime, timelineOffsetRef.current);
+  }, []);
+
+  // Publishes the element's duration on the media timeline. A direct-play
+  // engine's duration runs on its own clock, which starts at the origin, so
+  // it waits until the origin is known.
+  const applyElementDuration = useCallback((video: HTMLVideoElement) => {
+    if (directPlayOriginPendingRef.current) return;
+    if (!video.duration || !isFinite(video.duration)) return;
+    const originSeconds = planTimelineOffsetRef.current - timelineOffsetRef.current;
+    const mediaDuration = video.duration - originSeconds;
+    // For HLS EVENT playlists still being written, the element reports the
+    // length produced so far. The plan's source duration is the media's
+    // full runtime, so it wins whenever the engine reports something short.
+    if (backendDurationRef.current && mediaDuration < backendDurationRef.current) return;
+    setDuration(mediaDuration);
+  }, []);
+
   const rememberPendingSeek = useCallback((seconds: number) => {
     pendingSeekTimeRef.current = seconds;
     setPendingSeekTime(seconds);
@@ -1104,6 +1142,12 @@ export function VideoPlayer({
       if (!video) return false;
 
       resetRoomCatchupRate();
+
+      if (directPlayOriginPendingRef.current) {
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        return true;
+      }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
@@ -1204,17 +1248,13 @@ export function VideoPlayer({
   // scrub instead of snapping back to where the element still is.
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
-      const now =
-        pendingSeekTimeRef.current ??
-        (videoRef.current
-          ? toMediaTime(videoRef.current.currentTime, timelineOffsetRef.current)
-          : currentTimeRef.current);
+      const now = pendingSeekTimeRef.current ?? elementMediaPosition() ?? currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
       handlePlayerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
       );
     },
-    [handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
+    [elementMediaPosition, handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
   );
   const handleSkipRef = useRef(handleSkip);
   useEffect(() => {
@@ -1233,14 +1273,18 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const flushWatchProgress = useWatchProgress(sessionId, videoRef, timelineOffsetRef);
+  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
+  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const flushWatchProgress = useWatchProgress(
+    sessionId,
+    videoRef,
+    timelineOffsetRef,
+    markSessionEnded,
+  );
 
   const buildExitState = useCallback((): PlaybackExitState => {
-    const video = videoRef.current;
-    const positionSeconds = toMediaTime(
-      video?.currentTime ?? currentTime,
-      timelineOffsetRef.current,
-    );
+    const positionSeconds =
+      elementMediaPosition() ?? toMediaTime(currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
 
@@ -1253,7 +1297,7 @@ export function VideoPlayer({
       lastCodecVideo: selectedVersion?.codec_video,
       lastEditionKey: selectedVersion?.edition_key,
     };
-  }, [activeFileId, currentTime, duration, selectedVersion]);
+  }, [activeFileId, currentTime, duration, elementMediaPosition, selectedVersion]);
 
   useEffect(() => {
     if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {
@@ -1400,6 +1444,17 @@ export function VideoPlayer({
   const handleExit = useCallback(async () => {
     await handleLeave("exit");
   }, [handleLeave]);
+
+  // The server ended the session for good (an administrator stopped it while
+  // this player could not be told directly): leave instead of reconnecting.
+  const sessionEndedHandledRef = useRef(false);
+  useEffect(() => {
+    if (connectionStatus !== "ended" && !progressSessionEnded) return;
+    if (sessionEndedHandledRef.current) return;
+    sessionEndedHandledRef.current = true;
+    toast.info("An administrator ended this playback session.");
+    void handleExit();
+  }, [connectionStatus, handleExit, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
@@ -1930,6 +1985,7 @@ export function VideoPlayer({
     let autoplayAttempts = 0;
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
+    let directPlayMetadataHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1950,6 +2006,11 @@ export function VideoPlayer({
         video.removeEventListener("loadedmetadata", nativeHLSMetadataHandler);
         nativeHLSMetadataHandler = null;
       }
+      if (directPlayMetadataHandler) {
+        video.removeEventListener("loadedmetadata", directPlayMetadataHandler);
+        directPlayMetadataHandler = null;
+      }
+      directPlayOriginPendingRef.current = false;
     };
 
     // Settles the player into a deliberate paused state: the startup guard is
@@ -2194,8 +2255,34 @@ export function VideoPlayer({
         // the load algorithm that is about to seek to the resume position, and
         // the spec has that algorithm reject it.
         video.src = effectiveStreamUrl;
-        video.currentTime = effectiveInitialPosition;
-        attemptAutoplayWhenReady();
+        if (playsOriginalFile) {
+          // The original file's clock can start at the container's start time
+          // instead of zero. Load without a start position so currentTime at
+          // loadedmetadata reports where the clock starts, fold that into the
+          // timeline offset, then seek to the start position on the corrected
+          // clock. Subtitles, seeks, and progress then share the media timeline
+          // the server's streams use.
+          directPlayOriginPendingRef.current = true;
+          directPlayMetadataHandler = () => {
+            directPlayMetadataHandler = null;
+            directPlayOriginPendingRef.current = false;
+            const origin = Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0;
+            const planOffset = planTimelineOffsetRef.current;
+            timelineOffsetRef.current = planOffset - origin;
+            setDirectPlayOriginSeconds(origin);
+            // A seek made while the origin was unknown wins over the start position.
+            const mediaTarget =
+              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+            const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
+            if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
+            applyElementDuration(video);
+            attemptAutoplayWhenReady();
+          };
+          video.addEventListener("loadedmetadata", directPlayMetadataHandler, { once: true });
+        } else {
+          video.currentTime = effectiveInitialPosition;
+          attemptAutoplayWhenReady();
+        }
       }
     }
 
@@ -2219,11 +2306,13 @@ export function VideoPlayer({
     // `planRevision` is the single signal that the transport changed: two plans
     // can share a stream URL and still differ in protocol, timeline, or recipe.
   }, [
+    applyElementDuration,
     effectiveStreamUrl,
     effectiveInitialPosition,
     isHlsStream,
     isPlayerReady,
     planRevision,
+    playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
     reportCurrentPlanFailure,
@@ -2267,9 +2356,16 @@ export function VideoPlayer({
     // counting it would cancel the render: no loading overlay, a startup
     // guard marked started, and the new transport's first frame never seen.
     const hasCurrentFrame = () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    // Until an original file's clock origin is known the element has no media;
+    // its events are load resets. They must not settle a held seek or move the
+    // shown position off where playback is heading.
+    const resolveSeekAt = (actualTime: number) =>
+      directPlayOriginPendingRef.current
+        ? { currentTime: pendingSeekTime ?? subtitleFetchAnchorRef.current, pendingSeekTime }
+        : resolvePendingSeekTime(actualTime, pendingSeekTime);
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
-      const resolved = resolvePendingSeekTime(nextTime, pendingSeekTime);
+      const resolved = resolveSeekAt(nextTime);
       setCurrentTime(resolved.currentTime);
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
@@ -2302,10 +2398,7 @@ export function VideoPlayer({
       }
     };
     const onSeeked = () => {
-      const resolved = resolvePendingSeekTime(
-        toMediaTime(video.currentTime, timelineOffsetRef.current),
-        pendingSeekTime,
-      );
+      const resolved = resolveSeekAt(toMediaTime(video.currentTime, timelineOffsetRef.current));
       setCurrentTime(resolved.currentTime);
       setPendingSeekTime(resolved.pendingSeekTime);
       // Reloading a stream can finish an older native seek. It does not settle
@@ -2319,15 +2412,7 @@ export function VideoPlayer({
       if (hasCurrentFrame()) markPlaybackStarted();
       clearBuffering();
     };
-    const onDurationChange = () => {
-      if (video.duration && isFinite(video.duration)) {
-        // For HLS EVENT playlists still being written, the element reports the
-        // length produced so far. The plan's source duration is the media's
-        // full runtime, so it wins whenever the engine reports something short.
-        if (backendDurationRef.current && video.duration < backendDurationRef.current) return;
-        setDuration(video.duration);
-      }
-    };
+    const onDurationChange = () => applyElementDuration(video);
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
@@ -2441,6 +2526,7 @@ export function VideoPlayer({
     // deps are intentionally narrowed to the primitives the handlers read so
     // room snapshot churn doesn't re-subscribe every listener.
   }, [
+    applyElementDuration,
     pendingSeekTime,
     reportConnectionLost,
     reportCurrentPlanFailure,
@@ -3152,7 +3238,8 @@ export function VideoPlayer({
       const decision = decideRoomCatchup({
         action: command.action,
         targetPositionSeconds,
-        localPositionSeconds: toMediaTime(video.currentTime, timelineOffsetRef.current),
+        localPositionSeconds:
+          elementMediaPosition() ?? toMediaTime(video.currentTime, timelineOffsetRef.current),
         targetLocallySeekable,
       });
 
@@ -3281,6 +3368,7 @@ export function VideoPlayer({
     };
   }, [
     canSeekAnywhere,
+    elementMediaPosition,
     resetRoomCatchupRate,
     sessionId,
     watchTogetherRoomId,
@@ -3917,7 +4005,7 @@ export function VideoPlayer({
       ) : null}
 
       {/* Mid-stream connection loss: retrying, or given up */}
-      {!isDetached && connectionStatus !== "connected" && (
+      {!isDetached && connectionStatus !== "connected" && connectionStatus !== "ended" && (
         <div
           role={connectionStatus === "reconnecting" ? "status" : "alert"}
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6"

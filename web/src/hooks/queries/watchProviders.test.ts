@@ -67,6 +67,17 @@ describe("watch provider v2 queries", () => {
       headers: { "If-Match": '"version-1"' },
       onResponse: expect.any(Function),
     });
+    await updateWatchProviderConnection(
+      "simkl",
+      { connection_settings: { track_rewatches: true } },
+      '"version-2"',
+    );
+    expect(v2).toHaveBeenLastCalledWith("PATCH /api/v2/watch-providers/{provider}/connection", {
+      path: { provider: "simkl" },
+      body: { connection_settings: { track_rewatches: true } },
+      headers: { "If-Match": '"version-2"' },
+      onResponse: expect.any(Function),
+    });
     await deleteWatchProviderConnection("trakt");
     expect(v2).toHaveBeenLastCalledWith("DELETE /api/v2/watch-providers/{provider}/connection", {
       path: { provider: "trakt" },

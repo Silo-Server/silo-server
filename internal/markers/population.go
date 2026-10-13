@@ -384,6 +384,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 			return file, false, errors.Join(append(failures, checkErr)...)
 		}
 		effective := ApplyResult(file, s.selectResults(results))
+		effective.MarkerThumbnailBaseSegments = models.EffectiveMarkerSegments(file)
 		if s.opts.Notify != nil {
 			s.opts.Notify(saveCtx, effective)
 		}
