@@ -51,7 +51,7 @@ it("loads v2 branding before login and follows versioned v2 image URLs", async (
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("paints no accent when none is set or the stored value is unsafe", async () => {
+it("paints no accent when the stored value is not a hex color", async () => {
   const fetchMock = vi.fn<typeof fetch>(async () =>
     jsonResponse({ server_name: "Fixture", accent_color: "red;} body{display:none" }),
   );

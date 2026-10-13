@@ -1,14 +1,11 @@
-/** Reject values that could break out of a CSS declaration. */
-const UNSAFE_CSS_VALUE = /[;{}]|\/\*|<\//;
-
 /** Cinema Dark's label color on primary surfaces (--primary-foreground). */
 const DARK_LABEL = "#141417";
 const WHITE_LABEL = "#ffffff";
 
 /**
  * Returns the stored accent as lowercase "#rrggbb" when it is a "#rgb" or
- * "#rrggbb" hex color, else null. The setting is free text, so anything else
- * gets no derived label color.
+ * "#rrggbb" hex color, else null. The setting is free text, but the admin
+ * picker only writes hex, and email buttons (internal/mail) honor only hex too.
  */
 function normalizeHex(color: string): string | null {
   const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
@@ -40,20 +37,20 @@ function prefersWhiteLabel(hex: string): boolean {
 
 /**
  * The CSS custom properties the admin's accent sets, or null when the stored
- * value is unsafe to write into a declaration. The accent recolors the primary
- * action color, the focus ring, and the sidebar's primary accent. When white
- * reads better on it, the labels drawn on those surfaces turn white too; a
- * light accent keeps Cinema Dark's own dark labels.
+ * value is not a hex color, which is then ignored as email ignores it. The
+ * accent recolors the primary action color, the focus ring, and the sidebar's
+ * primary accent. When white reads better on it, the labels drawn on those
+ * surfaces turn white too; a light accent keeps Cinema Dark's own dark labels.
  */
 export function accentDeclarations(accent: string): Record<string, string> | null {
-  if (UNSAFE_CSS_VALUE.test(accent)) return null;
-  const declarations: Record<string, string> = {
-    primary: accent,
-    ring: accent,
-    "sidebar-primary": accent,
-  };
   const hex = normalizeHex(accent);
-  if (hex && prefersWhiteLabel(hex)) {
+  if (!hex) return null;
+  const declarations: Record<string, string> = {
+    primary: hex,
+    ring: hex,
+    "sidebar-primary": hex,
+  };
+  if (prefersWhiteLabel(hex)) {
     declarations["primary-foreground"] = WHITE_LABEL;
     declarations["sidebar-primary-foreground"] = WHITE_LABEL;
   }

@@ -475,7 +475,8 @@ The web client has one theme, Cinema Dark. The only customization is the
 administrator's accent color (`branding.accent_color`), which the web client
 reads from the branding document and applies to the primary action color, the
 focus ring and the sidebar accent, turning the labels on those surfaces white
-when white reads better on the accent; email buttons, the shell's `theme-color` and
+when white reads better on the accent. A stored value that is not a `#rgb` or
+`#rrggbb` hex color is ignored, as email ignores it. Email buttons, the shell's `theme-color` and
 the web app manifest use it too. The v2 branding document has no default theme
 or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
 The frozen v1 routes are unchanged: `/theme/branding` still reports a stored

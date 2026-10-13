@@ -12,25 +12,26 @@ describe("accentDeclarations", () => {
   });
 
   it("turns the labels white on a dark accent", () => {
-    for (const accent of ["#000000", "#4f46e5", "#64748B", "#00f"]) {
+    const cases: [accent: string, hex: string][] = [
+      ["#000000", "#000000"],
+      ["#4f46e5", "#4f46e5"],
+      ["#64748B", "#64748b"],
+      ["#00f", "#0000ff"],
+    ];
+    for (const [accent, hex] of cases) {
       expect(accentDeclarations(accent), accent).toMatchObject({
-        primary: accent,
+        primary: hex,
         "primary-foreground": "#ffffff",
         "sidebar-primary-foreground": "#ffffff",
       });
     }
   });
 
-  it("leaves the labels alone for a value it cannot measure", () => {
-    expect(accentDeclarations("rebeccapurple")).toEqual({
-      primary: "rebeccapurple",
-      ring: "rebeccapurple",
-      "sidebar-primary": "rebeccapurple",
-    });
-  });
-
-  it("rejects a value that could break out of the declaration", () => {
+  // Email buttons honor only hex too, and the admin picker only writes hex.
+  it("ignores a value that is not a hex color", () => {
+    expect(accentDeclarations("rebeccapurple")).toBeNull();
+    expect(accentDeclarations("rgb(0, 0, 0)")).toBeNull();
     expect(accentDeclarations("red;} body{display:none")).toBeNull();
-    expect(accentDeclarations("red /* x")).toBeNull();
+    expect(accentDeclarations("#12345")).toBeNull();
   });
 });
