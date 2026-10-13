@@ -272,10 +272,7 @@ func (r *Runner) runNext() {
 	if job.CancelRequested {
 		message := "Library metadata refresh canceled"
 		if job.JobType == JobTypeImageCacheCleanup {
-			message = "Image cache cleanup canceled; cached images not yet deleted remain in storage"
-			if job.ProgressTotal > 0 && job.ProgressCurrent >= job.ProgressTotal {
-				message = imageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal)
-			}
+			message = QueuedImageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal)
 		}
 		if job.JobType == JobTypeStorageTransition {
 			message = "Storage transition canceled; verified copy checkpoints retained"
@@ -615,6 +612,15 @@ var (
 // imageCacheCleanupCanceledMessage describes a canceled cleanup that stopped
 // before prefix next of total. A cancel seen only after the last prefix left
 // nothing behind, so it must not say that undeleted images remain.
+// QueuedImageCacheCleanupCanceledMessage is the message for a cleanup canceled
+// while queued, either before its first claim or between slices.
+func QueuedImageCacheCleanupCanceledMessage(current, total int) string {
+	if total > 0 && current >= total {
+		return imageCacheCleanupCanceledMessage(current, total)
+	}
+	return "Image cache cleanup canceled; cached images not yet deleted remain in storage"
+}
+
 func imageCacheCleanupCanceledMessage(next, total int) string {
 	if next >= total {
 		return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total)
@@ -753,11 +759,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 			slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)
 			return
 		}
-		event := notifications.TypeJobCompleted
-		if current, getErr := r.repo.GetByID(finishCtx, job.ID); getErr == nil && current.Status == StatusCancelled {
-			event = notifications.TypeJobCancelled
-		}
-		r.publishJobByID(finishCtx, event, job.ID)
+		r.publishJobByID(finishCtx, notifications.TypeJobCompleted, job.ID)
 	case errors.Is(err, context.DeadlineExceeded):
 		// A prefix cut off by the deadline may still have lost objects;
 		// that is progress, and the next claim deletes the rest.

@@ -82,3 +82,33 @@ func TestRequestAdminTaskJobCancellationStopsALocalImageCacheCleanup(t *testing.
 		t.Fatalf("cancel_requested=%v stopped=%v, want the flag set and the local cleanup stopped", got.CancelRequested, stopped)
 	}
 }
+
+// A queued cleanup, new or yielded between slices, is ended by the cancel
+// request itself rather than left canceling until a runner claims it.
+func TestRequestAdminTaskJobCancellationEndsAQueuedImageCacheCleanup(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusQueued, ProgressCurrent: 3, ProgressTotal: 8}
+	h := NewAdminJobsHandler(&cancellationRequestingRepository{fakeAdminJobRepository{job: job}}, nil)
+
+	got, err := h.RequestAdminTaskJobCancellation(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != adminjob.StatusCancelled || got.Message != adminjob.QueuedImageCacheCleanupCanceledMessage(3, 8) {
+		t.Fatalf("status=%q message=%q, want the queued cleanup canceled at once", got.Status, got.Message)
+	}
+}
+
+// When a runner claims the cleanup between the flag and the queued cancel, the
+// request still succeeds and the claim ends the job from the flag.
+func TestRequestAdminTaskJobCancellationLeavesAClaimedCleanupToItsRunner(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusQueued}
+	h := NewAdminJobsHandler(&cancellationRequestingRepository{fakeAdminJobRepository{job: job, promoteToRunningOnCancelQueued: true}}, nil)
+
+	got, err := h.RequestAdminTaskJobCancellation(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status == adminjob.StatusCancelled || !got.CancelRequested {
+		t.Fatalf("status=%q cancel_requested=%v, want a pending cancel left to the runner", got.Status, got.CancelRequested)
+	}
+}

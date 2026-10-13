@@ -133,10 +133,13 @@ completed effects and verified storage-copy checkpoints. An accepted
 cancellation returns `202`; an already canceled job returns `200`; a succeeded
 or failed job returns `409 job_not_cancelable`. A queued storage-transition
 cancellation also releases its staged target so a later transition can choose a
-different destination. An image cache cleanup stops before its next prefix, so
-the cancel can take partial effect: cached images already deleted stay deleted
-and any not yet deleted remain in storage. The canceled job reports the totals
-it reached in `library_result` (`deleted_prefixes`, `deleted_s3_objects`); a
-cleanup canceled before it deleted any prefix reports zeros. The administrator
+different destination. A queued image cache cleanup, including one waiting
+between slices, is canceled at once and returns `200`. A running cleanup stops
+at the prefix it is deleting, so the cancel can take partial effect: cached
+images already deleted stay deleted and any not yet deleted remain in storage.
+The canceled job reports the totals it reached in `library_result`:
+`deleted_prefixes` counts fully deleted prefixes and `deleted_s3_objects` counts
+every deleted object, including any from the prefix the cancel interrupted. A
+cleanup canceled before it deleted anything reports zeros. The administrator
 task section does not add a generic durable scheduler or change
 the retention and dispatch guarantees of existing job owners.
