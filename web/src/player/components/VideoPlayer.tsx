@@ -439,6 +439,15 @@ export function VideoPlayer({
   connectionStatusRef.current = connectionStatus;
   const transportFailedForPlanRevisionRef = useRef<number | null>(null);
   const timelineOffsetRef = useRef(0);
+  // Where the direct-play engine's clock starts, in player seconds. Chrome keeps
+  // a Matroska file's container start time (seconds into a TS remux), so its
+  // currentTime runs ahead of the media timeline by that much.
+  const [directPlayOriginSeconds, setDirectPlayOriginSeconds] = useState(0);
+  const planTimelineOffsetRef = useRef(0);
+  // True between loading an original file and learning its clock origin. A
+  // seek in that window is held as pending: written to the element it would
+  // become the default start position and be misread as the origin.
+  const directPlayOriginPendingRef = useRef(false);
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
@@ -854,14 +863,18 @@ export function VideoPlayer({
   const isCopyOriginalHLS = plan.delivery === "server_remux_hls";
 
   // Keep the player-local clock mapped onto the canonical media timeline.
-  const timelineOffsetSeconds = plan.timeline.timeline_offset_seconds;
+  const planTimelineOffset = plan.timeline.timeline_offset_seconds;
+  planTimelineOffsetRef.current = planTimelineOffset;
+  const playsOriginalFile = plan.delivery === "original_http";
+  const timelineOffsetSeconds =
+    planTimelineOffset - (playsOriginalFile ? directPlayOriginSeconds : 0);
   timelineOffsetRef.current = timelineOffsetSeconds;
 
   // Media-time position playback is heading to, for consumers that need a
   // position before the element has media loaded (when currentTime still
   // reads 0): an in-flight seek target, else the session's start position.
   subtitleFetchAnchorRef.current =
-    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, timelineOffsetSeconds);
+    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, planTimelineOffset);
 
   useEffect(() => {
     if (backendDuration > 0) {
@@ -1105,6 +1118,12 @@ export function VideoPlayer({
 
       resetRoomCatchupRate();
 
+      if (directPlayOriginPendingRef.current) {
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        return true;
+      }
+
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
         rememberPendingSeek(seconds);
@@ -1244,10 +1263,12 @@ export function VideoPlayer({
 
   const buildExitState = useCallback((): PlaybackExitState => {
     const video = videoRef.current;
-    const positionSeconds = toMediaTime(
-      video?.currentTime ?? currentTime,
-      timelineOffsetRef.current,
-    );
+    // Before metadata the element's clock is not on this stream yet; leaving
+    // then keeps the position playback was heading to.
+    const positionSeconds =
+      video?.readyState === HTMLMediaElement.HAVE_NOTHING
+        ? subtitleFetchAnchorRef.current
+        : toMediaTime(video?.currentTime ?? currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
 
@@ -1948,6 +1969,7 @@ export function VideoPlayer({
     let autoplayAttempts = 0;
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
+    let directPlayMetadataHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1968,6 +1990,11 @@ export function VideoPlayer({
         video.removeEventListener("loadedmetadata", nativeHLSMetadataHandler);
         nativeHLSMetadataHandler = null;
       }
+      if (directPlayMetadataHandler) {
+        video.removeEventListener("loadedmetadata", directPlayMetadataHandler);
+        directPlayMetadataHandler = null;
+      }
+      directPlayOriginPendingRef.current = false;
     };
 
     // Settles the player into a deliberate paused state: the startup guard is
@@ -2212,8 +2239,33 @@ export function VideoPlayer({
         // the load algorithm that is about to seek to the resume position, and
         // the spec has that algorithm reject it.
         video.src = effectiveStreamUrl;
-        video.currentTime = effectiveInitialPosition;
-        attemptAutoplayWhenReady();
+        if (playsOriginalFile) {
+          // The original file's clock can start at the container's start time
+          // instead of zero. Load without a start position so currentTime at
+          // loadedmetadata reports where the clock starts, fold that into the
+          // timeline offset, then seek to the start position on the corrected
+          // clock. Subtitles, seeks, and progress then share the media timeline
+          // the server's streams use.
+          directPlayOriginPendingRef.current = true;
+          directPlayMetadataHandler = () => {
+            directPlayMetadataHandler = null;
+            directPlayOriginPendingRef.current = false;
+            const origin = Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0;
+            const planOffset = planTimelineOffsetRef.current;
+            timelineOffsetRef.current = planOffset - origin;
+            setDirectPlayOriginSeconds(origin);
+            // A seek made while the origin was unknown wins over the start position.
+            const mediaTarget =
+              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+            const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
+            if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
+            attemptAutoplayWhenReady();
+          };
+          video.addEventListener("loadedmetadata", directPlayMetadataHandler, { once: true });
+        } else {
+          video.currentTime = effectiveInitialPosition;
+          attemptAutoplayWhenReady();
+        }
       }
     }
 
@@ -2242,6 +2294,7 @@ export function VideoPlayer({
     isHlsStream,
     isPlayerReady,
     planRevision,
+    playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
     reportCurrentPlanFailure,

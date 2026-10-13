@@ -2245,6 +2245,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2276,6 +2277,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2308,6 +2310,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onPlaybackTransportReady: ready,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
     Object.defineProperty(video, "seekable", {
       configurable: true,
@@ -2382,6 +2385,7 @@ describe("VideoPlayer plan failure recovery", () => {
       onReanchorSeek: reanchor,
     });
     const video = container.querySelector("video")!;
+    fireEvent.loadedMetadata(video);
     Object.defineProperty(video, "currentTime", { configurable: true, value: 10 });
     act(() => ready.mock.lastCall![0].skipBack());
     expect(reanchor).toHaveBeenLastCalledWith(395);
@@ -2900,7 +2904,7 @@ describe("VideoPlayer intro skip prompt", () => {
   });
 });
 
-describe("VideoPlayer native HLS timeline", () => {
+describe("VideoPlayer source timeline", () => {
   beforeEach(() => {
     realtimeOptions.current = null;
     controls.current = null;
@@ -2950,6 +2954,59 @@ describe("VideoPlayer native HLS timeline", () => {
     expect(video.currentTime).toBe(7);
     expect(subtitleTimeline.textOffsetSeconds).toBe(0);
     expect(subtitleTimeline.assOffsetSeconds).toBe(0);
+  });
+
+  // Chrome keeps a Matroska file's container start time on its clock, so a
+  // file that starts 30 s in reports currentTime 30 at its first frame.
+  // Subtitle cues, the resume seek, and the reported position all have to
+  // map through that origin or they drift by it.
+  it("maps direct play onto the media timeline when the engine clock starts late", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300, timeline_offset_seconds: 0 },
+    });
+    const { container } = renderPlayer({ plan, initialPosition: 1300 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+
+    expect(video.currentTime).toBeCloseTo(1300 + origin);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-origin));
+    expect(subtitleTimeline.assOffsetSeconds).toBeCloseTo(-origin);
+    fireFrameTimeUpdate(video);
+    expect(controls.current!.currentTime).toBeCloseTo(1300);
+
+    playerSeek.mockClear();
+    act(() => {
+      controls.current!.onSeek(1400);
+    });
+    expect(playerSeek).toHaveBeenCalledWith(expect.closeTo(1400 + origin));
+  });
+
+  // Written to the element before metadata, a seek would become the default
+  // start position and be read back as the clock origin.
+  it("holds a direct-play seek made before metadata until the origin is known", async () => {
+    const origin = 29.977;
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    playerSeek.mockClear();
+    act(() => {
+      controls.current!.onSeek(500);
+    });
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(controls.current!.currentTime).toBe(500);
+
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(500 + origin);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-origin));
   });
 
   it("uses native HLS for Dolby Vision when hls.js is also available", async () => {
