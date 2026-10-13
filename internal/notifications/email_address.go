@@ -159,7 +159,7 @@ func composeVerificationEmail(brand mail.Brand, profileName, verifyURL string) e
 	body.WriteString(mail.EmailParagraph(fmt.Sprintf(
 		"This address was entered as the notification destination for %s on a Silo server.", who)))
 	body.WriteString(mail.EmailParagraph("To confirm and start receiving notifications here:"))
-	body.WriteString(mail.EmailButton("Confirm this address", verifyURL))
+	body.WriteString(mail.EmailButton(brand, "Confirm this address", verifyURL))
 	body.WriteString(fmt.Sprintf(
 		`<p style="margin:20px 0 0;font:400 12px/1.7 %s;color:%s;">Or paste this link into your browser:<br>`+
 			`<span style="font:400 12px/1.7 %s;word-break:break-all;">%s</span></p>`,

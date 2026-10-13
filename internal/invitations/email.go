@@ -49,7 +49,7 @@ func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, cl
 			mail.EmailColorBorder + `;font:italic 400 14px/1.6 ` + mail.EmailFont +
 			`;color:` + mail.EmailColorMuted + `;">&ldquo;` + html.EscapeString(note) + `&rdquo;</p>`)
 	}
-	body.WriteString(mail.EmailButton("Set your password", claimURL))
+	body.WriteString(mail.EmailButton(brand, "Set your password", claimURL))
 	body.WriteString(mail.EmailFacts(
 		mail.EmailFact{Label: "Sign in with", ValueHTML: html.EscapeString(email), Mono: true},
 		mail.EmailFact{Label: "Link expires", ValueHTML: html.EscapeString(expiry)},

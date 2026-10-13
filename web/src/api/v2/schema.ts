@@ -20044,6 +20044,7 @@ export interface components {
       storage_available: boolean;
     };
     BrandingConfiguration: {
+      accent_color?: string;
       favicon_url?: string;
       login_bg_url?: string;
       login_subtitle: string;

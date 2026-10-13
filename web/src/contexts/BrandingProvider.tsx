@@ -13,6 +13,7 @@ const DEFAULT_LOGIN_SUBTITLE = "Sign in with an existing account.";
 interface BrandingApiResponse {
   server_name?: string;
   login_subtitle?: string;
+  accent_color?: string;
   wordmark_url?: string;
   mark_url?: string;
   favicon_url?: string;
@@ -23,6 +24,8 @@ interface BrandingApiResponse {
 export interface BrandingContextValue {
   serverName: string;
   loginSubtitle: string;
+  /** Brand accent color (hex), or null when unset. */
+  accentColor: string | null;
   /** Custom asset URLs (stable, cache-busted) or null to use bundled defaults. */
   wordmarkUrl: string | null;
   markUrl: string | null;
@@ -35,6 +38,7 @@ export interface BrandingContextValue {
 const DEFAULT_BRANDING: BrandingContextValue = {
   serverName: DEFAULT_SERVER_NAME,
   loginSubtitle: DEFAULT_LOGIN_SUBTITLE,
+  accentColor: null,
   wordmarkUrl: null,
   markUrl: null,
   faviconUrl: null,
@@ -50,6 +54,7 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
   return {
     serverName: data?.server_name || DEFAULT_SERVER_NAME,
     loginSubtitle: data?.login_subtitle || DEFAULT_LOGIN_SUBTITLE,
+    accentColor: data?.accent_color || null,
     wordmarkUrl: data?.wordmark_url || null,
     markUrl: data?.mark_url || null,
     faviconUrl: data?.favicon_url || null,
@@ -71,9 +76,45 @@ function applyFavicon(url: string | null) {
 }
 
 /**
+ * Tokens the brand accent recolors: the primary action color, the focus ring,
+ * and the sidebar's primary accent, so the brand color shows across the
+ * prominent UI surfaces.
+ */
+const ACCENT_TOKENS = ["primary", "ring", "sidebar-primary"] as const;
+
+/** Reject values that could break out of a CSS declaration. */
+const UNSAFE_CSS_VALUE = /[;{}]|\/\*|<\//;
+
+const ACCENT_STYLE_ID = "silo-accent";
+
+/**
+ * Paints the accent over Cinema Dark. It is an unlayered :root rule appended
+ * to <head>, so it wins over the theme's layered tokens, including the
+ * high-contrast focus ring, as the admin's accent always has.
+ */
+function applyAccent(hex: string | null) {
+  if (typeof document === "undefined") return;
+  const css =
+    hex && !UNSAFE_CSS_VALUE.test(hex)
+      ? `:root {\n${ACCENT_TOKENS.map((token) => `  --${token}: ${hex};`).join("\n")}\n}`
+      : "";
+  let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
+  if (!css) {
+    style?.remove();
+    return;
+  }
+  if (!style) {
+    style = document.createElement("style");
+    style.id = ACCENT_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+}
+
+/**
  * BrandingProvider fetches server branding (public endpoint, available before
- * login) and exposes it via context. It owns the document-title and favicon
- * side effects so they run exactly once, fixing the tab title and applying the
+ * login) and exposes it via context. It owns the document-title, favicon, and
+ * accent side effects so they run exactly once, fixing the tab title and applying the
  * custom favicon in dev (where the server does not template index.html).
  */
 export function BrandingProvider({ children }: { children: ReactNode }) {
@@ -96,6 +137,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyFavicon(value.faviconUrl);
   }, [value.faviconUrl]);
+
+  useEffect(() => {
+    applyAccent(value.accentColor);
+  }, [value.accentColor]);
 
   return <BrandingContext value={value}>{children}</BrandingContext>;
 }

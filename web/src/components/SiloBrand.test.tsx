@@ -10,6 +10,7 @@ import { SiloBrand, type SiloBrandVariant } from "./SiloBrand";
 const BRANDING_DEFAULTS: BrandingContextValue = {
   serverName: "Silo",
   loginSubtitle: "Sign in with an existing account.",
+  accentColor: null,
   wordmarkUrl: null,
   markUrl: null,
   faviconUrl: null,

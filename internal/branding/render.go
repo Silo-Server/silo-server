@@ -12,10 +12,9 @@ import (
 type Snapshot struct {
 	ServerName    string
 	LoginSubtitle string
-	// AccentColor and DefaultTheme are reported only by the frozen /api/v1
-	// branding response. They are not rendered into the shell and so are not
-	// part of RenderKey.
-	AccentColor  string // "" when unset
+	AccentColor   string // "" when unset
+	// DefaultTheme is reported only by the frozen /api/v1 branding response.
+	// It is not rendered into the shell and so is not part of RenderKey.
 	DefaultTheme string // "" when unset
 
 	assets map[AssetKind]string // kind -> content ref ("<hash><ext>")
@@ -43,6 +42,15 @@ func AssetURLFor(kind AssetKind, ref string) string {
 	return assetURLBase + string(kind) + "?v=" + ref
 }
 
+// ThemeColor returns the color used for the PWA manifest and the theme-color
+// meta tag: the configured accent color, or the default when unset.
+func (s Snapshot) ThemeColor() string {
+	if s.AccentColor != "" {
+		return s.AccentColor
+	}
+	return DefaultThemeColor
+}
+
 // RenderKey returns a stable identity covering every snapshot field the
 // Render* functions read and every branding asset ref, so callers can cache
 // rendered output and re-render only when the branding configuration actually
@@ -51,6 +59,7 @@ func (s Snapshot) RenderKey() string {
 	return strings.Join([]string{
 		s.ServerName,
 		s.LoginSubtitle,
+		s.AccentColor,
 		s.assets[KindWordmark],
 		s.assets[KindMark],
 		s.assets[KindFavicon],
@@ -65,7 +74,7 @@ func (s Snapshot) RenderKey() string {
 const indexFaviconLink = `<link rel="icon" href="/favicon.ico" sizes="any" />`
 
 // RenderIndexHTML injects branding into the SPA shell: the browser tab title
-// and, when configured, the custom favicon link.
+// and, when configured, the custom favicon link and a theme-color meta tag.
 // Favicon/manifest paths themselves are served dynamically by the frontend
 // handler, so only the cache-bustable favicon href is rewritten here.
 // Replacements that don't match are no-ops, so a build that changes the shell
@@ -85,6 +94,11 @@ func RenderIndexHTML(index []byte, snap Snapshot) []byte {
 			`<link rel="icon" href="`+html.EscapeString(u)+`" sizes="any" />`,
 			1,
 		)
+	}
+
+	if snap.AccentColor != "" {
+		meta := `<meta name="theme-color" content="` + html.EscapeString(snap.AccentColor) + `" />`
+		out = strings.Replace(out, "</head>", "  "+meta+"\n  </head>", 1)
 	}
 
 	return []byte(out)
@@ -130,8 +144,8 @@ func RenderManifest(snap Snapshot) []byte {
 		Name:            snap.ServerName,
 		ShortName:       snap.ServerName,
 		Icons:           icons,
-		ThemeColor:      ThemeColor,
-		BackgroundColor: ThemeColor,
+		ThemeColor:      snap.ThemeColor(),
+		BackgroundColor: snap.ThemeColor(),
 		Display:         "standalone",
 		StartURL:        "/",
 	}

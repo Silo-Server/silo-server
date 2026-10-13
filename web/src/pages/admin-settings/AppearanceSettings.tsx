@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, RotateCcw } from "lucide-react";
 
 import { BrandingAssetField } from "@/components/admin/BrandingAssetField";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -47,6 +47,18 @@ const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const FAVICON_ACCEPT =
   "image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,image/webp,.ico";
 
+const ACCENT_PRESETS = [
+  "#4f46e5",
+  "#0ea5e9",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#ec4899",
+  "#8b5cf6",
+  "#64748b",
+];
+
+const ACCENT_KEY = "branding.accent_color";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
 
@@ -59,6 +71,7 @@ const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
  * server identity, not look and feel.
  */
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
+const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -68,7 +81,7 @@ const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
 export default function AppearanceSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => OVERLAY_KEYS, []) });
+  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
@@ -78,6 +91,11 @@ export default function AppearanceSettings() {
   // Which sample the badge preview stands in for. View state only — show-only
   // overlays (network, show status) are otherwise impossible to see here.
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
+
+  const accentColor = form.getValue(ACCENT_KEY);
+  const customAccentActive =
+    Boolean(accentColor) &&
+    !ACCENT_PRESETS.some((hex) => hex.toLowerCase() === accentColor.toLowerCase());
 
   // s3.public_bucket is not staged here, but getValue falls back to the full
   // settings response so the uploads can still be gated on it.
@@ -178,6 +196,76 @@ export default function AppearanceSettings() {
               preview="wide"
             />
           </div>
+        </FieldGroup>
+
+        <FieldGroup label="Colors" restartAll={restartKeys.has(ACCENT_KEY)}>
+          <SettingFieldRow
+            label="Accent color"
+            description="Recolors buttons, focus outlines, and the sidebar."
+          >
+            <div className="flex flex-wrap items-center justify-end gap-2 sm:max-w-[300px]">
+              {/* Exactly one control in this row is always marked selected:
+                  the Default swatch when no accent is stored, the matching
+                  preset when one is, or the Custom chip when the stored hex
+                  matches no preset. */}
+              <button
+                type="button"
+                onClick={() => form.setValue(ACCENT_KEY, "")}
+                aria-label="Use theme default accent"
+                aria-pressed={!accentColor}
+                title="Theme default"
+                className={cn(
+                  "bg-muted text-muted-foreground relative grid h-8 w-8 place-items-center rounded-full border transition-transform hover:scale-110",
+                  !accentColor
+                    ? "border-foreground ring-foreground ring-offset-background ring-2 ring-offset-2"
+                    : "border-border",
+                )}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+              {ACCENT_PRESETS.map((hex) => {
+                const selected = accentColor.toLowerCase() === hex.toLowerCase();
+                return (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => form.setValue(ACCENT_KEY, hex)}
+                    aria-label={`Use accent ${hex}`}
+                    aria-pressed={selected}
+                    className={cn(
+                      "relative h-8 w-8 rounded-full border transition-transform hover:scale-110",
+                      selected
+                        ? "border-foreground ring-foreground ring-offset-background ring-2 ring-offset-2"
+                        : "border-border",
+                    )}
+                    style={{ backgroundColor: hex }}
+                  >
+                    {selected && (
+                      <Check className="absolute inset-0 m-auto h-4 w-4 text-white drop-shadow" />
+                    )}
+                  </button>
+                );
+              })}
+              <label
+                className={cn(
+                  "inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-xs font-medium",
+                  customAccentActive
+                    ? "border-foreground ring-foreground ring-offset-background ring-1 ring-offset-1"
+                    : "border-border",
+                )}
+              >
+                <input
+                  type="color"
+                  aria-label="Custom accent color"
+                  value={accentColor || "#4f46e5"}
+                  onChange={(e) => form.setValue(ACCENT_KEY, e.target.value)}
+                  className="h-5 w-5 cursor-pointer border-0 bg-transparent p-0"
+                />
+                Custom
+                {customAccentActive && <Check className="h-3.5 w-3.5" />}
+              </label>
+            </div>
+          </SettingFieldRow>
         </FieldGroup>
 
         <FieldGroup

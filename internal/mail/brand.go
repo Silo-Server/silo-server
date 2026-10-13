@@ -8,6 +8,7 @@ import (
 	_ "image/png"
 	"log/slog"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -17,7 +18,8 @@ import (
 
 // Email branding follows the web sidebar (web/src/components/SiloBrand.tsx):
 // the header shows the server's uploaded wordmark, else Silo's own, with the
-// server name as alt text. The logo travels inside the message as an inline PNG rather than a
+// server name as alt text; the accent color, when set, colors the primary
+// action. The logo travels inside the message as an inline PNG rather than a
 // link: many clients block remote images, the recipient may not be able to
 // reach the server, and uploaded logos are stored as WebP, which Outlook does
 // not render.
@@ -43,7 +45,9 @@ var defaultLogo = mustDefaultLogo()
 type Brand struct {
 	// Name is the server name, shown as the logo's alt text.
 	Name string
-	logo brandLogo
+	// AccentColor is a validated "#rrggbb" color, or "" for the default.
+	AccentColor string
+	logo        brandLogo
 }
 
 type brandLogo struct {
@@ -79,6 +83,17 @@ func (b Brand) withDefaults() Brand {
 	return b
 }
 
+// actionColors returns the primary button's background and label colors:
+// the accent with whichever label color reads better on it, else the
+// default white-on-dark action.
+func (b Brand) actionColors() (background, label string) {
+	accent := normalizeHexColor(b.AccentColor)
+	if accent == "" {
+		return EmailColorAction, EmailColorOnAct
+	}
+	return accent, readableLabelColor(accent)
+}
+
 // BrandSource supplies the server's branding. *branding.Service satisfies it.
 type BrandSource interface {
 	Load(ctx context.Context) branding.Snapshot
@@ -109,7 +124,7 @@ func (l *BrandLoader) Load(ctx context.Context) Brand {
 		return DefaultBrand()
 	}
 	snap := l.source.Load(ctx)
-	brand := Brand{Name: snap.ServerName}
+	brand := Brand{Name: snap.ServerName, AccentColor: normalizeHexColor(snap.AccentColor)}
 	if ref := snap.AssetRef(branding.KindWordmark); ref != "" {
 		brand.logo = l.customLogo(ctx, ref)
 	}
@@ -167,4 +182,49 @@ func logoDisplaySize(width, height int) (int, int) {
 		float64(logoMaxHeight)/float64(height)))
 	return max(1, int(math.Round(float64(width)*scale))),
 		max(1, int(math.Round(float64(height)*scale)))
+}
+
+// normalizeHexColor returns color as lowercase "#rrggbb" when it is a "#rgb"
+// or "#rrggbb" hex color, else "". The accent setting is stored as free text,
+// so anything else is ignored rather than written into a style attribute.
+func normalizeHexColor(color string) string {
+	color = strings.ToLower(strings.TrimSpace(color))
+	if !strings.HasPrefix(color, "#") {
+		return ""
+	}
+	digits := color[1:]
+	if len(digits) == 3 {
+		digits = string([]byte{digits[0], digits[0], digits[1], digits[1], digits[2], digits[2]})
+	}
+	if len(digits) != 6 {
+		return ""
+	}
+	if _, err := strconv.ParseUint(digits, 16, 32); err != nil {
+		return ""
+	}
+	return "#" + digits
+}
+
+// readableLabelColor picks the dark or white label color, whichever has the
+// higher WCAG contrast against the "#rrggbb" background.
+func readableLabelColor(background string) string {
+	bg := relativeLuminance(background)
+	dark := relativeLuminance(EmailColorOnAct)
+	white := 1.0
+	if (white+0.05)/(bg+0.05) > (bg+0.05)/(dark+0.05) {
+		return "#ffffff"
+	}
+	return EmailColorOnAct
+}
+
+func relativeLuminance(hex string) float64 {
+	value, _ := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	channel := func(shift uint) float64 {
+		c := float64((value>>shift)&0xff) / 255
+		if c <= 0.04045 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(16) + 0.7152*channel(8) + 0.0722*channel(0)
 }

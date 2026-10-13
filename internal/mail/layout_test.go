@@ -54,12 +54,28 @@ func TestRenderLayoutAddsNoLinks(t *testing.T) {
 }
 
 func TestEmailButtonEscapes(t *testing.T) {
-	out := EmailButton(`Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
+	out := EmailButton(Brand{}, `Click "here" <now>`, `https://example.com/?a=1&b=<2>`)
 	if !strings.Contains(out, `href="https://example.com/?a=1&amp;b=&lt;2&gt;"`) {
 		t.Fatalf("href not escaped: %s", out)
 	}
 	if strings.Contains(out, "<now>") {
 		t.Fatalf("label not escaped: %s", out)
+	}
+}
+
+func TestEmailButtonUsesAccent(t *testing.T) {
+	cases := []struct{ accent, background, label string }{
+		{"", EmailColorAction, EmailColorOnAct},
+		{"#f5a524", "#f5a524", EmailColorOnAct},             // light accent, dark label
+		{"#1d4ed8", "#1d4ed8", "#ffffff"},                   // dark accent, white label
+		{"red;x:url(y)", EmailColorAction, EmailColorOnAct}, // invalid: default
+	}
+	for _, tc := range cases {
+		out := EmailButton(Brand{AccentColor: tc.accent}, "Go", "https://example.com")
+		if !strings.Contains(out, `bgcolor="`+tc.background+`"`) ||
+			!strings.Contains(out, `;color:`+tc.label+`;`) {
+			t.Fatalf("accent %q: want background %s and label %s:\n%s", tc.accent, tc.background, tc.label, out)
+		}
 	}
 }
 

@@ -81,18 +81,33 @@ describe("AppearanceSettings", () => {
     useSettingsFormMock.mockImplementation(() => form);
   });
 
-  // Silo has one look, so the page offers no theme controls and stages only
-  // the badge settings.
-  it("stages only the badge settings and offers no theme controls", () => {
+  // The accent is the only color an admin picks: it is staged as the one
+  // branding key, with no token overrides or custom CSS beside it.
+  it("stages the accent color alone and offers no other theme controls", () => {
     render(<AppearanceSettings />);
 
     const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
-    expect(keys).toEqual(["overlays.enabled", "defaults.card_overlays"]);
+    expect(keys).toEqual(["branding.accent_color", "overlays.enabled", "defaults.card_overlays"]);
 
-    expect(screen.queryByText("Colors")).toBeNull();
-    expect(screen.queryByText("Accent color")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use accent #10b981" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(form.setValue).toHaveBeenCalledTimes(1);
+    expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "#10b981");
+
     expect(screen.queryByText("Custom CSS")).toBeNull();
+    expect(screen.queryByText("Individual colors and fonts")).toBeNull();
     expect(screen.queryByRole("button", { name: /Reset to Cinema Dark/ })).toBeNull();
+  });
+
+  it("clears the accent with the default swatch", () => {
+    form = makeForm({ "branding.accent_color": "#10b981" });
+    render(<AppearanceSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use theme default accent" }));
+
+    expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "");
+    expect(form.save).not.toHaveBeenCalled();
   });
 
   // Restoring is an ordinary staged edit: the admin still confirms the batch

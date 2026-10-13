@@ -69,21 +69,21 @@ func TestBrandLoaderDefaults(t *testing.T) {
 	var nilLoader *BrandLoader
 	for _, loader := range []*BrandLoader{nilLoader, NewBrandLoader(nil)} {
 		brand := loader.Load(context.Background())
-		if brand.Name != "Silo" || !bytes.Equal(brand.logo.png, defaultWordmarkPNG) {
-			t.Fatalf("want default brand, got name=%q", brand.Name)
+		if brand.Name != "Silo" || brand.AccentColor != "" || !bytes.Equal(brand.logo.png, defaultWordmarkPNG) {
+			t.Fatalf("want default brand, got name=%q accent=%q", brand.Name, brand.AccentColor)
 		}
 	}
 }
 
 func TestBrandLoaderUsesCustomBranding(t *testing.T) {
-	settings := memorySettings{branding.KeyServerName: "Harbor"}
+	settings := memorySettings{branding.KeyServerName: "Harbor", branding.KeyAccentColor: "#F5A524"}
 	source := &countingSource{Service: brandedService(t, settings)}
 	loader := NewBrandLoader(source)
 	ctx := context.Background()
 
 	brand := loader.Load(ctx)
-	if brand.Name != "Harbor" {
-		t.Fatalf("name=%q", brand.Name)
+	if brand.Name != "Harbor" || brand.AccentColor != "#f5a524" {
+		t.Fatalf("name=%q accent=%q", brand.Name, brand.AccentColor)
 	}
 	if brand.logo.width != 240 || brand.logo.height != 48 {
 		t.Fatalf("display size = %dx%d, want 240x48", brand.logo.width, brand.logo.height)
@@ -116,6 +116,22 @@ func TestBrandLoaderFallsBackWhenLogoUnavailable(t *testing.T) {
 	brand = NewBrandLoader(source).Load(context.Background())
 	if bytes.Equal(brand.logo.png, defaultWordmarkPNG) {
 		t.Fatal("custom logo not loaded after the store recovered")
+	}
+}
+
+func TestNormalizeHexColor(t *testing.T) {
+	for in, want := range map[string]string{
+		"#F5A524":                "#f5a524",
+		" #abc ":                 "#aabbcc",
+		"f5a524":                 "",
+		"#f5a52":                 "",
+		"#ggg":                   "",
+		"red":                    "",
+		`#fff;background:url(x)`: "",
+	} {
+		if got := normalizeHexColor(in); got != want {
+			t.Errorf("normalizeHexColor(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

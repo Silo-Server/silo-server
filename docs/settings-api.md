@@ -451,7 +451,7 @@ Branding remains public so it can render before sign-in:
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/v2/theme/capabilities` | Branding and asset-storage availability |
-| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional asset URLs, storage availability |
+| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
 Discovery uses the existing branding service. When dependencies are absent,
@@ -471,14 +471,16 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
 
-The web client has one look, Cinema Dark, with no color, font, or CSS
-customization. The v2 branding document therefore has no accent color, default
-theme, or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
+The web client has one theme, Cinema Dark. The only customization is the
+administrator's accent color (`branding.accent_color`), which the web client
+reads from the branding document and applies to the primary action color, the
+focus ring and the sidebar accent; email buttons, the shell's `theme-color` and
+the web app manifest use it too. The v2 branding document has no default theme
+or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
 The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
-`accent_color`, `default_theme`, and light logo URLs, and `/theme/admin-css` still
-reports the stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps
-those settings for v1 alone; nothing else reads them, and email and the web app
-shell no longer use the accent color. The v1 `/theme/catalog`,
+`default_theme` and light logo URLs, and `/theme/admin-css` still reports the
+stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps those
+settings for v1 alone; nothing else reads them. The v1 `/theme/catalog`,
 `/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
 `theme.catalog_url` its default, until v1 retires.
 

@@ -42,8 +42,7 @@ func TestBrandingPublicDiscovery(t *testing.T) {
 	if got.Code != 200 || body.ServerName != "Synthetic Server" || body.FaviconURL != Prefix+"/branding/assets/favicon?v=abc.svg" || !body.StorageAvailable {
 		t.Fatal(got.Code, got.Body.String())
 	}
-	// The retired accent color stays in the frozen v1 response only.
-	if strings.Contains(got.Body.String(), "accent_color") {
+	if body.AccentColor != "#5bc39d" {
 		t.Fatal(got.Body.String())
 	}
 	// v2 has no theme overrides.

@@ -21300,6 +21300,9 @@
       "BrandingConfiguration": {
         "additionalProperties": false,
         "properties": {
+          "accent_color": {
+            "type": "string"
+          },
           "favicon_url": {
             "type": "string"
           },

@@ -39,10 +39,10 @@ const (
 const (
 	KeyServerName    = "branding.server_name"
 	KeyLoginSubtitle = "branding.login_subtitle"
-	// KeyAccentColor and KeyDefaultTheme are the retired admin accent color and
-	// default theme. The web client has one look and ignores both; only the
-	// frozen /api/v1 branding response still reports them, until v1 retires.
-	KeyAccentColor  = "branding.accent_color"
+	KeyAccentColor   = "branding.accent_color"
+	// KeyDefaultTheme is the retired admin default theme. The web client has
+	// one theme and ignores it; only the frozen /api/v1 branding response still
+	// reports it, until v1 retires.
 	KeyDefaultTheme = "branding.default_theme"
 )
 
@@ -52,8 +52,9 @@ const (
 const (
 	DefaultServerName    = "Silo"
 	DefaultLoginSubtitle = "Sign in with an existing account."
-	// ThemeColor is the PWA manifest theme and background color.
-	ThemeColor = "#0b0b0f"
+	// DefaultThemeColor is used for the PWA manifest theme/background color when
+	// no accent color is configured.
+	DefaultThemeColor = "#0b0b0f"
 )
 
 // assetURLBase is the public, stable path prefix for serving branding assets.

@@ -143,8 +143,8 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
       {
         id: "appearance",
         label: "Appearance",
-        description: "Logos, icons, and poster badges.",
-        groups: ["Logos and icons", "Card overlays"],
+        description: "Logos, accent color, and poster badges.",
+        groups: ["Logos and icons", "Colors", "Card overlays"],
         keywords: [
           "logo",
           "wordmark",
@@ -152,6 +152,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "login background",
           "white label",
           "brand",
+          "accent color",
           "app name",
           "pwa",
           "overlays",
@@ -163,6 +164,9 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Logo (icon)",
           "Favicon",
           "Login background",
+          "Colors",
+          "Accent color",
+          "Custom accent color",
           "Card overlays",
           "Show badges on poster art",
           "Badge style",
