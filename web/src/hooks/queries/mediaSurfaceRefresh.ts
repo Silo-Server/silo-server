@@ -1,5 +1,10 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
-import type { HomeSectionItemsResponse, ItemDetail } from "@/api/types";
+import type {
+  HomeSectionItemsResponse,
+  ItemDetail,
+  SeasonDetailResponse,
+  SeasonsResponse,
+} from "@/api/types";
 import {
   adminKeys,
   catalogKeys,
@@ -222,11 +227,41 @@ function listedChildIds(data: unknown): string[] {
 // to that one ID would leave an open season grid, series watched totals or a
 // marked season's episodes stale.
 export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<string> {
-  // Index the cache's parent/child links in one pass, then walk them, so a
-  // series with many cached seasons and episodes costs one scan, not one per
-  // item.
+  // Index season identities before the links, then walk them, so a
+  // series with many cached seasons and episodes costs two cache scans,
+  // not one per item.
   const childrenOf = new Map<string, string[]>();
   const parentsOf = new Map<string, string[]>();
+  const queries = queryClient.getQueryCache().getAll();
+  const seasonIds = new Map<string, Map<number, string>>();
+  const rememberSeason = (
+    seriesId: string,
+    season: Pick<ItemDetail, "content_id" | "season_number"> | undefined,
+  ) => {
+    if (!season?.content_id || season.season_number == null) return;
+    let seasons = seasonIds.get(seriesId);
+    if (!seasons) {
+      seasons = new Map();
+      seasonIds.set(seriesId, seasons);
+    }
+    seasons.set(season.season_number, season.content_id);
+  };
+  for (const query of queries) {
+    const owner = listOwnerId(query.queryKey);
+    if (!owner) continue;
+    if (query.queryKey[0] === "catalog" && query.queryKey[1] === "series") {
+      for (const season of (query.state.data as SeasonsResponse | undefined)?.seasons ?? []) {
+        rememberSeason(owner, season);
+      }
+      rememberSeason(owner, (query.state.data as SeasonDetailResponse | undefined)?.season);
+    }
+    if (isItemDetailQueryKey(query.queryKey, owner)) {
+      const detail = query.state.data as ItemDetail | undefined;
+      if (detail?.type === "season" && detail.series_id) {
+        rememberSeason(detail.series_id, detail);
+      }
+    }
+  }
   const add = (edges: Map<string, string[]>, from: string, to: string) => {
     const list = edges.get(from);
     if (list) list.push(to);
@@ -237,23 +272,41 @@ export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<st
     add(childrenOf, parent, child);
     add(parentsOf, child, parent);
   };
-  for (const query of queryClient.getQueryCache().getAll()) {
+  for (const query of queries) {
     const owner = listOwnerId(query.queryKey);
     if (!owner) continue;
-    for (const child of listedChildIds(query.state.data)) link(owner, child);
+    // Numbered season episode keys name the series, while their members
+    // belong to the season whose identity the first pass found.
+    const numberedSeason =
+      query.queryKey[0] === "catalog" &&
+      query.queryKey[1] === "series" &&
+      query.queryKey[5] === "episodes" &&
+      typeof query.queryKey[4] === "number"
+        ? seasonIds.get(owner)?.get(query.queryKey[4])
+        : undefined;
+    if (numberedSeason) link(owner, numberedSeason);
+    for (const child of listedChildIds(query.state.data)) link(numberedSeason ?? owner, child);
     // A season's detail is cached under its series, so its own ID is only
     // in the data.
     const seasonId = (query.state.data as { season?: { content_id?: unknown } } | undefined)?.season
       ?.content_id;
     if (typeof seasonId === "string") link(owner, seasonId);
     if (isItemDetailQueryKey(query.queryKey, owner) || isWatchDetailQueryKey(query.queryKey)) {
-      const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
+      const detail = query.state.data as ItemDetail | undefined;
+      const seriesId = detail?.series_id;
       // A detail names its series, and derives its series title, backdrop
       // and credits from it. A season page opened directly has no cached
       // season list, so this edge is how a series change reaches it. A
       // playing episode's watch detail names it too, so its progress
       // reaches the series' watched summary.
-      if (seriesId) link(seriesId, owner);
+      if (seriesId) {
+        link(seriesId, owner);
+        const seasonId =
+          detail.season_number == null
+            ? undefined
+            : seasonIds.get(seriesId)?.get(detail.season_number);
+        if (seasonId) link(seasonId, owner);
+      }
     }
   }
 
@@ -369,7 +422,7 @@ export async function invalidateMediaSurfaceQueries(
     options.itemId &&
     !options.watchedKeys?.length &&
     relatedIds?.size === 1 &&
-    !cacheNamesItem(queryClient, options.itemId)
+    !cacheHasItemDetail(queryClient, options.itemId)
       ? { ...options, refreshItemKeyedLists: true, listOwnerIds: itemKeyedListOwners(queryClient) }
       : options;
   const matches = (query: Query) =>
@@ -390,12 +443,17 @@ function itemKeyedListOwners(queryClient: QueryClient): Set<string> {
   return owners;
 }
 
-// cacheNamesItem reports whether any cached query is keyed by itemId.
-function cacheNamesItem(queryClient: QueryClient, itemId: string): boolean {
+// A pending query or a markers-only read does not establish item ancestry.
+function cacheHasItemDetail(queryClient: QueryClient, itemId: string): boolean {
   return queryClient
     .getQueryCache()
     .getAll()
-    .some((query) => getQueryKeyItemId(query.queryKey) === itemId);
+    .some(
+      (query) =>
+        getQueryKeyItemId(query.queryKey) === itemId &&
+        (isItemDetailQueryKey(query.queryKey, itemId) || isWatchDetailQueryKey(query.queryKey)) &&
+        query.state.data != null,
+    );
 }
 
 // A letter index sorts the whole result, which on a large library can outlast
