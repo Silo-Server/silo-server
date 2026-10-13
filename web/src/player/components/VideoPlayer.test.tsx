@@ -4005,7 +4005,7 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     const onReanchorSeek = vi.fn(() => true);
     const onPlaybackStateChange = vi.fn();
     const onConnectionLost = vi.fn();
-    const { container, unmount } = renderPlayer({
+    const { container, unmount, rerenderPlayer } = renderPlayer({
       plan: remuxPlan,
       onReanchorSeek,
       onPlaybackStateChange,
@@ -4016,7 +4016,14 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     video.currentTime = 40;
     fireFrameTimeUpdate(video);
     fireEvent.pause(video);
-    return { video, unmount, onReanchorSeek, onPlaybackStateChange, onConnectionLost };
+    return {
+      video,
+      unmount,
+      rerenderPlayer,
+      onReanchorSeek,
+      onPlaybackStateChange,
+      onConnectionLost,
+    };
   }
 
   it("reopens the stream at the paused position when playback resumes", () => {
@@ -4079,6 +4086,27 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     await act(() => vi.advanceTimersByTimeAsync(0));
 
     expect(onConnectionLost).not.toHaveBeenCalled();
+  });
+
+  it("leaves a superseded reopen to the version switch that started meanwhile", async () => {
+    const { video, rerenderPlayer, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+
+    // The viewer switches version; the session drops the reopen as superseded.
+    rerenderPlayer({ replacing: true });
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // The switch fails and leaves the idle stream in place, so the reopen runs again.
+    rerenderPlayer({ replacing: false });
+    expect(onReanchorSeek).toHaveBeenCalledTimes(2);
   });
 
   it("hands a reopen the session refuses to the reconnect", async () => {

@@ -1250,12 +1250,18 @@ export function VideoPlayer({
     // When the reopen does not take, the session may have expired during the
     // pause or the route may no longer be granted. The reconnect replans or
     // starts a new attempt at the same position, unless another plan already
-    // replaced this stream or the viewer has left.
+    // replaced this stream or the viewer has left. A change that started
+    // meanwhile, such as a version switch, supersedes the reopen; it is
+    // retried only if that change lands no plan.
     const revision = planRevisionRef.current;
     const reconnect = () => {
       if (!isMountedRef.current) return;
       if (planRevisionRef.current !== revision) return;
       if (connectionStatusRef.current !== "connected") return;
+      if (planChangeInFlightRef.current) {
+        reopenAfterPlanChangeRef.current = revision;
+        return;
+      }
       onConnectionLost?.(position, !video.paused);
     };
     const accepted = reanchorAt(position);
