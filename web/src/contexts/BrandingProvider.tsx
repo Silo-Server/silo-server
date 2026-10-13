@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
 import { themeKeys } from "@/hooks/queries/keys";
+import { accentDeclarations } from "@/lib/accentColor";
 import { setAppDocumentTitle } from "@/lib/documentTitle";
 
 const DEFAULT_SERVER_NAME = "Silo";
@@ -75,16 +76,6 @@ function applyFavicon(url: string | null) {
   link.href = url ?? "/favicon.ico";
 }
 
-/**
- * Tokens the brand accent recolors: the primary action color, the focus ring,
- * and the sidebar's primary accent, so the brand color shows across the
- * prominent UI surfaces.
- */
-const ACCENT_TOKENS = ["primary", "ring", "sidebar-primary"] as const;
-
-/** Reject values that could break out of a CSS declaration. */
-const UNSAFE_CSS_VALUE = /[;{}]|\/\*|<\//;
-
 const ACCENT_STYLE_ID = "silo-accent";
 
 /**
@@ -94,10 +85,12 @@ const ACCENT_STYLE_ID = "silo-accent";
  */
 function applyAccent(hex: string | null) {
   if (typeof document === "undefined") return;
-  const css =
-    hex && !UNSAFE_CSS_VALUE.test(hex)
-      ? `:root {\n${ACCENT_TOKENS.map((token) => `  --${token}: ${hex};`).join("\n")}\n}`
-      : "";
+  const declarations = hex ? accentDeclarations(hex) : null;
+  const css = declarations
+    ? `:root {\n${Object.entries(declarations)
+        .map(([token, value]) => `  --${token}: ${value};`)
+        .join("\n")}\n}`
+    : "";
   let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
   if (!css) {
     style?.remove();
