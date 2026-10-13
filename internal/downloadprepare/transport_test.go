@@ -331,6 +331,35 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}
 }
 
+// A node URL that request() normalizes (an escaped path prefix, surrounding
+// whitespace) must be signed in its normalized form, or the worker behind a
+// prefix-stripping reverse proxy refuses the request.
+func TestHTTPPreparerSignsNormalizedNodeURLPrefix(t *testing.T) {
+	worker := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !nodeauthtest.Signed(r, "secret") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Length", "42")
+	})
+	for _, tc := range []struct {
+		name, strip, prefix, pad string
+	}{
+		{name: "escaped prefix", strip: "/worker", prefix: "/%77orker"},
+		{name: "padded URL", strip: "/node1", prefix: "/node1", pad: " "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.StripPrefix(tc.strip, worker))
+			defer server.Close()
+			nodeURL := tc.pad + server.URL + tc.prefix + tc.pad
+			result, err := HTTPPreparer{}.Stat(t.Context(), nodeURL, "secret", "artifact-1")
+			if err != nil || result.FileSize != 42 {
+				t.Fatalf("Stat = (%+v, %v), want a signed request the worker accepts", result, err)
+			}
+		})
+	}
+}
+
 func TestHTTPPreparerStatRecoversToneMapAttestationFromHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {

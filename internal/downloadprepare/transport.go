@@ -653,14 +653,20 @@ func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, p
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
 		return nil, fmt.Errorf("invalid node URL")
 	}
-	base.Path = strings.TrimRight(base.Path, "/") + path
+	// Sign against the same normalized node URL the request is built from:
+	// re-escaping or trimming only one of them would sign a path prefix the
+	// worker never sees.
+	base.Path = strings.TrimRight(base.Path, "/")
+	base.RawPath = ""
 	base.RawQuery = ""
 	base.Fragment = ""
+	signingBase := base.String()
+	base.Path += path
 	req, err := http.NewRequestWithContext(ctx, method, base.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	if err := nodeauth.Sign(req, nodeURL, jwtSecret); err != nil {
+	if err := nodeauth.Sign(req, signingBase, jwtSecret); err != nil {
 		return nil, err
 	}
 	return req, nil
