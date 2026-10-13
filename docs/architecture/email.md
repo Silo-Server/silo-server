@@ -46,9 +46,8 @@ send (`POST /api/v1/admin/email/test`).
 
 HTML emails wrap their content with `mail.RenderLayout`, which draws the shared
 dark shell. Its header follows the web sidebar: the server's uploaded wordmark,
-else the Silo wordmark, with the server name as alt text. When
-`branding.accent_color` is set, `mail.EmailButton` uses it for the primary
-action and picks a dark or white label for contrast.
+else the Silo wordmark, with the server name as alt text. `mail.EmailButton`
+draws the primary action as a white pill, like the web UI's primary button.
 
 The logo is embedded in each message as an inline PNG, not linked. Remote images
 are often blocked, the recipient may not reach the server, and uploaded logos

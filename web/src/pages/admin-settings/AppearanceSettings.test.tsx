@@ -27,28 +27,6 @@ vi.mock("@/components/admin/BrandingAssetField", () => ({
   BrandingAssetField: ({ label }: { label: string }) => <div>{label}</div>,
 }));
 
-vi.mock("@/components/theme/TokenEditor", () => ({
-  TokenEditor: ({ onSetVar }: { onSetVar: (token: "primary", value: string) => void }) => (
-    <button type="button" onClick={() => onSetVar("primary", "#112233")}>
-      Set primary token
-    </button>
-  ),
-}));
-
-vi.mock("@/components/theme/RawCssEditor", () => ({
-  RawCssEditor: ({ value, onChange }: { value: string; onChange: (css: string) => void }) => (
-    <textarea
-      aria-label="Custom CSS editor"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  ),
-}));
-
-vi.mock("@/components/theme/ThemePreviewCard", () => ({
-  ThemePreviewCard: () => null,
-}));
-
 vi.mock("@/components/overlays/OverlayPreviewCard", () => ({
   OverlayPreviewCard: ({ variant }: { variant?: string }) => (
     <div data-testid="overlay-preview">{variant}</div>
@@ -103,52 +81,18 @@ describe("AppearanceSettings", () => {
     useSettingsFormMock.mockImplementation(() => form);
   });
 
-  it("stages the accent color and its theme tokens instead of saving immediately", () => {
+  // Silo has one look, so the page offers no theme controls and stages only
+  // the badge settings.
+  it("stages only the badge settings and offers no theme controls", () => {
     render(<AppearanceSettings />);
 
     const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "branding.accent_color",
-        "ui.admin_theme_vars",
-        "ui.admin_custom_css",
-        "overlays.enabled",
-        "defaults.card_overlays",
-      ]),
-    );
-    expect(keys).not.toContain("branding.server_name");
-    expect(keys).not.toContain("branding.login_subtitle");
-    expect(keys).not.toContain("branding.default_theme");
-    expect(keys).not.toContain("theme.catalog_url");
+    expect(keys).toEqual(["overlays.enabled", "defaults.card_overlays"]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Use accent #10b981" }));
-
-    expect(form.save).not.toHaveBeenCalled();
-    expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "#10b981");
-    expect(form.setValue).toHaveBeenCalledWith(
-      "ui.admin_theme_vars",
-      JSON.stringify({ primary: "#10b981", ring: "#10b981", "sidebar-primary": "#10b981" }),
-    );
-  });
-
-  // Like restoring badge defaults, the reset is a staged edit confirmed
-  // through the SaveBar.
-  it("stages a reset of accent, tokens and CSS back to Cinema Dark", () => {
-    form = makeForm({
-      "branding.accent_color": "#10b981",
-      "ui.admin_theme_vars": JSON.stringify({ primary: "#10b981", background: "#000000" }),
-      "ui.admin_custom_css": "body { color: red; }",
-    });
-    render(<AppearanceSettings />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Reset to Cinema Dark/ }));
-    expect(form.setValue).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-
-    expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "");
-    expect(form.setValue).toHaveBeenCalledWith("ui.admin_theme_vars", "{}");
-    expect(form.setValue).toHaveBeenCalledWith("ui.admin_custom_css", "");
-    expect(form.save).not.toHaveBeenCalled();
+    expect(screen.queryByText("Colors")).toBeNull();
+    expect(screen.queryByText("Accent color")).toBeNull();
+    expect(screen.queryByText("Custom CSS")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reset to Cinema Dark/ })).toBeNull();
   });
 
   // Restoring is an ordinary staged edit: the admin still confirms the batch
@@ -168,22 +112,5 @@ describe("AppearanceSettings", () => {
     expect(form.setValue).toHaveBeenCalledWith("defaults.card_overlays", BUILT_IN_OVERLAY_DEFAULTS);
     expect(form.save).not.toHaveBeenCalled();
     expect(form.setValue).not.toHaveBeenCalledWith("overlays.enabled", expect.anything());
-  });
-
-  it("stages sanitized CSS while the editor keeps showing what was typed", () => {
-    render(<AppearanceSettings />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Advanced · 2 settings/ }));
-    const editor = screen.getByRole("textbox", { name: "Custom CSS editor" });
-    fireEvent.change(editor, {
-      target: { value: '@import "https://example.invalid/x.css"; .card { color: red; }' },
-    });
-
-    expect(form.save).not.toHaveBeenCalled();
-    expect(form.setValue).toHaveBeenCalledWith(
-      "ui.admin_custom_css",
-      "/* [blocked @import] */ .card { color: red; }",
-    );
-    expect(editor).toHaveValue('@import "https://example.invalid/x.css"; .card { color: red; }');
   });
 });

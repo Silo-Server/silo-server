@@ -450,13 +450,12 @@ Branding remains public so it can render before sign-in:
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
-| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
-| GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
+| GET | `/api/v2/theme/capabilities` | Branding and asset-storage availability |
+| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional asset URLs, storage availability |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
-Discovery uses the existing branding service and theme settings. When dependencies
-are absent, configuration returns default branding and empty overrides; capabilities
+Discovery uses the existing branding service. When dependencies are absent,
+configuration returns default branding; capabilities
 report availability explicitly. Discovery responses are not cached. The bundled web
 uses these v2 reads. Native server-identity discovery must adopt the same public
 endpoint through its negotiated API-version handling.
@@ -472,14 +471,16 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
 
-The web client has one theme, Cinema Dark. Only an administrator customizes it, with
-the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
-`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
-has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
-The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
-`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
-`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
-behavior, and `theme.catalog_url` its default, until v1 retires.
+The web client has one look, Cinema Dark, with no color, font, or CSS
+customization. The v2 branding document therefore has no accent color, default
+theme, or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
+The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
+`accent_color`, `default_theme`, and light logo URLs, and `/theme/admin-css` still
+reports the stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps
+those settings for v1 alone; nothing else reads them, and email and the web app
+shell no longer use the accent color. The v1 `/theme/catalog`,
+`/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
+`theme.catalog_url` its default, until v1 retires.
 
 ### Retired theme settings
 

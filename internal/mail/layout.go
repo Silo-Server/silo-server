@@ -94,17 +94,16 @@ func RenderLayout(opts LayoutOptions) string {
 	).Replace(emailShell)
 }
 
-// EmailButton renders the primary call-to-action: a pill in the brand's
-// accent color, or white on the dark card by default, matching the web UI's
-// primary action style. Label and href are escaped here. The wrapping table
-// keeps the button shape in Outlook, which ignores padding on anchors.
-func EmailButton(brand Brand, label, href string) string {
-	background, color := brand.actionColors()
+// EmailButton renders the primary call-to-action: a white pill on the dark
+// card, matching the web UI's primary action style. Label and href are escaped
+// here. The wrapping table keeps the button shape in Outlook, which ignores
+// padding on anchors.
+func EmailButton(label, href string) string {
 	return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>` +
-		`<td bgcolor="` + background + `" style="background-color:` + background +
+		`<td bgcolor="` + EmailColorAction + `" style="background-color:` + EmailColorAction +
 		`;border-radius:8px;mso-padding-alt:12px 24px;">` +
 		`<a href="` + html.EscapeString(href) + `" style="display:inline-block;padding:12px 24px;` +
-		`font:600 14px/1 ` + EmailFont + `;color:` + color +
+		`font:600 14px/1 ` + EmailFont + `;color:` + EmailColorOnAct +
 		`;text-decoration:none;border-radius:8px;">` + html.EscapeString(label) + `</a>` +
 		`</td></tr></table>`
 }

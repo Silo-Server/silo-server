@@ -31,16 +31,25 @@ func TestRenderIndexHTMLKeepsDefaultFaviconWhenUnset(t *testing.T) {
 	}
 }
 
-func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
+// The retired accent color is kept only for the frozen v1 branding response;
+// it no longer reaches the shell, the manifest, or the render cache key.
+func TestRetiredAccentColorDoesNotReachTheShell(t *testing.T) {
 	in := []byte("<head></head>")
-	if out := string(RenderIndexHTML(in, newSnapshot("X"))); strings.Contains(out, "theme-color") {
-		t.Fatalf("theme-color should not be injected without accent: %q", out)
+	plain := newSnapshot("X")
+	accented := newSnapshot("X")
+	accented.AccentColor = "#5bc39d"
+	if out := string(RenderIndexHTML(in, accented)); strings.Contains(out, "theme-color") {
+		t.Fatalf("theme-color should not be injected: %q", out)
 	}
-	snap := newSnapshot("X")
-	snap.AccentColor = "#5bc39d"
-	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `<meta name="theme-color" content="#5bc39d" />`) {
-		t.Fatalf("theme-color meta not injected: %q", out)
+	if accented.RenderKey() != plain.RenderKey() {
+		t.Fatal("RenderKey changed with the retired accent color")
+	}
+	var m map[string]any
+	if err := json.Unmarshal(RenderManifest(accented), &m); err != nil {
+		t.Fatalf("invalid manifest JSON: %v", err)
+	}
+	if m["theme_color"] != ThemeColor || m["background_color"] != ThemeColor {
+		t.Fatalf("manifest colors = %v / %v, want %s", m["theme_color"], m["background_color"], ThemeColor)
 	}
 }
 
@@ -105,8 +114,8 @@ func TestRenderManifestDefaults(t *testing.T) {
 	if m["name"] != "Acme TV" || m["short_name"] != "Acme TV" {
 		t.Fatalf("unexpected name: %v / %v", m["name"], m["short_name"])
 	}
-	if m["theme_color"] != DefaultThemeColor {
-		t.Fatalf("expected default theme color, got %v", m["theme_color"])
+	if m["theme_color"] != ThemeColor {
+		t.Fatalf("expected theme color %s, got %v", ThemeColor, m["theme_color"])
 	}
 	icons, _ := m["icons"].([]any)
 	if len(icons) != 3 {
@@ -119,13 +128,10 @@ func TestRenderManifestDefaults(t *testing.T) {
 }
 
 func TestRenderManifestUsesCustomMark(t *testing.T) {
-	snap := Snapshot{ServerName: "Acme", AccentColor: "#112233", assets: map[AssetKind]string{KindMark: "m1.webp"}}
+	snap := Snapshot{ServerName: "Acme", assets: map[AssetKind]string{KindMark: "m1.webp"}}
 	var m map[string]any
 	if err := json.Unmarshal(RenderManifest(snap), &m); err != nil {
 		t.Fatalf("invalid manifest JSON: %v", err)
-	}
-	if m["theme_color"] != "#112233" {
-		t.Fatalf("expected accent theme color, got %v", m["theme_color"])
 	}
 	icons, _ := m["icons"].([]any)
 	first, _ := icons[0].(map[string]any)

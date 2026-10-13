@@ -11349,23 +11349,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/theme/admin-css": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read public pre-login theme overrides. */
-    get: operations["getThemeOverrides"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/theme/branding": {
     parameters: {
       query?: never;
@@ -20051,7 +20034,6 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
       branding_available: boolean;
-      overrides_available: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -20062,7 +20044,6 @@ export interface components {
       storage_available: boolean;
     };
     BrandingConfiguration: {
-      accent_color?: string;
       favicon_url?: string;
       login_bg_url?: string;
       login_subtitle: string;
@@ -30410,10 +30391,6 @@ export interface components {
        * @example ogg
        */
       container: string;
-    };
-    ThemeOverrides: {
-      raw_css: string;
-      vars: string;
     };
     ThemePlayback: {
       /**
@@ -131635,71 +131612,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SetupStatus"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeOverrides: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeOverrides"];
         };
       };
       /** @description Bad Request */

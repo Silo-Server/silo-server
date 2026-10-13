@@ -40,7 +40,7 @@ func composeResetEmail(brand mail.Brand, requested bool, username, serverName, r
 
 	var body strings.Builder
 	body.WriteString(mail.EmailParagraph(intro))
-	body.WriteString(mail.EmailButton(brand, "Choose a new password", resetURL))
+	body.WriteString(mail.EmailButton("Choose a new password", resetURL))
 	body.WriteString(mail.EmailFacts(
 		mail.EmailFact{Label: "Account", ValueHTML: html.EscapeString(username), Mono: true},
 		mail.EmailFact{Label: "Link expires", ValueHTML: html.EscapeString(expiry)},

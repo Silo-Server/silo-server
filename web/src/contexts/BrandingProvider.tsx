@@ -13,7 +13,6 @@ const DEFAULT_LOGIN_SUBTITLE = "Sign in with an existing account.";
 interface BrandingApiResponse {
   server_name?: string;
   login_subtitle?: string;
-  accent_color?: string;
   wordmark_url?: string;
   mark_url?: string;
   favicon_url?: string;
@@ -24,8 +23,6 @@ interface BrandingApiResponse {
 export interface BrandingContextValue {
   serverName: string;
   loginSubtitle: string;
-  /** Brand accent color (hex), or null when unset. */
-  accentColor: string | null;
   /** Custom asset URLs (stable, cache-busted) or null to use bundled defaults. */
   wordmarkUrl: string | null;
   markUrl: string | null;
@@ -38,7 +35,6 @@ export interface BrandingContextValue {
 const DEFAULT_BRANDING: BrandingContextValue = {
   serverName: DEFAULT_SERVER_NAME,
   loginSubtitle: DEFAULT_LOGIN_SUBTITLE,
-  accentColor: null,
   wordmarkUrl: null,
   markUrl: null,
   faviconUrl: null,
@@ -54,7 +50,6 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
   return {
     serverName: data?.server_name || DEFAULT_SERVER_NAME,
     loginSubtitle: data?.login_subtitle || DEFAULT_LOGIN_SUBTITLE,
-    accentColor: data?.accent_color || null,
     wordmarkUrl: data?.wordmark_url || null,
     markUrl: data?.mark_url || null,
     faviconUrl: data?.favicon_url || null,
