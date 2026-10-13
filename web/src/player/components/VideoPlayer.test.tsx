@@ -3051,6 +3051,41 @@ describe("VideoPlayer source timeline", () => {
     await waitFor(() => expect(controls.current!.duration).toBeCloseTo(1830 - origin));
   });
 
+  // A room command that runs before metadata must judge drift from where
+  // playback is heading, not the unloaded clock, or it can skip a needed seek.
+  it("applies a room pause sent before direct-play metadata", async () => {
+    const origin = 29.977;
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+    });
+    const command = {
+      command_id: "room-command-1",
+      session_id: "session-1",
+      selection_revision: 1,
+      action: "pause" as const,
+      position_seconds: 0,
+      execute_at: new Date().toISOString(),
+      issued_at: new Date().toISOString(),
+      playback_state: "paused" as const,
+    };
+    const { container } = renderPlayer({
+      plan,
+      initialPosition: 1300,
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: roomConnection({ transportCommand: command }),
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    await waitFor(() => expect(controls.current!.currentTime).toBe(0));
+
+    video.currentTime = origin;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBeCloseTo(origin);
+  });
+
   it("skips from the resume position before direct-play metadata", async () => {
     const origin = 29.977;
     const ready = vi.fn();

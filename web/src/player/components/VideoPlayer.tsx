@@ -3238,7 +3238,8 @@ export function VideoPlayer({
       const decision = decideRoomCatchup({
         action: command.action,
         targetPositionSeconds,
-        localPositionSeconds: toMediaTime(video.currentTime, timelineOffsetRef.current),
+        localPositionSeconds:
+          elementMediaPosition() ?? toMediaTime(video.currentTime, timelineOffsetRef.current),
         targetLocallySeekable,
       });
 
@@ -3367,6 +3368,7 @@ export function VideoPlayer({
     };
   }, [
     canSeekAnywhere,
+    elementMediaPosition,
     resetRoomCatchupRate,
     sessionId,
     watchTogetherRoomId,
