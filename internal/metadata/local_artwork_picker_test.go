@@ -366,3 +366,36 @@ func TestFetchItemImagesWithLocalLogsDiscoveryFailureWithoutSecrets(t *testing.T
 		t.Fatalf("log = %q, leaks the api_key value", out)
 	}
 }
+
+// Discovery returns fingerprinted sidecar sources, image URLs an NFO names,
+// and slots the picker cannot apply. Only sidecar files of an applicable type
+// are offered, and an offered fingerprinted source applies.
+func TestFetchItemImagesWithLocalOffersApplicableSidecarFiles(t *testing.T) {
+	root := t.TempDir()
+	poster := fingerprintedSource(t, writeLocalPoster(t, root))
+	banner := filepath.Join(root, "banner.jpg")
+	if err := os.WriteFile(banner, []byte("banner-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := &recordingImageProvider{images: []RemoteImage{
+		{ProviderID: "nfo", URL: poster, Type: ImagePoster},
+		{ProviderID: "nfo", URL: fingerprintedSource(t, banner), Type: ImageBanner},
+		{ProviderID: "nfo", URL: LocalMetadataURLSource("https://image.example/fanart.jpg"), Type: ImageBackdrop},
+	}}
+	service, cacher := newLocalPickerServiceForTest(local, nil, []string{root})
+
+	images, providerErrors, err := service.FetchItemImagesWithLocal(context.Background(), nil, "series", "en", 7, "local-series-1")
+	if err != nil || len(providerErrors) != 0 {
+		t.Fatalf("FetchItemImagesWithLocal: err %v, provider errors %v", err, providerErrors)
+	}
+	if len(images) != 1 || images[0].URL != poster {
+		t.Fatalf("images = %+v, want only the fingerprinted poster", images)
+	}
+
+	if _, err := service.ApplyLocalItemImage(context.Background(), localApplyRequest(poster, ImagePoster)); err != nil {
+		t.Fatalf("ApplyLocalItemImage: %v", err)
+	}
+	if len(cacher.bytesReq) != 1 || cacher.bytesReq[0].SourceURL != poster {
+		t.Fatalf("cache requests = %+v, want the fingerprinted poster", cacher.bytesReq)
+	}
+}
