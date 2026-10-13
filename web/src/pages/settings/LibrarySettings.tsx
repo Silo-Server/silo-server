@@ -653,7 +653,7 @@ export default function LibrarySettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Libraries</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Libraries</h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Toggle which libraries appear in your navigation and customize playback defaults per
           library.

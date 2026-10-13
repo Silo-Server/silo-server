@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 
 import { V2ProblemError } from "@/api/v2/request";
@@ -13,8 +14,14 @@ import {
   useExternalSignInCapabilities,
 } from "@/hooks/queries/admin/externalSignIn";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-import { activeSignInInstallation, BREAK_GLASS_REQUIRED_TEXT } from "@/lib/externalSignInAdmin";
+import {
+  activeSignInInstallation,
+  authPluginInstallations,
+  BREAK_GLASS_REQUIRED_TEXT,
+  primarySignInInstallations,
+} from "@/lib/externalSignInAdmin";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
@@ -28,8 +35,14 @@ export const EMAIL_MATCH_KEY = "auth.email_auto_match";
 export const RECHECK_INTERVAL_KEY = "auth.provider_recheck_interval";
 export const OUTAGE_POLICY_KEY = "auth.provider_recheck_outage_policy";
 const RECHECK_KEYS = [RECHECK_INTERVAL_KEY, OUTAGE_POLICY_KEY];
+// Both only work for Silo-password accounts: the server refuses a signup while
+// password sign-in is off, and a reset needs a local password to replace.
+const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
+// Token lifetimes apply to every sign-in, provider or password alike.
+const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
+const ACCOUNT_KEYS = [...SESSION_KEYS, EMAIL_MATCH_KEY, ...RECHECK_KEYS];
 // server.public_url is read, not edited: OpenID Connect needs it.
-const KEYS = [LOCAL_LOGIN_KEY, EMAIL_MATCH_KEY, ...RECHECK_KEYS, "server.public_url"];
+const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, ...ACCOUNT_KEYS, "server.public_url"];
 
 const RECHECK_INTERVALS = [
   { value: "15m", label: "15 minutes" },
@@ -45,6 +58,14 @@ const OUTAGE_POLICIES = [
   { value: "fail_closed", label: "Stop sessions from renewing" },
 ];
 
+// What each provider-only field holds when nobody has set it; an empty value
+// reads as the same default.
+const PROVIDER_FIELD_DEFAULTS: Record<string, string> = {
+  [EMAIL_MATCH_KEY]: "false",
+  [RECHECK_INTERVAL_KEY]: "12h",
+  [OUTAGE_POLICY_KEY]: "fail_open",
+};
+
 /** The recheck interval options, plus a stored value none of them names. */
 function intervalOptions(current: string) {
   const value = current.trim();
@@ -56,7 +77,8 @@ function intervalOptions(current: string) {
 
 /**
  * Settings → Sign-in: the server's one external sign-in provider (OIDC or
- * LDAP) as guided setup, whether Silo passwords still sign in, how first
+ * LDAP) as guided setup, whether Silo passwords still sign in, public signups
+ * and self-service password reset, how long anyone stays signed in, how first
  * sign-ins match accounts, and how often Silo asks the provider again. Every
  * edit, the provider's configuration included, saves through the save bar;
  * only turning a provider on or off applies at once. The rules are in
@@ -64,6 +86,7 @@ function intervalOptions(current: string) {
  */
 export default function SignInSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const restartKeys = useRestartKeys();
   const capabilities = useExternalSignInCapabilities();
   const installations = useAdminPluginInstallations();
   const users = useAdminUsers();
@@ -89,6 +112,14 @@ export default function SignInSettings() {
     return active?.enabled === true;
   }, [installations.data]);
   const providerKnown = installations.data !== undefined;
+  // Email matching and the access re-check only act on accounts a sign-in
+  // plugin signs in: matching needs OIDC or LDAP (a network sign-in never
+  // matches by email), and the re-check also covers network sign-in. Without
+  // one installed they are noise, but a field stays while the installations
+  // are unknown or while it holds a value other than its default, saved or
+  // staged, so nothing set is ever out of reach.
+  const primaryInstalled = primarySignInInstallations(installations.data).length > 0;
+  const anySignInInstalled = authPluginInstallations(installations.data).length > 0;
 
   function showLocalError(text: string) {
     setLocalError(text);
@@ -149,6 +180,15 @@ export default function SignInSettings() {
   const localLoginOn = form.getValue(LOCAL_LOGIN_KEY) !== "false";
   const emailMatchOn = form.getValue(EMAIL_MATCH_KEY) === "true";
   const publicUrlSet = form.getPersistedValue("server.public_url").trim() !== "";
+  const holdsSetting = (key: string) => {
+    const fallback = PROVIDER_FIELD_DEFAULTS[key];
+    const isSet = (value: string) => value.trim() !== "" && value.trim() !== fallback;
+    return form.isDirty(key) || isSet(form.getValue(key)) || isSet(form.getPersistedValue(key));
+  };
+  const showEmailMatch = !providerKnown || primaryInstalled || holdsSetting(EMAIL_MATCH_KEY);
+  const showRecheck = !providerKnown || anySignInInstalled || RECHECK_KEYS.some(holdsSetting);
+  const providerVerbs = [showEmailMatch && "matched", showRecheck && "re-checked"].filter(Boolean);
+  const sessionAdvancedKeys = [...SESSION_KEYS, ...(showRecheck ? RECHECK_KEYS : [])];
 
   return (
     <div className="flex h-full flex-col">
@@ -182,7 +222,19 @@ export default function SignInSettings() {
 
         <NetworkSignInSection installations={installations.data} />
 
-        <FieldGroup label="Silo passwords" dirty={form.isDirty(LOCAL_LOGIN_KEY)}>
+        <FieldGroup
+          label="Silo passwords"
+          dirty={[LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS].some((key) => form.isDirty(key))}
+          actions={
+            <Link
+              to="/admin/users?tab=invite-codes"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+            >
+              Manage invite codes
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          }
+        >
           <SettingField
             label="Allow password sign-in"
             settingKey={LOCAL_LOGIN_KEY}
@@ -218,6 +270,26 @@ export default function SignInSettings() {
               {localError}
             </p>
           ) : null}
+          <SettingField
+            label="Public signups"
+            settingKey="signup.enabled"
+            dirty={form.isDirty("signup.enabled")}
+            type="toggle"
+            description="Anyone with a valid invite code can create an account."
+            value={form.getValue("signup.enabled")}
+            onChange={(v) => form.setValue("signup.enabled", v)}
+            restartRequired={restartKeys.has("signup.enabled")}
+          />
+          <SettingField
+            label="Self-service password reset"
+            settingKey="password_reset.self_service_enabled"
+            dirty={form.isDirty("password_reset.self_service_enabled")}
+            type="toggle"
+            description="Adds “Forgot password?” to the sign-in page, so people can get a reset link by email. Needs email and the public URL."
+            value={form.getValue("password_reset.self_service_enabled")}
+            onChange={(v) => form.setValue("password_reset.self_service_enabled", v)}
+            restartRequired={restartKeys.has("password_reset.self_service_enabled")}
+          />
           <AdvancedSection id="sign-in.locked-out" title="Locked out?">
             <p className="settings-field-note text-muted-foreground py-2 text-xs leading-relaxed">
               <code className="font-mono">/login?local=1</code> shows the password form for
@@ -230,51 +302,87 @@ export default function SignInSettings() {
 
         <FieldGroup
           label="Accounts and sessions"
-          description="Applies to whichever provider is on."
-          dirty={[EMAIL_MATCH_KEY, ...RECHECK_KEYS].some((key) => form.isDirty(key))}
+          description={
+            providerVerbs.length > 0
+              ? `How long anyone stays signed in, and how a sign-in provider's accounts are ${providerVerbs.join(" and ")}.`
+              : "How long anyone stays signed in."
+          }
+          dirty={ACCOUNT_KEYS.some((key) => form.isDirty(key))}
         >
-          <SettingField
-            label="Match existing accounts by email"
-            settingKey={EMAIL_MATCH_KEY}
-            dirty={form.isDirty(EMAIL_MATCH_KEY)}
-            type="toggle"
-            description="A first sign-in connects to the regular Silo account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched."
-            value={emailMatchOn ? "true" : "false"}
-            onChange={(value) => form.setValue(EMAIL_MATCH_KEY, value)}
-            status={
-              <SettingFieldStatus tone={emailMatchOn ? "warn" : "muted"}>
-                Whoever controls that email at the provider takes over the Silo account. Silo
-                doesn't verify account emails, so the account matched is whichever one registered or
-                set the address first; matching signs it out everywhere and deletes its API keys.
-                Turn this on only if the provider verifies every email and people can't change their
-                own.
-              </SettingFieldStatus>
-            }
-          />
-          <SettingField
-            label="Re-check access every"
-            settingKey={RECHECK_INTERVAL_KEY}
-            dirty={form.isDirty(RECHECK_INTERVAL_KEY)}
-            type="select"
-            description="Silo asks the provider again whether each person may still sign in, so someone removed there is signed out of Silo at the next check."
-            value={form.getValue(RECHECK_INTERVAL_KEY) || "12h"}
-            onChange={(value) => form.setValue(RECHECK_INTERVAL_KEY, value)}
-            options={intervalOptions(form.getValue(RECHECK_INTERVAL_KEY))}
-          />
-          <SettingField
-            label="If the provider is unreachable"
-            settingKey={OUTAGE_POLICY_KEY}
-            dirty={form.isDirty(OUTAGE_POLICY_KEY)}
-            type="select"
-            description={
-              form.getValue(OUTAGE_POLICY_KEY) === "fail_closed"
-                ? "A session due for a check can't renew until the provider answers, so apps stop working during an outage and carry on once it's over."
-                : "Sessions keep renewing and Silo asks again at the next renewal, so an outage doesn't sign anyone out."
-            }
-            value={form.getValue(OUTAGE_POLICY_KEY) || "fail_open"}
-            onChange={(value) => form.setValue(OUTAGE_POLICY_KEY, value)}
-            options={OUTAGE_POLICIES}
-          />
+          {showEmailMatch ? (
+            <SettingField
+              label="Match existing accounts by email"
+              settingKey={EMAIL_MATCH_KEY}
+              dirty={form.isDirty(EMAIL_MATCH_KEY)}
+              type="toggle"
+              description="A first sign-in connects to the regular Silo account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched."
+              value={emailMatchOn ? "true" : "false"}
+              onChange={(value) => form.setValue(EMAIL_MATCH_KEY, value)}
+              status={
+                <SettingFieldStatus tone={emailMatchOn ? "warn" : "muted"}>
+                  Whoever controls that email at the provider takes over the Silo account. Silo
+                  doesn't verify account emails, so the account matched is whichever one registered
+                  or set the address first; matching signs it out everywhere and deletes its API
+                  keys. Turn this on only if the provider verifies every email and people can't
+                  change their own.
+                </SettingFieldStatus>
+              }
+            />
+          ) : null}
+          <AdvancedSection
+            id="sign-in.sessions"
+            count={sessionAdvancedKeys.length}
+            forceOpen={sessionAdvancedKeys.some((key) => form.isDirty(key))}
+          >
+            <SettingField
+              label="Access token expiry"
+              settingKey="auth.access_token_expiry"
+              dirty={form.isDirty("auth.access_token_expiry")}
+              type="duration"
+              description="How long before an app silently renews, e.g. 30m."
+              value={form.getValue("auth.access_token_expiry")}
+              onChange={(v) => form.setValue("auth.access_token_expiry", v)}
+              restartRequired={restartKeys.has("auth.access_token_expiry")}
+            />
+            <SettingField
+              label="Refresh token expiry"
+              settingKey="auth.refresh_token_expiry"
+              dirty={form.isDirty("auth.refresh_token_expiry")}
+              type="duration"
+              description="How long someone stays signed in, e.g. 30d. Also how long an account whose sign-in provider can't re-check it keeps its API keys and Audiobookshelf sessions without signing in through the provider."
+              value={form.getValue("auth.refresh_token_expiry")}
+              onChange={(v) => form.setValue("auth.refresh_token_expiry", v)}
+              restartRequired={restartKeys.has("auth.refresh_token_expiry")}
+            />
+            {showRecheck ? (
+              <>
+                <SettingField
+                  label="Re-check access every"
+                  settingKey={RECHECK_INTERVAL_KEY}
+                  dirty={form.isDirty(RECHECK_INTERVAL_KEY)}
+                  type="select"
+                  description="Silo asks the provider again whether each person may still sign in, so someone removed there is signed out of Silo at the next check."
+                  value={form.getValue(RECHECK_INTERVAL_KEY) || "12h"}
+                  onChange={(value) => form.setValue(RECHECK_INTERVAL_KEY, value)}
+                  options={intervalOptions(form.getValue(RECHECK_INTERVAL_KEY))}
+                />
+                <SettingField
+                  label="If the provider is unreachable"
+                  settingKey={OUTAGE_POLICY_KEY}
+                  dirty={form.isDirty(OUTAGE_POLICY_KEY)}
+                  type="select"
+                  description={
+                    form.getValue(OUTAGE_POLICY_KEY) === "fail_closed"
+                      ? "A session due for a check can't renew until the provider answers, so apps stop working during an outage and carry on once it's over."
+                      : "Sessions keep renewing and Silo asks again at the next renewal, so an outage doesn't sign anyone out."
+                  }
+                  value={form.getValue(OUTAGE_POLICY_KEY) || "fail_open"}
+                  onChange={(value) => form.setValue(OUTAGE_POLICY_KEY, value)}
+                  options={OUTAGE_POLICIES}
+                />
+              </>
+            ) : null}
+          </AdvancedSection>
         </FieldGroup>
       </div>
 

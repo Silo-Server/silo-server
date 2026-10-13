@@ -12,8 +12,8 @@ export interface SettingsSubheadingProps {
 
 /**
  * A divider inside a settings group: the one treatment for a sub-grouping label,
- * so "Per user" in Downloads, "Mail Server" in Notifications and "Permission
- * checks" in Infrastructure read as the same kind of thing.
+ * so "Per user" in Downloads, "HDR chapter thumbnails" in Playback and
+ * "Permission checks" in Logging read as the same kind of thing.
  *
  * Deliberately quieter than a `SettingsGroup` title and than a row label — it
  * separates rows without competing with them, which is what four different

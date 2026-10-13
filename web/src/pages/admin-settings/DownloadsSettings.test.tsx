@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,12 +68,12 @@ describe("DownloadsSettings staged edits", () => {
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "download.enabled",
+      "download.transcode_enabled",
       "download.user_bandwidth_mbps",
       "download.max_concurrent_per_user",
       "download.max_per_period",
       "download.period_duration",
       "download.server_bandwidth_mbps",
-      "download.transcode_enabled",
       "download.local_transcode_fallback",
       "download.artifact_dir",
       "download.max_concurrent_prepares",
@@ -89,7 +89,21 @@ describe("DownloadsSettings staged edits", () => {
     expect(form.save).not.toHaveBeenCalled();
   });
 
-  it("stages a per-user bandwidth cap", () => {
+  it("stages device-friendly copies without opening the disclosure", () => {
+    renderSettings();
+
+    expect(screen.getByRole("button", { name: /^Advanced/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /Prepare device-friendly copies/ }));
+
+    expect(lastForm().setValue).toHaveBeenCalledWith("download.transcode_enabled", "true");
+    expect(lastForm().save).not.toHaveBeenCalled();
+  });
+
+  it("stages a per-user bandwidth cap from the Per user limits", () => {
+    expandAdvanced();
     renderSettings();
 
     fireEvent.change(screen.getByLabelText("Per-user bandwidth"), { target: { value: "25" } });
@@ -109,6 +123,48 @@ describe("DownloadsSettings staged edits", () => {
       "download.artifact_dir",
       "/var/lib/silo/downloads",
     );
+  });
+});
+
+describe("DownloadsSettings tiers", () => {
+  it("shows only the two switches until Advanced is opened", () => {
+    renderSettings();
+    const group = within(screen.getByRole("group", { name: "Downloads" }));
+
+    expect(group.getByRole("switch", { name: /Allow downloads/ })).toBeInTheDocument();
+    expect(
+      group.getByRole("switch", { name: /Prepare device-friendly copies/ }),
+    ).toBeInTheDocument();
+    expect(group.getByRole("button", { name: "Advanced · 11 settings" })).toBeInTheDocument();
+    expect(group.queryByLabelText("Per-user bandwidth")).toBeNull();
+  });
+
+  it("lists the bandwidth cap first among the per-user limits", () => {
+    expandAdvanced();
+    renderSettings();
+    const group = screen.getByRole("group", { name: "Downloads" });
+    // Subheadings and row labels; each limit's "Unlimited" switch label is not a row.
+    const labels = Array.from(group.querySelectorAll("h4, label"), (el) => el.textContent).filter(
+      (label) => label !== "Unlimited",
+    );
+
+    expect(labels.slice(labels.indexOf("Per user"), labels.indexOf("Whole server"))).toEqual([
+      "Per user",
+      "Per-user bandwidth",
+      "Downloads at once per user",
+      "Downloads per period",
+      "Period length",
+    ]);
+    expect(group.textContent).not.toContain("cap above");
+  });
+
+  it("opens the disclosure for an unsaved bandwidth cap", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "download.user_bandwidth_mbps": "25" }, ["download.user_bandwidth_mbps"]),
+    );
+    renderSettings();
+
+    expect(screen.getByLabelText("Per-user bandwidth")).toHaveValue(25);
   });
 });
 

@@ -339,7 +339,7 @@ export default function CardOverlaySettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Card Overlays</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Card Overlays</h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Choose the quick actions and badges shown on media cards, where badges sit, and how they
           look. Inspired by Kometa.

@@ -285,7 +285,7 @@ export default function AppearanceSettings() {
         >
           <SettingField
             label="Show badges on poster art"
-            description="Off hides badges for everyone."
+            description="The default for every profile. A profile that turns badges on or off for itself keeps its own choice."
             type="toggle"
             value={form.getValue(OVERLAYS_ENABLED_KEY) || "true"}
             onChange={(v) => form.setValue(OVERLAYS_ENABLED_KEY, v)}

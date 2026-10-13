@@ -72,6 +72,7 @@ import {
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
 } from "./adminNodesPresentation";
+import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
 type NodeType = "proxy" | "transcode";
 
@@ -1393,6 +1394,13 @@ export default function AdminNodes() {
           </div>
         }
       />
+
+      <section aria-labelledby="node-routing-heading" className="max-w-3xl space-y-3">
+        <h2 id="node-routing-heading" className="text-lg font-semibold">
+          Routing
+        </h2>
+        <NodeRoutingSettings />
+      </section>
 
       <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
         <DialogContent>

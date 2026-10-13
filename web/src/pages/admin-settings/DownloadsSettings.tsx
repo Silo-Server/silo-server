@@ -19,15 +19,18 @@ import { effectiveDownloadArtifactDir } from "./settingsPathDefaults";
 // Decimal GB, matching how drives and object stores are sold and reported.
 const BYTES_PER_GB = 1_000_000_000;
 
-// Shown without a disclosure: whether offline downloads exist at all, and the
-// one cap a household admin actually reaches for.
-const ESSENTIAL_KEYS = ["download.enabled", "download.user_bandwidth_mbps"];
+// Shown without a disclosure: whether offline downloads exist at all, and
+// whether Silo converts them. Without conversion no lower quality is offered,
+// and a device gets the original video even when it can't play it
+// (DownloadQualityResolver in internal/downloads/policy.go).
+const ESSENTIAL_KEYS = ["download.enabled", "download.transcode_enabled"];
 
 // Enforced per user: QuantityLimiter counts concurrency and period usage
 // against a user ID (internal/downloads/limiter.go), and the bandwidth cap
 // shapes each user's transfer. They are listed first, under their own
 // heading, so they do not read as server-wide budgets.
 const PER_USER_ADVANCED_KEYS = [
+  "download.user_bandwidth_mbps",
   "download.max_concurrent_per_user",
   "download.max_per_period",
   "download.period_duration",
@@ -36,7 +39,6 @@ const PER_USER_ADVANCED_KEYS = [
 // Enforced across the whole server.
 const GLOBAL_ADVANCED_KEYS = [
   "download.server_bandwidth_mbps",
-  "download.transcode_enabled",
   "download.local_transcode_fallback",
   "download.artifact_dir",
   "download.max_concurrent_prepares",
@@ -110,12 +112,13 @@ export default function DownloadsSettings() {
             onChange={(v) => form.setValue("download.enabled", v)}
             restartRequired={restartKeys.has("download.enabled")}
           />
-          <LimitField
-            label="Per-user bandwidth"
-            unit="Mbps"
-            value={form.getValue("download.user_bandwidth_mbps")}
-            onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
-            restartRequired={restartKeys.has("download.user_bandwidth_mbps")}
+          <SettingField
+            label="Prepare device-friendly copies"
+            type="toggle"
+            description="Converts video the device can't play and offers lower qualities. Off, every download keeps the original video, even where the device can't play it."
+            value={form.getValue("download.transcode_enabled")}
+            onChange={(v) => form.setValue("download.transcode_enabled", v)}
+            restartRequired={restartKeys.has("download.transcode_enabled")}
           />
 
           <AdvancedSection
@@ -125,8 +128,15 @@ export default function DownloadsSettings() {
           >
             <SettingsSubheading>Per user</SettingsSubheading>
             <LimitField
+              label="Per-user bandwidth"
+              unit="Mbps"
+              value={form.getValue("download.user_bandwidth_mbps")}
+              onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
+              restartRequired={restartKeys.has("download.user_bandwidth_mbps")}
+            />
+            <LimitField
               label="Downloads at once per user"
-              hint="Counted per user, alongside the per-user bandwidth cap above."
+              hint="Counted per user, alongside the per-user bandwidth cap."
               value={form.getValue("download.max_concurrent_per_user")}
               onChange={(v) => form.setValue("download.max_concurrent_per_user", v)}
               restartRequired={restartKeys.has("download.max_concurrent_per_user")}
@@ -155,14 +165,6 @@ export default function DownloadsSettings() {
               value={form.getValue("download.server_bandwidth_mbps")}
               onChange={(v) => form.setValue("download.server_bandwidth_mbps", v)}
               restartRequired={restartKeys.has("download.server_bandwidth_mbps")}
-            />
-            <SettingField
-              label="Prepare device-friendly copies"
-              type="toggle"
-              description="Converts a file the device cannot play before download."
-              value={form.getValue("download.transcode_enabled")}
-              onChange={(v) => form.setValue("download.transcode_enabled", v)}
-              restartRequired={restartKeys.has("download.transcode_enabled")}
             />
             <SettingField
               label="Prepare locally when workers are unavailable"

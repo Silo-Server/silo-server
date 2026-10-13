@@ -586,7 +586,7 @@ export default function WebhookSyncSettings() {
   return (
     <div className="space-y-6 pb-6">
       <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Webhook Sync</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Webhook Sync</h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Receive watched, stop, and progress events from Plex, Emby, and Jellyfin.
         </p>

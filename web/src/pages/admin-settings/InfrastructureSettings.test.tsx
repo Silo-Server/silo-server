@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import InfrastructureSettings from "./InfrastructureSettings";
-import { OPSLOG_BUCKET_POLICIES_KEY } from "./logRetentionPolicy";
 
 window.HTMLElement.prototype.hasPointerCapture ??= () => false;
 window.HTMLElement.prototype.setPointerCapture ??= () => {};
@@ -150,6 +149,8 @@ function mockForm(overrides: FormOverrides = {}) {
 
 describe("InfrastructureSettings", () => {
   afterEach(() => {
+    // Disclosures remember being opened; start every case collapsed.
+    localStorage.clear();
     serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
     serverStatus.isPending = false;
     serverStatus.isError = false;
@@ -340,7 +341,7 @@ describe("InfrastructureSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("manages the merged database, storage and log keys in one form", () => {
+  it("manages the merged database and storage keys in one form", () => {
     mockForm();
 
     renderToStaticMarkup(<InfrastructureSettings />);
@@ -350,13 +351,168 @@ describe("InfrastructureSettings", () => {
     expect(keys).toEqual(
       expect.arrayContaining(["redis.url", "redis.db", "database.max_connections"]),
     );
-    expect(keys).toEqual(
-      expect.arrayContaining(["s3.public_bucket", "s3.private_bucket", OPSLOG_BUCKET_POLICIES_KEY]),
-    );
+    expect(keys).toEqual(expect.arrayContaining(["s3.public_bucket", "s3.private_bucket"]));
+    // Log retention moved to the Logging page, which saves those keys itself.
+    expect(keys.filter((key) => /^(opslog|policy)\./.test(key))).toEqual([]);
     // Provider caching remains on Library & Metadata. This page selects storage.
     expect(keys).not.toContain("metadata.cache_images");
     // The disabled Litestream storage tab is gone; its keys keep working through the API.
     expect(keys.filter((key) => key.startsWith("s3.user_db_"))).toEqual([]);
+    // The per-user database backend and its SQLite tuning are Hidden: one usable
+    // option and two fields that could never show. The API still serves them.
+    expect(keys.filter((key) => key.startsWith("userdb."))).toEqual([]);
+  });
+
+  it("keeps only the Postgres connection limit behind the Database disclosure", async () => {
+    mockForm();
+    render(<InfrastructureSettings />);
+
+    const database = within(screen.getByRole("group", { name: "Database" }));
+    expect(database.queryByLabelText("Maximum Postgres connections")).not.toBeInTheDocument();
+    await userEvent.click(database.getByRole("button", { name: "Advanced · 1 setting" }));
+    expect(database.getByLabelText("Maximum Postgres connections")).toBeVisible();
+    expect(database.queryByText("Where per-user data is stored")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Local disk", "local", "", "", false],
+    ["Automatic without a bucket", "", "", "", false],
+    ["Automatic without a bucket, saved as auto", "auto", "", "", false],
+    ["Local disk with a leftover bucket", "local", "artwork", "", false],
+    ["S3", "s3", "", "", true],
+    ["Automatic with a saved bucket", "auto", "artwork", "", true],
+    ["Automatic with a staged bucket", "auto", "", "artwork", true],
+  ])("shows public storage for %s: %s", (_, backend, savedBucket, stagedBucket, shown) => {
+    mockForm({
+      isDirty: (key: string) => stagedBucket !== "" && key === "s3.public_bucket",
+      dirtyCount: stagedBucket ? 1 : 0,
+      getPersistedValue: (key: string) =>
+        key === "artwork.storage_backend" ? backend : key === "s3.public_bucket" ? savedBucket : "",
+      getValue: (key: string) =>
+        key === "artwork.storage_backend"
+          ? backend
+          : key === "s3.public_bucket"
+            ? stagedBucket || savedBucket
+            : key === "s3.public_url_auth"
+              ? "presigned"
+              : "",
+    });
+    render(<InfrastructureSettings />);
+
+    const group = screen.queryByRole("group", { name: "Public storage" });
+    if (shown) {
+      expect(group).toBeInTheDocument();
+      expect(within(group!).getByLabelText("Bucket")).toBeVisible();
+    } else {
+      expect(group).not.toBeInTheDocument();
+    }
+    // The private bucket stays reachable: on local disk it is where avatars could move.
+    expect(
+      screen.getByRole("group", { name: shown ? "Private storage" : "S3 storage" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a staged public edit in view after the backend goes back to Local disk", () => {
+    mockForm({
+      dirtyCount: 2,
+      isDirty: (key: string) => key === "artwork.storage_backend" || key === "s3.public_endpoint",
+      getValue: (key: string) =>
+        key === "artwork.storage_backend"
+          ? "local"
+          : key === "s3.public_endpoint"
+            ? "https://s3.example"
+            : key === "s3.public_url_auth"
+              ? "presigned"
+              : "",
+    });
+    render(<InfrastructureSettings />);
+
+    expect(
+      within(screen.getByRole("group", { name: "Public storage" })).getByLabelText("Endpoint"),
+    ).toHaveValue("https://s3.example");
+  });
+
+  it("reveals the public storage fields after S3 is picked on a locked local install", async () => {
+    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
+    const form = mockForm({
+      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
+      getValue: (key: string) =>
+        key === "artwork.storage_backend"
+          ? "local"
+          : key === "s3.public_url_auth"
+            ? "presigned"
+            : "",
+    });
+    render(<InfrastructureSettings />);
+    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+    await userEvent.click(screen.getByRole("option", { name: "S3" }));
+    const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
+    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
+      "Public bucket: not set",
+    );
+    // The review stages nothing, but the bucket it needs is now on the page.
+    expect(form.setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "s3");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+    expect(publicStorage.getByLabelText("Bucket")).toBeEnabled();
+    serverStatus.current = undefined;
+  });
+
+  it("folds S3 into one optional group on Local disk", async () => {
+    mockForm();
+    render(<InfrastructureSettings />);
+
+    expect(screen.queryByRole("group", { name: "Private storage" })).not.toBeInTheDocument();
+    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
+    expect(privateStorage.getByText(/^Optional\./)).toBeInTheDocument();
+    expect(privateStorage.queryByLabelText("Endpoint")).not.toBeInTheDocument();
+    expect(privateStorage.queryByLabelText("Access Key")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      privateStorage.getByRole("button", { name: "Private bucket · 7 settings" }),
+    );
+    for (const label of [
+      "Endpoint",
+      "Bucket",
+      "Access Key",
+      "Secret Key",
+      "Region",
+      "Put the bucket name in the URL path",
+      "Folder inside the bucket",
+    ]) {
+      expect(privateStorage.getByLabelText(label)).toBeVisible();
+    }
+    expect(privateStorage.getByRole("button", { name: "Check Connection" })).toBeVisible();
+  });
+
+  it("keeps public and private storage as separate groups on the S3 backend", () => {
+    mockForm({
+      getValue: (key: string) =>
+        key === "artwork.storage_backend" ? "s3" : key === "s3.public_url_auth" ? "presigned" : "",
+    });
+    render(<InfrastructureSettings />);
+
+    expect(screen.getByRole("group", { name: "Public storage" })).toBeInTheDocument();
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    expect(privateStorage.getByRole("button", { name: "Advanced · 7 settings" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
+  });
+
+  it("opens private storage while one of its fields is unsaved", () => {
+    mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["s3.private_bucket"],
+      isDirty: (key: string) => key === "s3.private_bucket",
+      getValue: (key: string) => (key === "s3.private_bucket" ? "private-new" : ""),
+    });
+    render(<InfrastructureSettings />);
+
+    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
+    expect(privateStorage.getByLabelText("Bucket")).toHaveValue("private-new");
+    expect(privateStorage.getByText("Storage location change")).toBeVisible();
   });
 
   it("keeps the Redis connection check available when REDIS_URL comes from the environment", () => {
@@ -764,16 +920,36 @@ describe("InfrastructureSettings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Storage lock status is unavailable");
     expect(screen.getByRole("group", { name: "Database" })).toBeInTheDocument();
     expect(screen.getByLabelText("Maximum Postgres connections")).toBeVisible();
-    expect(screen.getByRole("group", { name: "Logs" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Redis" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
-    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-    expect(publicStorage.getByLabelText("Bucket")).toBeDisabled();
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    // Local disk shows no public bucket; private storage is behind its disclosure.
+    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
+    await userEvent.click(privateStorage.getByRole("button", { name: /^Private bucket/ }));
     expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
+    expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).toHaveBeenCalledWith(["database.max_connections"]);
     expect(createStorageTransitionMock).not.toHaveBeenCalled();
+  });
+
+  it("holds the public bucket location while lock status is unknown", () => {
+    serverStatus.current = {
+      artwork_storage: { backend: "s3", locked: true, status_known: false },
+    };
+    mockForm({
+      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "s3" : ""),
+      getValue: (key: string) =>
+        key === "artwork.storage_backend" ? "s3" : key === "s3.public_url_auth" ? "presigned" : "",
+    });
+    render(<InfrastructureSettings />);
+
+    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+    expect(publicStorage.getByLabelText("Endpoint")).toBeDisabled();
+    expect(publicStorage.getByLabelText("Bucket")).toBeDisabled();
+    // Credentials are not a location, so they stay editable.
+    expect(publicStorage.getByLabelText("Access Key")).toBeEnabled();
   });
 
   it("holds a staged storage location until lock status can be retried", async () => {
@@ -1024,13 +1200,15 @@ describe("InfrastructureSettings", () => {
       save,
     });
     render(<InfrastructureSettings />);
+    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
+    await userEvent.click(privateStorage.getByRole("button", { name: /^Private bucket/ }));
+    expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
     expect(save).toHaveBeenCalledWith(["database.max_connections"]);
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
-    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-    expect(publicStorage.getByLabelText("Endpoint")).toBeDisabled();
-    expect(publicStorage.getByLabelText("Bucket")).toBeDisabled();
+    expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
+    expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
 
     finishSave?.();
     expect(await screen.findByRole("dialog", { name: "Change artwork storage" })).toBeVisible();
@@ -1626,10 +1804,14 @@ describe("InfrastructureSettings", () => {
   });
 
   it("keeps a saved credential when its input is emptied", async () => {
+    const values: Record<string, string> = {
+      "artwork.storage_backend": "s3",
+      "s3.public_access_key": "draft",
+      "s3.public_url_auth": "presigned",
+    };
     const form = mockForm({
       sensitiveConfigured: ["s3.public_access_key", "s3.public_secret_key"],
-      getValue: (key: string) =>
-        key === "s3.public_access_key" ? "draft" : key === "s3.public_url_auth" ? "presigned" : "",
+      getValue: (key: string) => values[key] ?? "",
     });
 
     render(<InfrastructureSettings />);
@@ -1656,7 +1838,8 @@ describe("InfrastructureSettings", () => {
 
     render(<InfrastructureSettings />);
 
-    const privateGroup = within(screen.getByRole("group", { name: "Private storage" }));
+    const privateGroup = within(screen.getByRole("group", { name: "S3 storage" }));
+    await userEvent.click(privateGroup.getByRole("button", { name: /^Private bucket/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -1676,40 +1859,49 @@ describe("InfrastructureSettings", () => {
     expect(screen.queryByLabelText("Secret Key")).not.toBeInTheDocument();
   });
 
-  it("stages bucket override edits through the shared save model", async () => {
-    const setValue = vi.fn();
-    mockForm({
-      setValue,
-      isDirty: (key: string) => key === OPSLOG_BUCKET_POLICIES_KEY,
-      dirtyCount: 1,
-      getValue: (key: string) => {
-        if (key === "s3.public_url_auth") return "presigned";
-        if (key === OPSLOG_BUCKET_POLICIES_KEY) {
-          return JSON.stringify([
-            {
-              component: "metadata",
-              level: "info",
-              retention_days: 1,
-              max_rows: 100,
-              max_size_mb: 8,
-            },
-          ]);
-        }
-        return "";
-      },
+  describe("staging the S3 backend", () => {
+    beforeEach(() => {
+      realForm.enabled = true;
+      serverSettings.current = {
+        "artwork.storage_backend": "local",
+        "s3.public_url_auth": "presigned",
+      };
+      sensitiveStatus.current = { configured: [], managed_by_env: [] };
+      updateSettingsMock.mockReset();
+      updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });
     });
 
-    render(<InfrastructureSettings />);
+    afterEach(() => {
+      realForm.enabled = false;
+    });
 
-    await userEvent.click(screen.getByRole("button", { name: /Remove metadata rule/ }));
+    it("shows the public bucket fields before the backend is saved", async () => {
+      render(<InfrastructureSettings />);
+      expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
 
-    expect(setValue).toHaveBeenCalledWith(OPSLOG_BUCKET_POLICIES_KEY, "[]");
+      await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+      await userEvent.click(screen.getByRole("option", { name: "S3" }));
+
+      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(updateSettingsMock).toHaveBeenCalledWith({
+          "artwork.storage_backend": "s3",
+          "s3.public_bucket": "artwork",
+        }),
+      );
+    });
   });
 
   describe("clearing a stored credential", () => {
     beforeEach(() => {
       realForm.enabled = true;
-      serverSettings.current = { "s3.public_url_auth": "presigned" };
+      serverSettings.current = {
+        "artwork.storage_backend": "s3",
+        "s3.public_url_auth": "presigned",
+      };
       sensitiveStatus.current = { configured: ["s3.public_access_key"], managed_by_env: [] };
       updateSettingsMock.mockReset();
       updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });

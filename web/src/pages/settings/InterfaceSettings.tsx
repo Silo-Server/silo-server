@@ -26,7 +26,6 @@ import {
   type PrimaryMenuItem,
 } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
-import { TitleArtSettingsGroup } from "./TitleArtSettingsGroup";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 
@@ -88,7 +87,7 @@ function CardPreview({ presentation }: { presentation: CardPresentation }) {
 function InterfaceHeader() {
   return (
     <header className="space-y-2">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Navigation & cards</h2>
+      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Navigation & Cards</h1>
       <p className="text-muted-foreground text-sm">
         These choices sync between web browsers signed into this profile. TV, mobile, tablet, and
         desktop-native apps keep their own matching-device layouts.
@@ -433,8 +432,6 @@ export default function InterfaceSettings() {
           </div>
         ) : null}
       </SettingsGroup>
-
-      <TitleArtSettingsGroup />
 
       <SettingsGroup
         title="Primary menu"

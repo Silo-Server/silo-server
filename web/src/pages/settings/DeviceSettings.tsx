@@ -101,7 +101,7 @@ export default function DeviceSettings() {
       {/* Hidden below xl while the detail view is open: on a phone that screen
           is about one device, and its own header says which. */}
       <header className={cn("space-y-2", showDetailOnMobile && "hidden xl:block")}>
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your devices</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your Devices</h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Every phone, tablet, TV and browser you watch on. Pick one to see what&apos;s set
           differently there and change it — from here, whichever device you&apos;re holding.

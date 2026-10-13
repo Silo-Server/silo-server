@@ -60,7 +60,7 @@ export default function AccountSettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Account</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Account</h1>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Manage the sign-in credential shared by every profile on this account.
         </p>

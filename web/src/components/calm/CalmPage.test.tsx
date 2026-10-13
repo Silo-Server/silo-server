@@ -24,13 +24,13 @@ describe("CalmPage", () => {
     expect(screen.getByRole("banner").parentElement).not.toHaveClass("pb-24");
   });
 
-  it("is an h2 under a parent page and leaves room for a docked bar", () => {
+  it("titles a settings page and leaves room for a docked bar", () => {
     render(
-      <CalmPage heading="section" title="Home Screen" subtitle="Your rows." padBottom>
+      <CalmPage heading="settings" title="Home Screen" subtitle="Your rows." padBottom>
         <p>List</p>
       </CalmPage>,
     );
-    expect(screen.getByRole("heading", { level: 2, name: "Home Screen" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home Screen" })).toBeInTheDocument();
     expect(screen.getByRole("banner").parentElement).toHaveClass("pb-24");
   });
 });

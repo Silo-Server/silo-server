@@ -40,7 +40,12 @@ const SETTINGS_TITLES: Record<string, string> = {
   "subtitle-appearance": "Subtitle Settings",
   "home-screen": "Home Screen Settings",
   "card-overlays": "Card Overlay Settings",
+  "title-pages": "Title Page Settings",
   "connect-apps": "Connect Apps Settings",
+  devices: "Your Devices",
+  personalize: "Personalize",
+  "watch-providers": "Watch Provider Settings",
+  notifications: "Notification Settings",
 };
 
 const ADMIN_TITLES: Record<string, string> = {
@@ -50,7 +55,6 @@ const ADMIN_TITLES: Record<string, string> = {
   autoscan: "Admin Autoscan",
   collections: "Admin Collections",
   devices: "Admin Devices",
-  "settings/devices": "Your Devices",
   diagnostics: "Admin Client Diagnostics",
   downloads: "Admin Downloads",
   history: "Admin Playback History",

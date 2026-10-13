@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import type {
   ConnectionCheckResponse,
@@ -11,7 +11,6 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
-import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,13 +21,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useAdminServerStatus,
@@ -47,35 +39,17 @@ import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
-import { USER_DATABASE_BACKEND_OPTIONS } from "./databaseSettingOptions";
 import { cleanPath } from "./settingsPathDefaults";
-import {
-  LOG_LEVEL_OPTIONS,
-  OPSLOG_BUCKET_POLICIES_KEY,
-  OPSLOG_MAX_ROWS_KEY,
-  OPSLOG_MAX_SIZE_MB_KEY,
-  OPSLOG_RETENTION_DAYS_KEY,
-  appendBucketRow,
-  bucketRowsFromRaw,
-  recommendedBucketRows,
-  removeBucketRow,
-  serializeBucketRows,
-  updateBucketRow,
-  type LogRetentionBucketPolicy,
-  type LogRetentionBucketRow,
-} from "./logRetentionPolicy";
 import { keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
 
 type SettingsForm = ReturnType<typeof useSettingsForm>;
 
 const REDIS_KEYS = ["redis.url", "redis.db"];
 
-const DATABASE_KEYS = [
-  "database.max_connections",
-  "userdb.backend",
-  "userdb.pool_max_open",
-  "userdb.idle_timeout",
-];
+// userdb.backend, userdb.pool_max_open and userdb.idle_timeout are Hidden on
+// purpose: PostgreSQL is the only usable per-user store, and the two SQLite
+// tuning fields could never show. They stay ordinary settings through the API.
+const DATABASE_KEYS = ["database.max_connections"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
@@ -125,19 +99,6 @@ const STORAGE_TRANSITION_KEYS = new Set([
   ...PRIVATE_S3_KEYS,
 ]);
 
-// The overall trim limits are what an admin comes here to change; the policy
-// decision log and the per-area rules are debugging tools behind Advanced.
-const LOG_ESSENTIAL_KEYS = [OPSLOG_RETENTION_DAYS_KEY, OPSLOG_MAX_ROWS_KEY, OPSLOG_MAX_SIZE_MB_KEY];
-
-const LOG_ADVANCED_KEYS = [
-  "policy.decision_log_retention_days",
-  "policy.decision_log_verbosity",
-  "policy.decision_log_scope_sample_rate",
-  OPSLOG_BUCKET_POLICIES_KEY,
-];
-
-const LOG_KEYS = [...LOG_ESSENTIAL_KEYS, ...LOG_ADVANCED_KEYS];
-
 const KEYS = [
   "artwork.storage_backend",
   "artwork.local_path",
@@ -145,7 +106,6 @@ const KEYS = [
   ...DATABASE_KEYS,
   ...PUBLIC_S3_KEYS,
   ...PRIVATE_S3_KEYS,
-  ...LOG_KEYS,
 ];
 
 function countDirty(form: SettingsForm, keys: string[]): number {
@@ -155,8 +115,7 @@ function countDirty(form: SettingsForm, keys: string[]): number {
 // Whether a group may claim "changes apply after a restart" for all of its
 // fields at once. Computed from the server's restart registry rather than
 // asserted, so converting one key to hot-reload silently demotes its group to
-// per-field chips instead of leaving a false blanket claim — the Logs group
-// below is exactly that case today.
+// per-field chips instead of leaving a false blanket claim.
 function allRestart(restartKeys: RestartKeyMatcher, keys: string[]): boolean {
   return keys.every((key) => restartKeys.has(key));
 }
@@ -400,6 +359,7 @@ function S3Group({
   artworkLockedBackend,
   publicBackendChangePending = false,
   locationFieldsDisabled = false,
+  disclosureTitle,
 }: {
   form: SettingsForm;
   restartKeys: RestartKeyMatcher;
@@ -411,6 +371,7 @@ function S3Group({
   artworkLockedBackend?: string;
   publicBackendChangePending?: boolean;
   locationFieldsDisabled?: boolean;
+  disclosureTitle?: string;
 }) {
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -418,23 +379,25 @@ function S3Group({
   const key = (suffix: string) => `s3.${scope}_${suffix}`;
   const urlAuth = form.getValue("s3.public_url_auth") || "presigned";
 
-  const advancedKeys =
-    scope === "public"
-      ? [
-          "s3.public_region",
-          "s3.public_path_style",
-          "s3.public_key_prefix",
-          "s3.public_url_auth",
-          "s3.public_read_endpoint",
-          "s3.public_token_secret",
-          "s3.public_token_param",
-          "s3.public_token_ttl",
-        ]
-      : ["s3.private_region", "s3.private_path_style", "s3.private_key_prefix"];
-  const advancedCount =
-    scope === "public"
-      ? 4 + (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0)
-      : 3;
+  // Private storage is optional: without it those files stay on local disk.
+  // So that whole group sits behind its disclosure, while public storage keeps
+  // its connection in view and only the tuning behind it.
+  const allAdvanced = scope === "private";
+  const advancedKeys = allAdvanced
+    ? keys
+    : [
+        "s3.public_region",
+        "s3.public_path_style",
+        "s3.public_key_prefix",
+        "s3.public_url_auth",
+        "s3.public_read_endpoint",
+        "s3.public_token_secret",
+        "s3.public_token_param",
+        "s3.public_token_ttl",
+      ];
+  const advancedCount = allAdvanced
+    ? keys.length
+    : 4 + (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0);
   const advancedChanged = countDirty(form, advancedKeys);
 
   async function handleCheckConnection() {
@@ -453,8 +416,8 @@ function S3Group({
     }
   }
 
-  return (
-    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
+  const connectionFields = (
+    <>
       <SettingField
         label="Endpoint"
         hint="https://s3.us-east-1.amazonaws.com"
@@ -531,97 +494,110 @@ function S3Group({
         isPending={checkConnection.isPending}
         disabled={form.isSaving}
       />
+    </>
+  );
 
-      <AdvancedSection
-        id={`infrastructure.s3.${scope}`}
-        count={advancedCount}
-        forceOpen={advancedChanged > 0}
-      >
-        <SettingField
-          label="Region"
-          description="Leave blank unless your provider requires one."
-          value={form.getValue(key("region"))}
-          onChange={(v) => form.setValue(key("region"), v)}
-          restartRequired={restartKeys.has(key("region"))}
-        />
-        <SettingField
-          label="Put the bucket name in the URL path"
-          type="toggle"
-          description="Needed by MinIO and some self-hosted storage."
-          value={form.getValue(key("path_style"))}
-          onChange={(v) => form.setValue(key("path_style"), v)}
-          restartRequired={restartKeys.has(key("path_style"))}
-        />
-        <SettingField
-          label="Folder inside the bucket"
-          description="Leave blank to use the bucket root."
-          value={form.getValue(key("key_prefix"))}
-          onChange={(v) => form.setValue(key("key_prefix"), v)}
-          disabled={secrets.disabled || locationFieldsDisabled}
-          restartRequired={restartKeys.has(key("key_prefix"))}
-        />
-        {scope === "public" && (
-          <>
+  const advancedFields = (
+    <>
+      <SettingField
+        label="Region"
+        description="Leave blank unless your provider requires one."
+        value={form.getValue(key("region"))}
+        onChange={(v) => form.setValue(key("region"), v)}
+        restartRequired={restartKeys.has(key("region"))}
+      />
+      <SettingField
+        label="Put the bucket name in the URL path"
+        type="toggle"
+        description="Needed by MinIO and some self-hosted storage."
+        value={form.getValue(key("path_style"))}
+        onChange={(v) => form.setValue(key("path_style"), v)}
+        restartRequired={restartKeys.has(key("path_style"))}
+      />
+      <SettingField
+        label="Folder inside the bucket"
+        description="Leave blank to use the bucket root."
+        value={form.getValue(key("key_prefix"))}
+        onChange={(v) => form.setValue(key("key_prefix"), v)}
+        disabled={secrets.disabled || locationFieldsDisabled}
+        restartRequired={restartKeys.has(key("key_prefix"))}
+      />
+      {scope === "public" && (
+        <>
+          <SettingField
+            label="How asset links are authorized"
+            type="select"
+            description="Signed links work with a private bucket and suit most installs."
+            value={urlAuth}
+            onChange={(v) => form.setValue("s3.public_url_auth", v)}
+            options={[
+              { value: "presigned", label: "Signed links (recommended)" },
+              { value: "public", label: "Anyone with the link" },
+              { value: "cloudflare_token", label: "Cloudflare signed token" },
+            ]}
+            restartRequired={restartKeys.has("s3.public_url_auth")}
+          />
+          {urlAuth !== "presigned" && (
             <SettingField
-              label="How asset links are authorized"
-              type="select"
-              description="Signed links work with a private bucket and suit most installs."
-              value={urlAuth}
-              onChange={(v) => form.setValue("s3.public_url_auth", v)}
-              options={[
-                { value: "presigned", label: "Signed links (recommended)" },
-                { value: "public", label: "Anyone with the link" },
-                { value: "cloudflare_token", label: "Cloudflare signed token" },
-              ]}
-              restartRequired={restartKeys.has("s3.public_url_auth")}
+              label="Address clients download from"
+              hint="https://cdn.example.com"
+              value={form.getValue("s3.public_read_endpoint")}
+              onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+              restartRequired={restartKeys.has("s3.public_read_endpoint")}
             />
-            {urlAuth !== "presigned" && (
-              <SettingField
-                label="Address clients download from"
-                hint="https://cdn.example.com"
-                value={form.getValue("s3.public_read_endpoint")}
-                onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
-                restartRequired={restartKeys.has("s3.public_read_endpoint")}
-              />
-            )}
-            {urlAuth === "cloudflare_token" && (
-              <>
-                {/*
+          )}
+          {urlAuth === "cloudflare_token" && (
+            <>
+              {/*
                   Cloudflare token auth requires this secret, so a clear only
                   saves alongside a switch back to another mode — the one order
                   that works, since the field is hidden in those modes.
                 */}
-                <SecretField
-                  label="Token Secret"
-                  value={form.getValue("s3.public_token_secret")}
-                  configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                  onKeep={() => secrets.keepSaved("s3.public_token_secret")}
-                  onClear={() => secrets.clearSaved("s3.public_token_secret")}
-                  cleared={form.isClearStaged("s3.public_token_secret")}
-                  onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
-                  hint="Signing key configured in Cloudflare"
-                  disabled={secrets.disabled}
-                  restartRequired={restartKeys.has("s3.public_token_secret")}
-                />
-                <SettingField
-                  label="Token query parameter"
-                  description="Usually verify."
-                  value={form.getValue("s3.public_token_param") || "verify"}
-                  onChange={(v) => form.setValue("s3.public_token_param", v)}
-                  restartRequired={restartKeys.has("s3.public_token_param")}
-                />
-                <SettingField
-                  label="Link lifetime"
-                  type="number"
-                  unit="seconds"
-                  value={form.getValue("s3.public_token_ttl") || "10800"}
-                  onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                  restartRequired={restartKeys.has("s3.public_token_ttl")}
-                />
-              </>
-            )}
-          </>
-        )}
+              <SecretField
+                label="Token Secret"
+                value={form.getValue("s3.public_token_secret")}
+                configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                onKeep={() => secrets.keepSaved("s3.public_token_secret")}
+                onClear={() => secrets.clearSaved("s3.public_token_secret")}
+                cleared={form.isClearStaged("s3.public_token_secret")}
+                onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
+                hint="Signing key configured in Cloudflare"
+                disabled={secrets.disabled}
+                restartRequired={restartKeys.has("s3.public_token_secret")}
+              />
+              <SettingField
+                label="Token query parameter"
+                description="Usually verify."
+                value={form.getValue("s3.public_token_param") || "verify"}
+                onChange={(v) => form.setValue("s3.public_token_param", v)}
+                restartRequired={restartKeys.has("s3.public_token_param")}
+              />
+              <SettingField
+                label="Link lifetime"
+                type="number"
+                unit="seconds"
+                value={form.getValue("s3.public_token_ttl") || "10800"}
+                onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                restartRequired={restartKeys.has("s3.public_token_ttl")}
+              />
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  return (
+    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
+      {allAdvanced ? null : connectionFields}
+      <AdvancedSection
+        id={`infrastructure.s3.${scope}`}
+        title={disclosureTitle}
+        count={advancedCount}
+        forceOpen={advancedChanged > 0}
+      >
+        {allAdvanced ? connectionFields : null}
+        {advancedFields}
       </AdvancedSection>
     </FieldGroup>
   );
@@ -634,13 +610,13 @@ function DatabaseGroup({
   form: SettingsForm;
   restartKeys: RestartKeyMatcher;
 }) {
-  const userDBBackend = form.getValue("userdb.backend");
-  const sqlite = userDBBackend === "sqlite";
-  const changed = countDirty(form, DATABASE_KEYS);
-
   return (
     <FieldGroup label="Database" restartAll={allRestart(restartKeys, DATABASE_KEYS)}>
-      <AdvancedSection id="infrastructure.database" count={sqlite ? 4 : 2} forceOpen={changed > 0}>
+      <AdvancedSection
+        id="infrastructure.database"
+        count={DATABASE_KEYS.length}
+        forceOpen={countDirty(form, DATABASE_KEYS) > 0}
+      >
         <SettingField
           label="Maximum Postgres connections"
           type="number"
@@ -648,264 +624,6 @@ function DatabaseGroup({
           value={form.getValue("database.max_connections")}
           onChange={(v) => form.setValue("database.max_connections", v)}
           restartRequired={restartKeys.has("database.max_connections")}
-        />
-        <SettingField
-          label="Where per-user data is stored"
-          type="select"
-          description="PostgreSQL is the only supported option."
-          options={USER_DATABASE_BACKEND_OPTIONS}
-          value={userDBBackend}
-          onChange={(v) => form.setValue("userdb.backend", v)}
-          restartRequired={restartKeys.has("userdb.backend")}
-        />
-        {sqlite && (
-          <>
-            <SettingField
-              label="Open files per user"
-              type="number"
-              description="SQLite connections one user database may hold open."
-              value={form.getValue("userdb.pool_max_open")}
-              onChange={(v) => form.setValue("userdb.pool_max_open", v)}
-              restartRequired={restartKeys.has("userdb.pool_max_open")}
-            />
-            <SettingField
-              label="Close idle user databases after"
-              type="duration"
-              description="For example 12h."
-              value={form.getValue("userdb.idle_timeout")}
-              onChange={(v) => form.setValue("userdb.idle_timeout", v)}
-              restartRequired={restartKeys.has("userdb.idle_timeout")}
-            />
-          </>
-        )}
-      </AdvancedSection>
-    </FieldGroup>
-  );
-}
-
-function BucketOverridesEditor({
-  rows,
-  parseError,
-  onChange,
-  onRestore,
-}: {
-  rows: LogRetentionBucketRow[];
-  parseError: string;
-  onChange: (rows: LogRetentionBucketRow[]) => void;
-  onRestore: () => void;
-}) {
-  function edit(id: string, field: keyof LogRetentionBucketPolicy, value: string) {
-    onChange(updateBucketRow(rows, id, field, value));
-  }
-
-  return (
-    <div className="space-y-4 py-3.5">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-        <div className="min-w-0">
-          <h4 className="text-sm font-medium">Per-area limits</h4>
-          <p className="text-muted-foreground mt-1 text-xs">A limit of 0 turns that rule off.</p>
-        </div>
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
-          <Button type="button" size="sm" variant="outline" onClick={onRestore}>
-            <RotateCcw className="size-4" />
-            Restore Recommended Rules
-          </Button>
-          <Button type="button" size="sm" onClick={() => onChange(appendBucketRow(rows))}>
-            <Plus className="size-4" />
-            Add Rule
-          </Button>
-        </div>
-      </div>
-
-      {parseError ? (
-        <div className="border-warning/30 bg-warning/10 text-warning rounded-[1rem] border px-3 py-2 text-sm">
-          The saved rules could not be read. The editor loaded the recommended rules so you can
-          recover cleanly. Details: {parseError}
-        </div>
-      ) : null}
-
-      <div className="border-border/70 overflow-x-auto rounded-[1rem] border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-muted/40 text-left">
-            <tr>
-              <th className="px-3 py-2 font-medium">Component</th>
-              <th className="px-3 py-2 font-medium">Level</th>
-              <th className="px-3 py-2 font-medium">Days</th>
-              <th className="px-3 py-2 font-medium">Max rows</th>
-              <th className="px-3 py-2 font-medium">Max size (MB)</th>
-              <th className="w-[60px] px-3 py-2 font-medium"> </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-muted-foreground px-3 py-6 text-center">
-                  No per-area rules configured.
-                </td>
-              </tr>
-            ) : (
-              rows.map((row) => (
-                <tr key={row.id} className="border-t">
-                  <td className="px-3 py-2">
-                    <Input
-                      value={row.component}
-                      onChange={(event) => edit(row.id, "component", event.target.value)}
-                      placeholder="metadata"
-                      aria-label={`Component for rule ${row.id}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Select
-                      value={row.level}
-                      onValueChange={(value) => edit(row.id, "level", value)}
-                    >
-                      <SelectTrigger className="w-[120px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LOG_LEVEL_OPTIONS.map((level) => (
-                          <SelectItem key={level} value={level}>
-                            {level}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      value={String(row.retention_days)}
-                      onChange={(event) => edit(row.id, "retention_days", event.target.value)}
-                      className="w-[110px]"
-                      aria-label={`Days for rule ${row.id}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      value={String(row.max_rows)}
-                      onChange={(event) => edit(row.id, "max_rows", event.target.value)}
-                      className="w-[140px]"
-                      aria-label={`Max rows for rule ${row.id}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      value={String(row.max_size_mb)}
-                      onChange={(event) => edit(row.id, "max_size_mb", event.target.value)}
-                      className="w-[140px]"
-                      aria-label={`Max size for rule ${row.id}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="outline"
-                      onClick={() => onChange(removeBucketRow(rows, row.id))}
-                      aria-label={`Remove ${row.component || "bucket"} rule`}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function LogsGroup({ form, restartKeys }: { form: SettingsForm; restartKeys: RestartKeyMatcher }) {
-  // The bucket rules are one JSON setting edited as a table, so the rows live
-  // here while they are dirty and re-hydrate from the saved value otherwise.
-  const [draftRows, setDraftRows] = useState<LogRetentionBucketRow[] | null>(null);
-  const raw = form.getValue(OPSLOG_BUCKET_POLICIES_KEY);
-  const bucketDirty = form.isDirty(OPSLOG_BUCKET_POLICIES_KEY);
-  const hydrated = useMemo(() => bucketRowsFromRaw(raw), [raw]);
-  // A stale draft can never be shown: it is only reachable while the key is
-  // dirty, and the only thing that marks it dirty also sets the draft.
-  const rows = bucketDirty && draftRows ? draftRows : hydrated.rows;
-  const parseError = bucketDirty ? "" : hydrated.error;
-  const advancedChanged = countDirty(form, LOG_ADVANCED_KEYS);
-
-  function commitRows(next: LogRetentionBucketRow[]) {
-    setDraftRows(next);
-    form.setValue(OPSLOG_BUCKET_POLICIES_KEY, serializeBucketRows(next));
-  }
-
-  return (
-    <FieldGroup label="Logs">
-      <SettingField
-        label="Delete log entries older than"
-        type="number"
-        unit="days"
-        value={form.getValue(OPSLOG_RETENTION_DAYS_KEY)}
-        onChange={(v) => form.setValue(OPSLOG_RETENTION_DAYS_KEY, v)}
-        restartRequired={restartKeys.has(OPSLOG_RETENTION_DAYS_KEY)}
-      />
-      <SettingField
-        label="Maximum log entries"
-        type="number"
-        value={form.getValue(OPSLOG_MAX_ROWS_KEY)}
-        onChange={(v) => form.setValue(OPSLOG_MAX_ROWS_KEY, v)}
-        restartRequired={restartKeys.has(OPSLOG_MAX_ROWS_KEY)}
-      />
-      <SettingField
-        label="Maximum log size"
-        type="number"
-        unit="MB"
-        value={form.getValue(OPSLOG_MAX_SIZE_MB_KEY)}
-        onChange={(v) => form.setValue(OPSLOG_MAX_SIZE_MB_KEY, v)}
-        restartRequired={restartKeys.has(OPSLOG_MAX_SIZE_MB_KEY)}
-      />
-
-      <AdvancedSection
-        id="infrastructure.logs"
-        count={LOG_ADVANCED_KEYS.length}
-        forceOpen={advancedChanged > 0}
-      >
-        <SettingsSubheading>Permission checks</SettingsSubheading>
-        <SettingField
-          label="Delete permission records older than"
-          type="number"
-          unit="days"
-          value={form.getValue("policy.decision_log_retention_days")}
-          onChange={(v) => form.setValue("policy.decision_log_retention_days", v)}
-          restartRequired={restartKeys.has("policy.decision_log_retention_days")}
-        />
-        <SettingField
-          label="How much to record"
-          type="select"
-          description="Full also stores a sample of each request."
-          value={form.getValue("policy.decision_log_verbosity") || "digest"}
-          onChange={(v) => form.setValue("policy.decision_log_verbosity", v)}
-          options={[
-            { value: "digest", label: "Summary" },
-            { value: "verbose", label: "Full" },
-          ]}
-          restartRequired={restartKeys.has("policy.decision_log_verbosity")}
-        />
-        <SettingField
-          label="Record one allowed check in every"
-          type="number"
-          description="Denials and errors are always recorded."
-          value={form.getValue("policy.decision_log_scope_sample_rate")}
-          onChange={(v) => form.setValue("policy.decision_log_scope_sample_rate", v)}
-          restartRequired={restartKeys.has("policy.decision_log_scope_sample_rate")}
-        />
-
-        <BucketOverridesEditor
-          rows={rows}
-          parseError={parseError}
-          onChange={commitRows}
-          onRestore={() => commitRows(recommendedBucketRows())}
         />
       </AdvancedSection>
     </FieldGroup>
@@ -937,6 +655,9 @@ export default function InfrastructureSettings() {
     form.getValue("artwork.local_path"),
   );
   const [dismissedTransitionId, setDismissedTransitionId] = useState<string>();
+  // Picking S3 on a locked local install opens the transition review without
+  // staging the backend, so remember it to bring up the bucket fields.
+  const [s3Requested, setS3Requested] = useState(false);
   const createTransition = useCreateStorageTransition();
   const transitionCapabilities = useStorageTransitionCapabilities();
   const managedTransitionsAvailable =
@@ -952,6 +673,19 @@ export default function InfrastructureSettings() {
     form.getValue("artwork.storage_backend"),
     form.getValue("s3.public_bucket"),
   );
+  // On local disk the public bucket fields are noise. They show for the S3
+  // backend, for Automatic once a public bucket (saved or staged) makes it S3,
+  // after S3 was picked for a transition, and while any of them holds an
+  // unsaved edit, so a staged value is never out of sight.
+  const backendChoice = form.getValue("artwork.storage_backend").trim().toLowerCase() || "auto";
+  const publicBucketSet =
+    form.getValue("s3.public_bucket").trim() !== "" ||
+    form.getPersistedValue("s3.public_bucket").trim() !== "";
+  const showPublicStorage =
+    backendChoice === "s3" ||
+    (backendChoice === "auto" && publicBucketSet) ||
+    s3Requested ||
+    PUBLIC_S3_KEYS.some((key) => form.isDirty(key));
   // The lock compares edits with the recorded location. That is the running
   // backend, except after a committed transition and before the restart, when
   // the saved settings already name the committed location.
@@ -1132,6 +866,7 @@ export default function InfrastructureSettings() {
 
   function handleDiscard() {
     if (saveInProgressRef.current) return;
+    setS3Requested(false);
     form.discard();
   }
 
@@ -1189,9 +924,11 @@ export default function InfrastructureSettings() {
       }
       setTransitionBackend(requestedBackend);
       setTransitionLocalPath(form.getValue("artwork.local_path"));
+      setS3Requested(requestedBackend === "s3");
       setTransitionOpen(true);
       return;
     }
+    setS3Requested(false);
     form.setValue("artwork.storage_backend", value);
   }
 
@@ -1706,31 +1443,39 @@ export default function InfrastructureSettings() {
           </DialogContent>
         </Dialog>
         <RedisGroup form={form} restartKeys={restartKeys} secrets={secrets} />
-        <S3Group
-          form={form}
-          restartKeys={restartKeys}
-          secrets={secrets}
-          scope="public"
-          label="Public storage"
-          description="Files clients download directly: cached artwork, uploaded posters, and branding images."
-          checkKind="s3_public"
-          artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
-          publicBackendChangePending={publicBackendChangePending}
-          locationFieldsDisabled={!storageStatusKnown}
-        />
+        {showPublicStorage ? (
+          <S3Group
+            form={form}
+            restartKeys={restartKeys}
+            secrets={secrets}
+            scope="public"
+            label="Public storage"
+            description="Files clients download directly: cached artwork, uploaded posters, and branding images."
+            checkKind="s3_public"
+            artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
+            publicBackendChangePending={publicBackendChangePending}
+            locationFieldsDisabled={!storageStatusKnown}
+          />
+        ) : null}
+        {/* On Local disk the public bucket is hidden and the private one is
+            optional, so S3 shrinks to a single folded group. */}
         <S3Group
           form={form}
           restartKeys={restartKeys}
           secrets={secrets}
           scope="private"
-          label="Private storage"
-          description="Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts."
+          label={showPublicStorage ? "Private storage" : "S3 storage"}
+          description={
+            showPublicStorage
+              ? "Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts. Without a private bucket they stay on local disk; S3 storage needs one for them."
+              : "Optional. A private bucket can hold files only the server reads, such as profile avatars and diagnostics bundles; without one they stay on local disk."
+          }
+          disclosureTitle={showPublicStorage ? undefined : "Private bucket"}
           checkKind="s3_private"
           artworkLockedBackend={privateLocked ? artworkStorage?.backend : undefined}
           locationFieldsDisabled={!storageStatusKnown}
         />
         <DatabaseGroup form={form} restartKeys={restartKeys} />
-        <LogsGroup form={form} restartKeys={restartKeys} />
       </div>
 
       <SaveBar

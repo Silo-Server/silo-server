@@ -378,6 +378,28 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   animation: var(--duration-sidebar-collapse) var(--ease-sidebar-collapse) both nav-slide-in;
 }
 
+/* Entering or leaving personal settings swaps what the app's sidebar column
+   holds (useSidebarSwap). The column's background and border never move; only
+   its contents slide in, from the side the reader is heading toward.
+   `backwards` rather than `both`: once it ends the entrance lets go of
+   transform, which the app sidebar's own collapse motion drives on some of
+   these same children.                                                       */
+@keyframes sidebar-entrance {
+  from {
+    opacity: 0;
+    transform: translateX(var(--sidebar-entrance-shift));
+  }
+}
+[data-sidebar-entrance="forward"] {
+  --sidebar-entrance-shift: 16px;
+}
+[data-sidebar-entrance="back"] {
+  --sidebar-entrance-shift: -16px;
+}
+[data-sidebar-entrance] > * {
+  animation: var(--duration-normal) var(--ease-out) backwards sidebar-entrance;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* The directional selectors carry their own specificity — (0,1,2) against the
      bare pseudo-elements' (0,0,1) — so they have to be suppressed by name here

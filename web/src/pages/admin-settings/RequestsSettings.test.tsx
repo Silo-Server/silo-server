@@ -172,6 +172,29 @@ describe("Requests settings: general", () => {
       screen.queryByRole("switch", { name: "Request titles added to a watchlist" }),
     ).toBeNull();
   });
+
+  it("keeps the 4K-for-every-title switch under Advanced and saves it", async () => {
+    serve({
+      handlers: {
+        "PUT /api/v2/admin/request-settings": (options) =>
+          reply(options, { ...settings, force_dual_quality: true }, '"saved"'),
+      },
+    });
+    mount();
+    await screen.findByLabelText("Request limit");
+    const general = within(group("General"));
+    expect(general.queryByRole("switch", { name: /4K version of every title/ })).toBeNull();
+
+    fireEvent.click(general.getByRole("button", { name: "Advanced · 1 setting" }));
+    const toggle = general.getByRole("switch", { name: /4K version of every title/ });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls("PUT /api/v2/admin/request-settings")).toHaveLength(1));
+    expect(calls("PUT /api/v2/admin/request-settings")[0]).toMatchObject({
+      body: { force_dual_quality: true },
+    });
+  });
 });
 
 async function openServer(name: string) {

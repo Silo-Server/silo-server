@@ -52,16 +52,8 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
-  SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE,
-  SETTING_KEYS.UI_NEXT_UP_MODE,
 ];
 
-const EPISODE_SPOILER_KEYS = [
-  SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
-  SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_OVERVIEWS,
-] as const;
-
-const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
 
 // Radix Select cannot represent "" as an item value, so the unset entry needs
@@ -417,19 +409,6 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
   );
-  const supportsThemeMusic = settingsCapabilitiesSupportKey(
-    capabilities.data,
-    SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
-  );
-  const supportsThemeMusicLoop = settingsCapabilitiesSupportKey(
-    capabilities.data,
-    SETTING_KEYS.UI_THEME_MUSIC_LOOP,
-  );
-  // Both spoiler keys share one introduced_in revision.
-  const supportsEpisodeSpoilers = settingsCapabilitiesSupportKey(
-    capabilities.data,
-    SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
-  );
   /**
    * Which intro control this server can honestly show.
    *
@@ -449,20 +428,13 @@ export default function PlaybackSettings() {
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
-      ...(supportsThemeMusic ? [SETTING_KEYS.UI_THEME_MUSIC_ENABLED] : []),
-      ...(supportsThemeMusicLoop ? [SETTING_KEYS.UI_THEME_MUSIC_LOOP] : []),
-      ...(supportsEpisodeSpoilers ? EPISODE_SPOILER_KEYS : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop, supportsEpisodeSpoilers],
+    [supportsIntroSkipMode],
   );
-  const {
-    data: effective,
-    isPending: effectivePending,
-    isError: effectiveError,
-  } = useEffectiveSettings({ keys: playbackKeys });
+  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const {
     save: saveProfileDefault,
     reset: resetProfileDefault,
@@ -482,7 +454,6 @@ export default function PlaybackSettings() {
     saveProfileDefault(key, value).catch(() => toast.error("Failed to save playback setting"));
   };
 
-  const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
   const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
   const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
   const audioLanguageOptions = namedLanguageOptionsFor(
@@ -495,9 +466,6 @@ export default function PlaybackSettings() {
     metadataLanguage,
     effective?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
   );
-  // Whether the profile has actually chosen, which is what gates the reset
-  // affordance: the resolved value is the default until a row exists.
-  const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
   const pending = isSaving;
 
   const saveMetadataOverrides = (overrides: MetadataLanguageOverrides) => {
@@ -511,60 +479,24 @@ export default function PlaybackSettings() {
     });
   };
 
-  async function resetNextUpMode() {
-    // Nothing stored is the state a reset asks for, which the shared reset
-    // already treats as success.
-    await resetProfileDefault(SETTING_KEYS.UI_NEXT_UP_MODE).catch(() =>
-      toast.error("Failed to reset the next up preference"),
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Playback</h2>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Choose the defaults Silo should use when playback starts.
-          </p>
-        </div>
-      </div>
+      <header className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Playback</h1>
+        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
+          The defaults this profile starts playback with. A library, a series, or one of your
+          devices can override some of them.
+        </p>
+      </header>
 
       <SettingsGroup
-        title="Defaults"
-        description="These preferences apply unless a library or item has a more specific playback choice."
+        title="Quality"
+        description="Each of your devices can override these, and a household manager can cap them for this profile."
       >
         <QualitySetting />
-        {supportsThemeMusic ? (
-          <SettingRow
-            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].label}
-            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].description}
-            control={(id) => (
-              <Switch
-                id={id}
-                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
-                disabled={pending || effectivePending || effectiveError}
-                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, value)}
-              />
-            )}
-          />
-        ) : null}
+      </SettingsGroup>
 
-        {supportsThemeMusicLoop ? (
-          <SettingRow
-            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].label}
-            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].description}
-            control={(id) => (
-              <Switch
-                id={id}
-                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_LOOP)}
-                disabled={pending || effectivePending || effectiveError}
-                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_LOOP, value)}
-              />
-            )}
-          />
-        ) : null}
-
+      <SettingsGroup title="Language">
         <SettingRow
           label="Spoken language"
           description="Prefer a spoken language for this profile when multiple tracks are available."
@@ -601,22 +533,9 @@ export default function PlaybackSettings() {
           }
           onOverridesChange={saveMetadataOverrides}
         />
+      </SettingsGroup>
 
-        <SettingRow
-          label="Show advisory age"
-          description="Show a suggested minimum viewer age, such as Common Sense Media's, on item detail. This only shows the age; a household manager can limit a profile by it in the profile's access settings."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE, checked)
-              }
-            />
-          )}
-        />
-
+      <SettingsGroup title="Skipping">
         {introSkipControl === "mode" ? (
           <SettingRow
             label="Skip intros"
@@ -708,7 +627,9 @@ export default function PlaybackSettings() {
             />
           )}
         />
+      </SettingsGroup>
 
+      <SettingsGroup title="Next episode">
         <SettingRow
           label="Start next at preview"
           description="Begin the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits."
@@ -725,66 +646,7 @@ export default function PlaybackSettings() {
         />
 
         <AutoPlayNextSetting />
-
-        <SettingRow
-          label="Next up episodes"
-          description="Choose whether upcoming episodes stay with Continue Watching or get their own row."
-          control={(id) => (
-            <div className="flex items-center gap-2">
-              <Select
-                value={nextUpMode}
-                onValueChange={(value) => saveValue(SETTING_KEYS.UI_NEXT_UP_MODE, value)}
-                disabled={pending}
-              >
-                <SelectTrigger id={id} className="w-full sm:w-[240px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {NEXT_UP_MODES.map((mode) => (
-                    <SelectItem key={mode.value} value={mode.value}>
-                      {mode.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {nextUpChosen ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 rounded-full px-3"
-                  onClick={resetNextUpMode}
-                  disabled={pending}
-                >
-                  Reset
-                </Button>
-              ) : null}
-            </div>
-          )}
-        />
       </SettingsGroup>
-
-      {supportsEpisodeSpoilers ? (
-        <SettingsGroup
-          title="Spoilers"
-          description="Applies to episodes you have not started, on every device that uses this profile."
-        >
-          {EPISODE_SPOILER_KEYS.map((key) => (
-            <SettingRow
-              key={key}
-              label={SETTING_DEFINITIONS[key].label}
-              description={SETTING_DEFINITIONS[key].description}
-              control={(id) => (
-                <Switch
-                  id={id}
-                  checked={read<boolean>(key)}
-                  disabled={pending || effectivePending || effectiveError}
-                  onCheckedChange={(value) => saveValue(key, value)}
-                />
-              )}
-            />
-          ))}
-        </SettingsGroup>
-      ) : null}
 
       <SeekControls />
 

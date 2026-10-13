@@ -236,9 +236,10 @@ it("offers only link creation when email is not configured", () => {
   expect(screen.getByLabelText("Create link")).toBeChecked();
   expect(screen.getByLabelText("Send email")).toBeDisabled();
   expect(screen.getByText("Email isn't set up on this server.")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Notifications settings/ })).toHaveAttribute(
+  // The mail server has its own page; Notifications only links to it.
+  expect(screen.getByRole("link", { name: /Email settings/ })).toHaveAttribute(
     "href",
-    "/admin/settings/notifications",
+    "/admin/settings/email",
   );
   expect(screen.getByRole("button", { name: "Create link" })).toBeInTheDocument();
 });

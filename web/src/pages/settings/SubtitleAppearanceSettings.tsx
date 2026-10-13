@@ -263,9 +263,9 @@ export default function SubtitleAppearanceSettings() {
     <div className="space-y-6">
       <div className="space-y-4">
         <div className="space-y-3">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Subtitles</h2>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Subtitles</h1>
           <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Choose when subtitles appear and how they look during playback.
+            Choose when subtitles appear for this profile, and how they look on this device.
           </p>
         </div>
       </div>
@@ -348,7 +348,7 @@ export default function SubtitleAppearanceSettings() {
 
       <SettingsGroup
         title="Preview"
-        description="This sample reflects the current subtitle appearance."
+        description="How subtitles look on this device. Your other devices keep their own look."
       >
         <div
           className="surface-panel-subtle relative overflow-hidden rounded-[1.3rem]"

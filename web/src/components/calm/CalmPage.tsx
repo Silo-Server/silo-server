@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 /**
  * The 1000px column of a calm list page, with its heading, subtitle and the
  * page's buttons at the right. `heading="page"` is a page's own h1;
- * `heading="section"` an h2 under a parent page's heading (Settings).
+ * `heading="settings"` the same h1 at the size every settings page uses.
  * `padBottom` keeps room at the foot for a bar docked at the bottom.
  */
 export function CalmPage({
@@ -15,7 +15,7 @@ export function CalmPage({
   padBottom = false,
   children,
 }: {
-  heading: "page" | "section";
+  heading: "page" | "settings";
   title: string;
   subtitle: string;
   actions?: ReactNode;
@@ -39,7 +39,7 @@ export function CalmPage({
           </div>
         ) : (
           <div className="space-y-3">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h2>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
             <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">{subtitle}</p>
           </div>
         )}

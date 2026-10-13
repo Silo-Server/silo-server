@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { RequestSettings } from "@/api/types";
 import { isRequestEditorConflict } from "@/api/v2/adminRequests";
 import { EditorConflict } from "@/components/admin/EditorConflict";
+import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -278,14 +279,6 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                     ) : undefined
                   }
                 />
-                <SettingField
-                  label="Also request a 4K version of every title"
-                  type="toggle"
-                  description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
-                  value={String(draft.force_dual_quality)}
-                  onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
-                  dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}
-                />
                 {draft.watchlist_requests !== undefined ? (
                   <SettingField
                     label="Request titles added to a watchlist"
@@ -296,6 +289,22 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                     dirty={draft.watchlist_requests !== baseGeneral.watchlist_requests}
                   />
                 ) : null}
+                {/* Only matters with a 4K server, and the playback-limit rule
+                    already sends 4K to whoever can watch it. */}
+                <AdvancedSection
+                  id="requests.general"
+                  count={1}
+                  forceOpen={draft.force_dual_quality !== baseGeneral.force_dual_quality}
+                >
+                  <SettingField
+                    label="Also request a 4K version of every title"
+                    type="toggle"
+                    description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
+                    value={String(draft.force_dual_quality)}
+                    onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
+                    dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}
+                  />
+                </AdvancedSection>
                 {generalConflict ? (
                   <div className="py-3.5">
                     <EditorConflict onReload={reloadGeneral} />

@@ -86,17 +86,19 @@ export function LoginSessionsPanel({
       ))}
     </ul>
   );
+  // A section of the admin's user page there; the page's own title in Settings.
+  const Heading = adminUser ? "h2" : "h1";
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-2">
-          <h2
+          <Heading
             ref={heading}
             tabIndex={-1}
             className={`${adminUser ? "text-lg" : "text-2xl sm:text-3xl"} font-semibold tracking-tight focus:outline-none`}
           >
             Signed-in sessions
-          </h2>
+          </Heading>
           <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
             {adminUser
               ? `Browsers and apps signed in to ${adminUser.username}’s account.`

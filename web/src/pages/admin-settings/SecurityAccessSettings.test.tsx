@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +35,7 @@ vi.mock("@/hooks/useUnsavedChanges", () => ({
 }));
 
 vi.mock("@/hooks/useRestartKeys", () => ({
-  useRestartKeys: () => new Set<string>(["auth.access_token_expiry"]),
+  useRestartKeys: () => new Set<string>(),
 }));
 
 vi.mock("@/hooks/queries/admin/rateLimits", () => ({
@@ -71,8 +71,12 @@ const SERVER_CONFIG: RateLimitConfig = {
 
 const REDIS_HINT = /Configure Redis under Storage & Database first/;
 
+const LIMITS = /^Server and client limits/;
+const API_KEY_TIERS = /^API key tiers/;
+const ENDPOINTS = /^Sign-in and webhook endpoints/;
+
 async function openBackendSelect() {
-  await userEvent.click(screen.getByRole("button", { name: /Advanced/i }));
+  await userEvent.click(screen.getByRole("button", { name: LIMITS }));
   await userEvent.click(screen.getByRole("combobox", { name: /Where counters are kept/i }));
 }
 
@@ -104,6 +108,74 @@ describe("SecurityAccessSettings", () => {
       isPending: false,
       data: undefined,
     });
+  });
+
+  // Token lifetimes moved to Sign-in and trusted proxies to General; their tests
+  // live in SignInSettings.test.tsx and GeneralSettings.test.tsx.
+  it("manages only the local network key through the settings batch", () => {
+    render(<SecurityAccessSettings />);
+
+    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
+      "media_servers.allow_private_destinations",
+    ]);
+    expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "Local network",
+      "Rate limiting",
+    ]);
+    expect(screen.queryByLabelText("Access token expiry")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Trusted proxies")).not.toBeInTheDocument();
+  });
+
+  it("splits the rate limits into three titled disclosures, each with its own count", async () => {
+    render(<SecurityAccessSettings />);
+    const rateLimiting = within(screen.getByRole("group", { name: "Rate limiting" }));
+
+    expect(rateLimiting.getByRole("switch", { name: /Enable rate limiting/i })).toBeVisible();
+    expect(
+      rateLimiting.getByRole("button", { name: "Server and client limits · 5 settings" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      rateLimiting.getByRole("button", { name: "API key tiers · 6 settings" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      rateLimiting.getByRole("button", { name: "Sign-in and webhook endpoints · 16 settings" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Whole-server limit")).not.toBeInTheDocument();
+
+    await userEvent.click(rateLimiting.getByRole("button", { name: LIMITS }));
+    expect(screen.getByRole("combobox", { name: /Where counters are kept/i })).toBeVisible();
+    expect(screen.getByLabelText("Whole-server limit")).toBeVisible();
+    expect(screen.getByText("Per client address")).toBeVisible();
+    expect(screen.queryByText("Standard API keys")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sign in")).not.toBeInTheDocument();
+
+    await userEvent.click(rateLimiting.getByRole("button", { name: API_KEY_TIERS }));
+    expect(screen.getByText("Standard API keys")).toBeVisible();
+    expect(screen.getByText("Elevated API keys")).toBeVisible();
+    expect(screen.queryByText("Autoscan webhook")).not.toBeInTheDocument();
+
+    await userEvent.click(rateLimiting.getByRole("button", { name: ENDPOINTS }));
+    expect(screen.getByText("Sign in")).toBeVisible();
+    expect(screen.getByText("Autoscan webhook")).toBeVisible();
+  });
+
+  it("stages an API key tier edit without opening the other disclosures", async () => {
+    render(<SecurityAccessSettings />);
+
+    await userEvent.click(screen.getByRole("button", { name: API_KEY_TIERS }));
+    const standardBurst = screen
+      .getAllByLabelText("Burst")
+      .find((input) => (input as HTMLInputElement).value === "20") as HTMLInputElement;
+    await userEvent.type(standardBurst, "1");
+    // Collapsing it by hand still works; the edit stays staged.
+    await userEvent.click(screen.getByRole("button", { name: API_KEY_TIERS }));
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: LIMITS })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: ENDPOINTS })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("reports a rate-limit-only draft to the unsaved-changes registry", async () => {
@@ -139,7 +211,7 @@ describe("SecurityAccessSettings", () => {
   it("stages an edited rate-limit row on the shared save bar", async () => {
     render(<SecurityAccessSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Advanced/i }));
+    await userEvent.click(screen.getByRole("button", { name: LIMITS }));
 
     // The control rejects empty/zero input, so append rather than clear first.
     const rpsInput = screen.getByLabelText("Whole-server limit") as HTMLInputElement;
@@ -235,7 +307,7 @@ describe("SecurityAccessSettings", () => {
     });
 
     render(<SecurityAccessSettings />);
-    await userEvent.click(screen.getByRole("button", { name: /Advanced/i }));
+    await userEvent.click(screen.getByRole("button", { name: LIMITS }));
 
     expect(
       screen.getByText(/running limiter is using in-memory counters, not the saved Redis/i),
@@ -257,7 +329,7 @@ describe("SecurityAccessSettings", () => {
     rateLimitConfigMock.mockReturnValue({ data: SERVER_CONFIG, isLoading: false });
 
     render(<SecurityAccessSettings />);
-    await userEvent.click(screen.getByRole("button", { name: /Advanced/i }));
+    await userEvent.click(screen.getByRole("button", { name: LIMITS }));
 
     expect(screen.queryByText(/no limiter is running/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/running limiter is using/i)).not.toBeInTheDocument();

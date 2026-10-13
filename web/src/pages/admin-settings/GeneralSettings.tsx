@@ -1,6 +1,4 @@
 import { useMemo } from "react";
-import { Link } from "react-router";
-import { ArrowRight } from "lucide-react";
 
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
@@ -11,16 +9,18 @@ import { SettingField } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 
-// Identity (server name, login subtitle) used to live on the Branding tab and
-// public signups on the Invite Codes tab; both are plain server-wide switches an
-// admin looks for under General, so they save with everything else on this page.
+// Identity (server name, login subtitle) used to live on the Branding tab; it is
+// a plain server-wide value an admin looks for under General, so it saves with
+// everything else on this page. Public signups and password reset live on
+// Sign-in, since both only work with Silo passwords, and the log level on
+// Logging.
 const IDENTITY_KEYS = ["branding.server_name", "branding.login_subtitle"];
-const ACCESS_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
-const LOGGING_ADVANCED_KEYS = ["server.log_quiet"];
-const LOGGING_KEYS = ["server.log_level", ...LOGGING_ADVANCED_KEYS];
 
-const NETWORK_KEYS = ["server.public_url", "server.lan_discovery"];
-const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...ACCESS_KEYS, ...LOGGING_KEYS];
+// Trusted proxies sit beside the public URL, the way the setup wizard asks for
+// them: both are what an install behind a reverse proxy needs to get right.
+const TRUSTED_PROXIES_KEY = "clientip.trusted_proxies";
+const NETWORK_KEYS = ["server.public_url", "server.lan_discovery", TRUSTED_PROXIES_KEY];
+const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS];
 
 export default function GeneralSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -28,6 +28,7 @@ export default function GeneralSettings() {
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
+  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes(TRUSTED_PROXIES_KEY);
 
   if (form.isLoading)
     return (
@@ -101,79 +102,26 @@ export default function GeneralSettings() {
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
           />
-        </FieldGroup>
-
-        <FieldGroup
-          label="Access"
-          restartAll={allRestart(ACCESS_KEYS)}
-          dirty={anyDirty(ACCESS_KEYS)}
-          actions={
-            <Link
-              to="/admin/users?tab=invite-codes"
-              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-            >
-              Manage invite codes
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
-          }
-        >
-          <SettingField
-            label="Public signups"
-            settingKey="signup.enabled"
-            dirty={form.isDirty("signup.enabled")}
-            type="toggle"
-            description="Anyone with a valid invite code can create an account."
-            value={form.getValue("signup.enabled")}
-            onChange={(v) => form.setValue("signup.enabled", v)}
-            restartRequired={restartKeys.has("signup.enabled")}
-          />
-          <SettingField
-            label="Self-service password reset"
-            settingKey="password_reset.self_service_enabled"
-            dirty={form.isDirty("password_reset.self_service_enabled")}
-            type="toggle"
-            description="Adds “Forgot password?” to the sign-in page, so people can get a reset link by email. Needs email and the public URL."
-            value={form.getValue("password_reset.self_service_enabled")}
-            onChange={(v) => form.setValue("password_reset.self_service_enabled", v)}
-            restartRequired={restartKeys.has("password_reset.self_service_enabled")}
-          />
-        </FieldGroup>
-
-        <FieldGroup
-          label="Logging"
-          restartAll={allRestart(LOGGING_KEYS)}
-          dirty={anyDirty(LOGGING_KEYS)}
-        >
-          <SettingField
-            label="Log level"
-            settingKey="server.log_level"
-            dirty={form.isDirty("server.log_level")}
-            type="select"
-            description="Debug is loud; use it while chasing a problem."
-            value={form.getValue("server.log_level")}
-            onChange={(v) => form.setValue("server.log_level", v)}
-            restartRequired={restartKeys.has("server.log_level")}
-            options={[
-              { value: "debug", label: "Debug" },
-              { value: "info", label: "Info" },
-              { value: "warn", label: "Warn" },
-              { value: "error", label: "Error" },
-            ]}
-          />
           <AdvancedSection
-            id="general.logging"
-            count={LOGGING_ADVANCED_KEYS.length}
-            forceOpen={form.isDirty("server.log_quiet")}
+            id="general.reverse-proxy"
+            title="Behind a reverse proxy?"
+            count={1}
+            forceOpen={form.isDirty(TRUSTED_PROXIES_KEY)}
           >
             <SettingField
-              label="Quiet log prefixes"
-              settingKey="server.log_quiet"
-              dirty={form.isDirty("server.log_quiet")}
-              hint="metadata, scanner"
-              description="Drops log lines starting with any of these words."
-              value={form.getValue("server.log_quiet")}
-              onChange={(v) => form.setValue("server.log_quiet", v)}
-              restartRequired={restartKeys.has("server.log_quiet")}
+              label="Trusted proxies"
+              settingKey={TRUSTED_PROXIES_KEY}
+              dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
+              description={
+                trustedProxiesManaged
+                  ? "Managed by SILO_TRUSTED_PROXIES."
+                  : "Comma-separated proxy ranges; empty keeps the private defaults."
+              }
+              hint="172.16.0.0/12, 203.0.113.7/32"
+              value={form.getValue(TRUSTED_PROXIES_KEY)}
+              onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
+              disabled={trustedProxiesManaged}
+              restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
             />
           </AdvancedSection>
         </FieldGroup>

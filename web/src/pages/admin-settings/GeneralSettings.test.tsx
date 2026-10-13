@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,10 +12,10 @@ vi.mock("@/hooks/useSettingsForm", () => ({
 }));
 
 vi.mock("@/hooks/useRestartKeys", () => ({
-  useRestartKeys: () => new Set<string>(["server.log_level"]),
+  useRestartKeys: () => new Set<string>(["server.lan_discovery", "clientip.trusted_proxies"]),
 }));
 
-function makeForm(values: Record<string, string> = {}) {
+function makeForm(values: Record<string, string> = {}, overrides: Record<string, unknown> = {}) {
   return {
     isLoading: false,
     getValue: (key: string) => values[key] ?? "",
@@ -27,8 +28,11 @@ function makeForm(values: Record<string, string> = {}) {
     restartRequired: false,
     sensitiveConfigured: [],
     sensitiveManagedByEnv: [],
+    ...overrides,
   };
 }
+
+const network = () => within(screen.getByRole("group", { name: "Network" }));
 
 function renderPage() {
   return render(
@@ -42,22 +46,77 @@ describe("GeneralSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     useSettingsFormMock.mockReset();
-    useSettingsFormMock.mockReturnValue(makeForm({ "signup.enabled": "true" }));
+    useSettingsFormMock.mockReturnValue(makeForm({ "branding.server_name": "Silo" }));
   });
 
-  it("manages identity, signup and logging keys on one save bar", () => {
+  // Signups and password reset moved to Sign-in, and logging to its own page;
+  // their tests followed them to SignInSettings.test.tsx and
+  // LoggingSettings.test.tsx.
+  it("manages identity and network keys on one save bar", () => {
     renderPage();
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "server.public_url",
       "server.lan_discovery",
+      "clientip.trusted_proxies",
       "branding.server_name",
       "branding.login_subtitle",
-      "signup.enabled",
-      "password_reset.self_service_enabled",
-      "server.log_level",
-      "server.log_quiet",
     ]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "Identity",
+      "Network",
+    ]);
+  });
+
+  // Trusted proxies moved here from Security, beside the public URL, the way
+  // the setup wizard asks for them.
+  it("keeps trusted proxies behind the reverse-proxy disclosure and stages edits", async () => {
+    const form = makeForm({ "clientip.trusted_proxies": "10.0.0.0/8" });
+    useSettingsFormMock.mockReturnValue(form);
+    renderPage();
+
+    expect(network().getByLabelText("Silo public URL")).toBeInTheDocument();
+    expect(network().queryByLabelText("Trusted proxies")).not.toBeInTheDocument();
+    await userEvent.click(
+      network().getByRole("button", { name: "Behind a reverse proxy? · 1 setting" }),
+    );
+
+    const proxies = network().getByLabelText("Trusted proxies");
+    expect(proxies).toHaveValue("10.0.0.0/8");
+    expect(proxies).toBeEnabled();
+    expect(network().getByText(/empty keeps the private defaults/)).toBeInTheDocument();
+    // The proxy list needs a restart; the public URL beside it does not, so the
+    // chip stays on the row instead of the group.
+    const badge = network()
+      .getAllByLabelText("Takes effect after a server restart")
+      .find((el) => el.parentElement?.textContent?.includes("Trusted proxies"));
+    expect(badge).toBeDefined();
+
+    await userEvent.type(proxies, ",");
+    expect(form.setValue).toHaveBeenCalledWith("clientip.trusted_proxies", "10.0.0.0/8,");
+  });
+
+  it("opens the reverse-proxy disclosure while the proxy list is unsaved", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm(
+        { "clientip.trusted_proxies": "10.0.0.0/8" },
+        { isDirty: (key: string) => key === "clientip.trusted_proxies", dirtyCount: 1 },
+      ),
+    );
+    renderPage();
+
+    expect(network().getByLabelText("Trusted proxies")).toHaveValue("10.0.0.0/8");
+  });
+
+  it("locks trusted proxies when SILO_TRUSTED_PROXIES manages them", async () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({}, { sensitiveManagedByEnv: ["clientip.trusted_proxies"] }),
+    );
+    renderPage();
+    await userEvent.click(network().getByRole("button", { name: /Behind a reverse proxy\?/ }));
+
+    expect(network().getByLabelText("Trusted proxies")).toBeDisabled();
+    expect(network().getByText("Managed by SILO_TRUSTED_PROXIES.")).toBeInTheDocument();
   });
 
   // The save bar moves to components/ but must render the same markup on every

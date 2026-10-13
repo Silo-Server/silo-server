@@ -907,7 +907,7 @@ export default function WatchProvidersSettings() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Watch Providers</h2>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Watch Providers</h1>
         <p className="text-muted-foreground text-[13px] leading-relaxed sm:text-sm">
           Connect external trackers to import watch history, sync paused progress, and scrobble
           playback in real time.

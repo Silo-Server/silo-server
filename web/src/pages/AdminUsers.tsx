@@ -239,7 +239,7 @@ function AdminUsersPage() {
           </p>
           {serverSettings !== undefined && (
             <Link
-              to="/admin/settings/general"
+              to="/admin/settings/sign-in"
               className="inline-flex w-fit items-center gap-1 hover:opacity-80"
             >
               <Badge

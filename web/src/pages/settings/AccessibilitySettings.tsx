@@ -34,7 +34,7 @@ export default function AccessibilitySettings() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Accessibility</h2>
+      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Accessibility</h1>
 
       <SettingsGroup
         title="Readability"

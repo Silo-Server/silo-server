@@ -67,6 +67,12 @@ export default function RequestsSettings() {
 
   return (
     <div className="space-y-6">
+      <header className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Requests</h1>
+        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
+          How you ask for titles this server doesn&apos;t have yet.
+        </p>
+      </header>
       <SettingsGroup
         title="Watchlist"
         description="What happens when you add a title the library doesn't have yet."

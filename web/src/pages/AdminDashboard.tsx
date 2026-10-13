@@ -19,6 +19,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
+import { SettingsAttention } from "@/components/admin/SettingsAttention";
+import { useSettingsAttention } from "@/hooks/admin/useSettingsHealth";
 
 // Query prefixes the dashboard's stats/sessions/libraries/users refetch does
 // not already cover. Widgets fetch these themselves, so Refresh only has to
@@ -78,6 +80,7 @@ export default function AdminDashboard() {
   const lastUpdatedLabel = lastDashboardUpdatedAt
     ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
     : null;
+  const settingsAttention = useSettingsAttention();
   const adminSearchSections = useMemo(
     () =>
       buildAdminCommandNavSections(adminInstallations, {
@@ -265,6 +268,10 @@ export default function AdminDashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Setup the server still owes, each item linking to the page that
+          fixes it. The admin sidebar marks the broken ones too. */}
+      <SettingsAttention items={settingsAttention} />
 
       {layout.isCustomizing && (
         <div className="surface-panel-subtle flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-2.5">

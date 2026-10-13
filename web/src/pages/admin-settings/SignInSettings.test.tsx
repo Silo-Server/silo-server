@@ -13,6 +13,7 @@ import { BREAK_GLASS_REQUIRED_TEXT } from "@/lib/externalSignInAdmin";
 import SignInSettings from "./SignInSettings";
 
 const state = vi.hoisted(() => ({
+  keys: [] as string[],
   values: {} as Record<string, string>,
   dirty: new Set<string>(),
   setValue: vi.fn(),
@@ -26,17 +27,20 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
-  useSettingsForm: () => ({
-    isLoading: false,
-    getValue: (key: string) => state.values[key] ?? "",
-    getPersistedValue: (key: string) => state.values[key] ?? "",
-    setValue: state.setValue,
-    isDirty: (key: string) => state.dirty.has(key),
-    dirtyCount: state.dirty.size,
-    save: state.save,
-    discard: state.discard,
-    isSaving: false,
-  }),
+  useSettingsForm: (options: { keys: string[] }) => {
+    state.keys = options.keys;
+    return {
+      isLoading: false,
+      getValue: (key: string) => state.values[key] ?? "",
+      getPersistedValue: (key: string) => state.values[key] ?? "",
+      setValue: state.setValue,
+      isDirty: (key: string) => state.dirty.has(key),
+      dirtyCount: state.dirty.size,
+      save: state.save,
+      discard: state.discard,
+      isSaving: false,
+    };
+  },
 }));
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => ({
@@ -181,6 +185,8 @@ let failures: Record<string, unknown>;
 // Operations that answer only when the test resolves them.
 let held: Record<string, Promise<unknown>>;
 let testResult: unknown;
+// The server's restart registry, served to the page's useRestartKeys.
+let restartKeys: { keys: string[]; prefixes: string[] };
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
 
 function problem(type: string, status: number, detail = `raw ${type}`) {
@@ -201,6 +207,10 @@ beforeEach(() => {
     "auth.email_auto_match": "false",
     "auth.provider_recheck_interval": "12h",
     "auth.provider_recheck_outage_policy": "fail_open",
+    "auth.access_token_expiry": "30m",
+    "auth.refresh_token_expiry": "30d",
+    "signup.enabled": "false",
+    "password_reset.self_service_enabled": "false",
     "server.public_url": "https://silo.example.test",
   };
   state.dirty = new Set();
@@ -225,6 +235,7 @@ beforeEach(() => {
   };
   failures = {};
   held = {};
+  restartKeys = { keys: [], prefixes: [] };
   testResult = {
     ok: false,
     callback_url: "https://silo.example.test/api/v2/auth/oauth/6/callback",
@@ -241,6 +252,8 @@ beforeEach(() => {
     switch (op) {
       case "GET /api/v2/auth/external-sign-in/capabilities":
         return Promise.resolve(capabilities);
+      case "GET /api/v2/admin/settings/restart-keys":
+        return Promise.resolve(restartKeys);
       case "GET /api/v2/auth/providers":
         return Promise.resolve({
           items: [
@@ -629,6 +642,21 @@ describe("SignInSettings network sign-in", () => {
       default_login: false,
     });
   });
+
+  it("keeps both switches in view and the roles explanation behind a disclosure", async () => {
+    const user = userEvent.setup();
+    state.installations = [oidcInstallation(), tailscaleInstallation()];
+    mount();
+    const network = within(screen.getByRole("group", { name: "Network sign-in" }));
+    expect(network.getByRole("switch", { name: "Sign in with Tailscale" })).toBeVisible();
+    expect(network.getByRole("switch", { name: "Create accounts on first sign-in" })).toBeVisible();
+    expect(network.queryByText(/Roles come from grants/)).not.toBeInTheDocument();
+
+    await user.click(network.getByRole("button", { name: "How roles and sharing work" }));
+    expect(network.getByText(/Roles come from grants/)).toBeVisible();
+    expect(network.getByText(/"grants": \[/)).toBeVisible();
+    expect(network.getByRole("link", { name: "Tailscale plugin settings" })).toBeVisible();
+  });
 });
 
 describe("SignInSettings guided setup", () => {
@@ -1007,9 +1035,168 @@ describe("SignInSettings password sign-in", () => {
     expect(screen.getByText("/login?local=1")).toBeInTheDocument();
     expect(screen.getByText("silo auth local-login enable")).toBeInTheDocument();
   });
+
+  // Signups and resets only ever make or mend a Silo-password account, so they
+  // sit with the switch that decides whether those accounts sign in at all.
+  it("keeps public signups and password reset with Silo passwords", async () => {
+    const user = userEvent.setup();
+    mount();
+    const passwords = within(screen.getByRole("group", { name: "Silo passwords" }));
+    expect(passwords.getByRole("link", { name: "Manage invite codes" })).toHaveAttribute(
+      "href",
+      "/admin/users?tab=invite-codes",
+    );
+    await user.click(passwords.getByRole("switch", { name: "Public signups" }));
+    expect(state.setValue).toHaveBeenCalledWith("signup.enabled", "true");
+    await user.click(passwords.getByRole("switch", { name: "Self-service password reset" }));
+    expect(state.setValue).toHaveBeenCalledWith("password_reset.self_service_enabled", "true");
+  });
+
+  it("saves a staged signup change through the save bar", async () => {
+    const user = userEvent.setup();
+    state.values["signup.enabled"] = "true";
+    state.dirty = new Set(["signup.enabled"]);
+    mount();
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(state.save).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("SignInSettings accounts and sessions", () => {
+  it("manages signups, password reset and token lifetimes with the sign-in keys", () => {
+    mount();
+    expect(state.keys).toEqual([
+      "auth.local_password_login",
+      "signup.enabled",
+      "password_reset.self_service_enabled",
+      "auth.access_token_expiry",
+      "auth.refresh_token_expiry",
+      "auth.email_auto_match",
+      "auth.provider_recheck_interval",
+      "auth.provider_recheck_outage_policy",
+      "server.public_url",
+    ]);
+  });
+
+  it("keeps token lifetimes and the re-check under Advanced and stages edits to them", async () => {
+    const user = userEvent.setup();
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    // With a provider installed, matching is the one row in view.
+    expect(
+      accounts.getByRole("switch", { name: "Match existing accounts by email" }),
+    ).toBeVisible();
+    expect(accounts.queryByLabelText("Access token expiry")).not.toBeInTheDocument();
+    expect(
+      accounts.queryByRole("combobox", { name: "Re-check access every" }),
+    ).not.toBeInTheDocument();
+    expect(
+      accounts.getByText(
+        "How long anyone stays signed in, and how a sign-in provider's accounts are matched and re-checked.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(accounts.getByRole("button", { name: "Advanced · 4 settings" }));
+    const access = accounts.getByLabelText("Access token expiry");
+    expect(access).toHaveValue("30m");
+    expect(accounts.getByLabelText("Refresh token expiry")).toHaveValue("30d");
+    expect(accounts.getByRole("combobox", { name: "Re-check access every" })).toBeVisible();
+    expect(
+      accounts.getByRole("combobox", { name: "If the provider is unreachable" }),
+    ).toBeVisible();
+    await user.type(access, "x");
+    expect(state.setValue).toHaveBeenCalledWith("auth.access_token_expiry", "30mx");
+  });
+
+  it("opens the sessions disclosure while a token lifetime is unsaved", () => {
+    state.values["auth.refresh_token_expiry"] = "14d";
+    state.dirty = new Set(["auth.refresh_token_expiry"]);
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    expect(accounts.getByLabelText("Refresh token expiry")).toHaveValue("14d");
+  });
+
+  it("leaves out matching and the re-check while no sign-in plugin is installed", async () => {
+    const user = userEvent.setup();
+    state.installations = [];
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    expect(
+      accounts.queryByRole("switch", { name: "Match existing accounts by email" }),
+    ).not.toBeInTheDocument();
+    expect(accounts.getByText("How long anyone stays signed in.")).toBeInTheDocument();
+
+    await user.click(accounts.getByRole("button", { name: "Advanced · 2 settings" }));
+    expect(accounts.getByLabelText("Access token expiry")).toBeVisible();
+    expect(accounts.getByLabelText("Refresh token expiry")).toBeVisible();
+    expect(
+      accounts.queryByRole("combobox", { name: "Re-check access every" }),
+    ).not.toBeInTheDocument();
+    expect(
+      accounts.queryByRole("combobox", { name: "If the provider is unreachable" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the re-check for a network sign-in, which never matches by email", async () => {
+    const user = userEvent.setup();
+    state.installations = [tailscaleInstallation()];
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    expect(
+      accounts.queryByRole("switch", { name: "Match existing accounts by email" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(accounts.getByRole("button", { name: "Advanced · 4 settings" }));
+    expect(accounts.getByRole("combobox", { name: "Re-check access every" })).toBeVisible();
+  });
+
+  it("keeps provider fields that hold a set value even with no plugin installed", async () => {
+    const user = userEvent.setup();
+    state.installations = [];
+    state.values["auth.email_auto_match"] = "true";
+    state.values["auth.provider_recheck_outage_policy"] = "fail_closed";
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    expect(
+      accounts.getByRole("switch", { name: "Match existing accounts by email" }),
+    ).toBeChecked();
+
+    await user.click(accounts.getByRole("button", { name: "Advanced · 4 settings" }));
+    expect(
+      accounts.getByRole("combobox", { name: "If the provider is unreachable" }),
+    ).toHaveTextContent("Stop sessions from renewing");
+  });
+
+  it("keeps every provider field while the installations are unknown", async () => {
+    const user = userEvent.setup();
+    state.installations = undefined;
+    state.installationsError = true;
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    expect(
+      accounts.getByRole("switch", { name: "Match existing accounts by email" }),
+    ).toBeVisible();
+    await user.click(accounts.getByRole("button", { name: "Advanced · 4 settings" }));
+    expect(accounts.getByRole("combobox", { name: "Re-check access every" })).toBeVisible();
+  });
+
+  it("marks the moved fields that the restart registry names", async () => {
+    restartKeys = { keys: ["auth.refresh_token_expiry", "signup.enabled"], prefixes: [] };
+    const user = userEvent.setup();
+    mount();
+    const accounts = within(screen.getByRole("group", { name: "Accounts and sessions" }));
+    await user.click(accounts.getByRole("button", { name: /^Advanced/ }));
+    const sessionBadges = await accounts.findAllByLabelText("Takes effect after a server restart");
+    expect(sessionBadges).toHaveLength(1);
+    expect(sessionBadges[0]?.parentElement).toHaveTextContent("Refresh token expiry");
+    const passwordBadges = within(
+      screen.getByRole("group", { name: "Silo passwords" }),
+    ).getAllByLabelText("Takes effect after a server restart");
+    expect(passwordBadges).toHaveLength(1);
+    expect(passwordBadges[0]?.parentElement).toHaveTextContent("Public signups");
+  });
+
   it("warns about account takeover and stages email matching", async () => {
     const user = userEvent.setup();
     mount();
@@ -1018,10 +1205,16 @@ describe("SignInSettings accounts and sessions", () => {
     expect(state.setValue).toHaveBeenCalledWith("auth.email_auto_match", "true");
   });
 
-  it("keeps a stored interval no preset names and explains the outage policy", () => {
+  it("keeps a stored interval no preset names and explains the outage policy", async () => {
     state.values["auth.provider_recheck_interval"] = "3h";
     state.values["auth.provider_recheck_outage_policy"] = "fail_closed";
+    const user = userEvent.setup();
     mount();
+    await user.click(
+      within(screen.getByRole("group", { name: "Accounts and sessions" })).getByRole("button", {
+        name: /^Advanced/,
+      }),
+    );
     expect(screen.getByRole("combobox", { name: "Re-check access every" })).toHaveTextContent("3h");
     expect(
       screen.getByRole("combobox", { name: "If the provider is unreachable" }),

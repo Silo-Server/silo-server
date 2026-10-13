@@ -1,3 +1,5 @@
+import { render as renderPage, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +37,17 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
+}));
+
+/** A transcode node subtitle sync could run on. */
+const transcodeNode = { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true };
+const useAdminNodesMock = vi.fn(() => ({
+  data: [transcodeNode] as unknown[] | undefined,
+  isSuccess: true,
+}));
+
+vi.mock("@/hooks/queries/admin/nodes", () => ({
+  useAdminNodes: () => useAdminNodesMock(),
 }));
 
 const ratingSourcesMock = vi.fn(() => ({
@@ -109,6 +122,29 @@ function render(values: Record<string, string>, dirty: string[] = []) {
   );
 }
 
+/** Opens one group's Advanced disclosure via its persisted state. */
+function expand(id: string) {
+  localStorage.setItem(`silo.admin.advanced.${id}`, "true");
+}
+
+/** The static-markup group whose heading reads `name`. */
+function groupNamed(markup: string, name: string): HTMLElement {
+  const container = document.createElement("div");
+  container.innerHTML = markup;
+  const group = Array.from(container.querySelectorAll<HTMLElement>("[role=group]")).find(
+    (candidate) => candidate.querySelector("h3")?.textContent === name,
+  );
+  if (!group) throw new Error(`no group rendered with heading: ${name}`);
+  return group;
+}
+
+/** The accessible names of a group's disclosure buttons. */
+function disclosures(group: HTMLElement): string[] {
+  return Array.from(group.querySelectorAll("button[aria-expanded]"), (button) =>
+    button.getAttribute("aria-label"),
+  ).filter((label): label is string => label !== null);
+}
+
 function text(markup: string): string {
   const container = document.createElement("div");
   container.innerHTML = markup;
@@ -147,6 +183,40 @@ describe("LibraryMetadataSettings", () => {
     useRestartKeysMock.mockReturnValue(new Set<string>());
     storageAvailableMock.mockReturnValue(true);
     markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
+  });
+
+  it("orders the groups with subtitle sync after skip markers", () => {
+    const container = document.createElement("div");
+    container.innerHTML = render({});
+
+    // Group headings only: the marker task cards carry their own h3s.
+    const headings = Array.from(
+      container.querySelectorAll("section[role=group]"),
+      (group) => group.querySelector("h3")?.textContent,
+    );
+    expect(headings).toEqual([
+      "Maturity limits",
+      "Ratings",
+      "Scanning",
+      "Skip markers",
+      "Subtitle sync",
+      "Search",
+      "Artwork and versions",
+    ]);
+  });
+
+  it("keeps artwork caching and per-library versions behind one disclosure at the foot", () => {
+    const labels = ["Keep provider artwork", "Show only the browsed library's versions"];
+    const collapsed = groupNamed(render({}), "Artwork and versions");
+    expect(disclosures(collapsed)).toEqual(["Advanced · 2 settings"]);
+    for (const label of labels) expect(collapsed.textContent).not.toContain(label);
+
+    // An unsaved edit to either setting opens it.
+    for (const key of ["metadata.cache_images", "catalog.scope_versions_to_library"]) {
+      const dirty = groupNamed(render({}, [key]), "Artwork and versions");
+      for (const label of labels) expect(dirty.textContent).toContain(label);
+    }
   });
 
   it("offers the server-wide real-time monitoring switch, on by default", () => {
@@ -208,6 +278,7 @@ describe("LibraryMetadataSettings", () => {
   });
 
   it("hides Meilisearch connection fields until that engine is selected", () => {
+    expand("library.search");
     expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
       "Meilisearch URL",
     );
@@ -215,7 +286,46 @@ describe("LibraryMetadataSettings", () => {
     expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
   });
 
+  it("keeps the search engine, Meilisearch and search status in one disclosure", () => {
+    const postgres = groupNamed(render({ "catalog.search.provider": "postgres" }), "Search");
+    expect(postgres.textContent).toContain(
+      "Built-in Postgres search needs no setup. Meilisearch is optional.",
+    );
+    expect(disclosures(postgres)).toEqual(["Advanced · 1 setting"]);
+    expect(postgres.textContent).not.toContain("Search engine");
+
+    const meili = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
+    // Engine, URL, API key and the six tuning fields.
+    expect(disclosures(meili)).toEqual(["Advanced · 9 settings"]);
+    expect(meili.textContent).not.toContain("Meilisearch URL");
+
+    expand("library.search");
+    const open = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
+    expect(disclosures(open)).toEqual(["Advanced · 9 settings"]);
+    for (const label of [
+      "Search engine",
+      "Meilisearch URL",
+      "Meilisearch API key",
+      "Index name prefix",
+      "Match by meaning as well as words",
+    ]) {
+      expect(open.textContent).toContain(label);
+    }
+    expect(open.querySelector("h4")?.textContent).toBe("Search status");
+  });
+
+  it("opens the search disclosure for an unsaved engine change", () => {
+    const group = groupNamed(
+      render({ "catalog.search.provider": "meilisearch" }, ["catalog.search.provider"]),
+      "Search",
+    );
+
+    expect(group.textContent).toContain("Search engine");
+    expect(group.textContent).toContain("Meilisearch URL");
+  });
+
   it("allows caching provider artwork without an S3 bucket", () => {
+    expand("library.artwork_versions");
     storageAvailableMock.mockReturnValue(false);
     const rendered = render({});
     expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
@@ -223,6 +333,7 @@ describe("LibraryMetadataSettings", () => {
   });
 
   it("offers separate intro and credits detection while this server detects markers", () => {
+    expand("library.markers");
     for (const mode of ["local", "both"]) {
       const rendered = text(render({ "markers.mode": mode }));
       expect(rendered).toContain("Detection workers");
@@ -239,6 +350,7 @@ describe("LibraryMetadataSettings", () => {
   });
 
   it("hides the detection switches unless the server honors them", () => {
+    expand("library.markers");
     const cases: Array<[string, { data?: Record<string, boolean> }]> = [
       ["capabilities not loaded", {}],
       ["a server without detection_kind_settings", { data: { redetect_markers: true } }],
@@ -251,6 +363,54 @@ describe("LibraryMetadataSettings", () => {
       expect(rendered).not.toContain("Detect credits");
       expect(rendered).toContain("Detection workers");
     }
+  });
+
+  it("keeps marker tuning behind the Skip markers disclosure, counting what applies", () => {
+    const cases: Array<[Record<string, string>, string[], string[]]> = [
+      [
+        { "markers.mode": "both" },
+        ["Advanced · 3 settings"],
+        ["Save online markers", "Find markers on playback", "Detection workers"],
+      ],
+      [
+        { "markers.mode": "local" },
+        ["Advanced · 2 settings"],
+        ["Find markers on playback", "Detection workers"],
+      ],
+      [
+        { "markers.mode": "online" },
+        ["Advanced · 2 settings"],
+        ["Save online markers", "Find markers on playback"],
+      ],
+      [
+        { "markers.mode": "online", "markers.online_storage": "on_demand" },
+        ["Advanced · 1 setting"],
+        ["Save online markers"],
+      ],
+      [{ "markers.mode": "off" }, [], []],
+    ];
+    for (const [values, expected, labels] of cases) {
+      localStorage.clear();
+      const collapsed = groupNamed(render(values), "Skip markers");
+      expect(disclosures(collapsed)).toEqual(expected);
+      expect(collapsed.textContent).toContain("Marker source");
+      for (const label of labels) expect(collapsed.textContent).not.toContain(label);
+
+      expand("library.markers");
+      const open = groupNamed(render(values), "Skip markers");
+      for (const label of labels) expect(open.textContent).toContain(label);
+    }
+  });
+
+  it("opens the Skip markers disclosure for an unsaved tuning edit", () => {
+    const group = groupNamed(
+      render({ "markers.mode": "both", "markers.detection_workers": "2" }, [
+        "markers.detection_workers",
+      ]),
+      "Skip markers",
+    );
+
+    expect(group.textContent).toContain("Detection workers");
   });
 
   it("shows each detection switch's saved state and defaults both on", () => {
@@ -296,5 +456,116 @@ describe("LibraryMetadataSettings", () => {
 
     expect(page).not.toContain("Metadata plugins can add other ratings");
     expect(page).not.toContain("From Kinopoisk Metadata");
+  });
+});
+
+describe("LibraryMetadataSettings subtitle sync", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useRestartKeysMock.mockReturnValue(new Set<string>());
+    markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
+  });
+
+  function renderInteractive(values: Record<string, string>, dirty: string[] = []) {
+    const form = makeForm(values, dirty);
+    useSettingsFormMock.mockReturnValue(form);
+    const view = renderPage(
+      <MemoryRouter>
+        <LibraryMetadataSettings />
+      </MemoryRouter>,
+    );
+    return {
+      form,
+      unmount: view.unmount,
+      group: within(screen.getByRole("group", { name: "Subtitle sync" })),
+    };
+  }
+
+  it("stages the subtitle sync settings with their defaults", async () => {
+    expand("library.subtitle_sync");
+    const { form, group } = renderInteractive({});
+
+    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual(
+      expect.arrayContaining([
+        "subtitles.auto_sync",
+        "subtitles.sync_execution",
+        "subtitles.sync_node_capacity",
+      ]),
+    );
+    expect(
+      group.getByText("Shifts subtitle timing to match the video's audio."),
+    ).toBeInTheDocument();
+    const auto = group.getByRole("switch", { name: /Sync subtitles automatically/ });
+    expect(auto).toBeChecked();
+    expect(
+      group.getByText(
+        "Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release.",
+      ),
+    ).toBeInTheDocument();
+    expect(group.getByRole("combobox", { name: /Where to analyze audio/ })).toHaveTextContent(
+      "Prefer transcode nodes",
+    );
+    expect(
+      group.getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toHaveValue(1);
+    expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
+
+    await userEvent.click(auto);
+    expect(form.setValue).toHaveBeenCalledWith("subtitles.auto_sync", "false");
+  });
+
+  it("keeps where and how many syncs run behind the disclosure", () => {
+    const { group } = renderInteractive({});
+
+    expect(group.getByRole("switch", { name: /Sync subtitles automatically/ })).toBeInTheDocument();
+    expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(group.queryByRole("combobox", { name: /Where to analyze audio/ })).toBeNull();
+    expect(
+      group.queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).toBeNull();
+  });
+
+  it("opens the disclosure for an unsaved placement change", () => {
+    const { group } = renderInteractive({ "subtitles.sync_execution": "local" }, [
+      "subtitles.sync_execution",
+    ]);
+
+    expect(group.getByRole("combobox", { name: /Where to analyze audio/ })).toHaveTextContent(
+      "Local server",
+    );
+  });
+
+  it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
+    expand("library.subtitle_sync");
+    const local = renderInteractive({ "subtitles.sync_execution": "local" });
+    expect(local.group.getByRole("button", { name: "Advanced · 1 setting" })).toBeInTheDocument();
+    expect(
+      local.group.queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
+    ).not.toBeInTheDocument();
+    local.unmount();
+
+    useAdminNodesMock.mockReturnValue({ data: [], isSuccess: true });
+    const nodeOnly = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+    expect(nodeOnly.group.getByText("No transcode nodes are connected")).toBeInTheDocument();
+  });
+
+  it("does not warn before the node list has loaded", () => {
+    expand("library.subtitle_sync");
+    useAdminNodesMock.mockReturnValue({ data: undefined, isSuccess: false });
+    const { group } = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
+
+    expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
+  });
+
+  it("saves subtitle sync through this page's save bar", async () => {
+    const { form } = renderInteractive({ "subtitles.auto_sync": "false" }, ["subtitles.auto_sync"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).toHaveBeenCalledTimes(1);
   });
 });

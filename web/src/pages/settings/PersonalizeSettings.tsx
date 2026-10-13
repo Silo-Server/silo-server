@@ -20,9 +20,9 @@ export default function PersonalizeSettings() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h2 className="text-foreground text-xl font-semibold tracking-tight">Personalize</h2>
-        <p className="text-muted-foreground text-sm">
+      <header className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Personalize</h1>
+        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Pick titles you love so your home, recommendations, and "For You" rows reflect your taste.
         </p>
       </header>

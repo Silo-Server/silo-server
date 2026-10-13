@@ -26,8 +26,6 @@ vi.mock("@/hooks/queries/settingValues", () => ({
   useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
 }));
 
-// Title art has its own suite; it reads settings capabilities this page does not.
-vi.mock("@/pages/settings/TitleArtSettingsGroup", () => ({ TitleArtSettingsGroup: () => null }));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));

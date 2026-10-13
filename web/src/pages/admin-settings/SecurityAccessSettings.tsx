@@ -8,7 +8,6 @@ import type {
 } from "@/api/types";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
-import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,15 +33,14 @@ import {
   SettingFieldStatus,
 } from "./SettingField";
 
-// Sign-in lifetimes, proxy trust, and local media server access go through the
-// batched settings endpoint. Rate limits do not: they live behind
-// /admin/rate-limits/config and the batch endpoint rejects those keys, so this
-// page drives two writers behind one save bar rather than showing the admin two
-// different Save buttons.
-const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
+// Local media server access goes through the batched settings endpoint. Rate
+// limits do not: they live behind /admin/rate-limits/config and the batch
+// endpoint rejects those keys, so this page drives two writers behind one save
+// bar rather than showing the admin two different Save buttons. Token lifetimes
+// live on Sign-in, with the rest of what decides how long a sign-in lasts, and
+// trusted proxies on General, beside the public URL.
 const LOCAL_MEDIA_SERVERS_KEY = "media_servers.allow_private_destinations";
-const NETWORK_KEYS = ["clientip.trusted_proxies", LOCAL_MEDIA_SERVERS_KEY];
-const KEYS = [...SESSION_KEYS, ...NETWORK_KEYS];
+const LOCAL_NETWORK_KEYS = [LOCAL_MEDIA_SERVERS_KEY];
 
 const DEFAULT_TIER: RateLimitTierConfig = {
   requests_per_second: 10,
@@ -170,13 +168,12 @@ function RateTriadRow({
 }
 
 export default function SecurityAccessSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const form = useSettingsForm({ keys: useMemo(() => LOCAL_NETWORK_KEYS, []) });
   const restartKeys = useRestartKeys();
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const { data: serverConfig, isLoading: rateLimitsLoading } = useRateLimitConfig();
   const updateConfig = useUpdateRateLimitConfig();
 
-  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
   const localMediaServersAllowed = form.getValue(LOCAL_MEDIA_SERVERS_KEY) === "true";
 
   // The save endpoint rejects the Redis backend unless Redis is configured, so
@@ -279,13 +276,21 @@ export default function SecurityAccessSettings() {
   // itself to the unsaved-changes registry on its own — otherwise the
   // navigation guard and the reload prompt only know about the batched keys.
   useReportUnsavedChanges(rateLimitsDirty);
-  // Everything except the on/off switch lives in the disclosure, so compare the
-  // two with `enabled` normalised away to decide whether to force it open.
-  const advancedDirty =
-    JSON.stringify({ ...config, enabled: true }) !==
-    JSON.stringify({ ...hydratedConfig, enabled: true });
-  const advancedCount =
-    2 + 3 + Object.keys(TIER_LABELS).length * 3 + Object.keys(AUTH_ENDPOINT_LABELS).length * 2;
+  // Everything except the on/off switch lives in three disclosures; each one
+  // forces itself open while a value inside it differs from the saved config.
+  const limitsDirty =
+    config.backend !== hydratedConfig.backend ||
+    config.global_requests_per_second !== hydratedConfig.global_requests_per_second ||
+    config.ip_requests_per_second !== hydratedConfig.ip_requests_per_second ||
+    config.ip_requests_per_minute !== hydratedConfig.ip_requests_per_minute ||
+    config.ip_burst !== hydratedConfig.ip_burst;
+  const tiersDirty = JSON.stringify(config.tiers) !== JSON.stringify(hydratedConfig.tiers);
+  const endpointsDirty =
+    JSON.stringify(config.auth_endpoints) !== JSON.stringify(hydratedConfig.auth_endpoints);
+  // Backend and whole-server limit, then the per-address triad.
+  const limitsCount = 2 + 3;
+  const tiersCount = Object.keys(TIER_LABELS).length * 3;
+  const endpointsCount = Object.keys(AUTH_ENDPOINT_LABELS).length * 2;
 
   /**
    * One Save, two writers — and they are ordered, not concurrent. The
@@ -342,42 +347,10 @@ export default function SecurityAccessSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Security & Access" className="mb-8" />
+      <SettingsPageHeader title="Security" className="mb-8" />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Sign-in sessions" restartAll={allRestart(SESSION_KEYS)}>
-          <SettingField
-            label="Access token expiry"
-            type="duration"
-            description="How long before an app silently renews, e.g. 30m."
-            value={form.getValue("auth.access_token_expiry")}
-            onChange={(v) => form.setValue("auth.access_token_expiry", v)}
-            restartRequired={restartKeys.has("auth.access_token_expiry")}
-          />
-          <SettingField
-            label="Refresh token expiry"
-            type="duration"
-            description="How long someone stays signed in, e.g. 30d. Also how long an account whose sign-in provider can't re-check it keeps its API keys and Audiobookshelf sessions without signing in through the provider."
-            value={form.getValue("auth.refresh_token_expiry")}
-            onChange={(v) => form.setValue("auth.refresh_token_expiry", v)}
-            restartRequired={restartKeys.has("auth.refresh_token_expiry")}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Network" restartAll={allRestart(NETWORK_KEYS)}>
-          <SettingField
-            label="Trusted proxies"
-            description={
-              trustedProxiesManaged
-                ? "Managed by SILO_TRUSTED_PROXIES."
-                : "Comma-separated proxy ranges; empty keeps the private defaults."
-            }
-            hint="172.16.0.0/12, 203.0.113.7/32"
-            value={form.getValue("clientip.trusted_proxies")}
-            onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
-            disabled={trustedProxiesManaged}
-            restartRequired={restartKeys.has("clientip.trusted_proxies")}
-          />
+        <FieldGroup label="Local network" restartAll={allRestart(LOCAL_NETWORK_KEYS)}>
           <SettingField
             label="Local servers for every account"
             description="Lets every account import history from, and sync with, Plex, Emby, and Jellyfin servers at local network addresses such as 192.168.x.x or localhost. Admins always can."
@@ -416,8 +389,9 @@ export default function SecurityAccessSettings() {
 
           <AdvancedSection
             id="security.rate-limits"
-            count={advancedCount}
-            forceOpen={advancedDirty}
+            title="Server and client limits"
+            count={limitsCount}
+            forceOpen={limitsDirty}
           >
             <SettingFieldRow
               label="Where counters are kept"
@@ -503,7 +477,14 @@ export default function SecurityAccessSettings() {
                 ),
               }}
             />
+          </AdvancedSection>
 
+          <AdvancedSection
+            id="security.rate-limits.api-keys"
+            title="API key tiers"
+            count={tiersCount}
+            forceOpen={tiersDirty}
+          >
             {Object.keys(TIER_LABELS).map((tier) => {
               const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
               return (
@@ -530,8 +511,14 @@ export default function SecurityAccessSettings() {
                 />
               );
             })}
+          </AdvancedSection>
 
-            <SettingsSubheading>Sign-in and webhook endpoints</SettingsSubheading>
+          <AdvancedSection
+            id="security.rate-limits.endpoints"
+            title="Sign-in and webhook endpoints"
+            count={endpointsCount}
+            forceOpen={endpointsDirty}
+          >
             {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
               const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
               return (
