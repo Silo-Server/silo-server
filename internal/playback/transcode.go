@@ -506,19 +506,32 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
-	if s.copyGroups != nil {
-		go s.copyGroups.watch(s.done)
-	}
 
 	return s, nil
 }
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
+	var processExited, assemblyFinished chan struct{}
+	if groups := s.copyGroups; groups != nil {
+		processExited = make(chan struct{})
+		assemblyFinished = make(chan struct{})
+		go func() {
+			defer close(assemblyFinished)
+			groups.watch(processExited)
+		}()
+	}
 	waitErr := cmd.Wait()
 	// The child no longer owns the device once Wait returns. Release before
 	// flushing/logging so slow diagnostics cannot make the allocator count a
 	// process that has already exited.
 	releaseHWDevice()
+	if processExited != nil {
+		// The final groups remain to be assembled after FFmpeg exits. Keep
+		// waiters alive and prevent another run from replacing these groups
+		// until the watcher has finished its final scan and stopped.
+		close(processExited)
+		<-assemblyFinished
+	}
 	processmetrics.Record(processmetrics.Transcode, cmd.ProcessState, waitErr, ctx.Err())
 	s.flushStderr(ctx)
 	s.mu.Lock()
@@ -3416,9 +3429,6 @@ func (s *TranscodeSession) restart(
 	close(flight.done)
 
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
-	if s.copyGroups != nil {
-		go s.copyGroups.watch(s.done)
-	}
 
 	if hook != nil {
 		hook(ctx)

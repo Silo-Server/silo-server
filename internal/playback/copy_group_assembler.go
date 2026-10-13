@@ -240,7 +240,10 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 		run.shift = a.timeline - run.offset
 	}
 	source := at - run.offset
-	i := sort.SearchFloat64s(keys, source-groupTimeTolerance)
+	i := sort.SearchFloat64s(keys, source)
+	if i > 0 && (i == len(keys) || math.Abs(keys[i-1]-source) < math.Abs(keys[i]-source)) {
+		i--
+	}
 	if i >= len(keys) || math.Abs(keys[i]-source) > groupTimeTolerance {
 		return fmt.Errorf("group at %.3fs matches no keyframe", source)
 	}
