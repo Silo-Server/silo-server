@@ -23,6 +23,7 @@
       "password_login": false,
       "password_change_required": false,
       "is_owner": false,
+      "break_glass": false,
       "effective_policy": {
         "library_ids": [
           "3"

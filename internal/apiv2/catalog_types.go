@@ -5,6 +5,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // The catalog card. CatalogItem is the one summary of a media item every
@@ -15,53 +16,55 @@ import (
 
 // CatalogItem is a media item as a browsing card shows it.
 type CatalogItem struct {
-	ContentID         string                    `json:"content_id" doc:"Deterministic catalog identifier" example:"movie:heat-1995"`
-	PlayContentID     string                    `json:"play_content_id,omitempty" doc:"The item to play when the card is a series or season; absent when the item plays itself"`
-	Type              string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode" example:"movie"`
-	Title             string                    `json:"title" example:"Heat"`
-	SeriesID          string                    `json:"series_id,omitempty" doc:"Owning series of an episode or season"`
-	SeriesTitle       string                    `json:"series_title,omitempty"`
-	SeasonNumber      *int                      `json:"season_number,omitempty"`
-	EpisodeNumber     *int                      `json:"episode_number,omitempty"`
-	Year              int                       `json:"year,omitempty" example:"1995"`
-	Runtime           int                       `json:"runtime,omitempty" doc:"Minutes" example:"170"`
-	Genres            []string                  `json:"genres" doc:"Empty, never null"`
-	Keywords          []string                  `json:"keywords" doc:"Empty, never null"`
-	Studios           []string                  `json:"studios,omitempty"`
-	Networks          []string                  `json:"networks,omitempty"`
-	ContentRating     string                    `json:"content_rating,omitempty" example:"R"`
-	AdvisoryAge       *int                      `json:"advisory_age,omitempty" doc:"Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling" example:"13"`
-	AdvisorySource    string                    `json:"advisory_source,omitempty" doc:"Who recommended advisory_age" enum:"commonsense,mdblist" example:"commonsense"`
-	Status            string                    `json:"status" doc:"Metadata match state of the item" example:"matched"`
-	ShowStatus        string                    `json:"show_status,omitempty" doc:"Airing state of a series"`
-	RatingIMDB        *float64                  `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64                  `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                      `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                      `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                    `json:"original_language,omitempty" example:"en"`
-	Overview          string                    `json:"overview,omitempty"`
-	ReleaseDate       *string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
-	LastAirDate       *string                   `json:"last_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	AddedAt           *Instant                  `json:"added_at,omitempty"`
-	PositionSeconds   *float64                  `json:"position_seconds,omitempty" doc:"Resume position on a continue-watching card"`
-	DurationSeconds   *float64                  `json:"duration_seconds,omitempty"`
-	ProgressUpdatedAt *Instant                  `json:"progress_updated_at,omitempty"`
-	PosterURL         string                    `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
-	PosterThumbhash   string                    `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                    `json:"backdrop_url,omitempty" doc:"Presigned, short-lived"`
-	BackdropThumbhash string                    `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                    `json:"logo_url,omitempty" doc:"Presigned, short-lived"`
-	MangaChapterCount *int                      `json:"manga_chapter_count,omitempty"`
-	MangaVolumeCount  *int                      `json:"manga_volume_count,omitempty"`
-	OverlaySummary    *CatalogItemOverlay       `json:"overlay_summary,omitempty" doc:"Technical badges of the best file"`
-	Badges            []string                  `json:"badges,omitempty" doc:"Section-specific badges (new, returning, …)"`
-	ItemSource        string                    `json:"item_source,omitempty" doc:"On a continue-watching card: in_progress or next_up"`
-	SortMetrics       *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`
-	UserState         *CatalogItemUserState     `json:"user_state,omitempty" doc:"The viewer's flags; absent without a profile"`
-	UpcomingEvent     *CatalogItemUpcomingEvent `json:"upcoming_event,omitempty"`
-	WorkID            string                    `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
-	WorkTitle         string                    `json:"work_title,omitempty"`
-	WorkFormats       []CatalogWorkFormat       `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	ContentID              string                    `json:"content_id" doc:"Deterministic catalog identifier" example:"movie:heat-1995"`
+	PlayContentID          string                    `json:"play_content_id,omitempty" doc:"The item to play when the card is a series or season; absent when the item plays itself"`
+	Type                   string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode" example:"movie"`
+	Title                  string                    `json:"title" example:"Heat"`
+	SeriesID               string                    `json:"series_id,omitempty" doc:"Owning series of an episode or season"`
+	SeriesTitle            string                    `json:"series_title,omitempty"`
+	SeasonNumber           *int                      `json:"season_number,omitempty"`
+	EpisodeNumber          *int                      `json:"episode_number,omitempty"`
+	Year                   int                       `json:"year,omitempty" example:"1995"`
+	Runtime                int                       `json:"runtime,omitempty" doc:"Minutes" example:"170"`
+	Genres                 []string                  `json:"genres" doc:"Empty, never null"`
+	Keywords               []string                  `json:"keywords" doc:"Empty, never null"`
+	Studios                []string                  `json:"studios,omitempty"`
+	Networks               []string                  `json:"networks,omitempty"`
+	ContentRating          string                    `json:"content_rating,omitempty" example:"R"`
+	AdvisoryAge            *int                      `json:"advisory_age,omitempty" doc:"Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling" example:"13"`
+	AdvisorySource         string                    `json:"advisory_source,omitempty" doc:"Who recommended advisory_age" enum:"commonsense,mdblist" example:"commonsense"`
+	Status                 string                    `json:"status" doc:"Metadata match state of the item" example:"matched"`
+	ShowStatus             string                    `json:"show_status,omitempty" doc:"Airing state of a series"`
+	RatingIMDB             *float64                  `json:"rating_imdb,omitempty"`
+	RatingTMDB             *float64                  `json:"rating_tmdb,omitempty"`
+	RatingRTCritic         *int                      `json:"rating_rt_critic,omitempty" doc:"Rotten Tomatoes critic score, 0-100. Absent unless an administrator shows rt_critic (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
+	RatingRTAudience       *int                      `json:"rating_rt_audience,omitempty" doc:"Rotten Tomatoes audience score, 0-100. Absent unless an administrator shows rt_audience (see getRatingsCapability); a viewer who curates the item's metadata gets it on item detail regardless"`
+	OriginalLanguage       string                    `json:"original_language,omitempty" example:"en"`
+	Overview               string                    `json:"overview,omitempty"`
+	ReleaseDate            *string                   `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
+	LastAirDate            *string                   `json:"last_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	AddedAt                *Instant                  `json:"added_at,omitempty"`
+	PositionSeconds        *float64                  `json:"position_seconds,omitempty" doc:"Resume position on a continue-watching card"`
+	DurationSeconds        *float64                  `json:"duration_seconds,omitempty"`
+	ProgressUpdatedAt      *Instant                  `json:"progress_updated_at,omitempty"`
+	PosterIsEpisodeStill   *bool                     `json:"poster_is_episode_still,omitempty" doc:"Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable."`
+	BackdropIsEpisodeStill *bool                     `json:"backdrop_is_episode_still,omitempty" doc:"Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable."`
+	PosterURL              string                    `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterThumbhash        string                    `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                    `json:"backdrop_url,omitempty" doc:"Presigned, short-lived"`
+	BackdropThumbhash      string                    `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                    `json:"logo_url,omitempty" doc:"Presigned, short-lived"`
+	MangaChapterCount      *int                      `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount       *int                      `json:"manga_volume_count,omitempty"`
+	OverlaySummary         *CatalogItemOverlay       `json:"overlay_summary,omitempty" doc:"Technical badges of the best file"`
+	Badges                 []string                  `json:"badges,omitempty" doc:"Section-specific badges (new, returning, …)"`
+	ItemSource             string                    `json:"item_source,omitempty" doc:"On a continue-watching card: in_progress or next_up"`
+	SortMetrics            *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`
+	UserState              *CatalogItemUserState     `json:"user_state,omitempty" doc:"The viewer's flags; absent without a profile"`
+	UpcomingEvent          *CatalogItemUpcomingEvent `json:"upcoming_event,omitempty"`
+	WorkID                 string                    `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
+	WorkTitle              string                    `json:"work_title,omitempty"`
+	WorkFormats            []CatalogWorkFormat       `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -148,7 +151,7 @@ func instantOfRFC3339(s *string) *Instant {
 }
 
 // catalogItemOfSection renders a section card.
-func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
+func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selection) CatalogItem {
 	item := CatalogItem{
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
@@ -158,6 +161,7 @@ func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview,
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
+		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
 	}
@@ -165,11 +169,11 @@ func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,
 			SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Badges: NonNil(e.Badges)}
 	}
-	return item
+	return withShownRatings(item, sel)
 }
 
 // catalogItemOfListing renders a listing (collection, browse) card.
-func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
+func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selection) CatalogItem {
 	item := CatalogItem{
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
@@ -178,7 +182,8 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 		Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: v.ReleaseDate, LastAirDate: v.LastAirDate, AddedAt: instantPtr(v.AddedAt),
-		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash,
+		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
+		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
@@ -193,6 +198,21 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 			wf.LibraryID = IDFromInt(int64(f.LibraryID))
 		}
 		item.WorkFormats = append(item.WorkFormats, wf)
+	}
+	return withShownRatings(item, sel)
+}
+
+// withShownRatings drops the card ratings an administrator has not turned on,
+// so poster badges and every other card surface follow the same choice as
+// title pages. IMDb and TMDB are always shown. Item detail applies it too,
+// except for a viewer who curates the item's metadata (see
+// catalogItemDetailOf).
+func withShownRatings(item CatalogItem, sel ratingsources.Selection) CatalogItem {
+	if !sel.Shows(models.RatingSourceRTCritic) {
+		item.RatingRTCritic = nil
+	}
+	if !sel.Shows(models.RatingSourceRTAudience) {
+		item.RatingRTAudience = nil
 	}
 	return item
 }

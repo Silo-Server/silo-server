@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { deviceKeys, mediaSurfaceKeys, sectionKeys, settingsKeys } from "./keys";
+import { deviceKeys, libraryKeys, mediaSurfaceKeys, sectionKeys, settingsKeys } from "./keys";
 import { useClearSettingValue, useSetSettingValue } from "./settingValues";
 
 const v2Mock = vi.hoisted(() => vi.fn());
@@ -93,6 +93,30 @@ describe("typed setting mutations", () => {
     });
     expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBeUndefined();
+  });
+
+  it("refetches the library list when the profile hides or shows a library", async () => {
+    v2Mock.mockResolvedValue({});
+    const { queryClient, wrapper } = createHarness();
+    const librariesKey = libraryKeys.user("profile-1");
+    queryClient.setQueryData(librariesKey, [{ id: 1 }]);
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_THEME,
+        value: "dark",
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(false);
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+        value: [],
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true);
   });
 
   it("does not invalidate effective settings after a definitive rejected write", async () => {

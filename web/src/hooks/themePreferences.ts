@@ -25,7 +25,7 @@ export interface AppearanceAuth {
  * last look" behavior as the login screen — and gates off the settings request,
  * which cannot resolve profile scope without an active profile anyway.
  */
-export function appearanceCacheOwner({ loading, user, profile }: AppearanceAuth): string | null {
+function appearanceCacheOwner({ loading, user, profile }: AppearanceAuth): string | null {
   return !loading && user && profile ? `${user.id}:${profile.id}` : null;
 }
 

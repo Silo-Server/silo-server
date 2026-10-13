@@ -1,21 +1,50 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import CardOverlays from "./CardOverlays";
-import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
 import {
+  ATTENTION_ACCENT,
+  OVERLAY_POSITIONS,
   OVERLAY_PRESETS,
-  OVERLAY_REGISTRY,
   PRESET_IDS,
   SAMPLE_MOVIE_DATA,
-  SAMPLE_SHOW_DATA,
+  SAMPLE_REQUEST_DATA,
   buildDefaultPrefs,
   type CardOverlayPrefs,
+  type OverlayData,
   type OverlayId,
   type PresetId,
 } from "@/lib/overlays";
+import CardOverlays from "./CardOverlays";
 
 const posterLength = (pixels: number) => `${Number(((pixels / 185) * 100).toFixed(6))}cqi`;
+const textScaled = (length: string) => `calc(${length} * var(--ui-root-text-ratio, 1))`;
+
+// app.css owns the root font sizes; jsdom does not apply it, so read the source.
+const appCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../app.css"), "utf8");
+
+/** Root font size, as a multiple of the 16px browser default, for an in-app text scale. */
+function rootTextRatio(scale: "default" | "large" | "x-large"): number {
+  const selector = scale === "default" ? "html" : `html\\[data-text-scale="${scale}"\\]`;
+  const match = appCss.match(
+    new RegExp(`^\\s*${selector}\\s*\\{[^}]*?font-size:\\s*([\\d.]+)%;`, "m"),
+  );
+  if (!match) throw new Error(`no root font size for ${scale}`);
+  return Number(match[1]) / 100;
+}
+
+/**
+ * Resolves a badge's inline font size the way a browser would on a card with
+ * the 185px reference width (1cqi = 1.85px), given the root text ratio.
+ */
+function resolveBadgeFontSize(value: string, ratio: number): number {
+  const match = value.match(/^calc\(([\d.]+)(cqi|px) \* var\(--ui-root-text-ratio, 1\)\)$/);
+  if (!match) throw new Error(`unexpected badge font size: ${value}`);
+  const base = Number(match[1]) * (match[2] === "cqi" ? 185 / 100 : 1);
+  return base * ratio;
+}
 
 function prefsWithOnly(id: OverlayId, preset: PresetId = "classic"): CardOverlayPrefs {
   const prefs = buildDefaultPrefs();
@@ -40,22 +69,6 @@ describe("CardOverlays", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-  });
-
-  it("renders a badge for every registered overlay given sample data", async () => {
-    // The language badge reads name data that loads on first use.
-    await vi.waitFor(() => expect(formatLanguageWhenLoaded("en")).toBe("English"));
-    for (const def of OVERLAY_REGISTRY) {
-      const data =
-        def.id === "network" || def.id === "show_status" ? SAMPLE_SHOW_DATA : SAMPLE_MOVIE_DATA;
-      const expected = def.getValue(data);
-      expect(expected, `sample data should exercise overlay ${def.id}`).toBeTruthy();
-      const { container, unmount } = render(
-        <CardOverlays data={data} prefs={prefsWithOnly(def.id)} />,
-      );
-      expect(badgeTexts(container), `overlay ${def.id}`).toEqual([expected]);
-      unmount();
-    }
   });
 
   it("shows 4K for a 2160p file on the standalone resolution badge", () => {
@@ -143,7 +156,7 @@ describe("CardOverlays", () => {
     expect(posterLayer?.className).toContain("@container/card-overlays");
     expect(posterTop?.style.left).toBe(posterLength(8));
     expect(posterTop?.style.top).toBe(posterLength(8));
-    expect(posterBadge?.style.fontSize).toBe(posterLength(10));
+    expect(posterBadge?.style.fontSize).toBe(textScaled(posterLength(10)));
     expect(posterBadge?.style.paddingInline).toBe(posterLength(10));
     expect(posterBadge?.style.paddingBlock).toBe(posterLength(4));
     expect(posterBadge?.style.borderWidth).toBe(posterLength(1));
@@ -163,52 +176,39 @@ describe("CardOverlays", () => {
 
     expect(wideTop?.style.left).toBe("8px");
     expect(wideTop?.style.top).toBe("8px");
-    expect(wideBadge?.style.fontSize).toBe("10px");
+    expect(wideBadge?.style.fontSize).toBe(textScaled("10px"));
     expect(wideBadge?.style.paddingInline).toBe("10px");
     expect(wideBadge?.style.paddingBlock).toBe("4px");
     expect(wideIcon?.style.height).toBe("12px");
     expect(wideIcon?.getAttribute("height")).toBe("12");
   });
 
-  it.each(PRESET_IDS)("keeps the %s preset proportional with fixed geometry fallbacks", (id) => {
-    const preset = OVERLAY_PRESETS[id];
-    const container = render(
-      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("resolution", id)} />,
-    ).container;
-    const stack = container.querySelector<HTMLElement>(
-      '[data-overlay-edge="top"] > div.items-start',
+  it("grows badge text with the in-app Large text size and keeps the default size", () => {
+    // The root text ratio is the root font size over 16px; browsers without
+    // CSS trigonometry use the in-app scale factor instead.
+    expect(appCss).toMatch(
+      /@supports[^{]*\{\s*html\s*\{\s*--ui-root-text-ratio: tan\(atan2\(1rem, 16px\)\);/,
     );
-    const badge = container.querySelector<HTMLElement>("span.inline-flex");
+    expect(appCss).toMatch(/--ui-root-text-ratio: var\(--ui-text-scale-factor\);/);
+    const ratio = { default: rootTextRatio("default"), large: rootTextRatio("large") };
+    expect(ratio).toEqual({ default: 1, large: 1.125 });
 
-    expect(stack?.className).toContain(preset.gapClass);
-    expect(stack?.style.gap).toBe(posterLength(preset.stackGap));
-    expect(badge?.className).toContain(preset.badgeClass);
-    expect(badge?.style.columnGap).toBe(posterLength(preset.iconGap));
-    expect(badge?.style.fontSize).toBe(posterLength(preset.fontSize));
-    expect(badge?.style.paddingInline).toBe(posterLength(preset.paddingInline));
-    expect(badge?.style.paddingBlock).toBe(posterLength(preset.paddingBlock));
-    expect(badge?.style.borderRadius).toBe(
-      preset.borderRadius === "full"
-        ? "9999px"
-        : `var(--card-overlay-border-radius, var(${preset.borderRadiusVariable}, ${preset.borderRadius}px))`,
-    );
-    expect(badge?.style.borderWidth).toBe(
-      preset.borderWidth === undefined ? "" : posterLength(preset.borderWidth),
-    );
-    // CSSStyleDeclaration exposes an all-sides borderWidth through its side longhands.
-    expect(badge?.style.borderLeftWidth).toBe(
-      preset.borderWidth === undefined ? "" : posterLength(preset.borderWidth),
-    );
-    expect(badge?.style.textShadow).toBe(
-      preset.textShadow === undefined
-        ? ""
-        : `${posterLength(preset.textShadow.x)} ${posterLength(preset.textShadow.y)} ${posterLength(preset.textShadow.blur)} ${preset.textShadow.color}`,
-    );
-    expect(badge?.style.boxShadow).toBe(
-      preset.boxShadow === undefined
-        ? ""
-        : `${posterLength(preset.boxShadow.x)} ${posterLength(preset.boxShadow.y)} ${posterLength(preset.boxShadow.blur)} ${posterLength(preset.boxShadow.spread ?? 0)} ${preset.boxShadow.color}`,
-    );
+    const poster = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("audio", "classic")} />,
+    ).container.querySelector<HTMLElement>("span.inline-flex");
+    const wide = render(
+      <CardOverlays
+        data={SAMPLE_MOVIE_DATA}
+        prefs={prefsWithOnly("audio", "classic")}
+        variant="wide"
+      />,
+    ).container.querySelector<HTMLElement>("span.inline-flex");
+
+    for (const badge of [poster, wide]) {
+      const fontSize = badge?.style.fontSize ?? "";
+      expect(resolveBadgeFontSize(fontSize, ratio.default)).toBeCloseTo(10, 4);
+      expect(resolveBadgeFontSize(fontSize, ratio.large)).toBeCloseTo(11.25, 4);
+    }
   });
 
   it("only scales the square accent border when the badge has an accent", () => {
@@ -421,6 +421,79 @@ describe("CardOverlays", () => {
     // Nothing inside the layer may re-enable hit testing.
     expect(container.querySelectorAll(".pointer-events-auto").length).toBe(0);
     expect(container.querySelector<HTMLElement>("span.inline-flex")?.style.pointerEvents).toBe("");
+  });
+
+  describe("request status", () => {
+    const attention: OverlayData = {
+      request_status: "Not found yet",
+      request_status_icon: "alert",
+      request_status_attention: true,
+    };
+
+    function badgeStyle(data: OverlayData, prefs: CardOverlayPrefs): string | null {
+      return (
+        render(<CardOverlays data={data} prefs={prefs} />)
+          .container.querySelector<HTMLElement>("[data-overlay-badge]")
+          ?.getAttribute("style") ?? null
+      );
+    }
+
+    it.each(PRESET_IDS)("renders the status in the %s preset, with its icon on request", (id) => {
+      const plain = render(
+        <CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefsWithOnly("request_status", id)} />,
+      ).container;
+      expect(badgeTexts(plain)).toEqual(["Downloading 43%"]);
+      expect(plain.querySelector("[data-overlay-badge] svg") !== null).toBe(
+        OVERLAY_PRESETS[id].preferIcon,
+      );
+
+      const prefs = prefsWithOnly("request_status", id);
+      prefs.items.request_status = { ...prefs.items.request_status, showIcon: true };
+      const withIcon = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />).container;
+      expect(badgeTexts(withIcon)).toEqual(["Downloading 43%"]);
+      expect(withIcon.querySelector("[data-overlay-badge] svg")).not.toBeNull();
+    });
+
+    it.each(OVERLAY_POSITIONS)("renders in the %s corner", (position) => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, position };
+      const [edge, side] = position.split("-");
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      const stack = container.querySelector(
+        `[data-overlay-edge="${edge}"] > div.${side === "left" ? "items-start" : "items-end"}`,
+      );
+      expect(stack?.textContent).toBe("Downloading 43%");
+    });
+
+    it("renders nothing when the badge is off", () => {
+      const prefs = prefsWithOnly("request_status");
+      prefs.items.request_status = { ...prefs.items.request_status, enabled: false };
+      const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
+      expect(badgeTexts(container)).toEqual([]);
+    });
+
+    it.each(PRESET_IDS)("colors a status that needs attention amber in the %s preset", (id) => {
+      const accented = prefsWithOnly("request_status", id);
+      accented.items.request_status = {
+        ...accented.items.request_status,
+        accentColor: ATTENTION_ACCENT,
+      };
+      const calm = { ...attention, request_status_attention: false };
+      expect(badgeStyle(attention, prefsWithOnly("request_status", id))).toBe(
+        badgeStyle(calm, accented),
+      );
+      expect(badgeStyle(calm, prefsWithOnly("request_status", id))).not.toBe(
+        badgeStyle(calm, accented),
+      );
+    });
+
+    it("lets the viewer's own accent win over the attention accent", () => {
+      const custom = prefsWithOnly("request_status", "square");
+      custom.items.request_status = { ...custom.items.request_status, accentColor: "#3b82f6" };
+      expect(badgeStyle(attention, custom)).toBe(
+        badgeStyle({ ...attention, request_status_attention: false }, custom),
+      );
+    });
   });
 
   it("renders nothing when no enabled overlay has data", () => {

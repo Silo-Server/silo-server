@@ -13,6 +13,8 @@
       "chapter_thumbnails_enabled": false,
       "chapter_thumbnails_supported": true,
       "intro_detection_enabled": false,
+      "trickplay_enabled": false,
+      "trickplay_supported": true,
       "trailer_kinds": [
         "trailer"
       ],
@@ -37,6 +39,8 @@
       "chapter_thumbnails_enabled": false,
       "chapter_thumbnails_supported": true,
       "intro_detection_enabled": false,
+      "trickplay_enabled": false,
+      "trickplay_supported": true,
       "trailer_kinds": [
         "trailer"
       ],

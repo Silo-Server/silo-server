@@ -489,3 +489,57 @@ func TestHistoryImportCreateRefusedForAnotherProfileIsForbidden(t *testing.T) {
 		t.Fatalf("a refused import was created: %+v", fake.lastCreate)
 	}
 }
+
+// TestHistoryImportCapabilityAndPlexBaseURLs covers the pair a client needs
+// together: the capability that says fallback is honored, and the request
+// member it enables. A server without fallback rejects plex_base_urls as an
+// unknown member, so a client needs the capability before sending it.
+func TestHistoryImportCapabilityAndPlexBaseURLs(t *testing.T) {
+	fake := fixtureHistoryImports()
+	h := newTestHandler(t, historyImportDeps(fake))
+
+	rec := do(t, h, http.MethodGet, Prefix+"/history-imports/capability", "", bearer(memberToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capability: %d %s", rec.Code, rec.Body)
+	}
+	var capability HistoryImportCapability
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil {
+		t.Fatalf("decoding capability: %v (%s)", err, rec.Body)
+	}
+	if capability.State != StateAvailable || !capability.PlexConnectionFallback {
+		t.Fatalf("capability = %+v, want available with fallback", capability)
+	}
+	// A client sizes its list against this number, so it has to be the bound
+	// the service enforces rather than a restated constant.
+	if capability.MaxPlexConnections != historyimport.MaxPlexConnectionCandidates {
+		t.Errorf("max_plex_connections = %d, want %d", capability.MaxPlexConnections, historyimport.MaxPlexConnectionCandidates)
+	}
+
+	body := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_base_urls":["https://relay.plex.direct:443"],"plex_token":"server-token"}`
+	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
+		t.Fatalf("create run: %d %s", rec.Code, rec.Body)
+	}
+	in := fake.lastCreate
+	if in == nil || len(in.PlexBaseURLs) != 1 || in.PlexBaseURLs[0] != "https://relay.plex.direct:443" {
+		t.Fatalf("plex_base_urls did not reach the service: %+v", in)
+	}
+	if in.PlexBaseURL != "https://primary.plex.direct:32400" {
+		t.Errorf("plex_base_url = %q, want the preferred address preserved", in.PlexBaseURL)
+	}
+
+	// The schema bounds the list at what admission checks, counting
+	// plex_base_url, so a client can send everything and let the server filter.
+	urls := func(n int) string {
+		list := make([]string, n)
+		for i := range list {
+			list[i] = fmt.Sprintf("%q", fmt.Sprintf("https://a%d.example", i))
+		}
+		return strings.Join(list, ",")
+	}
+	body = `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections-1) + `]}`
+	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
+		t.Fatalf("create run at the bound: %d %s", rec.Code, rec.Body)
+	}
+	over := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections) + `]}`
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/history-imports/runs", over, bearer(memberToken)), TypeValidationFailed)
+}

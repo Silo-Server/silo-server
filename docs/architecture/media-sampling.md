@@ -41,8 +41,8 @@ it. Rules:
   declines to move on; without a `Fallback` every attempt runs. A failed run
   returns an `*mediasample.Error` with a reason for each attempt (`canceled`,
   `timeout`, `start`, `exit`, `args`; for images also `empty`, `unsupported`,
-  and `capabilities`, see [Images](#images)) and a bounded tail of ffmpeg's
-  log.
+  and `capabilities`, see [Images](#images); for sheets also `empty` and
+  `output`, see [Sheets](#sheets)) and a bounded tail of ffmpeg's log.
   The error message quotes only ffmpeg's last log line, cleaned so it can be
   stored in a text column.
 - `Classify` names a failed run's cause from its last attempt
@@ -64,9 +64,9 @@ Supported today:
 
 | Part | Values |
 |---|---|
-| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only), `At` (the frame at a time; `Images` only) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
-| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images` or `Stats`); see [Hardware decode](#hardware-decode) |
+| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` or `Sheets`), `At` (the frame at a time; `Images` only) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images), `Sheets` (JPEG sprite sheets of the samples) |
+| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images`, `Stats`, or `Sheets`); see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
 the audio output first and the statistics of the first video stream
@@ -100,6 +100,11 @@ statistics. Rules:
   second keyframe, the first is kept.
 - Sample times are finite, non-negative, strictly increasing, and at most
   10,000 per request. `Samples` takes no audio output.
+- `Samples.ReadThrough` reads the sampled span as the one keyframes-only
+  window below, whatever the container, instead of seeking to each sample.
+  Each list entry opens and probes the input again and reads from the
+  keyframe before its inpoint, so when samples lie closer together than the
+  keyframes do, one pass front to back can cost less.
 - The list is read from `pipe:0`, so each entry names the input as an
   explicit `file:` URL, and the input opens with
   `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
@@ -115,7 +120,9 @@ statistics. Rules:
   so a list would decode nothing. They are read as one `KeyframesOnly`
   window from 10 s before the first sample to the last, and each sample
   takes the last keyframe at or before its time: the same frames, at the
-  cost of reading the whole span.
+  cost of reading the whole span. `Sheets` also fall back to that window
+  when the HEVC decoder drops listed keyframes as duplicates (see the
+  `Sheets` rules below).
 - The VP9 decoder ignores `-skip_frame nokey`, so a VP9 sample decodes every
   frame from its keyframe to the outpoint. The first frame is still the one
   kept, but the cost grows with the keyframe interval.
@@ -131,28 +138,65 @@ Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 repeated N times" and per-frame values would be lost. Fingerprint-only runs
 keep `-loglevel warning`.
 
+`Audio.Speech` takes a `Window` and no other output. It maps one audio
+stream (`AudioStream`, ffmpeg's `0:a:N`), optionally only its front-centre
+channel (`CenterChannel`, which fails on a stream without one), band-limits it
+to 200-3400 Hz, and resamples it to 8 kHz mono with
+`aresample=async=1:first_pts=0`, so a stream that starts after the window
+start is padded with silence and level `i` always covers window start plus
+`i` × 10 ms. ffmpeg writes raw samples to stdout and the runner reduces them
+to one level per frame as they arrive (whole dB above -100 dBFS), so no window
+is held as PCM. Subtitle sync is its consumer.
+
+## Remote runs
+
+`POST /media-samples/run` on the transcode-node listener runs one `Request`
+with the node's ffmpeg and returns its `Result` as JSON
+(`mediasample.RemoteClient` is the caller). The node requires a
+[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
+only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
+the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
+whether running the request elsewhere may succeed: an unreachable node, a 5xx,
+or a node lacking a capability, but not a file that has no stream or cannot be
+decoded. Callers choose and reserve nodes themselves
+(`nodepool.Reservations`); the node also admits at most
+`subtitles.sync_node_capacity` runs at once across every caller; a request
+over the limit waits up to two minutes for a slot (`MaxRemoteAdmissionWait`)
+and is then refused with `503` and `node_unavailable`.
+
 ## Hardware decode
 
 An attempt with `Hardware` set decodes the request's video on the runner's
 `HWAccel` (`hwdecode.go`). `HWAccel` is a backend the caller resolved with
 `playback.ResolveHWAccelWithFFmpegContext` from `playback.hw_accel` and
-`playback.hw_device`, never `auto`. Only QSV, VAAPI, and VideoToolbox decode
-here (`SupportsHardwareDecode`); NVENC does not. A hardware attempt needs a
-video output (`Images` or `Stats`). Audio in the same run always decodes in
-software.
+`playback.hw_device`, never `auto`. A consumer that samples repeatedly keeps a
+`HardwareResolver` (`hwresolver.go`), which caches the resolved backend per
+configured pair until the playback probe cache is invalidated, and asks again
+after `HardwareRetryInterval` when `auto` resolved to no hardware; credits
+detection uses one. QSV, VAAPI, and VideoToolbox decode
+every video output (`SupportsHardwareDecode`); NVENC decodes only `Sheets`
+(`SupportsHardwareSheets`), on CUDA, so the stats chains cached intro
+fingerprints come from and the chapter-thumbnail images stay as they were. A
+hardware attempt needs a video output (`Images`, `Stats`, or `Sheets`); one
+whose output its accelerator does not decode fails as `unsupported` without
+starting ffmpeg. Audio in the same run always decodes in software.
 
 - QSV and VAAPI decode into VAAPI surfaces on a render device. QSV
   initializes its VAAPI parent device the way playback does
   (`tonemap.QSVInitDeviceArgs`) and decodes through it.
+- NVENC decodes into CUDA surfaces on the CUDA device `HWDevice` names (an
+  index, or the default when empty), declared as the filters' device too:
+  `-init_hw_device cuda=cu[:N] -filter_hw_device cu -hwaccel cuda
+  -hwaccel_output_format cuda`.
 - VideoToolbox decodes `Images` into system-memory frames, so software
   filters apply to them directly. `Stats` asks for VideoToolbox surfaces
   (`-hwaccel_output_format videotoolbox_vld`) and downloads them, because
   only surfaces prove the decode ran on hardware: given a stream VideoToolbox
   cannot decode, such as VP8, plain `-hwaccel videotoolbox` quietly decodes
   in software, while the download of a software frame fails the attempt.
-- Each hardware attempt reserves one render device through
-  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
-  before its timeout starts, and releases it when the attempt ends, before
+- Each hardware attempt reserves one device through
+  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice` for
+  QSV and VAAPI, before its timeout starts, and releases it when the attempt ends, before
   the next attempt. A multi-device `Runner.HWDevice` list therefore resolves
   to one device per attempt. A hardware attempt that cannot be built, such as
   VAAPI without a render device, fails as `unsupported` without starting
@@ -161,6 +205,10 @@ software.
   the hardware one. A failed run takes its reason from its last attempt, so
   once the software attempt has run, a hardware failure costs only time and
   cannot mark an artifact unusable.
+- A GPU that cannot decode the stream makes ffmpeg log "Failed setup for
+  format …" or "doesn't support hardware accelerated …" and fall back to
+  software frames, which the GPU chain refuses; the attempt's cause is
+  `unsupported`.
 
 `Stats` on VAAPI surfaces (VAAPI and QSV) scales the whole picture on the
 GPU and converts it to 8-bit NV12 there before the download, since a 10-bit
@@ -238,6 +286,172 @@ backoff. Its `Runner.Fallback` ends the run only after a hardware attempt
 that found invalid data or whose VideoToolbox software tone mapping was
 refused; every other failure moves on to the next planned attempt.
 
+## Sheets
+
+A `Samples` request with a `Sheets` output tiles the sampled frames into
+JPEG sprite sheets, the images seek-bar previews are cut from. Each sample
+fills one cell of a `Columns` by `Rows` grid, left to right and top to
+bottom; every sheet keeps the full grid size, and the cells after the last
+sample are black, because Jellyfin clients cut cells from an assumed full
+grid.
+
+The chain scales each frame to exactly `TileWidth` by `TileHeight` (the
+caller derives the height from the display aspect ratio), then converts it
+to full-range BT.601 4:2:0, the colors JFIF decoders read, and writes it raw
+to stdout:
+
+```text
+scale=W:H:flags=area:out_range=full:out_color_matrix=bt601,format=yuv420p,
+metadata=mode=add:key=sample:value=-1,metadata@sheets=print
+-fps_mode passthrough -pix_fmt yuv420p -f rawvideo pipe:1
+```
+
+`Sheets.UseInputAspect` derives the height from the input header instead,
+including a 90-degree display matrix, and returns the actual cell height in
+`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
+request also probes when this option is set. Callers publishing manifests
+must use the returned height and reject chunks whose geometry differs.
+
+- GPU surfaces (VAAPI, QSV, CUDA) are scaled on the GPU to four tiles' size,
+  or the frame's own size if smaller, downloaded as NV12 (P010 for a source
+  tone mapped below), and area-scaled to the tile in software:
+
+  ```text
+  scale_vaapi=w=min(iw\,4W):h=min(ih\,4H):format=nv12,hwdownload,format=nv12,scale=W:H:flags=area:out_range=full:…
+  scale_cuda=w=min(iw\,4W):h=min(ih\,4H):interp_algo=bilinear:format=nv12,hwdownload,format=nv12,scale=W:H:flags=area:out_range=full:…
+  ```
+
+  The GPU scalers sample a few source pixels per output pixel, so scaling a
+  4K frame straight to a 300-pixel tile aliases: SSIM 0.94 against the
+  software area scale on four 4K frames, where the two-step scale gives 0.999
+  and downloads a fraction of the frame.
+- HDR sources are tone mapped in software after scaling, so the tone map
+  only handles thumbnail-sized frames, followed by
+  `scale=out_range=full:out_color_matrix=bt601`.
+- `ToneMap.Source` names the base signal `tonemap.ResolveSource` classified
+  the input as. With it, every attempt converts with the chain playback
+  converts that signal with in software (`tonemap.SoftwareFilter`) on a
+  filter the binary lists: `tonemapx`, else `tonemap`'s Hable curve, which
+  cannot apply a Dolby Vision RPU. GPU attempts decode and scale as above,
+  download 10-bit P010 (`format=p010`, `hwdownload,format=p010le`), and take
+  the same software chain, so every decoder gives the same colors. The GPU
+  tone mappers do not: on an Intel Arc, `tonemap_vaapi` crushed PQ midtones
+  and turned HLG teal and inverted, AMD's refuses HDR, and neither applies an
+  RPU. A frame keeps its Dolby Vision RPU through the GPU scale and the
+  download (SSIM 0.986 against the software render, 0.85 without the RPU).
+  An attempt the binary has no filter for, such as a Dolby Vision base
+  (Profile 5, compatibility id 0) without `tonemapx`, or one that does not
+  allow software tone mapping, fails as `unsupported` before ffmpeg starts,
+  so it makes no sheets rather than green and magenta ones. A base that is
+  already SDR only changes gamut. Without `Source` the [Images](#images)
+  chains apply, as best effort for sources whose catalog facts cannot be
+  classified; CUDA has none of those, so its attempt is `unsupported`. Images
+  take no `Source`.
+- `metadata=print` logs a frame only when it carries metadata, so
+  `metadata=mode=add` gives every frame a `sample` entry of -1 unless its
+  packet was tagged. The log then counts every frame on stdout, and the Nth
+  raw frame is the frame logged as `frame:N`. A filter graph reinit, which a
+  hardware decoder that renews its surfaces causes mid-list, restarts the
+  counter at zero after the old graph passed on every frame it logged; the
+  frames still line up, and the count goes on. A counter that skips or
+  restarts anywhere else, frames without log lines, log lines without frames,
+  or bytes after the last whole frame fail the attempt as `output`.
+- `-fps_mode passthrough` is required: a list's timestamps jump back at every
+  entry, and rawvideo would otherwise pick a constant frame rate and drop or
+  duplicate frames. Windows bound their duration with an input `-t`, since an
+  output `-t` drops frames after the filters logged them.
+- ffmpeg logs a frame before it writes it, but stdout and stderr are read by
+  separate goroutines. The assembler places a frame once both halves are in
+  and never makes either reader wait for the other.
+- A sampled list places each frame by its tag; when one sample decodes two
+  frames (a later keyframe within its span, or an all-intra source), the
+  first, which is at or before the sample time, is kept.
+- Sheets list entries last half a second rather than 40 ms. With B-frames,
+  the packet after a keyframe in decode order can carry a later presentation
+  time that ends a 40 ms entry before the decoder releases the keyframe, and
+  the sample decodes nothing: 20 of 656 samples of one MP4 fixture did, and
+  half a second recovered all of them at no measurable cost. Stats keep the
+  40 ms span their cached analyses were computed with. A window gives each
+  sample the last frame at or before its time.
+- A window also copies the same input's video packets to a `framecrc`
+  timing file in a private temporary directory, separate from stderr and
+  removed when the attempt ends. Their presentation times and durations
+  bound the final keyframe's coverage without decoding extra frames or
+  reading the file again. Samples beyond that observed extent remain missing, so
+  premature EOF cannot turn every trailing cell into a decoded preview.
+- A cell without a frame shows the previous cell's frame, and cells before
+  the first frame show the first, so the grid never shifts. A run that had
+  to fill more than 10 % of its cells (and more than one) fails as `empty`,
+  which sends a hardware attempt on to software.
+- A list run that fails as `empty` after the HEVC decoder logged "Duplicate
+  POC in a sequence" is read again, in the same attempt, as the
+  keyframes-only window that other containers use. One decoder serves every
+  list entry and nothing resets it between them, so an HEVC CRA keyframe
+  (open GOP) after a jump takes a picture order count derived from the
+  previous sample's. When that count matches a picture still in the
+  decoder's buffer, the decoder drops the keyframe ("Duplicate POC in a
+  sequence", then "Skipping invalid undecodable NALU: 21"), and such a file
+  can lose nearly every sample on every run. A window decodes keyframes in
+  order and keeps the counts consistent, at the cost of reading the whole
+  span. A list that is empty without that message, such as a truncated or
+  damaged file's, still fails without the extra read: damaged pictures log
+  only "Skipping invalid undecodable NALU", and a window would give their
+  samples the last good keyframe instead of failing.
+- Skipped pictures do not advance the decoder's count, so keyframes a whole
+  count cycle apart (256 pictures with the common 8-bit count) collide in the
+  window too. A window that logs "Duplicate POC in a sequence" after a list
+  fallback fails as `empty` rather than give later samples the last keyframe
+  it kept; such files fail as they did without the fallback. If the window
+  fails for any reason, the attempt reports the window's failure, whose
+  reason and log describe the latest read, and its error names the list
+  run's.
+- Sheets are JPEG-encoded in-process (`image/jpeg`, `Quality`) once the run
+  and its repairs are done, since a repair may replace any cell. A run holds
+  its tiles until then, so a request whose sheets exceed 64 million tile
+  pixels is invalid; callers chunk longer files. `Result.Sheets` holds them
+  in order and `Result.SheetFrames` counts the decoded, filled, and
+  repaired (`Refined`) cells.
+
+### Repairs
+
+A list gives each sample the keyframe at or before its time, placed back in
+the input from its frame time: `pts + start - k*span + sample` for list entry
+`k`, where `start` is the list input's start time from its header, by which
+ffmpeg shifted every frame. Two kinds of cell come out worse than the input
+allows, and the attempt reads their samples again in a second list, after
+the first run and before the sheets are encoded (`sheet_repair.go`):
+
+- Missing cells decoded no frame. The demuxer could not seek to a keyframe
+  before the sample, as in a container that flags no keyframes (VC-1 in
+  Matroska, whose I-frames only the decoder recognizes, lost a third of its
+  samples to half-second entries), or the HEVC decoder dropped the keyframe
+  as a duplicate picture order count. The repair lists them again,
+  keyframes only, each entry lasting until the next sample (the shortest gap
+  between the run's samples): the decoder starts afresh and finds the
+  keyframe before the sample, or failing that the first one after it.
+- Repeated cells show the same moment as the cell before: their frames lie
+  within a tenth of the time between the two samples, because no keyframe
+  lies between them (a GOP longer than the interval), or because an open-GOP
+  keyframe brought a leading picture just before it that one sample kept.
+  The repair lists them again with `-skip_frame:v noref`, decoding every
+  reference frame from the keyframe on, and keeps the last frame at or before
+  each sample's time.
+
+Each repaired sample keeps its nearest frame: the last at or before its
+time, else the first after it. A repair that ffmpeg finishes must line up
+with its log like any run; one cut short keeps the frames it placed, which
+were written and logged in order, and leaves the rest. Both repairs share one
+time box, 30 seconds plus a quarter second a sample of the run, within the
+attempt's timeout: on a 4K HEVC clip with a keyframe every 25 seconds and
+samples every 10, software repaired 12 of 31 cells in 26 seconds, CUDA in 4.
+Missing cells are repaired first, then the repeated cells, recomputed so a
+recovered cell that shows its neighbor's keyframe is decoded at its own time
+too. A list that decoded nothing is repaired as well, since a container
+without keyframe flags can miss every short entry. A repair never fails the
+run, except that the caller canceling ends it as `canceled`; the sparse check then counts what the run and its repairs
+decoded, so a list whose repairs recover its missing samples no longer needs
+the window fallback above.
+
 ## Argument stability
 
 Intro fingerprints are cached per file for as long as the algorithm version
@@ -262,8 +476,8 @@ of new thumbnails.
 that the chromaprint muxer can write raw fingerprints. `Capabilities.Require`
 reports the first thing a request needs that the binary lacks: the
 chromaprint muxer for a fingerprint, `silencedetect` for silence, and
-`blackframe`, `signalstats`, and `metadata` for `Stats`. Images need no
-check up front; the runner reads the tone-map filters itself (see
+`blackframe`, `signalstats`, and `metadata` for `Stats`, and `metadata`
+for `Sheets`. Images need no check up front; the runner reads the tone-map filters itself (see
 [Images](#images)).
 
 - Inventories are cached per binary identity (resolved path, size, and
@@ -313,23 +527,27 @@ that is never idle, switch to the lowest best-effort level (7) instead.
 
 Per-file analysis results are stored in `media_intro_fingerprints`, one row
 per file and artifact. The table name predates generalization; renaming it
-waits for a schema maintenance window. `intromarkers.Repository` reads and
-writes it through `LoadArtifact`, `LoadArtifacts`, `UpsertArtifact`, and
-`RecordArtifactFailure`; it moves to its own package when a second feature
-stores artifacts.
+waits for a schema maintenance window. `internal/mediaartifact` owns the
+table: `mediaartifact.Store` reads and writes it through `Load`, `LoadMany`,
+`Upsert`, and `RecordFailure`, and `Artifact.State` interprets a stored row.
+Features consume it by kind; intro detection (`internal/intromarkers`) is one
+consumer and stores the `intro_fingerprint`, `credits_fingerprint`, and
+`credits_tail` kinds.
 
 - **Key.** The primary key is `(media_file_id, algorithm_version,
   config_hash)`. A row also has a `kind`, such as `intro_fingerprint`. Kinds
   never share a key because each derives its `config_hash` with
-  `intromarkers.ArtifactConfigHash`, a hash of the kind and its parameters.
-  Intro fingerprints keep `Config.ConfigHash`, which predates the namespacing
-  and is pinned by a test. An upsert never takes over another kind's row.
+  `mediaartifact.ConfigHash`, a hash of the kind and its parameters. Intro
+  fingerprints keep `intromarkers.Config.ConfigHash`, which predates the
+  namespacing and is pinned by a test. An upsert never takes over another
+  kind's row.
 - **Identity.** Each row records the file hash, size, duration, and analysis
   window it was computed from. A row applies only while all of them match the
   file.
 - **Payload.** `points` holds the payload bytes and `point_count` the number
-  of items in it; `fingerprint_format` names the encoding. The consuming kind
-  owns the encoding.
+  of items in it; `fingerprint_format` names the encoding. Each kind owns its
+  payload encoding and lives with the feature that consumes it;
+  `mediaartifact` stores the bytes without interpreting them.
 
 Status rules, applied by `Artifact.State`:
 

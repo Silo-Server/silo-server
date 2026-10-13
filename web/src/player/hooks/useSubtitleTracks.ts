@@ -34,6 +34,7 @@ const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
  */
 interface SubtitleTrackCarryover {
   url: string | null;
+  cueRevision: number;
   cues: ParsedCue[];
   coverageStart: number;
   windowEnd: number;
@@ -131,7 +132,13 @@ export function useSubtitleTracks(
   // renders. Initial media loading also bumps it because HLS can clear cues
   // fetched before the first media metadata arrives.
   streamGeneration = 0,
-  onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
+  // "refreshing" is a reload of the track on screen for new timing: its
+  // current cues stay up meanwhile, so it is not announced as loading.
+  onLoadState?: (state: "idle" | "loading" | "refreshing" | "ready" | "error") => void,
+  // Bumped when the server retimed the active track's content (subtitle sync
+  // or a timing reset) behind an unchanged URL. Changing it refetches the cues
+  // instead of restoring the carried-over ones.
+  cueRevision = 0,
 ): string[] {
   const [activeCueTexts, setActiveCueTexts] = useState<string[]>([]);
   const onLoadStateRef = useRef(onLoadState);
@@ -179,8 +186,19 @@ export function useSubtitleTracks(
     if (!video) return;
     const videoEl: HTMLVideoElement = video;
 
-    setActiveCueTexts([]);
-    onLoadStateRef.current?.("idle");
+    // A retime of the track on screen (same URL, new cue revision) swaps its
+    // cues in place: the current ones stay up until the corrected ones arrive.
+    const previous = carryoverRef.current;
+    const retiming =
+      previous !== null &&
+      previous.url === activeUrl &&
+      previous.cueRevision !== cueRevision &&
+      previous.hasFetched &&
+      !activeIsLive;
+    if (!retiming) {
+      setActiveCueTexts([]);
+      onLoadStateRef.current?.("idle");
+    }
 
     // Skip entirely for ASS/SSA (JASSUB renders those via useASSSubtitles)
     // and bitmap codecs (PGS/DVD/DVB are burned into the video server-side;
@@ -213,7 +231,10 @@ export function useSubtitleTracks(
     // every restored cue, including cues newly visible after an origin change.
     const carried = carryoverRef.current;
     carryoverRef.current = null;
-    const restored = carried && carried.url === activeUrl && !activeIsLive ? carried : null;
+    const restored =
+      carried && carried.url === activeUrl && carried.cueRevision === cueRevision && !activeIsLive
+        ? carried
+        : null;
     // HLS clears every native TextTrack when it attaches a new stream. Keep
     // source cues independently so that cleanup after that clear can still
     // restore the fetched window, rather than marking an empty track covered.
@@ -225,6 +246,15 @@ export function useSubtitleTracks(
       const origin = appliedOriginRef.current;
       const delaySec = appliedDelayMsRef.current / 1000;
       addCuesToTrack(track, restored.cues, origin, delaySec, seenCueKeysRef.current);
+    }
+    // While retiming, the previous cues hold the screen as placeholders until
+    // the first corrected window replaces them.
+    let placeholders = false;
+    if (retiming && carried && carried.cues.length > 0) {
+      const origin = appliedOriginRef.current;
+      const delaySec = appliedDelayMsRef.current / 1000;
+      addCuesToTrack(track, carried.cues, origin, delaySec, seenCueKeysRef.current);
+      placeholders = true;
     }
 
     let cancelled = false;
@@ -266,8 +296,15 @@ export function useSubtitleTracks(
       }
     }
 
+    function dropPlaceholders() {
+      if (!placeholders) return;
+      placeholders = false;
+      clearCues();
+    }
+
     function addParsedCues(newCues: ParsedCue[]) {
       if (newCues.length === 0) return;
+      dropPlaceholders();
       // Cue timestamps come from ffmpeg in source-PTS. For copy-mode HLS
       // the player timeline is rebased to start at `streamOriginSeconds`,
       // so subtract it. For regular transcodes origin is 0 and the
@@ -295,11 +332,11 @@ export function useSubtitleTracks(
       inflight = controller;
       inflightStart = seekStart;
       if (retryTimer !== null) clearTimeout(retryTimer);
-      if (resetExisting) onLoadStateRef.current?.("loading");
+      if (resetExisting) onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
 
       const requestedEnd = seekStart + WINDOW_DURATION;
       if (resetExisting) {
-        clearCues();
+        if (!placeholders) clearCues();
         coverageStart = seekStart;
         windowEnd = seekStart;
         atEOF = false;
@@ -368,6 +405,8 @@ export function useSubtitleTracks(
           inflight = null;
         }
         if (succeeded && !cancelled && !superseded) {
+          // A corrected window without cues still replaces the placeholders.
+          dropPlaceholders();
           onLoadStateRef.current?.("ready");
           hasFetched = true;
           retryDelay = 0;
@@ -478,6 +517,7 @@ export function useSubtitleTracks(
       {
         carryoverRef.current = {
           url: activeUrl,
+          cueRevision,
           cues: Array.from(sourceCues.values()),
           coverageStart,
           windowEnd,
@@ -500,7 +540,16 @@ export function useSubtitleTracks(
     // `streamGeneration` IS included: a stream restart reloads the <video>
     // element and orphans the current track, so it must be rebuilt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, streamGeneration, videoRef]);
+  }, [
+    activeUrl,
+    activeCodec,
+    activeLang,
+    activeIsLive,
+    liveTrackKey,
+    streamGeneration,
+    cueRevision,
+    videoRef,
+  ]);
 
   // Re-base already-loaded cues when the media timeline remaps — e.g. a
   // copy-mode session restarting at a new position after an out-of-window

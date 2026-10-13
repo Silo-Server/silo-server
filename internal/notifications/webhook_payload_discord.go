@@ -123,11 +123,14 @@ func BuildDiscordDMPayload(rows []DeliveryRow) ([]byte, error) {
 
 // discordEmbedAuthorLine renders the small "what happened" line above the
 // embed title.
-func discordEmbedAuthorLine(deliveryType string) string {
-	switch deliveryType {
+func discordEmbedAuthorLine(row DeliveryRow) string {
+	switch row.Type {
 	case DeliveryTypeEpisodeAvailable:
 		return "New episode on Silo"
 	case DeliveryTypeRequestFulfilled:
+		if parseRequestFlags(row.ReasonFlags).Follower {
+			return "Now available on Silo"
+		}
 		return "Your request is now available on Silo"
 	case DeliveryTypeRequestApproved:
 		return "Your request was approved on Silo"
@@ -218,7 +221,7 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 		URL:         ids.titleURL(),
 		Description: embedDescription(overview, ids),
 		Color:       color,
-		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row.Type)},
+		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row)},
 		Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
 		Fields:      fields,
 	}

@@ -73,12 +73,14 @@ func TestGetServerIdentityFailures(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.ServerIdentity = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/identity", "", nil), TypeDependencyUnavailable)
-	deps.ServerIdentity = fakeServerIdentity{err: serveridentity.ErrUnavailable}
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/identity", "", nil), TypeDependencyUnavailable)
-	deps.ServerIdentity = fakeServerIdentity{err: errors.New("db down")}
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/identity", "", nil), TypeInternalError)
+	identity := &fakeServerIdentity{err: serveridentity.ErrUnavailable}
+	deps.ServerIdentity = identity
+	h := newTestHandler(t, deps)
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/identity", "", nil), TypeDependencyUnavailable)
+	identity.err = errors.New("db down")
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/identity", "", nil), TypeInternalError)
 	// The connections document depends on the same identity.
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/connections", "", bearer(memberToken)), TypeInternalError)
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/connections", "", bearer(memberToken)), TypeInternalError)
 }
 
 func TestGetServerConnections(t *testing.T) {

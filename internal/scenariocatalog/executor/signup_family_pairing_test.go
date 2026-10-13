@@ -17,13 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 )
 
-func TestRequiredSignupFamilyAcceptance(t *testing.T) { runSignupFamilyAcceptance(t, false) }
-
-// Focused recovery runs the six original success cases when only their effect
-// checker changed. The default family target still requires all fourteen cases.
-func TestRequiredSignupSuccessAcceptance(t *testing.T) { runSignupFamilyAcceptance(t, true) }
-
-func runSignupFamilyAcceptance(t *testing.T, successesOnly bool) {
+func TestRequiredSignupFamilyAcceptance(t *testing.T) {
 	if os.Getenv("SILO_SCENARIO_REQUIRED") != "1" {
 		t.Skip("run make test-scenario-signup-family for required paired acceptance")
 	}
@@ -53,18 +47,11 @@ func runSignupFamilyAcceptance(t *testing.T, successesOnly bool) {
 	defer func() { e.Reseed(); e.guardScratchDatabase(); guardFrozenAPIKeyFixture(t) }()
 	required := scenariocatalog.RequiredSignupFamilyScenarios
 	wantRequests, wantEffects := 40, 80
-	if successesOnly {
-		required = []string{"signup.ok", "signup.user_meaning", "signup.field_shape", "signup.ok.r1", "signup.user_meaning.r1", "signup.field_shape.r1"}
-		wantRequests, wantEffects = 12, 24
-	}
 	var results []Result
 	requests, effects := 0, 0
 	for _, c := range selected {
 		for _, row := range c.Rows {
 			for _, s := range row.Scenarios {
-				if successesOnly && s.Expect.Status != 201 {
-					continue
-				}
 				for _, transport := range []string{"v1", "v2"} {
 					t.Run(s.ID+"/"+transport, func(t *testing.T) {
 						e.Reseed()

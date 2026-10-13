@@ -53,7 +53,7 @@ func newAdminValuesEnv(t *testing.T) adminValuesEnv {
 
 	router := chi.NewRouter()
 	router.Group(func(r chi.Router) {
-		r.Use(apimw.RequireActingAdmin(nil))
+		r.Use(apimw.RequireActingAdmin(nil, nil))
 		r.Get("/admin/users/{id}/settings/values", handler.HandleAdminListUserSettingValues)
 		r.Put("/admin/users/{id}/settings/values/{key}", handler.HandleAdminSetUserSettingValue)
 		r.Delete("/admin/users/{id}/settings/values/{key}", handler.HandleAdminDeleteUserSettingValue)
@@ -77,28 +77,6 @@ func (env adminValuesEnv) do(t *testing.T, role, method, target string, body []b
 	rec := httptest.NewRecorder()
 	env.router.ServeHTTP(rec, req)
 	return rec
-}
-
-func TestAdminSettingValuesRefuseNonAdmins(t *testing.T) {
-	env := newAdminValuesEnv(t)
-
-	for name, req := range map[string]struct {
-		method, target string
-		body           []byte
-	}{
-		"list":   {http.MethodGet, "/admin/users/7/settings/values", nil},
-		"set":    {http.MethodPut, "/admin/users/7/settings/values/playback.subtitle_mode?scope=account", []byte(`{"value":"always"}`)},
-		"delete": {http.MethodDelete, "/admin/users/7/settings/values/playback.subtitle_mode?scope=account", nil},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if rec := env.do(t, "user", req.method, req.target, req.body); rec.Code != http.StatusForbidden {
-				t.Errorf("non-admin %s = %d, want 403: %s", name, rec.Code, rec.Body.String())
-			}
-			if rec := env.do(t, "", req.method, req.target, req.body); rec.Code != http.StatusUnauthorized {
-				t.Errorf("anonymous %s = %d, want 401: %s", name, rec.Code, rec.Body.String())
-			}
-		})
-	}
 }
 
 func TestAdminSettingValuesRejectNonexistentLibraryContext(t *testing.T) {

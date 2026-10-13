@@ -1,556 +1,744 @@
 import {
   fetchCollectionEditSnapshot,
   fetchCollectionOrderSnapshot,
-  fetchGroupOrderSnapshot,
-  fetchGroupSnapshot,
   type CollectionEditSnapshot,
 } from "@/api/personalCollections";
 import { toast } from "sonner";
-import { useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
 import {
-  Calendar,
-  Film,
-  Globe,
-  GripVertical,
-  Library,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEventHandler,
+  type ReactNode,
+} from "react";
+import { Link, useNavigate } from "react-router";
+import { GripVertical, Plus, Users } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import type { Collection, ServerCollectionsLibrary, UserCollectionType } from "@/api/types";
+import type { Collection, LibraryTabCollection } from "@/api/types";
+import { CalmPage } from "@/components/calm/CalmPage";
+import { PillSwitcher } from "@/components/calm/PillSwitcher";
+import { CollectionActionsMenu } from "@/components/collections/CollectionActionsMenu";
+import { NewCollectionPicker } from "@/components/collections/NewCollectionPicker";
+import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
 import {
-  useCollectionGroups,
+  CollectionMetaLine,
+  type SyncAttention,
+} from "@/components/collections/editor/CollectionMetaLine";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
   useCollectionCapabilities,
   useCollections,
-  useCreateCollectionGroup,
   useDeleteCollection,
-  useDeleteCollectionGroup,
-  useReorderCollectionGroups,
   useReorderCollections,
   useServerCollections,
-  useUpdateCollection,
-  useUpdateCollectionGroup,
+  useSetCollectionShared,
 } from "@/hooks/queries/collections";
-import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
-import MediaCarousel from "@/components/MediaCarousel";
+import { useProfiles } from "@/hooks/queries/profiles";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useDialogSearchParam } from "@/hooks/useDialogSearchParam";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { CollectionTemplateGallery } from "@/components/CollectionTemplateGallery";
-import {
-  GroupedCollectionsBoard,
-  useGroupedCollectionCard,
-} from "@/components/collections/GroupedCollectionsBoard";
-import { slugifyGroupSlug } from "@/lib/collectionGroups";
-import { useUICustomization } from "@/hooks/useUICustomization";
-import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { personalDeleteDescription, unshareConsequence } from "@/lib/collections/copy";
+import { NEW_COLLECTION_DIALOG } from "@/lib/collections/dialogs";
+import { partitionPersonalCollections } from "@/lib/collections/personalOwnership";
+import { addToMyHomePath } from "@/lib/collections/rows";
+import { PERSONAL_SCOPE } from "@/lib/collections/scope";
+import { COLLECTION_KIND_LABEL, collectionKindOf } from "@/lib/collections/types";
+import { cn } from "@/lib/utils";
 
-import {
-  buildUserCollectionCatalogHref,
-  buildUserCollectionEditorPath,
-} from "./userCollectionsShared";
-
-type ImportedCollectionType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
-const SYNCABLE_TYPES = new Set<ImportedCollectionType>(["mdblist", "tmdb", "trakt"]);
-
-function isImportedType(t: UserCollectionType): t is ImportedCollectionType {
-  return SYNCABLE_TYPES.has(t as ImportedCollectionType);
-}
+/** Seven posters a row on desktop, five on medium widths, three on phones. */
+const POSTER_GRID = "grid grid-cols-3 gap-x-3.5 gap-y-5 sm:grid-cols-5 lg:grid-cols-7";
+/** One POSTER_GRID column, for cards laid out in a flex row inside an `@container`. */
+const GRID_COLUMN_WIDTH =
+  "w-[calc((100cqw-2*0.875rem)/3)] sm:w-[calc((100cqw-4*0.875rem)/5)] lg:w-[calc((100cqw-6*0.875rem)/7)]";
+/** Under this width New collection moves to a bar docked at the bottom. */
+const NARROW_QUERY = "(max-width: 1023px)";
 
 export default function Collections() {
-  return <CollectionList />;
-}
-
-function CollectionList() {
-  const { data, isLoading } = useCollections();
-  const { data: groupsData } = useCollectionGroups();
-  const { data: capabilities } = useCollectionCapabilities();
-  const collections = useMemo(() => data ?? [], [data]);
-  const groups = useMemo(() => groupsData ?? [], [groupsData]);
-  const [confirmDeleteCollection, setConfirmDeleteCollection] =
-    useState<CollectionEditSnapshot | null>(null);
-  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState<Awaited<
-    ReturnType<typeof fetchGroupSnapshot>
-  > | null>(null);
-  const dragSnapshot =
-    useRef<Promise<{ etag: string; collection?: CollectionEditSnapshot }>>(undefined);
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  const navigate = useNavigate();
-  const deleteMutation = useDeleteCollection();
-  const syncMutation = useSyncUserCollection();
-  const reorderMutation = useReorderCollections();
-  const updateMutation = useUpdateCollection();
-  const createGroupMutation = useCreateCollectionGroup();
-  const renameGroupMutation = useUpdateCollectionGroup();
-  const deleteGroupMutation = useDeleteCollectionGroup();
-  const reorderGroupsMutation = useReorderCollectionGroups();
-
-  function beginDrag(id: string) {
-    const dragged = collections.find((item) => item.id === id);
-    const sameIDs = (left: string[], right: string[]) =>
-      left.length === right.length && left.every((value, index) => value === right[index]);
-    dragSnapshot.current = dragged
-      ? Promise.all([
-          fetchCollectionOrderSnapshot(dragged.group_id ?? null),
-          fetchCollectionEditSnapshot(id),
-        ]).then(([order, collection]) => {
-          const visible = collections
-            .filter((item) => (item.group_id ?? null) === (dragged.group_id ?? null))
-            .map((item) => item.id);
-          if (
-            !sameIDs(order.ordered_ids, visible) ||
-            (collection.collection.group_id ?? null) !== (dragged.group_id ?? null)
-          )
-            throw new Error("Collection order changed. Reload before moving collections.");
-          return { etag: order.etag, collection };
-        })
-      : fetchGroupOrderSnapshot().then((order) => {
-          if (
-            !sameIDs(
-              order.ordered_ids,
-              groups.map((group) => group.id),
-            )
-          )
-            throw new Error("Group order changed. Reload before moving groups.");
-          return { etag: order.etag };
-        });
-    // A cancelled drag may never consume its snapshot.
-    void dragSnapshot.current.catch(() => undefined);
-  }
-  function withDragSnapshot(
-    action: (snapshot: { etag: string; collection?: CollectionEditSnapshot }) => void,
-  ) {
-    if (!dragSnapshot.current) return;
-    void dragSnapshot.current.then(action).catch((error) => toast.error(error.message));
-  }
-
   useDocumentTitle("Collections");
+  const { data, isLoading } = useCollections();
+  const { data: capabilities } = useCollectionCapabilities();
+  const { data: profiles = [] } = useProfiles();
+  const { profile } = useCurrentProfile();
+  const { own, shared } = useMemo(
+    () => partitionPersonalCollections(data ?? [], profile?.id, profiles),
+    [data, profile?.id, profiles],
+  );
+  const otherProfileNames = profiles
+    .filter((entry) => entry.id !== profile?.id)
+    .map((entry) => entry.name);
+  // A one-profile account has nobody to share with: no sharing switch, no Shared with me.
+  const multiProfile = otherProfileNames.length > 0;
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const [pickerOpen, setPickerOpen] = useDialogSearchParam(NEW_COLLECTION_DIALOG);
 
-  if (isLoading)
-    return (
-      <div className="page-shell space-y-4 py-4 sm:py-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-[1.6rem]" />
-          ))}
-        </div>
-      </div>
-    );
+  const newCollection = (
+    <Button
+      type="button"
+      size="sm"
+      className={cn(narrow && "h-11 w-full")}
+      onClick={() => setPickerOpen(true)}
+    >
+      <Plus aria-hidden /> New collection
+    </Button>
+  );
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <ConfirmDialog
-        open={confirmDeleteGroup !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDeleteGroup(null);
-        }}
-        title="Delete group"
-        description={`Delete group "${confirmDeleteGroup?.group.name}"? Collections will become ungrouped.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmDeleteGroup)
-            deleteGroupMutation.mutate({
-              id: confirmDeleteGroup.group.id,
-              etag: confirmDeleteGroup.etag,
-            });
-          setConfirmDeleteGroup(null);
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmDeleteCollection !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDeleteCollection(null);
-        }}
-        title="Delete collection"
-        description={`Delete collection "${confirmDeleteCollection?.collection.name}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmDeleteCollection)
-            deleteMutation.mutate({
-              id: confirmDeleteCollection.collection.id,
-              etag: confirmDeleteCollection.etag,
-            });
-          setConfirmDeleteCollection(null);
-        }}
-      />
-
-      {capabilities?.imports && (
-        <CollectionTemplateGallery mode="user" open={galleryOpen} onOpenChange={setGalleryOpen} />
-      )}
-
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,5vw,3.25rem)]">Collections</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Build personal or shared shelves around moods, series arcs, or anything else worth
-            grouping.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {capabilities?.imports && (
-            <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)}>
-              <Sparkles className="mr-1 h-4 w-4" /> Browse Templates
-            </Button>
-          )}
-          <Button size="sm" onClick={() => navigate(buildUserCollectionEditorPath("new"))}>
-            <Plus className="mr-1 h-4 w-4" /> New Collection
-          </Button>
-        </div>
-      </div>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your collections</h2>
-        {collections.length === 0 ? (
-          <div className="surface-panel flex flex-col items-center justify-center gap-3 rounded-[2rem] py-16 text-center">
-            <Library className="text-muted-foreground/50 h-10 w-10" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium">No collections yet</p>
-              <p className="text-muted-foreground max-w-sm text-xs">
-                Build your own collection from scratch.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {capabilities?.imports && (
-                <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
-                  <Sparkles className="mr-1 h-4 w-4" /> Start from a template
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(buildUserCollectionEditorPath("new"))}
-              >
-                <Plus className="mr-1 h-4 w-4" /> Create from scratch
-              </Button>
-            </div>
-          </div>
+    <div className="page-shell py-4 sm:py-6">
+      <CalmPage
+        heading="page"
+        title="Collections"
+        subtitle={
+          multiProfile
+            ? "Yours, the ones other profiles share with you, and the server's."
+            : "Yours and the server's."
+        }
+        actions={narrow ? null : newCollection}
+        padBottom={narrow}
+      >
+        {isLoading ? (
+          <PosterGridSkeleton />
         ) : (
-          <GroupedCollectionsBoard
-            onBeginDrag={beginDrag}
-            readOnly={!capabilities?.groups}
-            items={collections}
-            groups={groups}
-            renderItem={(collection) => {
-              const syncable =
-                capabilities?.imports === true && isImportedType(collection.collection_type);
-              const isSyncing = syncMutation.isPending && syncMutation.variables === collection.id;
-              return (
-                <SortableCollectionCard
-                  collection={collection}
-                  canReorder={capabilities?.groups === true}
-                  syncable={syncable}
-                  isSyncing={isSyncing}
-                  onSync={() => syncMutation.mutate(collection.id)}
-                  onEdit={() => navigate(buildUserCollectionEditorPath(collection.id))}
-                  onDelete={() => {
-                    void fetchCollectionEditSnapshot(collection.id)
-                      .then(setConfirmDeleteCollection)
-                      .catch((error) => toast.error(error.message));
-                  }}
-                />
-              );
-            }}
-            onReorderInGroup={(groupId, orderedIds) =>
-              withDragSnapshot((snapshot) =>
-                reorderMutation.mutate({ orderedIds, groupId, etag: snapshot.etag }),
-              )
-            }
-            onMoveItemAcross={(itemId, toGroupId) =>
-              withDragSnapshot((snapshot) => {
-                if (snapshot.collection?.collection.id === itemId)
-                  updateMutation.mutate({
-                    id: itemId,
-                    etag: snapshot.collection.etag,
-                    body: { group_id: toGroupId },
-                  });
-              })
-            }
-            onReorderGroups={(orderedIds) =>
-              withDragSnapshot((snapshot) =>
-                reorderGroupsMutation.mutate({ orderedIds, etag: snapshot.etag }),
-              )
-            }
-            onAddGroup={(title) =>
-              createGroupMutation.mutate({ slug: slugifyGroupSlug(title), name: title })
-            }
-            onPrepareRenameGroup={async (id) => {
-              try {
-                const snapshot = await fetchGroupSnapshot(id);
-                return {
-                  title: snapshot.group.name,
-                  commit: (name: string) =>
-                    renameGroupMutation.mutate({ id, name, etag: snapshot.etag }),
-                };
-              } catch (error) {
-                toast.error(error instanceof Error ? error.message : "Could not load group");
-              }
-            }}
-            onDeleteGroup={(id) => {
-              void fetchGroupSnapshot(id)
-                .then(setConfirmDeleteGroup)
-                .catch((error) => toast.error(error.message));
-            }}
+          <YourCollections
+            collections={own}
+            canReorder={capabilities?.item_reorder === true}
+            canSync={capabilities?.imports === true}
+            otherProfileNames={otherProfileNames}
           />
         )}
-      </section>
-
-      <ServerCollectionsSection />
-    </div>
-  );
-}
-
-// ServerCollectionsSection renders admin-curated collections aggregated across
-// every accessible library, one horizontal teaser row per library. Each row's
-// title (and the "Explore all" action when the library has more) links into
-// that library's full Collections tab.
-function ServerCollectionsSection() {
-  const { data, isLoading } = useServerCollections();
-  const { cardPresentation } = useUICustomization();
-  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
-  const libraries = data ?? [];
-
-  if (isLoading) {
-    // Mirror the loaded layout (per-library horizontal rows) so data arriving
-    // doesn't shift the page from a grid into rows.
-    return (
-      <section className="space-y-6">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
-          <p className="text-muted-foreground text-sm">
-            Curated shelves from across every library on this server.
-          </p>
-        </div>
-        <div className="space-y-8">
-          {Array.from({ length: 2 }).map((_, row) => (
-            <div key={row} className="space-y-5">
-              <Skeleton className="h-7 w-40" />
-              <div className="flex gap-4 overflow-hidden lg:gap-5">
-                {Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className={posterWidthClasses}>
-                    <Skeleton className="aspect-[2/3] rounded-xl" />
-                    <Skeleton className="mt-2.5 h-4 w-3/4" />
+        {multiProfile && shared.length > 0 ? (
+          <CollectionsSection
+            id="shared-with-me"
+            title="Shared with me"
+            count={shared.reduce((total, group) => total + group.collections.length, 0)}
+            note="Read-only. Other profiles on this account made these."
+          >
+            {/* Owners sit side by side, each card one grid column wide. */}
+            <div className="@container">
+              <div className="flex flex-wrap gap-x-3.5 gap-y-5">
+                {shared.map((group) => (
+                  <div key={group.owner.id} className="grid max-w-full min-w-0 content-start gap-3">
+                    <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                      <OwnerInitial name={group.owner.name} />
+                      <h3>
+                        by <span className="text-foreground font-semibold">{group.owner.name}</span>
+                      </h3>
+                    </div>
+                    <ul className="flex flex-wrap gap-x-3.5 gap-y-5">
+                      {group.collections.map((collection) => (
+                        <li key={collection.id} className={GRID_COLUMN_WIDTH}>
+                          <CollectionPosterCard
+                            collection={posterOf(collection)}
+                            kind="user_collections"
+                            meta={<CardMeta collection={collection} />}
+                          />
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ))}
               </div>
             </div>
-          ))}
+          </CollectionsSection>
+        ) : null}
+        <ServerCollectionsSection />
+      </CalmPage>
+      {narrow ? (
+        // Docked above whichever background playback bar shows, as SaveBar is.
+        <div
+          role="region"
+          aria-label="Page actions"
+          className="from-background/0 to-background fixed inset-x-0 bottom-(--playback-bar-clearance,0px) z-30 bg-gradient-to-b to-30% px-4 pt-[22px] pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
+          {newCollection}
         </div>
-      </section>
-    );
-  }
+      ) : null}
+      {pickerOpen ? (
+        <NewCollectionPicker scope="personal" onClose={() => setPickerOpen(false)} />
+      ) : null}
+    </div>
+  );
+}
 
-  if (libraries.length === 0) return null;
-
+/** One section of the page: a heading with its count, a note at the right, and its cards. */
+function CollectionsSection({
+  id,
+  title,
+  count,
+  note,
+  action,
+  children,
+}: {
+  id: string;
+  title: string;
+  count?: number;
+  note?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <section className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
-        <p className="text-muted-foreground text-sm">
-          Curated shelves from across every library on this server.
-        </p>
+    <section aria-labelledby={id} className="grid gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div className="flex items-baseline gap-2">
+          <h2 id={id} className="text-xl font-semibold tracking-tight sm:text-2xl">
+            {title}
+          </h2>
+          {count !== undefined ? (
+            <span className="text-muted-foreground text-sm">{count}</span>
+          ) : null}
+        </div>
+        {note ? <p className="text-muted-foreground text-[13px]">{note}</p> : null}
+        {action}
       </div>
-      <div className="space-y-8">
-        {libraries.map((library) => (
-          <ServerLibraryRow key={library.library_id} library={library} />
-        ))}
-      </div>
+      {children}
     </section>
   );
 }
 
-// One library's teaser row of server collections, rendered with the shared
-// MediaCarousel so it matches every other content row in the app (hover scroll
-// arrows, edge fades, drag/snap, keyboard nav). edgePadding is off because this
-// section sits inside the Collections page's `page-shell`, which already
-// supplies horizontal padding — the row title and cards align to that column.
-function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
-  const navigate = useNavigate();
-  const { cardPresentation } = useUICustomization();
-  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
-  const collectionsHref = `/library/${library.library_id}?tab=collections`;
-  const hasMore = library.total_count > library.collections.length;
+function OwnerInitial({ name }: { name: string }) {
   return (
-    <MediaCarousel
-      title={library.library_name}
-      titleHref={collectionsHref}
-      onViewAll={hasMore ? () => navigate(collectionsHref) : undefined}
-      edgePadding={false}
+    <span
+      aria-hidden
+      className="bg-primary/20 text-primary inline-flex size-5 items-center justify-center rounded-full text-[11px] font-semibold"
     >
-      {library.collections.map((collection) => (
-        <div key={collection.id} className={posterWidthClasses}>
-          <CollectionPosterCard
-            collection={collection}
-            kind="regular"
-            libraryId={library.library_id}
-          />
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+function PosterGridSkeleton() {
+  return (
+    <div className={POSTER_GRID} aria-hidden>
+      {Array.from({ length: 7 }, (_, index) => (
+        <div key={index}>
+          <Skeleton className="aspect-[2/3] rounded-xl" />
+          <Skeleton className="mt-2.5 h-4 w-3/4" />
         </div>
       ))}
-    </MediaCarousel>
+    </div>
   );
 }
 
+/** A personal collection in the shape the poster card draws. */
+function posterOf(collection: Collection): LibraryTabCollection {
+  return {
+    id: collection.id,
+    title: collection.name,
+    poster_url: collection.poster_url ?? "",
+    poster_thumbhash: collection.poster_thumbhash,
+    item_count: collection.item_count ?? 0,
+  };
+}
+
+/** Failed or syncing lists say so; a healthy sync stays quiet. */
+function syncAttention(collection: Collection, syncing: boolean): SyncAttention | undefined {
+  if (syncing || collection.last_sync_status === "running")
+    return { label: "Syncing now", tone: "syncing" };
+  if (collection.last_sync_status === "failed")
+    return { label: "Sync failed", tone: "failed", message: collection.last_sync_message };
+  return undefined;
+}
+
+function CardMeta({ collection, syncing = false }: { collection: Collection; syncing?: boolean }) {
+  return (
+    <CollectionMetaLine
+      className="text-xs"
+      typeLabel={COLLECTION_KIND_LABEL[collectionKindOf(collection.collection_type)]}
+      itemCount={collection.item_count ?? 0}
+      attention={syncAttention(collection, syncing)}
+    />
+  );
+}
+
+/**
+ * The profile's own collections, in its order: drag a poster, or focus its
+ * handle and press Space, then the arrow keys. Each card has a ⋯ menu.
+ */
+function YourCollections({
+  collections,
+  canReorder,
+  canSync,
+  otherProfileNames,
+}: {
+  collections: Collection[];
+  canReorder: boolean;
+  canSync: boolean;
+  otherProfileNames: string[];
+}) {
+  const navigate = useNavigate();
+  const remove = useDeleteCollection();
+  const sync = useSyncUserCollection();
+  const share = useSetCollectionShared();
+  const reorderMutation = useReorderCollections();
+  // A closing dialog stays on screen while it animates out, so it keeps the
+  // collection it was about until the next one opens; only `open` resets.
+  const [confirmDelete, setConfirmDelete] = useState<{
+    open: boolean;
+    snapshot?: CollectionEditSnapshot;
+  }>({ open: false });
+  const [confirmUnshare, setConfirmUnshare] = useState<{ open: boolean; collection?: Collection }>({
+    open: false,
+  });
+  const dragSnapshot = useRef<Promise<string>>(undefined);
+  const ids = collections.map((collection) => collection.id);
+  // The confirm dialogs open from a menu item that is gone once they close,
+  // so focus goes back to the ⋯ of the collection they were about.
+  const menuTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const confirmFor = useRef<string>(undefined);
+  function focusMenuTrigger(event: Event) {
+    const trigger = menuTriggers.current.get(confirmFor.current ?? "");
+    if (!trigger?.isConnected) return;
+    event.preventDefault();
+    trigger.focus();
+  }
+
+  // A drag reads the server's order validator as it starts, and refuses to
+  // reorder when the server's own-collection order differs from the page.
+  function beginDrag() {
+    dragSnapshot.current = fetchCollectionOrderSnapshot().then((order) => {
+      const same =
+        order.ordered_ids.length === ids.length &&
+        order.ordered_ids.every((id, index) => id === ids[index]);
+      if (!same) throw new Error("Collection order changed. Reload before moving collections.");
+      return order.etag;
+    });
+    // A cancelled drag may never consume its snapshot.
+    void dragSnapshot.current.catch(() => undefined);
+  }
+  function reorder(orderedIds: string[]) {
+    if (!dragSnapshot.current) return;
+    void dragSnapshot.current
+      .then((etag) => reorderMutation.mutate({ orderedIds, etag }))
+      .catch((error) => toast.error(error.message));
+  }
+  function setShared(collection: Collection, shared: boolean) {
+    // Turning sharing off takes it away from other profiles: ask first.
+    if (shared) share.mutate({ id: collection.id, shared });
+    else {
+      confirmFor.current = collection.id;
+      setConfirmUnshare({ open: true, collection });
+    }
+  }
+
+  return (
+    <CollectionsSection
+      id="your-collections"
+      title="Your collections"
+      count={collections.length}
+      note={collections.length > 0 ? "Only you can change these" : undefined}
+    >
+      <ConfirmDialog
+        open={confirmDelete.open}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete((current) => ({ ...current, open: false }));
+        }}
+        title={`Delete "${confirmDelete.snapshot?.collection.name ?? ""}"?`}
+        description={personalDeleteDescription(
+          confirmDelete.snapshot?.collection.is_shared ?? false,
+        )}
+        confirmLabel="Delete"
+        variant="destructive"
+        onCloseAutoFocus={focusMenuTrigger}
+        onConfirm={() => {
+          const { snapshot } = confirmDelete;
+          if (snapshot) remove.mutate({ id: snapshot.collection.id, etag: snapshot.etag });
+          setConfirmDelete({ open: false, snapshot });
+        }}
+      />
+      <ConfirmDialog
+        open={confirmUnshare.open}
+        onOpenChange={(open) => {
+          if (!open) setConfirmUnshare((current) => ({ ...current, open: false }));
+        }}
+        title={`Stop sharing ${confirmUnshare.collection?.name ?? ""}?`}
+        description={unshareConsequence(otherProfileNames)}
+        confirmLabel="Stop sharing"
+        onCloseAutoFocus={focusMenuTrigger}
+        onConfirm={() => {
+          const { collection } = confirmUnshare;
+          if (collection) share.mutate({ id: collection.id, shared: false });
+          setConfirmUnshare({ open: false, collection });
+        }}
+      />
+      {collections.length === 0 ? (
+        <ul className={POSTER_GRID}>
+          <li>
+            <NewCollectionCard />
+          </li>
+        </ul>
+      ) : (
+        <>
+          <SortableCollectionGrid
+            collections={collections}
+            disabled={!canReorder}
+            onBeginDrag={beginDrag}
+            onReorder={reorder}
+          >
+            {collections.map((collection) => {
+              const syncing = sync.isPending && sync.variables === collection.id;
+              const synced = collectionKindOf(collection.collection_type) === "synced";
+              return (
+                <SortableCollectionCard
+                  key={collection.id}
+                  collection={collection}
+                  canReorder={canReorder}
+                  syncing={syncing}
+                  menu={
+                    <CollectionActionsMenu
+                      name={collection.name}
+                      triggerRef={(node) => {
+                        if (node) menuTriggers.current.set(collection.id, node);
+                        else menuTriggers.current.delete(collection.id);
+                      }}
+                      onEdit={() => navigate(PERSONAL_SCOPE.paths.edit(collection.id))}
+                      sync={
+                        canSync && synced
+                          ? { syncing, onSync: () => sync.mutate(collection.id) }
+                          : undefined
+                      }
+                      addRow={{
+                        mine: true,
+                        libraries: [],
+                        onAdd: (page) =>
+                          navigate(addToMyHomePath({ source: "user", id: collection.id }, page)),
+                      }}
+                      share={
+                        otherProfileNames.length > 0
+                          ? {
+                              shared: collection.is_shared,
+                              disabled: share.isPending,
+                              onChange: (shared) => setShared(collection, shared),
+                            }
+                          : undefined
+                      }
+                      onDelete={() => {
+                        confirmFor.current = collection.id;
+                        void fetchCollectionEditSnapshot(collection.id)
+                          .then((snapshot) => setConfirmDelete({ open: true, snapshot }))
+                          .catch((error) => toast.error(error.message));
+                      }}
+                    />
+                  }
+                />
+              );
+            })}
+          </SortableCollectionGrid>
+          {canReorder && collections.length > 1 ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-[13px]">
+              <GripVertical aria-hidden className="size-3.5" />
+              Drag a poster to change the order, or focus its handle and press Space, then the arrow
+              keys.
+            </p>
+          ) : null}
+        </>
+      )}
+    </CollectionsSection>
+  );
+}
+
+/** The empty Your collections: one dashed card, because nobody sees anything here yet. */
+function NewCollectionCard() {
+  const [, setPickerOpen] = useDialogSearchParam(NEW_COLLECTION_DIALOG);
+  return (
+    <button
+      type="button"
+      onClick={() => setPickerOpen(true)}
+      className="border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 focus-visible:ring-ring/50 flex aspect-[2/3] flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center text-[13px] font-medium transition-colors outline-none focus-visible:ring-[3px]"
+    >
+      <Plus aria-hidden className="size-5" />
+      New collection
+    </button>
+  );
+}
+
+/** Live-region words for a keyboard or pointer move, by name and position. */
+function moveAnnouncements(collections: Collection[]): Announcements {
+  const name = (id: UniqueIdentifier) =>
+    collections.find((collection) => collection.id === id)?.name ?? "The collection";
+  const position = (id: UniqueIdentifier) =>
+    `position ${collections.findIndex((collection) => collection.id === id) + 1} of ${collections.length}`;
+  return {
+    onDragStart: ({ active }) => `Picked up ${name(active.id)}, at ${position(active.id)}.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${name(active.id)} is over ${position(over.id)}.`
+        : `${name(active.id)} is not over a position.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `Moved ${name(active.id)} to ${position(over.id)}.`
+        : `${name(active.id)} stayed at ${position(active.id)}.`,
+    onDragCancel: ({ active }) => `Cancelled. ${name(active.id)} stayed at ${position(active.id)}.`,
+  };
+}
+
+// SortableCollectionGrid is the profile's own collections as one flat,
+// drag-sortable grid. It reports the new full order of ids.
+function SortableCollectionGrid({
+  collections,
+  disabled,
+  onBeginDrag,
+  onReorder,
+  children,
+}: {
+  collections: Collection[];
+  disabled: boolean;
+  onBeginDrag: () => void;
+  onReorder: (orderedIds: string[]) => void;
+  children: ReactNode;
+}) {
+  const ids = collections.map((collection) => collection.id);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const blockClicks = useClickBlockAfterPointerDrag();
+  function handleDragStart(event: DragStartEvent) {
+    blockClicks.start(event);
+    onBeginDrag();
+  }
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    blockClicks.settle();
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    onReorder(arrayMove(ids, from, to));
+  }
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      accessibility={{ announcements: moveAnnouncements(collections) }}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={blockClicks.settle}
+    >
+      <SortableContext items={ids} strategy={rectSortingStrategy} disabled={disabled}>
+        <ul className={POSTER_GRID}>{children}</ul>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+// useClickBlockAfterPointerDrag keeps the click that ends a pointer drag from
+// opening the card under the pointer. dnd-kit stops that click's propagation
+// at the document, so React Router never sees it and the browser would follow
+// the link's href; a window listener runs first and cancels it. It stays for
+// 50ms after the drop, as dnd-kit's own guard does.
+function useClickBlockAfterPointerDrag() {
+  const release = useRef<() => void>(undefined);
+  useEffect(() => () => release.current?.(), []);
+  return {
+    start({ activatorEvent }: DragStartEvent) {
+      if (release.current || !activatorEvent?.type.startsWith("pointer")) return;
+      const block = (event: MouseEvent) => event.preventDefault();
+      window.addEventListener("click", block, true);
+      release.current = () => window.removeEventListener("click", block, true);
+    },
+    settle() {
+      const done = release.current;
+      release.current = undefined;
+      if (done) setTimeout(done, 50);
+    },
+  };
+}
+
+// SortableCollectionCard is one of the profile's own collections, with its ⋯
+// menu and, when the store supports it, a drag handle. The pointer can drag
+// from anywhere on the card; the keyboard drags from the handle, so Enter on
+// the card's link still opens it.
 function SortableCollectionCard({
   collection,
-  syncable,
   canReorder,
-  isSyncing,
-  onSync,
-  onEdit,
-  onDelete,
+  syncing,
+  menu,
 }: {
   collection: Collection;
-  syncable: boolean;
   canReorder: boolean;
-  isSyncing: boolean;
-  onSync: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  syncing: boolean;
+  menu: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useGroupedCollectionCard(collection.id, !canReorder);
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
     transition,
-    opacity: isDragging ? 0.4 : 1,
-  };
-
+    isDragging,
+  } = useSortable({ id: collection.id, disabled: !canReorder });
   return (
-    <Card
+    <li
       ref={setNodeRef}
-      style={style}
-      className="surface-panel hover:border-primary group relative rounded-[1.6rem] border-0 transition-all hover:-translate-y-1"
+      data-collection-id={collection.id}
+      onPointerDown={
+        canReorder
+          ? (event) => {
+              // Only a press on the card itself starts a drag: not one in the
+              // ⋯ menu, which renders in a portal but still bubbles here
+              // through React, and not one on the ⋯ button. A finger or pen
+              // drags only from the handle: elsewhere on the card it may be
+              // the start of a scroll.
+              const target = event.target as Element;
+              if (!event.currentTarget.contains(target)) return;
+              if (target.closest("button:not([data-drag-handle])")) return;
+              if (event.pointerType !== "mouse" && !target.closest("[data-drag-handle]")) return;
+              listeners?.onPointerDown?.(event);
+            }
+          : undefined
+      }
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
     >
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <div className="flex min-w-0 items-center gap-2">
-          {canReorder && (
+      <CollectionPosterCard
+        collection={posterOf(collection)}
+        kind="user_collections"
+        meta={<CardMeta collection={collection} syncing={syncing} />}
+        tag={
+          collection.is_shared ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+              <Users aria-hidden className="size-3" />
+              Shared
+            </span>
+          ) : undefined
+        }
+        menu={menu}
+        handle={
+          canReorder ? (
             <button
+              ref={setActivatorNodeRef}
               type="button"
               aria-label={`Drag ${collection.name}`}
-              className="hover:bg-surface-hover relative z-10 -ml-1 cursor-grab touch-none rounded-md p-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              data-drag-handle
+              className="flex size-8 cursor-grab touch-none items-center justify-center rounded-[10px] bg-black/55 text-white opacity-0 backdrop-blur-sm transition group-focus-within/card:opacity-100 group-hover/card:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
               {...attributes}
-              {...listeners}
+              onKeyDown={listeners?.onKeyDown as KeyboardEventHandler}
             >
-              <GripVertical className="text-muted-foreground h-4 w-4" />
+              <GripVertical aria-hidden className="size-4" />
             </button>
-          )}
-          <div className="min-w-0 space-y-2">
-            <CardTitle className="text-base">
-              <Link
-                to={buildUserCollectionCatalogHref(collection.id, collection.name)}
-                className="cursor-pointer after:absolute after:inset-0"
-              >
-                {collection.name}
-              </Link>
-            </CardTitle>
-            <CollectionBadges collection={collection} />
-          </div>
-        </div>
-        <div className="relative z-10 flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-          {syncable ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              aria-label="Sync collection"
-              disabled={isSyncing}
-              onClick={(event) => {
-                event.stopPropagation();
-                onSync();
-              }}
-            >
-              <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            aria-label="Edit collection"
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit();
-            }}
-          >
-            <Pencil className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            aria-label="Delete collection"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete();
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        </div>
-      </CardHeader>
-    </Card>
+          ) : undefined
+        }
+      />
+    </li>
   );
 }
 
-const TYPE_LABELS: Record<UserCollectionType, string> = {
-  manual: "manual",
-  smart: "smart",
-  mdblist: "MDBList",
-  tmdb: "TMDB",
-  trakt: "Trakt",
-};
+const ALL_LIBRARIES = "all";
 
-const TYPE_ICONS: Record<UserCollectionType, typeof Film> = {
-  manual: Film,
-  smart: Sparkles,
-  mdblist: Globe,
-  tmdb: Globe,
-  trakt: Globe,
-};
+/**
+ * Server collections: library pills, one row of cards, and See all for the
+ * chosen library. Hidden only when no library has any, so one-profile accounts see it too.
+ */
+function ServerCollectionsSection() {
+  const { data, isLoading } = useServerCollections();
+  const [selected, setSelected] = useState(ALL_LIBRARIES);
+  const libraries = data ?? [];
 
-const SYNC_STATUS_BADGES: Partial<
-  Record<
-    NonNullable<Collection["last_sync_status"]>,
-    { variant: "outline" | "destructive"; label: string }
-  >
-> = {
-  warning: { variant: "outline", label: "Sync warning" },
-  failed: { variant: "destructive", label: "Sync failed" },
-};
+  if (isLoading)
+    return (
+      <CollectionsSection id="server-collections" title="Server collections">
+        <PosterGridSkeleton />
+      </CollectionsSection>
+    );
+  if (libraries.length === 0) return null;
 
-function CollectionBadges({ collection }: { collection: Collection }) {
-  const TypeIcon = TYPE_ICONS[collection.collection_type] ?? Film;
-  const typeLabel = TYPE_LABELS[collection.collection_type] ?? collection.collection_type;
-  const statusBadge = collection.last_sync_status
-    ? SYNC_STATUS_BADGES[collection.last_sync_status]
-    : undefined;
-
+  const library =
+    libraries.length === 1
+      ? libraries[0]
+      : libraries.find((entry) => String(entry.library_id) === selected);
+  // All libraries: every library's cards in library order, each collection
+  // once. A collection in several libraries opens across all of them, so its
+  // card carries no library (and so no sidebar pin, which needs one).
+  const libraryCount = new Map<string, number>();
+  for (const entry of libraries) {
+    for (const collection of entry.collections) {
+      libraryCount.set(collection.id, (libraryCount.get(collection.id) ?? 0) + 1);
+    }
+  }
+  const seen = new Set<string>();
+  const cards = (library ? [library] : libraries).flatMap((entry) =>
+    entry.collections.flatMap((collection) => {
+      if (seen.has(collection.id)) return [];
+      seen.add(collection.id);
+      const inSeveral = !library && (libraryCount.get(collection.id) ?? 0) > 1;
+      return [{ collection, libraryId: inSeveral ? undefined : entry.library_id }];
+    }),
+  );
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Badge variant="secondary">
-        <TypeIcon className="mr-1 h-3 w-3" />
-        {typeLabel}
-      </Badge>
-      {collection.is_shared ? <Badge variant="outline">Shared</Badge> : null}
-      {collection.sync_schedule ? (
-        <Badge variant="outline">
-          <Calendar className="mr-1 h-3 w-3" />
-          {collection.sync_schedule}
-        </Badge>
+    <CollectionsSection
+      id="server-collections"
+      title="Server collections"
+      action={
+        library ? (
+          <Link
+            to={`/library/${library.library_id}?tab=collections`}
+            aria-label={`See all ${library.total_count} ${library.library_name} collections`}
+            className="text-sm font-medium underline-offset-4 hover:underline"
+          >
+            See all {library.total_count}
+          </Link>
+        ) : null
+      }
+    >
+      {libraries.length > 1 ? (
+        <PillSwitcher
+          label="Library"
+          options={[
+            { value: ALL_LIBRARIES, label: "All" },
+            ...libraries.map((entry) => ({
+              value: String(entry.library_id),
+              label: entry.library_name,
+            })),
+          ]}
+          value={library ? String(library.library_id) : ALL_LIBRARIES}
+          onChange={setSelected}
+        />
       ) : null}
-      {statusBadge ? <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge> : null}
-    </div>
+      {/* One row: as many cards as the grid has columns. */}
+      <ul
+        className={cn(
+          POSTER_GRID,
+          "max-sm:[&>li:nth-child(n+4)]:hidden max-lg:[&>li:nth-child(n+6)]:hidden [&>li:nth-child(n+8)]:hidden",
+        )}
+      >
+        {cards.map(({ collection, libraryId }) => (
+          <li key={collection.id}>
+            <CollectionPosterCard
+              collection={collection}
+              kind="regular"
+              libraryId={libraryId}
+              meta={<CollectionMetaLine className="text-xs" itemCount={collection.item_count} />}
+            />
+          </li>
+        ))}
+      </ul>
+    </CollectionsSection>
   );
 }

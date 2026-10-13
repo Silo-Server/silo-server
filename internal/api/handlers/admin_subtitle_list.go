@@ -97,7 +97,7 @@ func (h *AdminSubtitleHandler) ListAdminSubtitlesPage(ctx context.Context, filte
 	out.Items = make([]AdminDownloadedSubtitle, 0)
 	for rows.Next() {
 		var row AdminDownloadedSubtitle
-		err = rows.Scan(&row.ID, &row.MediaFileID, &row.MediaContentID, &row.Provider, &row.Language, &row.Format, &row.ReleaseName, &row.Score, &row.HearingImpaired, &row.CreatedAt, &row.DownloadedBy, &row.UploaderUsername, &row.MediaTitle, &row.MediaType, &row.FilePath)
+		row, err = scanAdminDownloadedSubtitle(rows)
 		if err != nil {
 			rows.Close()
 			return out, err

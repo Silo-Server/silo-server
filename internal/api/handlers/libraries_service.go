@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -72,6 +73,10 @@ type UnmatchedItemView = unmatchedItemResponse
 func (h *LibraryHandler) ListLibraries(ctx context.Context) ([]LibraryView, error) {
 	folders, err := h.folderRepo.List(ctx)
 	if err != nil {
+		if ctxerr.Abandoned(ctx, err) {
+			// The client left; nothing failed, so there is nothing to log.
+			return nil, err
+		}
 		slog.ErrorContext(ctx, "listing libraries", "component", "api", "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list libraries")
 	}
@@ -99,6 +104,9 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 	if req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
+	if req.TrickplayEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
+	}
 
 	folder, err := h.folderRepo.Create(ctx, catalog.CreateFolderInput{
 		Paths:                    req.Paths,
@@ -109,6 +117,7 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
 		RealtimeMonitoring:       req.RealtimeMonitoring,
+		TrickplayEnabled:         req.TrickplayEnabled,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDuplicatePath) {
@@ -118,6 +127,9 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to create library")
 	}
 	h.pokeRealtimeMonitor()
+	if req.TrickplayEnabled {
+		h.reconcileTrickplay()
+	}
 
 	// Seed default sections for the new library.
 	if h.SectionRepo != nil {
@@ -179,6 +191,9 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
+	if req.TrickplayEnabled != nil && *req.TrickplayEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
+	}
 
 	// Fetch the folder before updating so we can detect path changes.
 	oldFolder, err := h.folderRepo.GetByID(ctx, id)
@@ -201,6 +216,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
 		RealtimeMonitoring:       req.RealtimeMonitoring,
+		TrickplayEnabled:         req.TrickplayEnabled,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
@@ -213,6 +229,9 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update library")
 	}
 	h.pokeRealtimeMonitor()
+	if req.affectsTrickplay() {
+		h.reconcileTrickplay()
+	}
 
 	// Fetch the updated folder to return it.
 	folder, err := h.folderRepo.GetByID(ctx, id)
@@ -400,6 +419,7 @@ func (h *LibraryHandler) LibraryProviderDefaults(ctx context.Context, libraryTyp
 			ProviderSlug:         e.CapabilityID,
 			Priority:             e.Priority,
 			Enabled:              e.Enabled,
+			Local:                e.Local,
 		})
 	}
 	return out, nil
@@ -1261,6 +1281,7 @@ func (h *LibraryHandler) LibraryProviders(ctx context.Context, id int) (map[stri
 			ProviderSlug:         e.CapabilityID,
 			Priority:             e.Priority,
 			Enabled:              e.Enabled,
+			Local:                e.Local,
 		})
 	}
 	return levels, nil

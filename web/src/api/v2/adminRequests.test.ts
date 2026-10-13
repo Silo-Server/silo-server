@@ -3,8 +3,8 @@ import { captureProfileRequestContext, isProfileRequestContextCurrent } from "@/
 import { v2, V2ProblemError } from "./request";
 import {
   getAdminRequestIntegrationV2,
-  listAdminMediaRequestsV2,
   listAdminRequestIntegrationsV2,
+  listAdminRequestQueuePageV2,
   putAdminRequestSettingsV2,
   putAdminRequestUserLimitV2,
   requestValidationErrors,
@@ -124,7 +124,7 @@ describe("admin request v2 adapter", () => {
     vi.mocked(captureProfileRequestContext).mockReturnValue(authority);
     vi.mocked(isProfileRequestContextCurrent).mockReturnValue(true);
     vi.mocked(v2).mockResolvedValue({ items: [], page: { has_more: true } } as never);
-    await expect(listAdminMediaRequestsV2({ limit: 100 })).rejects.toThrow(
+    await expect(listAdminRequestQueuePageV2({ view: "failed" })).rejects.toThrow(
       "Incomplete request page",
     );
     vi.mocked(v2).mockResolvedValue({
@@ -133,7 +133,36 @@ describe("admin request v2 adapter", () => {
     } as never);
     await expect(listAdminRequestIntegrationsV2()).rejects.toThrow("Incomplete integration page");
     vi.mocked(isProfileRequestContextCurrent).mockReturnValue(false);
-    await expect(listAdminMediaRequestsV2()).rejects.toThrow("account or server changed");
+    await expect(listAdminRequestQueuePageV2({ view: "failed" })).rejects.toThrow(
+      "account or server changed",
+    );
+  });
+  it("sends the queue filters as the server names them and returns the next cursor", async () => {
+    vi.mocked(captureProfileRequestContext).mockReturnValue(authority);
+    vi.mocked(isProfileRequestContextCurrent).mockReturnValue(true);
+    vi.mocked(v2).mockResolvedValue({
+      items: [],
+      page: { has_more: true, next_cursor: "next" },
+    } as never);
+    const page = await listAdminRequestQueuePageV2(
+      { view: "needs_approval", q: "  dune ", mediaType: "movie", requestedByUserId: 7 },
+      { limit: 25, cursor: "here" },
+    );
+    expect(page).toEqual({ items: [], nextCursor: "next" });
+    expect(vi.mocked(v2).mock.calls[0]).toEqual([
+      "GET /api/v2/admin/requests",
+      expect.objectContaining({
+        profileContext: authority,
+        query: {
+          view: "needs_approval",
+          q: "dune",
+          media_type: "movie",
+          requested_by_user_id: "7",
+          limit: 25,
+          cursor: "here",
+        },
+      }),
+    ]);
   });
   it("maps problem field details inline and unwraps options with string installation IDs", async () => {
     const error = new V2ProblemError("save", {

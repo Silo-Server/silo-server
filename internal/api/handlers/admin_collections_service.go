@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -90,7 +89,7 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 	if err := eg.Wait(); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	collections := <-collectionsCh
+	collections := h.withViewerPosters(ctx, <-collectionsCh, AccessFilterFromContext(ctx, ""))
 	var groups []models.LibraryCollectionGroup
 	if groupsCh != nil {
 		groups = <-groupsCh
@@ -128,13 +127,13 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	queryDefinition := defaultJSON(req.QueryDefinition)
 	if req.CollectionType == collectionTypeSmart {
 		var err error
-		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false)
+		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	} else if len(req.QueryDefinition) > 0 {
 		var err error
-		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false)
+		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
@@ -200,7 +199,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	h.refreshSmartCountAsync(collection.ID)
 
-	return h.libraryCollectionResponseOf(ctx, collection), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, collection)), nil
 }
 func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, req AdminCollectionCreate) (AdminCollection, error) {
 	return h.createAdminCollection(ctx, req, h.adminArtworkSources(ctx))
@@ -219,11 +218,18 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(req.QueryDefinition) > 0 {
 		var err error
 		if req.CollectionType == nil || *req.CollectionType == collectionTypeSmart {
-			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
+			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		} else {
-			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		}
 		if err != nil {
+			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
+		}
+	} else if req.V1Rules && req.CollectionType != nil && *req.CollectionType == collectionTypeSmart &&
+		existing.CollectionType != collectionTypeSmart && len(existing.QueryDefinition) > 0 {
+		// Switching to Smart activates the stored rules, so, as with a changed
+		// section definition, a v1 update must find them in its vocabulary.
+		if err := catalog.ValidateV1Rules(existing.QueryDefinition); err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	}
@@ -299,7 +305,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(queryDefinition) > 0 || req.CollectionType != nil {
 		h.refreshSmartCountAsync(collectionID)
 	}
-	return h.libraryCollectionResponseOf(ctx, updated), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
 }
 
 func adminCollectionLookupAPIError(err error) error {
@@ -371,7 +377,7 @@ func (h *LibraryCollectionHandler) PreviewAdminCollection(ctx context.Context, r
 	}
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
@@ -409,7 +415,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -426,7 +432,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -454,7 +460,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -471,7 +477,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -496,7 +502,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -513,7 +519,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -558,8 +564,8 @@ func (h *LibraryCollectionHandler) SyncAdminCollection(ctx context.Context, id s
 	}
 	return h.service.SyncCollection(ctx, id)
 }
-func (h *LibraryCollectionHandler) ListAdminCollectionTemplates(ctx context.Context) (templates.BundleCatalog, error) {
-	return h.templateRegistry().BundleCatalog(), nil
+func (h *LibraryCollectionHandler) ListAdminCollectionTemplates(ctx context.Context) ([]templates.BundleWithTemplates, error) {
+	return h.templateRegistry().BundlesWithTemplates(), nil
 }
 func (h *LibraryCollectionHandler) ApplyAdminCollectionTemplate(ctx context.Context, id string, req AdminCollectionTemplateApply) (AdminCollectionTemplateResult, error) {
 	result, err := h.applyTemplateBundle(ctx, id, req, nil)
@@ -628,7 +634,7 @@ func (h *LibraryCollectionHandler) SetAdminCollectionArtworkSource(ctx context.C
 	if _, err := h.repo.GetByID(ctx, id); err != nil {
 		return err
 	}
-	data, err := downloadCollectionImageURL(ctx, h.httpClient, url)
+	data, err := downloadCollectionImageURL(adminCollectionImageContext(ctx), h.httpClient, url)
 	if err != nil {
 		return err
 	}
@@ -657,10 +663,8 @@ func (h *LibraryCollectionHandler) DeleteAdminCollectionArtwork(ctx context.Cont
 	if err := h.repo.Update(ctx, input); err != nil {
 		return err
 	}
-	if kind == collectionImagePoster && h.service != nil && h.service.CollageGen != nil {
-		if err := h.GenerateCollectionPoster(ctx, id); err != nil {
-			slog.DebugContext(ctx, "Collection poster regeneration unavailable", "error", err)
-		}
+	if kind == collectionImagePoster && h.service != nil {
+		h.service.MaybeGenerateCollage(ctx, id)
 	}
 	return nil
 }

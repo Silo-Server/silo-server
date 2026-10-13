@@ -81,7 +81,7 @@ type ArtworkObjectChecker interface {
 
 // nonProviderImageSchemesSQL mirrors isNonProviderImageScheme for use inside
 // SQL predicates: source paths with these schemes cannot be re-downloaded.
-const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%']`
+const nonProviderImageSchemesSQL = `ARRAY['s3://%', 'file://%', 'nfo+%', 'local://%', 'upload://%', 'generated://%']`
 
 const (
 	artworkReconcileSampleTarget = 200
@@ -308,6 +308,17 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "item posters", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: itemClear(posterPathColumn)},
 		{name: "item backdrops", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: itemClear("backdrop_path")},
 		{name: "item logos", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: itemClear("logo_path")},
+		// Banners, thumbs, clear art and disc art reset like the slots above:
+		// a provider copy goes back to its source for the backfill to cache
+		// again, and a sidecar copy is cleared so the item's next refresh
+		// queues it.
+		{name: "item banners", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "banner_path", sourceCol: "banner_source_path", clearSet: itemClear("banner_path")},
+		{name: "item thumbs", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "thumb_path", sourceCol: "thumb_source_path", clearSet: itemClear("thumb_path")},
+		{name: "item clear art", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "clearart_path", sourceCol: "clearart_source_path", clearSet: itemClear("clearart_path")},
+		{name: "item disc art", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "disc_path", sourceCol: "disc_source_path", clearSet: itemClear("disc_path")},
+		// Extra backdrops are local sidecars only (planExtraBackdrops), so
+		// there is no provider source to reset to.
+		{name: "item extra backdrops", table: "media_item_backdrops", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "path", clearSet: `path = '', thumbhash = ''`},
 		{name: "localized item posters", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "localized item backdrops", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
 		{name: "localized item logos", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: plainClear("logo_path")},
@@ -317,13 +328,16 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
-		// to the generated collage (admin collections), the generated poster
-		// (user collections), or the default tile (library posters); admins
-		// re-upload anything they want back. alwaysVerify protects surviving
-		// uploads from blind bulk resets.
+		// to the generated collage (collections) or the default tile (library
+		// posters); admins re-upload anything they want back. alwaysVerify
+		// protects surviving uploads from blind bulk resets.
 		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
 		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		// Generated collection collages. A cleared row reads as a missing
+		// collage, which the next viewer's read rebuilds.
+		{name: "collection collages", table: "library_collection_poster_variants", keyCols: []artworkSweepKey{textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		{name: "user collection collages", table: "user_personal_collection_poster_variants", keyCols: []artworkSweepKey{int64SweepKey("user_id"), textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}
 }

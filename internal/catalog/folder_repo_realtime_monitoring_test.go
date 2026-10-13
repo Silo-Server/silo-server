@@ -175,3 +175,59 @@ func TestFolderDeleteCascadesLibraryMonitorStatus(t *testing.T) {
 		t.Fatalf("status rows after folder delete = %d, want 0", remaining)
 	}
 }
+
+func TestFolderRepositoryTrickplay(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	repo := NewFolderRepository(pool)
+	suffix := time.Now().UnixNano()
+	create := func(name string, enabled bool) *models.MediaFolder {
+		t.Helper()
+		folder, err := repo.Create(ctx, CreateFolderInput{
+			Paths:            []string{fmt.Sprintf("/media/trickplay-%s-%d", name, suffix)},
+			Type:             "movies",
+			Name:             fmt.Sprintf("trickplay-%s-%d", name, suffix),
+			TrickplayEnabled: enabled,
+		})
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		t.Cleanup(func() { _ = repo.Delete(context.Background(), folder.ID) })
+		return folder
+	}
+	off, on := create("off", false), create("on", true)
+	if off.TrickplayEnabled || !on.TrickplayEnabled {
+		t.Fatalf("created off=%v on=%v", off.TrickplayEnabled, on.TrickplayEnabled)
+	}
+	enable, disable := true, false
+	newName := fmt.Sprintf("trickplay-renamed-%d", suffix)
+	if err := repo.Update(ctx, on.ID, UpdateFolderInput{Name: &newName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Update(ctx, off.ID, UpdateFolderInput{TrickplayEnabled: &enable}); err != nil {
+		t.Fatal(err)
+	}
+	folders, err := repo.ListByIDs(ctx, []int{off.ID, on.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range folders {
+		if !f.TrickplayEnabled {
+			t.Fatalf("folder %d lost its trickplay setting", f.ID)
+		}
+	}
+	if err := repo.Update(ctx, on.ID, UpdateFolderInput{TrickplayEnabled: &disable}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.GetByID(ctx, on.ID); got.TrickplayEnabled {
+		t.Fatal("update to false did not apply")
+	}
+}

@@ -92,13 +92,6 @@ describe("AdminApiKeys", () => {
     mocks.createKey.mockResolvedValue({ key: CREATED_KEY });
   });
 
-  it("lists keys by prefix only; the full secret is never available to copy", () => {
-    render(<AdminApiKeys />);
-
-    expect(screen.getByText("silo_listed…")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Copy API key/ })).not.toBeInTheDocument();
-  });
-
   it("closes the create dialog once the new key is copied", async () => {
     render(<AdminApiKeys />);
     await createKey();

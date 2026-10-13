@@ -38,12 +38,11 @@ type PlaybackCaller struct {
 	DeviceID, DeviceName, Platform                        string
 	UserAgent, RemoteAddr                                 string
 	ClientName, ClientVersion, ClientBuild, ClientChannel string
-	// SiloClientName is the X-Silo-Client product name the v2 listener labels
-	// its request metrics with. The first-party apps send it, not the
-	// X-Client-Name the playback operations declare, so a route event falls
-	// back to it to name its client in playback_route_events and in
-	// silo_playback_first_frame_seconds.
-	SiloClientName string
+	// DeclaredDevice is the device the client declared in its
+	// X-Silo-Device-* headers. A successful start registers it in the
+	// profile's device registry. It is separate from DeviceID, the playback
+	// device named by the v2 X-Device-ID header.
+	DeclaredDevice DeviceMetadata
 }
 
 // PlaybackCapabilitiesView is the v2 capabilities body. State is always
@@ -186,7 +185,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1")
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -324,6 +323,9 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
 	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
+		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
+	}
 	return withNativeServerFeaturesV3(response), err
 }
 
@@ -352,14 +354,16 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 		return PlaybackMutationView{}, err
 	}
 	if record.StoppedAt != nil {
-		return PlaybackMutationView{}, playbackSessionNotFoundOperationError()
+		return PlaybackMutationView{}, h.stoppedAttemptError(ctx, sessionID, record)
 	}
 	sample := playback.ProgressSampleV3{Sequence: command.Sequence, Position: command.Position, IsPaused: command.IsPaused}
 	receipt, err := store.ApplyProgress(ctx, sessionID, sample)
 	switch {
 	case errors.Is(err, playback.ErrProgressConflictV3):
 		return PlaybackMutationView{}, playbackOperationError(http.StatusConflict, PlaybackCodeProgressConflict, "The sequence already has different progress")
-	case errors.Is(err, playback.ErrAttemptStoppedV3), errors.Is(err, playback.ErrSessionNotFound):
+	case errors.Is(err, playback.ErrAttemptStoppedV3):
+		return PlaybackMutationView{}, h.stoppedAttemptError(ctx, sessionID, nil)
+	case errors.Is(err, playback.ErrSessionNotFound):
 		return PlaybackMutationView{}, playbackSessionNotFoundOperationError()
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
@@ -695,11 +699,23 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// seek must not launch a replacement transport the deny marker will
 	// refuse to serve. The store's commit predicate refuses stopped rows too.
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
-		return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
+		return playback.DecisionResponseV3{}, h.stoppedAttemptError(ctx, sessionID, record)
 	}
 	response, err := h.replanPlaybackApplicationV3(playbackCallerSessionRequest(ctx, caller, sessionID), sessionID, body)
-	if errors.Is(err, playback.ErrAttemptStoppedV3) {
-		return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
+	if err != nil {
+		// A stop that lands after the check above reaches the replan as a
+		// missing live session or a refused commit, both reported as not
+		// found. Re-read the attempt so an administrator stop still answers
+		// 410 instead of the 404 the player renews from.
+		var opErr *PlaybackOperationError
+		if errors.Is(err, playback.ErrAttemptStoppedV3) || (errors.As(err, &opErr) && opErr.Status == http.StatusNotFound) {
+			if record, getErr := h.PlanStoreV3.GetAttempt(ctx, sessionID); getErr == nil && attemptEndedByAdmin(record) {
+				return playback.DecisionResponseV3{}, playbackSessionEndedByAdminError()
+			}
+		}
+		if errors.Is(err, playback.ErrAttemptStoppedV3) {
+			return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
+		}
 	}
 	return withNativeServerFeaturesV3(response), err
 }
@@ -739,7 +755,7 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: firstNonEmptyValue(caller.ClientName, caller.SiloClientName), ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
+	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
 	return nil
 }
 
@@ -776,7 +792,52 @@ func (h *PlaybackHandler) markAttemptStoppedServerSide(ctx context.Context, sess
 	h.forgetProgressSideEffectLock(sessionID)
 }
 
+// adminStopID is the server-minted stop id of an attempt an administrator
+// ended. Progress and replan for such an attempt answer 410
+// playback_session_ended, so the player exits instead of starting a fresh
+// session the way it recovers from an expiry or a server restart.
+func adminStopID(sessionID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-admin-stop:"+sessionID)).String()
+}
+
+// markAttemptStoppedByAdmin is markAttemptStoppedServerSide for a session an
+// administrator ended: stop, terminate, or the fallback of a command the
+// player never confirmed. An attempt the client already stopped keeps its
+// own receipt.
+func (h *PlaybackHandler) markAttemptStoppedByAdmin(ctx context.Context, sessionID string) {
+	if h == nil {
+		return
+	}
+	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
+	h.forgetProgressSideEffectLock(sessionID)
+}
+
+func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {
+	return record != nil && record.StoppedAt != nil && record.SessionID != "" && record.StopID == adminStopID(record.SessionID)
+}
+
+func playbackSessionEndedByAdminError() *PlaybackOperationError {
+	return playbackOperationError(http.StatusGone, playbackSessionEndedErrorCode, "An administrator ended this playback session")
+}
+
+// stoppedAttemptError is the answer for a request on an attempt that is no
+// longer live: 410 when an administrator ended it, otherwise the 404 that
+// lets the client start over.
+func (h *PlaybackHandler) stoppedAttemptError(ctx context.Context, sessionID string, record *playback.AttemptRecordV3) *PlaybackOperationError {
+	if record == nil && h != nil && h.PlanStoreV3 != nil {
+		record, _ = h.PlanStoreV3.GetAttempt(ctx, sessionID)
+	}
+	if attemptEndedByAdmin(record) {
+		return playbackSessionEndedByAdminError()
+	}
+	return playbackSessionNotFoundOperationError()
+}
+
 func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID string) {
+	stopAttemptServerSide(ctx, planStore, deny, sessionID, expiredStopID(sessionID))
+}
+
+func stopAttemptServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID, stopID string) {
 	if sessionID == "" {
 		return
 	}
@@ -785,10 +846,10 @@ func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanSt
 	if !ok {
 		return
 	}
-	receipt, first, err := store.StopAttempt(ctx, sessionID, expiredStopID(sessionID), nil)
+	receipt, first, err := store.StopAttempt(ctx, sessionID, stopID, nil)
 	if err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to stop expired playback attempt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			slog.WarnContext(ctx, "failed to stop playback attempt server-side", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 		return
 	}
@@ -796,7 +857,7 @@ func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanSt
 		// The local teardown already ran; the receipt is complete.
 		receipt.Finalized = true
 		if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
-			slog.WarnContext(ctx, "failed to record expired playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			slog.WarnContext(ctx, "failed to record server-side playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 	}
 }

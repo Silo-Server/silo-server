@@ -1,6 +1,8 @@
 {
-  "revision": "0ca6fd54255e4e701b932e204511ae56b9587bacbbc0513e6b225a6000a99e15",
+  "revision": "acb6061b6ed685ee85933c4187157c9cf4380cd0e099b671dcee7690ef3e7e74",
   "state": "available",
   "allowed": true,
-  "realtime_monitoring": true
+  "realtime_monitoring": true,
+  "trickplay": true,
+  "trickplay_supported": false
 }

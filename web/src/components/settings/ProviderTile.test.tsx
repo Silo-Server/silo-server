@@ -8,10 +8,12 @@ describe("ProviderTileGrid", () => {
   it("stops at two columns so tile headers do not truncate the provider name", () => {
     const { container } = render(
       <ProviderTileGrid>
-        <ProviderTile name="OpenSubtitles" state="connected" />
+        <ProviderTile name="OpenSubtitles" tagline="Community subtitles" state="connected" />
       </ProviderTileGrid>,
     );
 
+    expect(screen.getByRole("group", { name: "OpenSubtitles" })).toBeInTheDocument();
+    expect(screen.getByText("Community subtitles")).toBeInTheDocument();
     const grid = container.firstElementChild;
     expect(grid).toHaveClass("sm:grid-cols-2");
     expect(grid?.className).not.toMatch(/grid-cols-3/);
@@ -19,13 +21,6 @@ describe("ProviderTileGrid", () => {
 });
 
 describe("ProviderTile", () => {
-  it("names the tile after the provider so it can be found as a group", () => {
-    render(<ProviderTile name="OpenSubtitles" tagline="Community subtitles" state="connected" />);
-
-    expect(screen.getByRole("group", { name: "OpenSubtitles" })).toBeInTheDocument();
-    expect(screen.getByText("Community subtitles")).toBeInTheDocument();
-  });
-
   it("labels each connection state and exposes it for styling", () => {
     const { rerender } = render(<ProviderTile name="SubDL" state="connected" />);
     expect(screen.getByText("Connected")).toBeInTheDocument();

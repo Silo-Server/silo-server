@@ -67,27 +67,6 @@ describe("PlaybackStep", () => {
     useHWAccelDetectionMock.mockReturnValue({ data: undefined, isLoading: false, isError: false });
   });
 
-  it("names the detected GPU under the hardware acceleration field", () => {
-    useHWAccelDetectionMock.mockReturnValue({
-      data: {
-        resolved: "nvenc",
-        render_devices: ["/dev/dri/renderD128"],
-        source: "local",
-        tone_map_capabilities: [
-          { mode: "hardware", backend: "cuda", filter: "tonemap_cuda", source_kinds: ["hdr10"] },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    const { setSummary } = mockStep();
-    render(<PlaybackStep />);
-
-    expect(screen.getByText("Detected NVIDIA NVENC on /dev/dri/renderD128")).toBeInTheDocument();
-    expect(screen.getByText("Hardware tone mapper available")).toBeInTheDocument();
-    expect(setSummary).toHaveBeenCalledWith("playback", "NVIDIA NVENC");
-  });
-
   it("does not probe hardware when acceleration is set to software", () => {
     mockStep({ "playback.hw_accel": "none" });
     render(<PlaybackStep />);

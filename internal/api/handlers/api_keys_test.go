@@ -55,6 +55,9 @@ func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder
 	t.Helper()
 	store := &fakeAPIKeyStore{}
 	h := NewAPIKeyHandler(store)
+	// A household with no limited profile: the profile-less admin request
+	// below keeps creating keys.
+	h.Stores = householdGateStores{store: householdGateStore{}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    7,

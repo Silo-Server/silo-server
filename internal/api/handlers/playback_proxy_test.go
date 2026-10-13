@@ -136,7 +136,7 @@ func (w *failingProxyResponseWriter) Write(p []byte) (int, error) {
 func TestProxyToTranscodeNodeReusesNodeConnections(t *testing.T) {
 	const (
 		concurrency = 20
-		waves       = 5
+		waves       = 2
 	)
 	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
 

@@ -3,6 +3,7 @@ package mail
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +35,9 @@ const (
 
 // LayoutOptions is the content RenderLayout places into the branded shell.
 type LayoutOptions struct {
+	// Brand supplies the header logo; the zero value is Silo's own. The
+	// message must carry Brand.InlineImages() for the logo to display.
+	Brand Brand
 	// Preheader is the hidden inbox-preview snippet shown next to the subject
 	// line. Plain text; optional.
 	Preheader string
@@ -46,8 +50,8 @@ type LayoutOptions struct {
 	FooterHTML string
 }
 
-// RenderLayout wraps content in Silo's dark branded email shell: wordmark,
-// content card, and footer. It adds no links of its own, so an email whose
+// RenderLayout wraps content in Silo's dark branded email shell: the brand's
+// logo, content card, and footer. It adds no links of its own, so an email whose
 // options carry no hrefs renders fully link-free (some features require
 // that when no external URL is configured).
 func RenderLayout(opts LayoutOptions) string {
@@ -70,8 +74,15 @@ func RenderLayout(opts LayoutOptions) string {
 			`;color:` + EmailColorMuted + `;">` + opts.FooterHTML + `</td></tr>` + "\n"
 	}
 
+	brand := opts.Brand.withDefaults()
+	logo := `<img src="cid:` + logoContentID + `" width="` + strconv.Itoa(brand.logo.width) +
+		`" height="` + strconv.Itoa(brand.logo.height) + `" alt="` + html.EscapeString(brand.Name) +
+		`" style="display:block;border:0;outline:none;text-decoration:none;font:600 16px/1.2 ` +
+		EmailFont + `;color:` + EmailColorText + `;">`
+
 	return strings.NewReplacer(
 		"{{preheader}}", preheader,
+		"{{logo}}", logo,
 		"{{title}}", title,
 		"{{body}}", opts.BodyHTML,
 		"{{footer}}", footer,
@@ -83,16 +94,17 @@ func RenderLayout(opts LayoutOptions) string {
 	).Replace(emailShell)
 }
 
-// EmailButton renders the primary call-to-action: a white pill on the dark
-// card, matching the web UI's primary action style. Both arguments are
-// escaped here. The wrapping table keeps the button shape in Outlook, which
-// ignores padding on anchors.
-func EmailButton(label, href string) string {
+// EmailButton renders the primary call-to-action: a pill in the brand's
+// accent color, or white on the dark card by default, matching the web UI's
+// primary action style. Label and href are escaped here. The wrapping table
+// keeps the button shape in Outlook, which ignores padding on anchors.
+func EmailButton(brand Brand, label, href string) string {
+	background, color := brand.actionColors()
 	return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>` +
-		`<td bgcolor="` + EmailColorAction + `" style="background-color:` + EmailColorAction +
+		`<td bgcolor="` + background + `" style="background-color:` + background +
 		`;border-radius:8px;mso-padding-alt:12px 24px;">` +
 		`<a href="` + html.EscapeString(href) + `" style="display:inline-block;padding:12px 24px;` +
-		`font:600 14px/1 ` + EmailFont + `;color:` + EmailColorOnAct +
+		`font:600 14px/1 ` + EmailFont + `;color:` + color +
 		`;text-decoration:none;border-radius:8px;">` + html.EscapeString(label) + `</a>` +
 		`</td></tr></table>`
 }
@@ -177,7 +189,7 @@ const emailShell = `<!DOCTYPE html>
 {{preheader}}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{canvas}}" style="background-color:{{canvas}};">
 <tr><td align="center" class="silo-shell" style="padding:36px 16px 48px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
-<tr><td style="padding:0 6px 18px;font:600 12px/1 {{font}};color:{{text}};letter-spacing:7px;"><span style="color:#55555e;">&#9656;&#xFE0E;</span>&nbsp;&nbsp;SILO</td></tr>
+<tr><td style="padding:0 6px 20px;">{{logo}}</td></tr>
 <tr><td class="silo-card" bgcolor="{{card}}" style="background-color:{{card}};border:1px solid {{border}};border-radius:12px;padding:28px 32px;">
 {{title}}{{body}}
 </td></tr>

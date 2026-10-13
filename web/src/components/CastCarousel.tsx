@@ -128,9 +128,9 @@ function CastCard({ member, href }: { member: CastMember; href: string | null })
         )}
       </div>
       <div className="px-0.5">
-        <div className="text-foreground truncate text-[13px] font-medium">{member.name}</div>
+        <div className="text-foreground truncate text-[0.8125rem] font-medium">{member.name}</div>
         {member.character ? (
-          <div className="text-muted-foreground truncate text-[11px]">{member.character}</div>
+          <div className="text-muted-foreground truncate text-[0.6875rem]">{member.character}</div>
         ) : null}
       </div>
     </>

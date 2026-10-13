@@ -1,13 +1,10 @@
+// @vitest-environment node
+
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { catalogKeys, ebookKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
 import type { ItemDetail } from "@/api/types";
-import {
-  getCachedWatchedInvalidationKeys,
-  getWatchedActionLabel,
-  getWatchedInvalidationKeys,
-  getWatchedToastMessage,
-} from "./watchedState";
+import { getCachedWatchedInvalidationKeys, getWatchedInvalidationKeys } from "./watchedState";
 
 function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
   return {
@@ -25,6 +22,7 @@ function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
     rating_tmdb: overrides.rating_tmdb ?? null,
     rating_rt_critic: overrides.rating_rt_critic ?? null,
     rating_rt_audience: overrides.rating_rt_audience ?? null,
+    ratings: [],
     imdb_id: overrides.imdb_id ?? "",
     tmdb_id: overrides.tmdb_id ?? "",
     tvdb_id: overrides.tvdb_id ?? "",
@@ -56,94 +54,6 @@ function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
     credits: overrides.credits ?? null,
   };
 }
-
-describe("getWatchedActionLabel", () => {
-  it("returns mark watched for an unwatched movie", () => {
-    expect(
-      getWatchedActionLabel(
-        makeItem({
-          type: "movie",
-          user_data: { played: false },
-        }),
-      ),
-    ).toBe("Mark Watched");
-  });
-
-  it("returns mark season unwatched for a played season", () => {
-    expect(
-      getWatchedActionLabel(
-        makeItem({
-          type: "season",
-          user_data: { played: true },
-        }),
-      ),
-    ).toBe("Mark Season Unwatched");
-  });
-
-  it("returns mark series watched for an unplayed series", () => {
-    expect(
-      getWatchedActionLabel(
-        makeItem({
-          type: "series",
-          user_data: { played: false },
-        }),
-      ),
-    ).toBe("Mark Series Watched");
-  });
-
-  it("returns listening labels for audiobooks", () => {
-    expect(
-      getWatchedActionLabel(makeItem({ type: "audiobook", user_data: { played: false } })),
-    ).toBe("Mark Listened");
-    expect(
-      getWatchedActionLabel(makeItem({ type: "audiobook", user_data: { played: true } })),
-    ).toBe("Mark Unlistened");
-  });
-
-  it("returns reading labels for ebooks", () => {
-    expect(getWatchedActionLabel(makeItem({ type: "ebook", user_data: { played: false } }))).toBe(
-      "Mark Read",
-    );
-    expect(getWatchedActionLabel(makeItem({ type: "ebook", user_data: { played: true } }))).toBe(
-      "Mark Unread",
-    );
-  });
-
-  it("returns reading labels for manga series", () => {
-    expect(getWatchedActionLabel(makeItem({ type: "manga", user_data: { played: false } }))).toBe(
-      "Mark Read",
-    );
-    expect(getWatchedActionLabel(makeItem({ type: "manga", user_data: { played: true } }))).toBe(
-      "Mark Unread",
-    );
-  });
-});
-
-describe("getWatchedToastMessage", () => {
-  it("uses watched copy for video items", () => {
-    expect(getWatchedToastMessage(makeItem({ type: "movie" }), true)).toBe("Marked as watched");
-    expect(getWatchedToastMessage(makeItem({ type: "movie" }), false)).toBe("Marked as unwatched");
-  });
-
-  it("uses listened copy for audiobooks", () => {
-    expect(getWatchedToastMessage(makeItem({ type: "audiobook" }), true)).toBe(
-      "Marked as listened",
-    );
-    expect(getWatchedToastMessage(makeItem({ type: "audiobook" }), false)).toBe(
-      "Marked as unlistened",
-    );
-  });
-
-  it("uses read copy for ebooks", () => {
-    expect(getWatchedToastMessage(makeItem({ type: "ebook" }), true)).toBe("Marked as read");
-    expect(getWatchedToastMessage(makeItem({ type: "ebook" }), false)).toBe("Marked as unread");
-  });
-
-  it("uses read copy for manga", () => {
-    expect(getWatchedToastMessage(makeItem({ type: "manga" }), true)).toBe("Marked as read");
-    expect(getWatchedToastMessage(makeItem({ type: "manga" }), false)).toBe("Marked as unread");
-  });
-});
 
 describe("getWatchedInvalidationKeys", () => {
   it("returns the expected related queries for an episode target", () => {

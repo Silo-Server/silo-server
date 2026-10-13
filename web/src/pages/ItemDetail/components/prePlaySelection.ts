@@ -52,12 +52,6 @@ function normalizeDownloadedLabel(subtitle: DownloadedSubtitle): string {
   return releaseName || provider || getLanguageName(subtitle.language?.trim() || "unknown");
 }
 
-export function formatSubtitleCandidateSummary(
-  row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
-): string {
-  return row.languageLabel;
-}
-
 export function inferSubtitleFlagsFromTitle(title: string | undefined): {
   forced: boolean;
   hearingImpaired: boolean;
@@ -210,7 +204,7 @@ export function buildPrePlaySubtitleCandidates(
           hearing_impaired: row.hearingImpaired,
           track_index: row.index,
         },
-        summary: formatSubtitleCandidateSummary(row),
+        summary: row.languageLabel,
       };
       all.push(candidate);
       return candidate;
@@ -232,7 +226,7 @@ export function buildPrePlaySubtitleCandidates(
         hearing_impaired: row.hearingImpaired,
         downloaded_subtitle_id: row.downloadedSubtitleId,
       },
-      summary: formatSubtitleCandidateSummary(row),
+      summary: row.languageLabel,
     };
     all.push(candidate);
     return candidate;

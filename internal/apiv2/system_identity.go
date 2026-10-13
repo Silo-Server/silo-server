@@ -171,6 +171,19 @@ func (reg *Registry) serverID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// knownServerID is the identity for a response that names it as a courtesy
+// and must not fail over it: empty when the identity cannot be read.
+func (reg *Registry) knownServerID(ctx context.Context) string {
+	if reg.deps.ServerIdentity == nil {
+		return ""
+	}
+	id, err := reg.deps.ServerIdentity.ServerID(ctx)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 func (reg *Registry) getServerIdentity(ctx context.Context, _ *struct{}) (*ServerIdentityOutput, error) {
 	id, err := reg.serverID(ctx)
 	if err != nil {

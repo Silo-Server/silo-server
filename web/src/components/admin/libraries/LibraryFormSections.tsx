@@ -412,8 +412,8 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>
           <p className="text-muted-foreground mb-3 text-xs">
-            Providers are asked in order from top to bottom. Uncheck a provider to skip it for that
-            level.
+            Local metadata always comes first. Remote providers are asked in order from top to
+            bottom and fill in what is still missing. Uncheck a provider to skip it for that level.
           </p>
           {form.chainLoading ? (
             <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
@@ -421,15 +421,39 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
               Loading providers…
             </div>
           ) : form.hasMetadataProviders ? (
-            form.contentLevels.map((level) => (
-              <ProviderLevelSection
-                key={level}
-                level={level}
-                items={form.activeLevelChains[level] ?? []}
-                onReorder={(newItems) => form.reorderLevel(level, newItems)}
-                onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
-              />
-            ))
+            <>
+              {form.hasLocalMetadata && (
+                <div className="mb-3">
+                  <SettingCard
+                    htmlFor="local-metadata-switch"
+                    title="Local metadata (NFO + artwork)"
+                    description="Reads .nfo files and artwork saved next to your media. Runs first at every level, so its values win over remote providers; fields you lock while editing an item win over both."
+                  >
+                    <Switch
+                      id="local-metadata-switch"
+                      checked={form.localMetadataEnabled}
+                      onCheckedChange={form.toggleLocalMetadata}
+                    />
+                  </SettingCard>
+                </div>
+              )}
+              {form.hasRemoteProviders ? (
+                form.contentLevels.map((level) => (
+                  <ProviderLevelSection
+                    key={level}
+                    level={level}
+                    items={form.remoteLevelChains[level] ?? []}
+                    onReorder={(newItems) => form.reorderLevel(level, newItems)}
+                    onToggleEnabled={(index) => form.toggleLevelProvider(level, index)}
+                  />
+                ))
+              ) : (
+                <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
+                  No remote metadata provider plugins are installed. Install one under Admin →
+                  Plugins to fetch artwork and descriptions.
+                </p>
+              )}
+            </>
           ) : (
             <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
               No metadata provider plugins are installed. Install one under Admin → Plugins to fetch
@@ -445,9 +469,12 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
 export function AdvancedFields({
   form,
   chapterThumbnailsSupported,
+  trickplaySupported,
 }: {
   form: LibraryFormController;
   chapterThumbnailsSupported: boolean;
+  /** Undefined when the server does not offer seek previews. */
+  trickplaySupported?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -469,6 +496,27 @@ export function AdvancedFields({
             checked={form.chapterThumbnailsEnabled}
             disabled={!chapterThumbnailsSupported}
             onCheckedChange={form.setChapterThumbnailsEnabled}
+          />
+        </SettingCard>
+      )}
+      {form.settingSupport.trickplay && trickplaySupported !== undefined && (
+        <SettingCard
+          htmlFor="trickplay-switch"
+          title="Generate seek previews"
+          description="Makes the thumbnails players show while seeking, in the configured public asset storage. Files are processed in the background at low priority. Turning this off deletes the library's previews."
+          footer={
+            !trickplaySupported ? (
+              <p className="text-warning text-xs">
+                Public asset storage is required before this can be enabled.
+              </p>
+            ) : null
+          }
+        >
+          <Switch
+            id="trickplay-switch"
+            checked={form.trickplayEnabled}
+            disabled={!trickplaySupported && !form.trickplayEnabled}
+            onCheckedChange={form.setTrickplayEnabled}
           />
         </SettingCard>
       )}

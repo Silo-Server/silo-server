@@ -342,9 +342,9 @@ completion, `silo_subprocess_exits_total` counts bounded workload and outcome
 categories, and `silo_subprocess_peak_rss_bytes` is a distribution of per-child
 maximum RSS, normalized to bytes and omitted on unsupported platforms.
 Instrumented owners are playback transcodes and restarts, progressive remux,
-scanner probes, plugin shutdown and failed startup, and media analysis and
-chapter thumbnail runs through `internal/mediasample` (workloads `analysis` and
-`thumbnail`). Other FFmpeg uses need their own owner instrumentation before
+scanner probes, plugin shutdown and failed startup, and media analysis,
+chapter thumbnail, and trickplay runs through `internal/mediasample`
+(workloads `analysis`, `thumbnail`, and `trickplay`). Other FFmpeg uses need their own owner instrumentation before
 claiming coverage. No second waiter or reaper is installed.
 
 ### Node resource sampling
@@ -360,7 +360,8 @@ application listener; the API process serves it only on `SILO_METRICS_LISTEN`.
   `mount="library-1"`), never by path, so an unauthenticated scrape cannot
   enumerate media locations. A node's unauthenticated `/api/v1/health` withholds paths
   on the same terms. Paths appear only in the admin resources response and a
-  node's bearer-authenticated `/status`.
+  node's `/status`, which needs a
+  [signed request](worker-http-protocol.md#authentication).
 - **Probing is bounded.** Each process's sampler checks at most eight mounts:
   the transcode scratch directory first, then library roots in order. The
   process logs how many go unsampled. The cap is per process, not per host, so

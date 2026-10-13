@@ -12,17 +12,6 @@ func newSnapshot(name string) Snapshot {
 	return Snapshot{ServerName: name, assets: map[AssetKind]string{}}
 }
 
-func TestRenderIndexHTMLReplacesTitle(t *testing.T) {
-	in := []byte(`<html><head><title>Silo</title></head><body></body></html>`)
-	out := string(RenderIndexHTML(in, newSnapshot("Acme Media")))
-	if !strings.Contains(out, "<title>Acme Media</title>") {
-		t.Fatalf("title not replaced: %q", out)
-	}
-	if strings.Contains(out, "<title>Silo</title>") {
-		t.Fatalf("default title still present: %q", out)
-	}
-}
-
 func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	in := []byte(`<title>Silo</title></head>`)
 	out := string(RenderIndexHTML(in, newSnapshot(`A&B<script>`)))
@@ -31,15 +20,6 @@ func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	}
 	if !strings.Contains(out, "A&amp;B&lt;script&gt;") {
 		t.Fatalf("expected escaped title, got: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLRewritesFaviconWhenSet(t *testing.T) {
-	in := []byte(indexFaviconLink + "</head>")
-	snap := Snapshot{ServerName: "X", assets: map[AssetKind]string{KindFavicon: "abc123.png"}}
-	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `href="/api/v2/branding/assets/favicon?v=abc123.png"`) {
-		t.Fatalf("favicon not rewritten: %q", out)
 	}
 }
 

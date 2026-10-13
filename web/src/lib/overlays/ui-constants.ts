@@ -35,7 +35,8 @@ export const CATEGORY_META: Record<OverlayCategory, CategoryMeta> = {
   ribbons: {
     category: "ribbons",
     title: "Status & Awards",
-    description: "Series lifecycle and award badges. Some require upcoming data sources.",
+    description:
+      "Series lifecycle, request status and award badges. Some require upcoming data sources.",
   },
 };
 

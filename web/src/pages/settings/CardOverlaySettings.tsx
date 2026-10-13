@@ -10,13 +10,16 @@ import {
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import {
   ACCENT_PALETTE,
   buildDefaultPrefs,
   CATEGORY_GROUPS,
   getOverlayDef,
   isOverlaySuppressed,
+  OVERLAY_PREVIEW_VARIANTS,
   OVERLAY_REGISTRY,
+  isOverlayOffered,
   OVERLAY_PRESETS,
   POSITION_OPTIONS,
   PRESET_IDS,
@@ -274,6 +277,7 @@ function PresetPicker({ value, onChange }: PresetPickerProps) {
 }
 
 export default function CardOverlaySettings() {
+  const shownRatingSources = useShownRatingSources();
   const {
     prefs,
     setPrefs,
@@ -287,8 +291,13 @@ export default function CardOverlaySettings() {
     hasOverride,
     isResetting,
     isLoading,
+    isOverlaySupported,
   } = useOverlayPrefs();
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
+  // The request sample only shows a badge this server lets the profile keep.
+  const previewVariants = isOverlaySupported("request_status")
+    ? OVERLAY_PREVIEW_VARIANTS
+    : OVERLAY_PREVIEW_VARIANTS.filter((variant) => variant !== "requested");
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
 
   const handleUpdate = (next: CardOverlayPrefs) => {
@@ -424,7 +433,11 @@ export default function CardOverlaySettings() {
         >
           <div className="flex flex-col items-center gap-4">
             <OverlayPreviewCard prefs={displayPrefs} variant={previewVariant} size="md" />
-            <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
+            <OverlayPreviewVariantToggle
+              value={previewVariant}
+              onChange={setPreviewVariant}
+              variants={previewVariants}
+            />
           </div>
         </SettingsGroup>
 
@@ -436,7 +449,12 @@ export default function CardOverlaySettings() {
 
           <TabsContent value="overlays" className="mt-4 space-y-6">
             {CATEGORY_GROUPS.map(({ category, title, description }) => {
-              const overlays = OVERLAY_REGISTRY.filter((d) => d.category === category);
+              const overlays = OVERLAY_REGISTRY.filter(
+                (d) =>
+                  d.category === category &&
+                  isOverlaySupported(d.id) &&
+                  isOverlayOffered(d, shownRatingSources),
+              );
               if (overlays.length === 0) return null;
               return (
                 <SettingsGroup key={category} title={title} description={description}>

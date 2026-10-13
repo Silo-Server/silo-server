@@ -23,6 +23,10 @@ func TestGetSetupStatus(t *testing.T) {
 }
 
 func TestGetSetupStatusWizardCompleted(t *testing.T) {
+	accounts := new(fakeAccounts)
+	deps := pilotDeps(nil, nil)
+	deps.Accounts = accounts
+	h := newTestHandler(t, deps)
 	for _, tc := range []struct {
 		name     string
 		accounts fakeAccounts
@@ -33,9 +37,8 @@ func TestGetSetupStatusWizardCompleted(t *testing.T) {
 		{"store failing", fakeAccounts{wizardErr: errStore}, `{"needs_setup":false,"wizard_completed":false}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			deps := pilotDeps(nil, nil)
-			deps.Accounts = tc.accounts
-			rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/system/setup", "", nil)
+			*accounts = tc.accounts
+			rec := do(t, h, http.MethodGet, "/api/v2/system/setup", "", nil)
 			if rec.Code != 200 || rec.Body.String() != tc.want+"\n" {
 				t.Fatalf("%d %s", rec.Code, rec.Body.String())
 			}

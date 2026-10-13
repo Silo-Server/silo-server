@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { Link } from "react-router";
 import type { DiscoverBrandCard, DiscoverBrowseKind } from "@/api/types";
 import { cn } from "@/lib/utils";
 
@@ -8,34 +8,34 @@ interface BrandCardProps {
   defaultMediaTypeForGenre?: "movie" | "series";
 }
 
+/** The browse page of a studio, network, or genre; a genre opens on movies unless asked otherwise. */
+function brandBrowseHref(
+  kind: DiscoverBrowseKind,
+  card: DiscoverBrandCard,
+  defaultMediaTypeForGenre: "movie" | "series" = "movie",
+): string {
+  const base = `/requests/browse/${kind}/${encodeURIComponent(card.slug)}`;
+  if (kind !== "genre") return base;
+  const initial =
+    card.series_supported && defaultMediaTypeForGenre === "series" ? "series" : "movie";
+  return `${base}?media_type=${initial}`;
+}
+
 export default function BrandCard({
   kind,
   card,
   defaultMediaTypeForGenre = "movie",
 }: BrandCardProps) {
-  const navigate = useNavigate();
-  const isGenre = kind === "genre";
-
-  function handleClick() {
-    const base = `/requests/browse/${kind}/${encodeURIComponent(card.slug)}`;
-    if (kind === "genre") {
-      const initial =
-        card.series_supported && defaultMediaTypeForGenre === "series" ? "series" : "movie";
-      navigate(`${base}?media_type=${initial}`);
-      return;
-    }
-    navigate(base);
-  }
+  const href = brandBrowseHref(kind, card, defaultMediaTypeForGenre);
 
   const baseClasses =
     "group relative flex h-28 w-52 flex-none transform-gpu cursor-pointer items-center justify-center overflow-hidden rounded-xl shadow-sm ring-1 transition duration-300 ease-in-out hover:scale-[1.03] focus:scale-[1.03] focus:outline-none sm:h-32 sm:w-64";
 
-  if (isGenre) {
+  if (kind === "genre") {
     const background = `linear-gradient(135deg, ${card.gradient_from ?? "#475569"}, ${card.gradient_to ?? "#0f172a"})`;
     return (
-      <button
-        type="button"
-        onClick={handleClick}
+      <Link
+        to={href}
         aria-label={card.display_name}
         className={cn(
           baseClasses,
@@ -46,14 +46,13 @@ export default function BrandCard({
         <span className="px-3 text-center text-base leading-tight font-semibold text-white drop-shadow">
           {card.display_name}
         </span>
-      </button>
+      </Link>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <Link
+      to={href}
       aria-label={card.display_name}
       className={cn(
         baseClasses,
@@ -63,7 +62,7 @@ export default function BrandCard({
       {card.logo_url ? (
         <img
           src={card.logo_url}
-          alt={card.display_name}
+          alt=""
           loading="lazy"
           className="h-full w-full object-contain px-6 py-7 sm:px-8 sm:py-8"
         />
@@ -72,6 +71,6 @@ export default function BrandCard({
           {card.display_name}
         </span>
       )}
-    </button>
+    </Link>
   );
 }

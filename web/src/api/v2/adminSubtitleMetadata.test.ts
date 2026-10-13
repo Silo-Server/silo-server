@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import {
   captureAdminSubtitleEditIntent,
@@ -53,6 +53,8 @@ it("reads canonical state once and sends only the patch with the original strong
 it.each([401, 412, 503])(
   "does not reread, replay or adopt an error validator after %s",
   async (status) => {
+    setAccessToken("synthetic-admin");
+    setRefreshToken("synthetic-refresh");
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(json(row))

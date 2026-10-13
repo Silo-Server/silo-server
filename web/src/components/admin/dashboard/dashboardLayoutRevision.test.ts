@@ -140,10 +140,15 @@ it("cleanup flush preserves the original read validator", async () => {
   const { result, unmount } = renderHook(useDashboardLayout, fixture());
   await settle();
   await settle();
-  act(() => result.current.resizeWidget("users", { span: 6 }));
+  act(() => result.current.resizeWidget("users", { span: 6, rows: 5 }));
+  expect(writes).toHaveLength(0);
   unmount();
   await settle();
   expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]!.body)).layout).toEqual({
+    version: 1,
+    entries: [{ id: "users", span: 6, rows: 5 }],
+  });
   expect(new Headers(writes[0]!.headers).get("If-Match")).toBe('"A"');
 });
 

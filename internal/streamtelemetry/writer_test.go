@@ -3,6 +3,7 @@ package streamtelemetry
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -89,22 +90,44 @@ func TestObservedWriterPanicReleasesUnknownAndPropagates(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
 }
 
-type optionalWriter struct{ *httptest.ResponseRecorder }
+type optionalWriter struct {
+	*httptest.ResponseRecorder
+	hijackErr   error
+	pushErr     error
+	pushTarget  string
+	pushOptions *http.PushOptions
+}
 
-func (w *optionalWriter) Flush()                                       {}
-func (w *optionalWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }
-func (w *optionalWriter) Push(string, *http.PushOptions) error         { return nil }
+func (w *optionalWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, w.hijackErr
+}
+func (w *optionalWriter) Push(target string, options *http.PushOptions) error {
+	w.pushTarget, w.pushOptions = target, options
+	return w.pushErr
+}
 
 func TestObservedWriterPreservesOptionalInterfaces(t *testing.T) {
 	obs := newObservation(nil, MediaRoute{}, CaptureSet{})
-	w := &observedWriter{w: &optionalWriter{httptest.NewRecorder()}, observation: obs, bodyEligible: true}
-	if _, _, err := w.Hijack(); err != nil {
-		t.Fatal(err)
+	underlying := &optionalWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		hijackErr:        errors.New("hijack failed"),
+		pushErr:          errors.New("push failed"),
 	}
-	if err := w.Push("/asset", nil); err != nil {
-		t.Fatal(err)
+	w := &observedWriter{w: underlying, observation: obs, bodyEligible: true}
+	if _, _, err := w.Hijack(); !errors.Is(err, underlying.hijackErr) {
+		t.Fatalf("Hijack error = %v, want underlying error", err)
+	}
+	options := &http.PushOptions{Method: http.MethodGet}
+	if err := w.Push("/asset", options); !errors.Is(err, underlying.pushErr) {
+		t.Fatalf("Push error = %v, want underlying error", err)
+	}
+	if underlying.pushTarget != "/asset" || underlying.pushOptions != options {
+		t.Fatalf("Push forwarded %q, %v", underlying.pushTarget, underlying.pushOptions)
 	}
 	w.Flush()
+	if !underlying.Flushed {
+		t.Fatal("Flush did not reach the underlying writer")
+	}
 }
 
 type failingResponseWriter struct{ err error }

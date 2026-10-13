@@ -67,7 +67,7 @@ it("mints under captured authority once, with no authentication replay", async (
   expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("profile-a");
 });
 
-it("refuses a wrong protocol, a 403, and a stale authority without retrying", async () => {
+it("refuses a wrong protocol, a 401, and a stale authority without retrying", async () => {
   const authority = captureProfileRequestContext()!;
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ticketResponse("silo.events.v2")));
   await expect(mintAdminLogsSocketTicket(authority)).rejects.toThrow(
@@ -76,13 +76,13 @@ it("refuses a wrong protocol, a 403, and a stale authority without retrying", as
   const denied = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({
-        type: "https://silo.dev/problems/permission_denied",
-        title: "Forbidden",
-        status: 403,
+        type: "https://silo.dev/problems/authentication_required",
+        title: "Authentication required",
+        status: 401,
         detail: "synthetic",
         instance: "synthetic",
       }),
-      { status: 403, headers: { "Content-Type": "application/problem+json" } },
+      { status: 401, headers: { "Content-Type": "application/problem+json" } },
     ),
   );
   vi.stubGlobal("fetch", denied);

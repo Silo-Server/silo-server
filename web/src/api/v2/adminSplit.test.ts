@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId } from "@/api/client";
+import { setAccessToken, setProfileId, setRefreshToken } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { getAdminItemFiles, splitAdminItem } from "./adminSplit";
 beforeEach(() => {
@@ -36,6 +36,7 @@ it("rejects a repeated file cursor", async () => {
   expect(mock).toHaveBeenCalledTimes(2);
 });
 it("does not replay split after401", async () => {
+  setRefreshToken("synthetic-refresh");
   const mock = vi.fn<typeof fetch>(async () => jsonResponse({ message: "Expired" }, 401));
   vi.stubGlobal("fetch", mock);
   await expect(

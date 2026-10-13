@@ -128,13 +128,7 @@ export default function EbookContent({
             advisorySource={item.advisory_source || undefined}
           />
         }
-        scoreRow={
-          <ScoreRow
-            ratingImdb={item.rating_imdb}
-            ratingRtCritic={item.rating_rt_critic}
-            ratingRtAudience={item.rating_rt_audience}
-          />
-        }
+        scoreRow={<ScoreRow ratings={item.ratings} />}
         overview={item.overview}
         crewLine={
           authors.length > 0 ? (

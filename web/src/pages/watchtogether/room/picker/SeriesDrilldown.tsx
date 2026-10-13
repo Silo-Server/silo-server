@@ -4,7 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSeasons, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { cn } from "@/lib/utils";
 import type { EpisodeListItem, Season } from "@/api/types";
 import type { ItemMemberState } from "@/api/v2/watchTogetherMemberState";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
@@ -86,14 +89,16 @@ function seasonProgressLabel(season: Season) {
   return `${seen} of ${total} watched`;
 }
 
-function EpisodeStill({ episode }: { episode: EpisodeListItem }) {
+function EpisodeStill({ episode, hidden }: { episode: EpisodeListItem; hidden: boolean }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhash = episode.still_thumbhash ? decodeThumbhash(episode.still_thumbhash) : "";
   return (
     <div
       className="media-card-image bg-surface hidden aspect-video w-28 shrink-0 @xl:block @3xl:w-36"
       style={
-        thumbhash ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" } : undefined
+        !hidden && thumbhash
+          ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" }
+          : undefined
       }
     >
       {episode.still_url ? (
@@ -102,7 +107,11 @@ function EpisodeStill({ episode }: { episode: EpisodeListItem }) {
           alt=""
           loading="lazy"
           onLoad={() => setLoaded(true)}
-          className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+          className={cn(
+            "h-full w-full object-cover transition-opacity duration-300",
+            loaded ? "opacity-100" : "opacity-0",
+            hidden && SPOILER_IMAGE_CLASS,
+          )}
         />
       ) : null}
     </div>
@@ -146,18 +155,28 @@ export function SeriesDrilldown({
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
   const item = detail.data;
   const seasons = useSeasons(series.content_id);
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
   const [season, setSeason] = useState<number | null>(initialSeason ?? null);
+  // Without a season from the shelf, open where the viewer left off: the
+  // season of the series' play target. The detail carries that season with
+  // the target, so the season list's own targets need not agree with it; wait
+  // for a detail refetch so a stale copy does not choose.
+  const playSeasonNumber = item?.play_season_number;
+  const resolvingSeason = seasons.isLoading || detail.isFetching;
   useEffect(() => {
-    if (season === null && seasonList.length > 0) {
-      const first = seasonList.find((s) => !s.is_specials) ?? seasonList[0]!;
-      setSeason(first.season_number);
-    }
-  }, [season, seasonList]);
+    if (season !== null || seasonList.length === 0 || resolvingSeason) return;
+    const resume = seasonList.find((s) => s.season_number === playSeasonNumber);
+    const first = resume ?? seasonList.find((s) => !s.is_specials) ?? seasonList[0]!;
+    setSeason(first.season_number);
+  }, [season, seasonList, resolvingSeason, playSeasonNumber]);
   const episodesQuery = useSeasonEpisodes(
     season === null ? undefined : series.content_id,
     season ?? -1,
   );
+  // Until a season is chosen the episode query is idle; keep the skeletons up
+  // rather than flash an empty season.
+  const loadingEpisodes = episodesQuery.isLoading || (season === null && resolvingSeason);
   const episodes = useMemo(
     () => (episodesQuery.data?.episodes ?? []).filter((e) => e.files.length > 0),
     [episodesQuery.data?.episodes],
@@ -302,9 +321,7 @@ export function SeriesDrilldown({
                   ? "Specials"
                   : `Season ${currentSeason.season_number}`
                 : "Episodes"}
-              {!episodesQuery.isLoading && episodes.length > 0
-                ? ` · ${episodes.length} episodes`
-                : ""}
+              {!loadingEpisodes && episodes.length > 0 ? ` · ${episodes.length} episodes` : ""}
             </span>
             {members.length > 0 ? (
               <span className="hidden @xl:block">
@@ -316,13 +333,14 @@ export function SeriesDrilldown({
             ref={listRef}
             className="overlay-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2"
           >
-            {episodesQuery.isLoading
+            {loadingEpisodes
               ? Array.from({ length: 5 }).map((_, i) => (
                   <li key={i} className="bg-surface h-20 animate-pulse rounded-lg" />
                 ))
               : episodes.map((episode) => {
                   const isNext = nextUp?.episode.content_id === episode.content_id;
                   const isPicked = picked?.episode.content_id === episode.content_id;
+                  const unwatched = isEpisodeUnwatched(episode.user_data);
                   const pick = () =>
                     onPick({ episode, series, seasonNumber: season ?? episode.season_number });
                   return (
@@ -343,7 +361,14 @@ export function SeriesDrilldown({
                         aria-label={pickLabel(episode)}
                         className="flex min-w-0 flex-1 items-start gap-3 text-left"
                       >
-                        <EpisodeStill episode={episode} />
+                        <EpisodeStill
+                          episode={episode}
+                          hidden={
+                            spoilerPrefs.hideImages &&
+                            unwatched &&
+                            isEpisodeStill(episode.still_is_episode_still)
+                          }
+                        />
                         <span className="min-w-0 flex-1">
                           {isNext && nextUp ? (
                             <span className="block text-[10px] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
@@ -359,7 +384,7 @@ export function SeriesDrilldown({
                               {episode.runtime ? `${episode.runtime}m` : ""}
                             </span>
                           </span>
-                          {episode.overview ? (
+                          {episode.overview && !(spoilerPrefs.hideOverviews && unwatched) ? (
                             <span className="text-muted-foreground mt-0.5 line-clamp-2 text-xs leading-relaxed">
                               {episode.overview}
                             </span>
@@ -386,7 +411,7 @@ export function SeriesDrilldown({
                     </li>
                   );
                 })}
-            {!episodesQuery.isLoading && episodes.length === 0 ? (
+            {!loadingEpisodes && episodes.length === 0 ? (
               <li className="text-muted-foreground px-2 py-8 text-center text-sm">
                 No playable episodes in this season.
               </li>

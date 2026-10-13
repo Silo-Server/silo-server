@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
@@ -25,6 +26,7 @@ type AdminPlaybackHistoryListInput struct {
 	ProfileID   string `query:"profile_id" maxLength:"1024" doc:"Only attempts by this household profile"`
 	MediaItemID string `query:"media_item_id" maxLength:"1024" doc:"Only attempts of this catalog item"`
 	Completed   string `query:"completed" enum:"all,true,false" default:"all" doc:"Completion filter; all returns every finalized attempt"`
+	EndedAfter  string `query:"ended_after" format:"date-time" doc:"Only attempts that ended at or after this instant"`
 }
 
 // AdminPlaybackHistoryEntry is one finalized playback attempt as an
@@ -46,6 +48,9 @@ type AdminPlaybackHistoryEntry struct {
 	WatchedSeconds  float64  `json:"watched_seconds"`
 	DurationSeconds *float64 `json:"duration_seconds" nullable:"true" doc:"Media duration when known"`
 	Completed       bool     `json:"completed"`
+	SeriesTitle     string   `json:"series_title" doc:"Series title for an episode; empty otherwise"`
+	SeasonNumber    *int     `json:"season_number" nullable:"true" doc:"Episode season; null when not an episode"`
+	EpisodeNumber   *int     `json:"episode_number" nullable:"true" doc:"Episode number; null when not an episode"`
 }
 
 // AdminPlaybackHistoryCollection is the named envelope the contract carries.
@@ -83,6 +88,13 @@ func registerAdminPlaybackHistory(reg *Registry) {
 			// Huma already restricted the value to the enum.
 			filter.Completed = new(in.Completed == strconv.FormatBool(true))
 		}
+		if value := strings.TrimSpace(in.EndedAfter); value != "" {
+			at, err := time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				return nil, NewProblem(TypeValidationFailed, "Invalid ended_after.")
+			}
+			filter.EndedAfter = new(at.UTC())
+		}
 		filterJSON, _ := json.Marshal(struct {
 			Filter handlers.AdminPlaybackHistoryFilter
 			Limit  int
@@ -110,6 +122,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 				MediaFileID: IDFromInt(int64(row.MediaFileID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
 				PlayMethod: row.PlayMethod, StartedAt: NewInstant(row.StartedAt), EndedAt: NewInstant(row.EndedAt),
 				WatchedSeconds: row.WatchedSeconds, DurationSeconds: row.DurationSeconds, Completed: row.Completed,
+				SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
 			})
 		}
 		next := ""

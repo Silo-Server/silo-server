@@ -10,11 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,6 +71,7 @@ type System struct {
 	EmailVerification *EmailVerificationService
 
 	mailSender                mail.Sender
+	emailBrand                *mail.BrandLoader
 	emailVerificationDispatch *emailVerificationDispatcher
 	emailWorker               *accountChannelWorker[string]
 	discordWorker             *accountChannelWorker[int]
@@ -95,6 +98,9 @@ type System struct {
 
 	pool   *pgxpool.Pool
 	stores userstore.UserStoreProvider
+	// scopes resolves a recipient's current access before a delivery that
+	// names a catalog item is created.
+	scopes ScopeResolver
 	users  UserLister
 	images ImageURLResolver
 	logger *slog.Logger
@@ -103,7 +109,8 @@ type System struct {
 
 // NewSystem wires the notification system. hub may be nil (no realtime
 // publishing); redisClient may be nil (in-memory websocket tickets);
-// mailSender may be nil (no email channel).
+// mailSender may be nil (no email channel); emailBrand may be nil (emails
+// carry Silo's default branding).
 func NewSystem(
 	pool *pgxpool.Pool,
 	settingsReader SettingReader,
@@ -114,6 +121,7 @@ func NewSystem(
 	redisClient *redis.Client,
 	cipher *secret.Cipher,
 	mailSender mail.Sender,
+	emailBrand *mail.BrandLoader,
 ) *System {
 	settings := NewSettings(settingsReader)
 	releases := NewReleaseRepository(pool)
@@ -145,6 +153,10 @@ func NewSystem(
 		pushDeviceRepo = NewPushDeviceRepository(pool)
 		pushDeviceService = NewPushDeviceService(pushDeviceRepo, cipher)
 		pushSenderInst = newPushSender(pushDeviceRepo, deliveries, cipher, settings)
+		// Pushes name the identity getServerIdentity reports, read through the
+		// raw settings repo as it is: a SECRET_KEY rotation must not change
+		// who the server is.
+		pushSenderInst.serverID = serveridentity.New(catalog.NewServerSettingsRepo(pool)).ServerID
 		pushDispatcher = newPushDispatcher(pushSenderInst)
 		dispatchers = append(dispatchers, pushDispatcher)
 	}
@@ -187,6 +199,7 @@ func NewSystem(
 			deliveries: deliveries,
 			settings:   settings,
 			sender:     mailSender,
+			brand:      emailBrand,
 		}
 		emailWorker = newAccountChannelWorker(pool, emailChannelInst)
 		dispatchers = append(dispatchers, newNudgeDispatcher(emailWorker))
@@ -201,7 +214,7 @@ func NewSystem(
 	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
-	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, multiDispatcher)
+	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, scopes, multiDispatcher)
 	if webhookRepo != nil {
 		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
 	}
@@ -235,6 +248,7 @@ func NewSystem(
 		EmailPrefs:          emailPrefs,
 		DiscordPrefs:        discordPrefs,
 		mailSender:          mailSender,
+		emailBrand:          emailBrand,
 		emailWorker:         emailWorker,
 		discordWorker:       discordWorker,
 		discordClient:       discordClient,
@@ -250,6 +264,7 @@ func NewSystem(
 		dispatcher:          multiDispatcher,
 		pool:                pool,
 		stores:              stores,
+		scopes:              scopes,
 		users:               users,
 		logger:              slog.Default().With("component", "notifications.system"),
 	}
@@ -257,7 +272,7 @@ func NewSystem(
 		// emailPrefs is only built with a mail sender, so the dispatcher
 		// always accompanies the admission service.
 		system.emailVerificationDispatch = newEmailVerificationDispatcher(emailPrefs, cipher, mailSender)
-		system.EmailVerification = &EmailVerificationService{store: emailPrefs, cipher: cipher, profile: system.lookupProfile, linkBase: system.emailLinkBase, dispatch: system.emailVerificationDispatch}
+		system.EmailVerification = &EmailVerificationService{store: emailPrefs, cipher: cipher, profile: system.lookupProfile, linkBase: system.emailLinkBase, brand: emailBrand, dispatch: system.emailVerificationDispatch}
 	}
 	wsDispatcher.payload = system.PayloadForRow
 	if emailChannelInst != nil {

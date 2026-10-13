@@ -237,3 +237,24 @@ func TestParseBuildNumber(t *testing.T) {
 		}
 	}
 }
+
+// Go refuses to send a request whose header value holds a control character,
+// so an odd injected revision must not reach the User-Agent verbatim.
+func TestUserAgentForKeepsHeaderTokenCharacters(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		info Info
+		want string
+	}{
+		{info: Info{Available: true, Display: "ce6a0f53+dirty"}, want: "Silo/ce6a0f53+dirty"},
+		{info: Info{Available: true, Display: "ce6a 0f53\r\n"}, want: "Silo/ce6a0f53"},
+		{info: Info{Available: true, Display: "\n"}, want: "Silo/dev"},
+		{info: unavailableInfo(), want: "Silo/dev"},
+	}
+	for _, tt := range tests {
+		if got := userAgentFor(tt.info); got != tt.want {
+			t.Errorf("userAgentFor(%q) = %q, want %q", tt.info.Display, got, tt.want)
+		}
+	}
+}

@@ -41,6 +41,28 @@ type FormFields<Op> = [FormOf<Op>] extends [never]
   ? never
   : { [P in keyof FormOf<Op>]: Blob | string };
 
+// Session headers come from PlayerConfig; a caller supplies only the
+// operation's own headers, such as an If-Match validator.
+type SessionHeader = "authorization" | "x-profile-id" | "x-profile-token" | "x-device-id";
+type HeadersOf<Op> = Op extends { parameters: { header?: infer H extends object } }
+  ? [H] extends [never]
+    ? never
+    : {
+        [Key in keyof H as Key extends string
+          ? Lowercase<Key> extends SessionHeader
+            ? never
+            : Key
+          : Key]: H[Key];
+      }
+  : never;
+type HeaderOptions<Op> = [HeadersOf<Op>] extends [never]
+  ? unknown
+  : keyof HeadersOf<Op> extends never
+    ? unknown
+    : Record<never, never> extends HeadersOf<Op>
+      ? { headers?: HeadersOf<Op> }
+      : { headers: HeadersOf<Op> };
+
 type SuccessStatus = 200 | 201 | 202 | 203 | 204;
 
 type SuccessOf<Op> = Op extends { responses: infer R }
@@ -60,9 +82,12 @@ export type PlayerV2Body<K extends PlayerV2Key> = BodyOf<OperationOf<K>>;
 export type PlayerV2Options<K extends PlayerV2Key> = {
   signal?: AbortSignal;
   query?: QueryOf<OperationOf<K>>;
-} & ([PathParamsOf<OperationOf<K>>] extends [never]
-  ? unknown
-  : { path: PathParamsOf<OperationOf<K>> }) &
+  /** Inspect a successful response's metadata, such as its ETag. */
+  onResponse?: (response: Response) => void;
+} & HeaderOptions<OperationOf<K>> &
+  ([PathParamsOf<OperationOf<K>>] extends [never]
+    ? unknown
+    : { path: PathParamsOf<OperationOf<K>> }) &
   ([PlayerV2Body<K>] extends [never] ? unknown : { body: PlayerV2Body<K> }) &
   ([FormFields<OperationOf<K>>] extends [never] ? unknown : { form: FormFields<OperationOf<K>> });
 
@@ -91,6 +116,14 @@ function buildV2Url(route: string, pathParams: Record<string, string | number> |
   });
 }
 
+function definedHeaders(headers: Record<string, string | undefined> | undefined) {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (value !== undefined) out[name] = value;
+  }
+  return out;
+}
+
 /**
  * Performs one v2 request with the player's own credentials. Resolves to the
  * decoded 2xx body (undefined for an empty response) and throws
@@ -102,8 +135,10 @@ export async function playerV2<K extends PlayerV2Key>(
   options: PlayerV2Options<K>,
 ): Promise<SuccessOf<OperationOf<K>>> {
   const [method, route] = key.split(" ", 2) as [string, string];
-  const { signal, path, query, body, form } = options as {
+  const { signal, path, query, body, form, headers, onResponse } = options as {
     signal?: AbortSignal;
+    headers?: Record<string, string | undefined>;
+    onResponse?: (response: Response) => void;
     path?: Record<string, string | number>;
     query?: Record<string, unknown>;
     body?: unknown;
@@ -130,7 +165,7 @@ export async function playerV2<K extends PlayerV2Key>(
     `${playerV2Origin(config)}${buildV2Url(route, path)}${search}`,
     {
       method,
-      headers: { Accept: "application/json" },
+      headers: { ...definedHeaders(headers), Accept: "application/json" },
       signal,
       body: requestBody,
     },
@@ -154,6 +189,7 @@ export async function playerV2<K extends PlayerV2Key>(
     throw new PlayerFetchError(res.status, message, code, text);
   }
 
+  onResponse?.(res);
   if (text.trim() === "") return undefined as SuccessOf<OperationOf<K>>;
   return JSON.parse(text) as SuccessOf<OperationOf<K>>;
 }

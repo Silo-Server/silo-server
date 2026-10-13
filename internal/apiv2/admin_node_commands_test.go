@@ -32,12 +32,15 @@ func (f *fakeNodeCommands) ReprobeAdminNode(_ http.ResponseWriter, r *http.Reque
 	return handlers.ReprobeNodeResult{NodeID: id, Status: "error", Error: "private-worker-detail"}, f.err
 }
 func TestAdminNodeCommands(t *testing.T) {
+	f := new(fakeNodeCommands)
+	deps := pilotDeps(nil, nil)
+	deps.AdminNodeCommands = f
+	h := NewHandler(deps)
+	deps.AdminNodeCommands = nil
+	missing := NewHandler(deps)
 	for _, suffix := range []string{"check", "reprobe"} {
 		t.Run(suffix, func(t *testing.T) {
-			f := new(fakeNodeCommands)
-			deps := pilotDeps(nil, nil)
-			deps.AdminNodeCommands = f
-			h := NewHandler(deps)
+			*f = fakeNodeCommands{}
 			path := Prefix + "/admin/nodes/17/" + suffix
 			requireProblem(t, do(t, h, "POST", path, "", nil), TypeAuthenticationRequired)
 			requireProblem(t, do(t, h, "POST", path, "", bearer(memberToken)), TypePermissionDenied)
@@ -71,8 +74,7 @@ func TestAdminNodeCommands(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			deps.AdminNodeCommands = nil
-			requireProblem(t, do(t, NewHandler(deps), "POST", path, "", bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, "POST", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }

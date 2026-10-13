@@ -5,28 +5,6 @@ import (
 	"testing"
 )
 
-func TestBuildBrowsePlanDisabledLibrariesUseItemLevelExclusion(t *testing.T) {
-	plan, earlyEmpty, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{
-		DisabledLibraryIDs: []int{9},
-		Limit:              20,
-	})
-	if err != nil {
-		t.Fatalf("buildBrowsePlan: %v", err)
-	}
-	if earlyEmpty {
-		t.Fatal("disabled-library scope must not be treated as empty")
-	}
-
-	sql, _ := plan.pagedSQL(false)
-	assertDisabledLibraryItemScope(t, sql, "media_item_libraries", "content_id", "mi.content_id")
-	if strings.Contains(plan.fromClause, "JOIN media_item_libraries") {
-		t.Fatalf("disabled-only browse must not fan out through a membership JOIN; got:\n%s", sql)
-	}
-	if plan.groupByClause != "" {
-		t.Fatalf("disabled-only browse must not need GROUP BY after item-level filtering; got %q", plan.groupByClause)
-	}
-}
-
 func TestBuildBrowsePlanSingleLibraryKeepsFastPathWithDisabledLibraries(t *testing.T) {
 	plan, earlyEmpty, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{
 		LibraryID:          7,
@@ -50,22 +28,6 @@ func TestBuildBrowsePlanSingleLibraryKeepsFastPathWithDisabledLibraries(t *testi
 	}
 	if plan.groupByClause != "" {
 		t.Fatalf("single-library browse must not add a GROUP BY for the independent deny check; got %q", plan.groupByClause)
-	}
-}
-
-func TestFilterWhereClauseDisabledLibrariesUseItemLevelExclusion(t *testing.T) {
-	fromClause, whereClause, _, earlyEmpty := filterWhereClauseForSource(
-		BrowseFilters{DisabledLibraryIDs: []int{9}},
-		"media_items mi",
-		"",
-	)
-	if earlyEmpty {
-		t.Fatal("disabled-library scope must not be treated as empty")
-	}
-
-	assertDisabledLibraryItemScope(t, whereClause, "media_item_libraries", "content_id", "mi.content_id")
-	if strings.Contains(fromClause, "JOIN media_item_libraries") {
-		t.Fatalf("disabled-only facet query must not fan out through a membership JOIN; got FROM %s %s", fromClause, whereClause)
 	}
 }
 

@@ -64,11 +64,12 @@ describe("SecretField", () => {
   it("shows a password input when nothing is saved", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<Harness configured={false} onChange={onChange} />);
+    render(<Harness configured={false} onChange={onChange} onClear={vi.fn()} />);
 
     const input = screen.getByLabelText("Secret key");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("placeholder", "Not configured");
+    expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
     await user.type(input, "abc");
     expect(onChange).toHaveBeenLastCalledWith("abc");
   });
@@ -86,6 +87,7 @@ describe("SecretField", () => {
       screen.getByText("Type to replace the saved value; leave blank to keep it."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
 
     await user.type(input, "new-secret");
     expect(onChange).toHaveBeenLastCalledWith("new-secret");
@@ -134,42 +136,19 @@ describe("SecretField", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
-  it("offers no clear action on a page that owns its own clear", () => {
-    render(<Harness configured />);
-
-    expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
-  });
-
-  it("offers no clear action while nothing is saved", () => {
-    render(<Harness configured={false} onClear={vi.fn()} />);
-
-    expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
-  });
-
   it("offers no clear action while the field is read-only", () => {
     render(<Harness configured onClear={vi.fn()} disabled />);
 
     expect(screen.queryByRole("button", CLEAR)).not.toBeInTheDocument();
   });
 
-  it("stages a clear from an action that carries a border at rest", async () => {
-    const user = userEvent.setup();
-    const onClear = vi.fn();
-    render(<Harness configured onClear={onClear} />);
-
-    const action = screen.getByRole("button", CLEAR);
-    // Never `ghost`: an action that only appears on hover is invisible to the
-    // admins who need it.
-    expect(action).toHaveAttribute("data-variant", "outline");
-    await user.click(action);
-    expect(onClear).toHaveBeenCalled();
-  });
-
   it("says a staged clear will be saved, and offers to keep the value instead", async () => {
     const user = userEvent.setup();
     render(<FormHarness />);
 
-    await user.click(screen.getByRole("button", CLEAR));
+    const action = screen.getByRole("button", CLEAR);
+    expect(action).toHaveAttribute("data-variant", "outline");
+    await user.click(action);
 
     const input = screen.getByLabelText("Secret key");
     expect(input).toHaveAttribute("placeholder", "Will be cleared on save");

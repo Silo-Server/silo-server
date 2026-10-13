@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -123,7 +124,7 @@ func TestRunPlacesVideoCreditsOnALoneEpisode(t *testing.T) {
 		credits[0].Source != models.MarkerSourceScanner {
 		t.Fatalf("credits patches %+v", credits)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete ||
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete ||
 		artifact.PayloadFormat != creditsTailFormat || artifact.ItemCount != 445 || artifact.ConfigHash != creditsTailKey().ConfigHash {
 		t.Fatalf("tail artifact %+v", artifact)
 	}
@@ -182,7 +183,7 @@ func TestCreditsTailPassFingerprintsInTheSameRun(t *testing.T) {
 		t.Fatalf("summary %+v, want the season's audio to place all three", summary)
 	}
 	for _, candidate := range candidates {
-		if artifact := repo.artifact(candidate.FileID, ArtifactKindCreditsFingerprint); artifact.Status != ArtifactComplete || artifact.ItemCount == 0 {
+		if artifact := repo.artifact(candidate.FileID, ArtifactKindCreditsFingerprint); artifact.Status != mediaartifact.StatusComplete || artifact.ItemCount == 0 {
 			t.Fatalf("file %d fingerprint artifact %+v", candidate.FileID, artifact)
 		}
 	}
@@ -295,7 +296,7 @@ func TestCreditsTailUnusableFilesAreNotDecodedAgain(t *testing.T) {
 				if artifact.Status != "" {
 					t.Fatalf("artifact %+v, want none stored for %q", artifact, tt.detail)
 				}
-			} else if artifact.Status != ArtifactUnusable || artifact.Detail != tt.detail {
+			} else if artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != tt.detail {
 				t.Fatalf("artifact %+v, want unusable with %q", artifact, tt.detail)
 			}
 			if last := repo.upsertedStates[len(repo.upsertedStates)-1]; last.Status != seasonStatusNotFound {
@@ -353,7 +354,7 @@ func TestCreditsTailFailuresBackOff(t *testing.T) {
 	if sampler.callCount() != 2 || summary.CreditsVideoMarkersWritten != 1 {
 		t.Fatalf("%d tail passes, summary %+v; want another server to retry", sampler.callCount(), summary)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete {
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete {
 		t.Fatalf("artifact %+v, want the success stored", artifact)
 	}
 }
@@ -383,7 +384,7 @@ func TestCreditsTailPassWithoutAudio(t *testing.T) {
 	if extractor.creditsExtractCalls != 1 {
 		t.Fatalf("%d audio-only extractions, want one for the file without audio", extractor.creditsExtractCalls)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != ArtifactUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
+	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
 		t.Fatalf("fingerprint artifact %+v, want unusable with no_audio", artifact)
 	}
 	if summary.CreditsFingerprintErrors != 0 || len(repo.artifactFailures) != 0 {
@@ -411,15 +412,15 @@ func TestCreditsTailPassWithoutTheProbedStreams(t *testing.T) {
 	}
 	// File 1's audio was missing: its tail is kept and its fingerprint is
 	// stored as having no audio, like an audio-only run that finds none.
-	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete {
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete {
 		t.Fatalf("file 1 tail artifact %+v, want the video tail stored", artifact)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != ArtifactUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
+	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
 		t.Fatalf("file 1 fingerprint artifact %+v, want unusable with no_audio", artifact)
 	}
 	// File 2's video was missing: its tail is unusable, and its audio is
 	// fingerprinted on its own rather than assumed missing.
-	if artifact := repo.artifact(2, ArtifactKindCreditsTail); artifact.Status != ArtifactUnusable || artifact.Detail != string(mediasample.ReasonNoStream) {
+	if artifact := repo.artifact(2, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != string(mediasample.ReasonNoStream) {
 		t.Fatalf("file 2 tail artifact %+v, want unusable with no_stream", artifact)
 	}
 	if extractor.creditsExtractCalls != 1 {
@@ -444,7 +445,7 @@ func TestCreditsTailPassWithoutFramesIsRetried(t *testing.T) {
 	if summary.CreditsTailScanErrors != 1 || summary.CreditsTailUnusable != 0 || len(repo.artifactFailures) != 1 {
 		t.Fatalf("summary %+v with %d recorded failures", summary, len(repo.artifactFailures))
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status == ArtifactUnusable {
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status == mediaartifact.StatusUnusable {
 		t.Fatalf("artifact %+v, want no unusable tail", artifact)
 	}
 }
@@ -469,9 +470,9 @@ func TestCreditsTailAfterProbeRepair(t *testing.T) {
 			sampler := &fakeTailSampler{frames: endCreditsFrames}
 			analyzer, _ := tailAnalyzer(repo, sampler, "node-a")
 			if tt.legacy {
-				repo.artifacts = map[artifactSlot]Artifact{{1, ArtifactKindCreditsTail}: {
-					MediaFileID: 1, ArtifactKey: creditsTailKey(), ArtifactIdentity: tailWindow(candidate).identity(candidate),
-					Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+				repo.artifacts = map[artifactSlot]mediaartifact.Artifact{{1, ArtifactKindCreditsTail}: {
+					MediaFileID: 1, Key: creditsTailKey(), Identity: tailWindow(candidate).identity(candidate),
+					Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
 				}}
 			} else {
 				summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidate), analyzeGroupOptions{persistState: true, creditsTail: true})

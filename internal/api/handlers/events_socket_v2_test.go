@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,16 +18,22 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func socketTestHandler() (*EventsSocketV2, *atomic.Bool) {
-	invalid := new(atomic.Bool)
+// socketValidity is what the fixture validator answers: nil until a test
+// stores the error the next periodic check should fail with.
+type socketValidity struct{ err atomic.Pointer[error] }
+
+func (v *socketValidity) fail(err error) { v.err.Store(&err) }
+
+func socketTestHandler() (*EventsSocketV2, *socketValidity) {
+	validity := new(socketValidity)
 	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil), checkInterval: time.Millisecond * 10}
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
-		if invalid.Load() {
-			return ctx, nil, evt.ErrSocketTicket
+		if err := validity.err.Load(); err != nil {
+			return ctx, nil, *err
 		}
 		return ctx, &auth.Claims{UserID: proof.UserID, Role: proof.Role, SessionID: proof.SessionID}, nil
 	}
-	return h, invalid
+	return h, validity
 }
 func socketTestTicket(t *testing.T, h *EventsSocketV2, expires time.Time) string {
 	t.Helper()
@@ -79,7 +87,7 @@ func TestEventsSocketV2ProofOriginProtocolAndReplay(t *testing.T) {
 func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 	for _, expiry := range []bool{false, true} {
 		t.Run(map[bool]string{false: "revoked", true: "expired"}[expiry], func(t *testing.T) {
-			h, invalid := socketTestHandler()
+			h, validity := socketTestHandler()
 			server := httptest.NewServer(h)
 			defer server.Close()
 			until := time.Now().Add(time.Minute)
@@ -98,7 +106,7 @@ func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 				t.Fatal("connection did not become live", err)
 			}
 			if !expiry {
-				invalid.Store(true)
+				validity.fail(evt.ErrSocketTicket)
 			}
 			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			for {
@@ -117,9 +125,24 @@ func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 	}
 }
 
-type socketSessionFixture struct{ valid bool }
+// socketSessionFixture is one session of account: valid or ended, and a
+// remote-playback handoff bound to remoteProfile when that is set. Like the
+// repository, it reports the account's current role.
+type socketSessionFixture struct {
+	valid         bool
+	account       *socketUserFixture
+	remoteProfile string
+}
 
-func (s *socketSessionFixture) IsValid(context.Context, string) (bool, error) { return s.valid, nil }
+func (s *socketSessionFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+	if !s.valid {
+		return auth.SessionAuthority{}, false, nil
+	}
+	if s.remoteProfile != "" {
+		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: s.remoteProfile}, true, nil
+	}
+	return auth.SessionAuthority{Role: s.account.user.Role, Purpose: models.SessionPurposeAccount}, true, nil
+}
 
 type socketUserFixture struct{ user models.User }
 
@@ -136,8 +159,8 @@ func (s *socketViewerFixture) Resolve(context.Context, access.ResolveInput) (acc
 
 func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
 	events, _ := socketTestHandler()
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "secondary", ProfileVerified: true, PolicyRevision: 1}}
 	primaryFlag := false
 	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return primaryFlag, true, nil }, "")
@@ -154,29 +177,117 @@ func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
 	if err != nil || claims.Role == "admin" {
 		t.Fatal("secondary profile gained administrator channels")
 	}
-	primaryFlag = true
-	if _, _, err := h.Validate(t.Context(), proof); err == nil {
-		t.Fatal("changed administrator-profile authority accepted")
+	// Access changes under a valid session are told apart from a dead
+	// credential, and both still fail validation.
+	accessChanged := func(name string) {
+		t.Helper()
+		_, _, err := h.Validate(t.Context(), proof)
+		if !errors.Is(err, errSocketAccessChanged) || !errors.Is(err, evt.ErrSocketTicket) {
+			t.Fatalf("%s: error = %v, want an access change", name, err)
+		}
 	}
+	credentialEnded := func(name string) {
+		t.Helper()
+		_, _, err := h.Validate(t.Context(), proof)
+		if !errors.Is(err, evt.ErrSocketTicket) || errors.Is(err, errSocketAccessChanged) {
+			t.Fatalf("%s: error = %v, want an ended credential", name, err)
+		}
+	}
+	primaryFlag = true
+	accessChanged("changed administrator-profile authority")
 	primaryFlag = false
 	sessions.valid = false
-	if _, _, err := h.Validate(t.Context(), proof); err == nil {
-		t.Fatal("revoked session accepted")
-	}
+	credentialEnded("revoked session")
 	sessions.valid = true
 	users.user.Enabled = false
-	if _, _, err := h.Validate(t.Context(), proof); err == nil {
-		t.Fatal("disabled account accepted")
-	}
+	credentialEnded("disabled account")
 	users.user.Enabled = true
+	users.user.Role = "user"
+	accessChanged("changed account role")
+	users.user.Role = "admin"
 	viewer.scope.PolicyRevision++
-	if _, _, err := h.Validate(t.Context(), proof); err == nil {
-		t.Fatal("changed viewer policy accepted")
-	}
+	accessChanged("changed viewer policy")
 	viewer.scope.PolicyRevision--
+	viewer.scope.ProfileVerified = false
+	accessChanged("profile no longer verified")
+	viewer.scope.ProfileVerified = true
+	viewer.err = access.ErrProfileUnverified
+	accessChanged("stale profile token")
 	viewer.err = evt.ErrSocketTicket
-	if _, _, err := h.Validate(t.Context(), proof); err == nil {
-		t.Fatal("lost profile proof accepted")
+	credentialEnded("lost profile proof")
+	viewer.err = nil
+	// Preferences that fell back to their defaults during a failed read are
+	// not an access change, even though the fallback scope hashes
+	// differently.
+	viewer.scope.DisabledLibraryIDs = []int{3}
+	accessChanged("hidden libraries changed")
+	viewer.scope.PreferencesDegraded = true
+	if _, _, err := h.Validate(t.Context(), proof); err != nil {
+		t.Fatalf("degraded preferences: error = %v, want the check skipped", err)
+	}
+	// Nor does a ticket carry a fingerprint of fallback preferences.
+	if _, err := h.Mint(t.Context(), evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", ProfileID: "secondary", AccessExpiresAt: time.Now().Add(time.Minute)}); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("mint with degraded preferences: error = %v, want refused", err)
+	}
+}
+
+// readUntilClosed reads frames until the server ends the connection and
+// returns the text frames and the read error that ended it.
+func readUntilClosed(t *testing.T, conn *websocket.Conn) ([]string, error) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var frames []string
+	for {
+		_, body, err := conn.ReadMessage()
+		if err != nil {
+			if strings.Contains(err.Error(), "timeout") {
+				t.Fatal("connection was not closed")
+			}
+			return frames, err
+		}
+		frames = append(frames, strings.TrimSpace(string(body)))
+	}
+}
+
+func TestEventsSocketV2SignalsAccessChangeBeforeClosing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err        error
+		wantSignal bool
+	}{
+		"access changed":  {err: errSocketAccessChanged, wantSignal: true},
+		"session revoked": {err: evt.ErrSocketTicket},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, validity := socketTestHandler()
+			server := httptest.NewServer(h)
+			defer server.Close()
+			ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
+			dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+			conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_state", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			defer func() { _ = resp.Body.Close() }()
+			if _, _, err := conn.ReadMessage(); err != nil {
+				t.Fatal("connection did not become live", err)
+			}
+
+			validity.fail(tc.err)
+			frames, err := readUntilClosed(t, conn)
+
+			signaled := slices.Contains(frames, `{"type":"access_changed"}`)
+			var closeErr *websocket.CloseError
+			closedForAccess := errors.As(err, &closeErr) && closeErr.Code == EventsCloseAccessChanged && closeErr.Text == "access_changed"
+			if signaled != tc.wantSignal || closedForAccess != tc.wantSignal {
+				t.Fatalf("frames %q, close %v; want access_changed frame and close code 4001 = %v", frames, err, tc.wantSignal)
+			}
+			if tc.wantSignal && frames[len(frames)-1] != `{"type":"access_changed"}` {
+				t.Fatalf("frames %q: access_changed must be the last frame before the close", frames)
+			}
+		})
 	}
 }
 
@@ -212,5 +323,50 @@ func TestEventsSocketV2MalformedHandshakeDoesNotConsumeProof(t *testing.T) {
 				t.Fatal("malformed handshake consumed proof")
 			}
 		})
+	}
+}
+
+// A remote-playback handoff's ticket validates as its bound profile with the
+// account role "user", even on an admin account, and a ticket naming another
+// profile is refused.
+func TestSocketValidatorBindsRemotePlayback(t *testing.T) {
+	events, _ := socketTestHandler()
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	_, claims, err := h.Validate(t.Context(), identity)
+	if err != nil || claims.Role != "user" || !claims.IsRemotePlayback() || claims.IsOwnLoginSession() {
+		t.Fatalf("handoff ticket = %+v, %v", claims, err)
+	}
+	identity.ProfileID = "parent"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("ticket for another profile: %v", err)
+	}
+	// A ticket an older release minted with the admin role is an access
+	// change: the client fetches a new one.
+	identity.ProfileID, identity.Role = "kid", "admin"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("admin ticket for a handoff: %v", err)
+	}
+}
+
+// The Watch Together socket refuses a handoff's ticket, at the handshake and
+// on every recheck, even one naming the bound profile that the events socket
+// accepts: one minted before the session was bound, or by an older node.
+func TestWatchTogetherSocketRefusesRemotePlayback(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	primary := func(context.Context, int, string) (bool, bool, error) { return false, true, nil }
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	room := NewWatchTogetherSocketV2(nil, nil, sessions, users, viewer, primary, "")
+	if _, _, err := room.Validate(t.Context(), identity); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("handoff room ticket: %v", err)
+	}
+	sessions.remoteProfile = ""
+	if _, claims, err := room.Validate(t.Context(), identity); err != nil || claims.IsRemotePlayback() {
+		t.Fatalf("ordinary room ticket = %+v, %v", claims, err)
 	}
 }

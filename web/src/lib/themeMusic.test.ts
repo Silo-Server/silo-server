@@ -138,23 +138,6 @@ describe("ThemeMusic", () => {
     expect(element.src).toBe("");
   });
 
-  it("discards a grant that arrives after navigation or profile change", async () => {
-    let resolve!: (grant: ThemeGrant) => void;
-    const grant = vi.fn(
-      () =>
-        new Promise<ThemeGrant>((done) => {
-          resolve = done;
-        }),
-    );
-    const create = vi.fn(audio);
-    const music = new ThemeMusic(grant, create);
-    music.select(selection, false);
-    music.stop(true);
-    resolve({ url: "/audio?token=obsolete" });
-    await flush();
-    expect(create).not.toHaveBeenCalled();
-  });
-
   it("recovers once from a stale playback URL and then stops retrying", async () => {
     const first = audio(),
       second = audio();

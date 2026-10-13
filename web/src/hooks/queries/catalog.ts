@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { CatalogFiltersResponse, CatalogResponse } from "@/api/types";
 import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
@@ -19,6 +19,10 @@ import {
 // out interactive search against PostgreSQL.
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
+function catalogQueryFingerprint(state: CatalogSearchState): string {
+  return JSON.stringify([state.query_definition, state.sort_from_server, state.explicit_sort]);
+}
+
 function catalogParamsForKey(
   state: CatalogSearchState,
   limit: number,
@@ -35,7 +39,7 @@ function catalogParamsForKey(
     person_id: state.person_id,
     type: state.type_override ?? state.query_definition.media_scope,
     uses_source_order: state.uses_source_order,
-    query_fingerprint: JSON.stringify([state.query_definition, state.sort_from_server]),
+    query_fingerprint: catalogQueryFingerprint(state),
     include_total: includeTotal,
     limit,
   };
@@ -67,6 +71,7 @@ function catalogScopeQuery(state: CatalogSearchState): CatalogScopeQuery {
 }
 
 export interface CatalogPage extends CatalogResponse {
+  next_cursor?: string;
   search_diagnostics?: V2Result<"POST /api/v2/catalog/query">["search_diagnostics"];
 }
 
@@ -77,6 +82,7 @@ export async function fetchCatalogPage(
   options?: RequestInit,
   includeTotal = true,
   snapshot?: string,
+  nextCursor?: string,
 ): Promise<CatalogPage> {
   if (!Number.isInteger(offset) || offset < 0 || offset > MAX_CATALOG_SEEK) {
     throw new RangeError("Narrow your filters or search to browse beyond this result window.");
@@ -93,8 +99,8 @@ export async function fetchCatalogPage(
     query_limit: params.has("query_limit") ? Number(params.get("query_limit")) : undefined,
     limit,
     skip_total: includeTotal ? undefined : true,
-    cursor: snapshot,
-    seek: offset > 0 || snapshot !== undefined ? offset : undefined,
+    cursor: nextCursor || snapshot,
+    seek: nextCursor ? undefined : offset > 0 || snapshot !== undefined ? offset : undefined,
   };
   const result = await v2("POST /api/v2/catalog/query", {
     body,
@@ -106,6 +112,7 @@ export async function fetchCatalogPage(
     total_exact: result.total_exact,
     search_diagnostics: result.search_diagnostics,
     has_more: result.page?.has_more ?? false,
+    next_cursor: result.page?.next_cursor || undefined,
     snapshot: result.window_cursor,
     title: state.title,
     effective_sort: result.effective_sort
@@ -118,6 +125,31 @@ export async function fetchCatalogPage(
         }
       : undefined,
   };
+}
+
+/** The most items one `POST /api/v2/catalog/query` page may ask for (its `limit` maximum). */
+export const MAX_CATALOG_PAGE = 100;
+
+/**
+ * The items `state` lists, up to `max` (every one when `max` is omitted), read
+ * a page of at most `MAX_CATALOG_PAGE` at a time through the response cursor.
+ * Every page asks for the same `limit`: a cursor is bound to the one it was
+ * issued for, and a page may come back short with more to follow.
+ */
+export async function fetchCatalogItems(
+  state: CatalogSearchState,
+  options: { max?: number; signal?: AbortSignal } = {},
+): Promise<CatalogPage["items"]> {
+  const { max = Number.POSITIVE_INFINITY, signal } = options;
+  const limit = Math.min(MAX_CATALOG_PAGE, max);
+  const items: CatalogPage["items"] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await fetchCatalogPage(state, limit, 0, { signal }, false, undefined, cursor);
+    items.push(...page.items);
+    cursor = page.has_more ? page.next_cursor : undefined;
+  } while (cursor && items.length < max);
+  return items.slice(0, max);
 }
 
 export async function fetchCatalogFilters(
@@ -148,6 +180,8 @@ export type CatalogFacetName =
 
 export interface CatalogFacetSearchResponse {
   matches: string[];
+  /** The matches in the same order, each with its title count in scope. */
+  values: { value: string; count: number }[];
   has_more: boolean;
 }
 
@@ -184,6 +218,7 @@ export function useCatalogWindow(
     enabled?: boolean;
   } = {},
 ) {
+  const queryClient = useQueryClient();
   const limit = options.limit ?? 60;
   const includeTotal = options.includeTotal ?? true;
   const enabled = options.enabled ?? true;
@@ -196,12 +231,13 @@ export function useCatalogWindow(
   const visibleEndPage = Math.floor(visibleRange[1] / limit);
   const startPage = Math.max(0, visibleStartPage - bufferPages);
   const endPage = visibleEndPage + bufferPages;
+  const page0Key = catalogKeys.list({ ...page0Params, limit, offset: 0 });
 
-  // Fetch page 0 separately so its snapshot timestamp is available
+  // Fetch page 0 separately so its root window cursor is available
   // synchronously for subsequent page queries, preventing duplicate items
   // when new items are added between page fetches (e.g. during a scan).
   const page0Result = useQuery({
-    queryKey: catalogKeys.list({ ...page0Params, limit, offset: 0 }),
+    queryKey: page0Key,
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       fetchCatalogPage(state, limit, 0, { signal }, includeTotal),
     staleTime: 10 * 60 * 1000,
@@ -230,23 +266,97 @@ export function useCatalogWindow(
     return Array.from(indices).sort((a, b) => a - b);
   }, [endPage, startPage, lastKnownPage]);
 
+  const remainingPageOptions = {
+    staleTime: 10 * 60 * 1000,
+    ...(isInteractiveSearch
+      ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+      : {}),
+  };
+  const pageKey = (pageIndex: number) =>
+    pageIndex === 0
+      ? page0Key
+      : catalogKeys.list({ ...remainingPageParams, limit, offset: pageIndex * limit, snapshot });
+  const continuationCursor = (page: CatalogPage | undefined) =>
+    snapshot !== undefined &&
+    page?.snapshot === snapshot &&
+    page.items.length === limit &&
+    page.has_more
+      ? page.next_cursor
+      : undefined;
+  // A continuation is cheap only where the server can start an index scan at
+  // the cursor: title order over the catalog's own titles, not episodes or
+  // search. Elsewhere it scans from the first row like a seek does.
+  const apiParams = buildCatalogApiSearchParams(state);
+  const continuationIsIndexed =
+    state.source === "query" &&
+    !state.q &&
+    apiParams.get("type") !== "episode" &&
+    (apiParams.get("sort") ?? page0Result.data?.effective_sort?.field) === "title";
+  // Reuse a completed previous page. Where continuations are cheap, a jump
+  // seeks only for the first visible page and each later window page waits
+  // for the one before it; elsewhere every page of a jump seeks in parallel.
+  const fetchRemainingPage = async (pageIndex: number, signal: AbortSignal) => {
+    const previous = queryClient.getQueryState<CatalogPage>(pageKey(pageIndex - 1));
+    let nextCursor: string | undefined;
+    if (
+      previous?.status === "success" &&
+      previous.fetchStatus === "idle" &&
+      !previous.isInvalidated
+    ) {
+      nextCursor = continuationCursor(previous.data);
+    } else if (
+      continuationIsIndexed &&
+      pageIndex > visibleStartPage &&
+      remainingPageIndices.includes(pageIndex - 1) &&
+      (previous === undefined ||
+        previous.status === "pending" ||
+        previous.fetchStatus === "fetching")
+    ) {
+      nextCursor = continuationCursor(await awaitPage(pageIndex - 1, signal));
+    }
+    return fetchCatalogPage(
+      state,
+      limit,
+      pageIndex * limit,
+      { signal },
+      false,
+      snapshot,
+      nextCursor,
+    );
+  };
+  // Joins the previous page's request (or starts it); resolves undefined when
+  // it fails, so the caller seeks instead.
+  const awaitPage = (pageIndex: number, signal: AbortSignal) => {
+    const previous = queryClient
+      .fetchQuery({
+        ...remainingPageOptions,
+        queryKey: pageKey(pageIndex),
+        queryFn: ({ signal: previousSignal }) => fetchRemainingPage(pageIndex, previousSignal),
+      })
+      .catch(() => undefined);
+    const aborted = new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    return Promise.race([previous, aborted]);
+  };
+  // The page above a jump can't continue from anything, so it seeks too; when
+  // the rest of the jump seeks once, start it after the first visible page
+  // settles rather than alongside it.
+  const firstVisiblePage = queryClient.getQueryState(pageKey(visibleStartPage));
+  const firstVisiblePageSettled =
+    !remainingPageIndices.includes(visibleStartPage) ||
+    (firstVisiblePage !== undefined && firstVisiblePage.status !== "pending");
+
   const remainingResults = useQueries({
     queries: remainingPageIndices.map((pageIndex) => {
-      const offset = pageIndex * limit;
       return {
-        queryKey: catalogKeys.list({
-          ...remainingPageParams,
-          limit,
-          offset,
-          snapshot,
-        }),
-        queryFn: ({ signal }: { signal: AbortSignal }) =>
-          fetchCatalogPage(state, limit, offset, { signal }, false, snapshot),
-        staleTime: 10 * 60 * 1000,
-        ...(isInteractiveSearch
-          ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
-          : {}),
-        enabled: canFetchRemainingPages,
+        queryKey: pageKey(pageIndex),
+        queryFn: ({ signal }: { signal: AbortSignal }) => fetchRemainingPage(pageIndex, signal),
+        ...remainingPageOptions,
+        enabled:
+          canFetchRemainingPages &&
+          (!continuationIsIndexed || pageIndex >= visibleStartPage || firstVisiblePageSettled),
       };
     }),
   });
@@ -296,7 +406,7 @@ export function useCatalogWindow(
     collection_id: state.collection_id,
     person_id: state.person_id,
     type: state.type_override ?? state.query_definition.media_scope,
-    query_fingerprint: JSON.stringify([state.query_definition, state.sort_from_server]),
+    query_fingerprint: catalogQueryFingerprint(state),
     limit,
   });
 
@@ -315,6 +425,19 @@ export function useCatalogWindow(
     });
     return { maxLoadedEnd, highestPageHasMore };
   }, [limit, pageResults]);
+
+  // The furthest any page of this browse and snapshot has loaded. Pages
+  // scrolled out of the window drop out of `pageResults`, but the titles they
+  // returned still exist; a new snapshot starts over.
+  const loadedEndKey = `${estimateKey}|${snapshot ?? ""}`;
+  const [loadedEndMark, setLoadedEndMark] = useState({ key: loadedEndKey, end: 0 });
+  const loadedEnd = Math.max(
+    nonExactPageStats.maxLoadedEnd,
+    loadedEndMark.key === loadedEndKey ? loadedEndMark.end : 0,
+  );
+  if (loadedEndMark.key !== loadedEndKey || loadedEndMark.end < loadedEnd) {
+    setLoadedEndMark({ key: loadedEndKey, end: loadedEnd });
+  }
 
   const initialEstimatedTotalItems = useMemo(() => {
     if (page0Result.data?.total_exact !== false) {
@@ -379,6 +502,11 @@ export function useCatalogWindow(
     data: {
       title,
       totalItems,
+      // Items known to exist: the exact total when the source reports one,
+      // else the end of the furthest page loaded. Unlike `totalItems`, never
+      // the scroll runway estimated past it.
+      knownItems:
+        page0Result.data?.total_exact !== false ? (page0Result.data?.total ?? 0) : loadedEnd,
       pages,
       // Collection sources report the order they actually resolved in, after
       // the viewer's saved override and the collection's configured default.
@@ -404,25 +532,88 @@ export function useCatalogWindow(
   };
 }
 
+/**
+ * Whether a library holds any item at all, independent of the viewer's
+ * filters, search, and browse type. Reads one unfiltered item without a total
+ * so it stays cheap on large libraries; callers enable it only once their own
+ * view came back empty. It lives under the catalog list key for the library,
+ * so the catalog events a scan emits refresh it.
+ */
+export function useLibraryHasItems(libraryId: number, options: { enabled?: boolean } = {}) {
+  const state = createCatalogSearchState("query", {
+    library_id: libraryId,
+    query_definition: { ...createEmptyQueryDefinition(), library_ids: [libraryId] },
+  });
+  const limit = 1;
+  return useQuery({
+    queryKey: catalogKeys.list({ ...catalogParamsForKey(state, limit, false), offset: 0 }),
+    queryFn: ({ signal }) => fetchCatalogPage(state, limit, 0, { signal }, false),
+    select: (page: CatalogPage) => page.items.length > 0,
+    enabled: (options.enabled ?? true) && Number.isSafeInteger(libraryId) && libraryId > 0,
+    staleTime: 60 * 1000,
+  });
+}
+
+/** The letter index of a title-ordered browse; see `queryCatalogLetters`. */
+export type CatalogLetters = V2Result<"POST /api/v2/catalog/letters">;
+export type CatalogLetter = CatalogLetters["letters"][number];
+export type CatalogLetterRun = CatalogLetters["runs"][number];
+
+export async function fetchCatalogLetters(
+  state: CatalogSearchState,
+  options?: Pick<RequestInit, "signal">,
+): Promise<CatalogLetters> {
+  const scope = catalogScopeQuery(state);
+  const order = buildCatalogApiSearchParams(state).get("order");
+  return v2("POST /api/v2/catalog/letters", {
+    body: {
+      library_id: scope.library_id,
+      type: scope.type,
+      match: state.query_definition.match,
+      groups: state.query_definition.groups,
+      order: order === "desc" ? "desc" : "asc",
+    },
+    signal: options?.signal ?? undefined,
+  });
+}
+
+/**
+ * The letter index of a title-ordered query-source browse: how many titles
+ * file under each letter and the list position of each letter's first title,
+ * for an alphabetical jump bar. Keyed like the browse it indexes, so a filter
+ * or order change asks again and a library refresh invalidates both.
+ */
+export function useCatalogLetters(state: CatalogSearchState, options: { enabled?: boolean } = {}) {
+  const scope = catalogScopeQuery(state);
+  return useQuery({
+    queryKey: catalogKeys.letters({
+      library_id: scope.library_id ? Number(scope.library_id) : undefined,
+      type: scope.type,
+      query_fingerprint: catalogQueryFingerprint(state),
+    }),
+    queryFn: ({ signal }) => fetchCatalogLetters(state, { signal }),
+    enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
 export function useCatalogFilters(
   state: CatalogSearchState,
   options: { enabled?: boolean; includeTechnical?: boolean } = {},
 ) {
-  const params = catalogParamsForKey(state, 0, true);
+  const scope = catalogScopeQuery(state);
   const enabled = options.enabled ?? true;
   const includeTechnical = options.includeTechnical ?? true;
 
   return useQuery({
     queryKey: catalogKeys.filters({
-      source: params.source,
-      q: params.q,
-      title: params.title,
-      scope: params.scope,
-      section_id: params.section_id,
-      library_id: params.library_id,
-      collection_id: params.collection_id,
-      person_id: state.person_id,
-      query_fingerprint: params.query_fingerprint,
+      source: state.source,
+      scope: scope.scope,
+      section_id: scope.section_id,
+      library_id: scope.library_id ? Number(scope.library_id) : undefined,
+      collection_id: scope.collection_id,
+      person_id: scope.person_id,
+      type: scope.type,
       include_technical: includeTechnical,
     }),
     queryFn: ({ signal }) => fetchCatalogFilters(state, { signal }, { includeTechnical }),

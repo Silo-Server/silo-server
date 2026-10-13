@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 12;
+export const SETTINGS_REVISION = 17;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -180,6 +180,10 @@ export const SETTING_OPTION_SETS = {
 export type SettingOptionSetId = keyof typeof SETTING_OPTION_SETS;
 
 export const SETTING_KEYS = {
+  /** Blur unwatched episode images */
+  CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES: "catalog.hide_unwatched_episode_images",
+  /** Hide unwatched episode descriptions */
+  CATALOG_HIDE_UNWATCHED_EPISODE_OVERVIEWS: "catalog.hide_unwatched_episode_overviews",
   /** Metadata language */
   CATALOG_METADATA_LANGUAGE: "catalog.metadata_language",
   /** Metadata language exceptions */
@@ -264,6 +268,8 @@ export const SETTING_KEYS = {
   PLAYER_VIDEO_SKIP_BACK_SECONDS: "player.video_skip_back_seconds",
   /** Video fast-forward interval */
   PLAYER_VIDEO_SKIP_FORWARD_SECONDS: "player.video_skip_forward_seconds",
+  /** Request titles I add to my watchlist */
+  REQUESTS_WATCHLIST_AUTO_REQUEST: "requests.watchlist_auto_request",
   /** Search scope */
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
@@ -310,6 +316,8 @@ export const SETTING_KEYS = {
   UI_THEME_MUSIC_LOOP: "ui.theme_music_loop",
   /** Time format */
   UI_TIME_FORMAT: "ui.time_format",
+  /** Show title art */
+  UI_TITLE_ART: "ui.title_art",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -364,6 +372,39 @@ export interface SettingDefinition {
 }
 
 export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
+  "catalog.hide_unwatched_episode_images": {
+    key: "catalog.hide_unwatched_episode_images",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile"],
+    scopeIntroducedIn: [17],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Blur unwatched episode images",
+    description:
+      "Blur an episode's thumbnail until you start watching it, so the image does not give away the story.",
+    category: "catalog",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "catalog.hide_unwatched_episode_overviews": {
+    key: "catalog.hide_unwatched_episode_overviews",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile"],
+    scopeIntroducedIn: [17],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Hide unwatched episode descriptions",
+    description: "Hide an episode's description until you start watching it.",
+    category: "catalog",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
   "catalog.metadata_language": {
     key: "catalog.metadata_language",
     type: "language_tag",
@@ -739,6 +780,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       backgroundColor: "#000000",
       backgroundStyle: "box",
       backgroundOpacity: 75,
+      textOpacity: 100,
       textOutline: false,
       textOutlineColor: "#000000",
       position: "bottom",
@@ -904,6 +946,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Allow HDR output on this device.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.match_frame_rate": {
     key: "player.match_frame_rate",
@@ -992,6 +1035,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "x",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: 0.25,
     maximum: 3,
     step: 0.05,
@@ -1064,6 +1108,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "milliseconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: -10000,
     maximum: 10000,
   },
@@ -1141,6 +1186,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: 90, label: "90 seconds", introducedIn: 9 },
     ],
   },
+  "requests.watchlist_auto_request": {
+    key: "requests.watchlist_auto_request",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 15,
+    scopes: ["profile"],
+    scopeIntroducedIn: [15],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: true,
+    label: "Request titles I add to my watchlist",
+    description:
+      "When you add a title that is not in the library to your watchlist, also request it.",
+    category: "requests",
+    control: "switch",
+  },
   "search.media_scope": {
     key: "search.media_scope",
     type: "enum",
@@ -1206,7 +1267,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Show overlay badges on media cards.",
     category: "appearance",
     control: "switch",
-    platforms: ["web"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.card_presentation": {
     key: "ui.card_presentation",
@@ -1542,5 +1603,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "12h", label: "12-hour", introducedIn: 1 },
       { value: "24h", label: "24-hour", introducedIn: 1 },
     ],
+  },
+  "ui.title_art": {
+    key: "ui.title_art",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 16,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [16, 16],
+    resolutionOrder: ["profile", "profile_device", "default"],
+    defaultValue: true,
+    label: "Show title art",
+    description:
+      "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
+    category: "appearance",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
 };

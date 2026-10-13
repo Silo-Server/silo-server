@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 )
@@ -17,24 +18,34 @@ type DownloadRegistryService interface {
 	Delete(context.Context, int, string, string, string) error
 }
 type DownloadEntry struct {
-	ID                ID       `json:"id"`
-	ContentID         string   `json:"content_id"`
-	EpisodeID         string   `json:"episode_id,omitempty"`
-	BatchID           ID       `json:"batch_id,omitempty"`
-	DeviceID          ID       `json:"device_id,omitempty"`
-	MediaFileID       ID       `json:"media_file_id"`
-	FileSize          int64    `json:"file_size"`
-	BytesSent         int64    `json:"bytes_sent"`
-	Kind              string   `json:"kind"`
-	Status            string   `json:"status"`
-	Quality           string   `json:"quality"`
-	EffectiveQuality  string   `json:"effective_quality"`
-	DeliveryFormat    string   `json:"delivery_format"`
-	TargetBitrateKbps int      `json:"target_bitrate_kbps"`
-	Revision          int      `json:"revision"`
-	CreatedAt         Instant  `json:"created_at"`
-	CompletedAt       *Instant `json:"completed_at,omitempty"`
-	StatusEventAt     *Instant `json:"status_event_at,omitempty" doc:"Latest accepted client status event time for this revision."`
+	ID                ID                   `json:"id"`
+	ContentID         string               `json:"content_id"`
+	EpisodeID         string               `json:"episode_id,omitempty"`
+	BatchID           ID                   `json:"batch_id,omitempty"`
+	DeviceID          ID                   `json:"device_id,omitempty"`
+	MediaFileID       ID                   `json:"media_file_id"`
+	FileSize          int64                `json:"file_size"`
+	BytesSent         int64                `json:"bytes_sent"`
+	Kind              string               `json:"kind"`
+	Status            string               `json:"status"`
+	Quality           string               `json:"quality"`
+	EffectiveQuality  string               `json:"effective_quality"`
+	DeliveryFormat    string               `json:"delivery_format"`
+	TargetBitrateKbps int                  `json:"target_bitrate_kbps"`
+	Revision          int                  `json:"revision"`
+	CreatedAt         Instant              `json:"created_at"`
+	CompletedAt       *Instant             `json:"completed_at,omitempty"`
+	StatusEventAt     *Instant             `json:"status_event_at,omitempty" doc:"Latest accepted client status event time for this revision."`
+	Preparation       *DownloadPreparation `json:"preparation,omitempty" doc:"How far the server has got preparing the file. Present on listed preparing entries when the capability reports preparation_progress."`
+}
+
+// DownloadPreparation is a preparing entry's place in the server's
+// preparation queue, or its running encode's progress.
+type DownloadPreparation struct {
+	State            string   `json:"state" enum:"queued,running,retrying,paused" doc:"retrying: an attempt failed and the job waits out its backoff. paused: an administrator paused the job; it isn't claimed until resumed."`
+	QueuePosition    int      `json:"queue_position,omitempty" minimum:"1" doc:"1-based place among every queued preparation on this server; present only while queued."`
+	Progress         *float64 `json:"progress,omitempty" minimum:"0" maximum:"1" doc:"Encoded fraction, once a running encode reports it."`
+	RemainingSeconds *int     `json:"remaining_seconds,omitempty" minimum:"0" doc:"Estimated seconds left at the encode's reported speed."`
 }
 type DownloadEntryOutput struct{ Body DownloadEntry }
 type DownloadRegistryOutput struct{ Body Collection[DownloadEntry] }
@@ -70,11 +81,41 @@ type DownloadCapability struct {
 	ProxyDelivery           bool     `json:"proxy_delivery"`
 	OrderedStatus           bool     `json:"ordered_status"`
 	QualityPresets          []string `json:"quality_presets"`
-	TranscodeEnabled        bool     `json:"transcode_enabled"`
-	TranscodeUserAllowed    bool     `json:"transcode_user_allowed"`
-	SeasonDownload          bool     `json:"season_download"`
-	SeriesMonitoring        bool     `json:"series_monitoring"`
-	MonitoringModes         []string `json:"monitoring_modes"`
+	// QualityOptions describes quality_presets, in the same order, for labels:
+	// each bitrate preset's video cap and the tallest output it can produce.
+	QualityOptions       []DownloadQualityOption `json:"quality_options"`
+	TranscodeEnabled     bool                    `json:"transcode_enabled"`
+	TranscodeUserAllowed bool                    `json:"transcode_user_allowed"`
+	SeasonDownload       bool                    `json:"season_download"`
+	SeriesMonitoring     bool                    `json:"series_monitoring"`
+	MonitoringModes      []string                `json:"monitoring_modes"`
+	// BulkQuality: season and series creation accepts any of quality_presets,
+	// skipping episodes the preset cannot be prepared for. MonitorQuality:
+	// monitors store a quality and register episodes in it.
+	BulkQuality    bool `json:"bulk_quality"`
+	MonitorQuality bool `json:"monitor_quality"`
+	// PreparationProgress: listed preparing entries carry `preparation`.
+	PreparationProgress bool `json:"preparation_progress"`
+	// DirectDownloadLinks: POST /direct-download/links mints the
+	// profile-bound links the direct-download routes accept as `dl`.
+	DirectDownloadLinks bool `json:"direct_download_links"`
+	// PrepareAgain: a finished entry whose server file was cleaned up answers
+	// the file route with 409 prepared_file_expired, and POST
+	// /downloads/{id}/prepare prepares it again.
+	PrepareAgain bool `json:"prepare_again"`
+	// RevokedRemovesLocal: an administrator can revoke entries. A revoked
+	// entry means the app deletes its local copy at its next sync and then
+	// deletes the entry; see docs/downloads-api.md.
+	RevokedRemovesLocal bool `json:"revoked_removes_local"`
+}
+
+// DownloadQualityOption describes one quality preset. bitrate_kbps and
+// max_height are omitted for original, which keeps the source's bitrate and
+// resolution.
+type DownloadQualityOption struct {
+	Preset      string `json:"preset"`
+	BitrateKbps int    `json:"bitrate_kbps,omitempty"`
+	MaxHeight   int    `json:"max_height,omitempty"`
 }
 type DownloadCapabilityOutput struct {
 	Status       int
@@ -96,6 +137,37 @@ func registerDownloadRegistry(reg *Registry) {
 	remove.DefaultStatus = 204
 	Register(reg, remove, reg.deleteDownload)
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/capabilities/downloads", "getDownloadCapability", "downloads", "Discover download policy and ordered registry status support."), Class: ClassProfileScoped, ServiceBacked: true}, reg.getDownloadCapability)
+	prepare := Operation{Operation: humaOp(http.MethodPost, Prefix+"/downloads/{id}/prepare", "prepareDownloadAgain", "downloads", "Prepare a finished download's file again after the server cleaned up its copy; the entry returns to preparing and becomes ready like a new download."), Class: ClassProfileScoped, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	prepare.Description = "Use after the file route answers 409 prepared_file_expired. The revision does not change: the recipe is the same. An entry whose file is still on the server, an original-quality entry, or one already preparing returns unchanged."
+	prepare.Errors = []int{409, 429, 501}
+	Register(reg, prepare, reg.prepareDownloadAgain)
+}
+
+// DownloadPrepareAgainService prepares a finished managed download's expired
+// file again (*downloads.Service).
+type DownloadPrepareAgainService interface {
+	PrepareAgain(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalogpkg.AccessFilter) (*downloads.Download, error)
+}
+
+type DownloadPrepareAgainInput struct {
+	ID       string `path:"id" minLength:"1"`
+	DeviceID string `header:"X-Silo-Device-Id" required:"true" minLength:"1" maxLength:"128"`
+}
+
+func (reg *Registry) prepareDownloadAgain(ctx context.Context, in *DownloadPrepareAgainInput) (*DownloadEntryOutput, error) {
+	if reg.deps.DownloadPrepareAgain == nil {
+		return nil, unavailable("downloads")
+	}
+	user, profile, p := viewerIdentity(ctx)
+	if p != nil {
+		return nil, p
+	}
+	row, err := reg.deps.DownloadPrepareAgain.PrepareAgain(ctx, user, profile, in.DeviceID, in.ID, handlers.AccessFilterFromContext(ctx, ""))
+	if err != nil {
+		// The caps and delivery checks a new download meets answer the same way here.
+		return nil, downloadCreationProblem(err)
+	}
+	return &DownloadEntryOutput{Body: downloadEntryOf(row)}, nil
 }
 func downloadEntryOf(row *downloads.Download) DownloadEntry {
 	out := DownloadEntry{ID: ID(row.ID), ContentID: row.ContentID, EpisodeID: row.EpisodeID, BatchID: ID(row.BatchID), DeviceID: ID(row.DeviceID), MediaFileID: ID(strconv.Itoa(row.MediaFileID)), FileSize: row.FileSize, BytesSent: row.BytesSent, Kind: row.Kind, Status: row.Status, Quality: row.Quality, EffectiveQuality: row.EffectiveQuality, DeliveryFormat: row.Format, TargetBitrateKbps: row.TargetBitrateKbps, Revision: row.Revision, CreatedAt: NewInstant(row.CreatedAt)}
@@ -104,6 +176,9 @@ func downloadEntryOf(row *downloads.Download) DownloadEntry {
 	}
 	if row.StatusEventAt != nil {
 		out.StatusEventAt = new(NewInstant(*row.StatusEventAt))
+	}
+	if p := row.Preparation; p != nil {
+		out.Preparation = &DownloadPreparation{State: p.State, QueuePosition: p.QueuePosition, Progress: p.Progress, RemainingSeconds: p.RemainingSeconds}
 	}
 	return out
 }
@@ -114,6 +189,9 @@ func downloadProblem(err error) *Problem {
 		return NewProblem(TypeDependencyUnavailable, "The asset is temporarily unavailable.").WithRetryAfter(5)
 	case errors.Is(err, downloads.ErrNotFound), errors.Is(err, downloads.ErrSubscriptionNotFound), errors.Is(err, downloads.ErrAssetNotFound), errors.Is(err, catalogpkg.ErrItemNotFound):
 		return NewProblem(TypeNotFound, "Download not found.")
+	// Before not-active: an expired file is both, and the client acts on it.
+	case errors.Is(err, downloads.ErrPreparedFileExpired):
+		return NewProblem(TypePreparedFileExpired, "The server's prepared file was cleaned up; prepare the download again before fetching it.")
 	case errors.Is(err, downloads.ErrDownloadNotActive):
 		return NewProblem(TypeConflict, "The download is no longer active.")
 	case errors.Is(err, downloads.ErrFeatureDisabled), errors.Is(err, downloads.ErrDownloadNotAllowed):
@@ -193,7 +271,7 @@ func (reg *Registry) deleteDownload(ctx context.Context, in *DownloadDeleteInput
 	return &struct{}{}, nil
 }
 func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInput) (*DownloadCapabilityOutput, error) {
-	out := DownloadCapability{Capability: Capability{State: StateNotConfigured}, QualityPresets: []string{}, MonitoringModes: []string{}}
+	out := DownloadCapability{Capability: Capability{State: StateNotConfigured}, QualityPresets: []string{}, QualityOptions: []DownloadQualityOption{}, MonitoringModes: []string{}}
 	if reg.deps.Downloads != nil {
 		user, _, p := viewerIdentity(ctx)
 		if p != nil {
@@ -207,15 +285,24 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.DownloadAllowed = view.DownloadAllowed
 		out.OrderedStatus = true
 		out.FileDelivery = reg.deps.DownloadDelivery != nil
+		out.DirectDownloadLinks = reg.deps.DirectDownloadLinks != nil
+		out.PrepareAgain = reg.deps.DownloadPrepareAgain != nil
+		out.RevokedRemovesLocal = true
 		out.BoundedManifests = reg.deps.DownloadManifests != nil
 		out.SubscriptionReads = reg.deps.DownloadSubscriptions != nil
 		out.SubscriptionMutations = reg.deps.DownloadSubscriptionMutations != nil
 		out.BoundedCreation = reg.deps.DownloadCreation != nil
 		out.BoundedSubscriptionSync = reg.deps.DownloadSubscriptionSync != nil
+		out.BulkQuality = out.BoundedCreation
+		out.MonitorQuality = out.SubscriptionMutations
+		out.PreparationProgress = true
 		if reg.deps.DownloadProxyDelivery != nil {
 			out.ProxyDelivery = reg.deps.DownloadProxyDelivery()
 		}
 		out.QualityPresets = append([]string{}, view.QualityPresets...)
+		for _, option := range view.QualityOptions {
+			out.QualityOptions = append(out.QualityOptions, DownloadQualityOption{Preset: option.Preset, BitrateKbps: option.BitrateKbps, MaxHeight: option.MaxHeight})
+		}
 		out.MonitoringModes = append([]string{}, view.MonitoringModes...)
 		out.TranscodeEnabled = view.TranscodeEnabled
 		out.TranscodeUserAllowed = view.TranscodeUserAllowed

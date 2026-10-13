@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,14 +21,26 @@ import (
 // ImagesHandler serves Jellyfin-compatible image routes.
 const compatImagePrimary = "Primary"
 
+// Jellyfin image types for a movie's or series' artwork beyond the poster,
+// backdrop and logo. Jellyfin calls clear art "Art".
+const (
+	compatImageThumb  = "Thumb"
+	compatImageBanner = "Banner"
+	compatImageArt    = "Art"
+	compatImageDisc   = "Disc"
+)
+
 type ImagesHandler struct {
-	content      ContentService
-	codec        *ResourceIDCodec
-	sessions     *SessionStore
-	keyAuth      *AdminAPIKeyAuthenticator
-	images       *ImageCache
-	personRepo   imagePersonRepository
-	detailSvc    *catalog.DetailService
+	content    ContentService
+	codec      *ResourceIDCodec
+	sessions   *SessionStore
+	keyAuth    *AdminAPIKeyAuthenticator
+	images     *ImageCache
+	personRepo imagePersonRepository
+	detailSvc  *catalog.DetailService
+	// backdrops lists the backdrops after an item's primary for
+	// Backdrop/{index}; the detail service in production.
+	backdrops    extraBackdropSource
 	itemRepo     imageItemRepository
 	folderRepo   imageFolderRepository
 	seasonRepo   imageSeasonRepository
@@ -40,11 +53,18 @@ type ImagesHandler struct {
 	// collections is optional; when set, BoxSet (library collection) artwork
 	// resolves durably instead of depending on the in-memory image cache.
 	collections collectionSource
+	// collectionPosters is optional; when set, BoxSet artwork includes each
+	// viewer's collage (see ItemsHandler.collectionPosters).
+	collectionPosters CollectionPosterResolver
 	// frontendFS is optional; when set, app-relative artwork references (bundled
 	// collection-template posters like "/images/collection-templates/x.jpg") are
 	// served straight from the embedded frontend assets. Without it those paths
 	// have no fetchable origin on the compat surface.
 	frontendFS fs.FS
+}
+
+type extraBackdropSource interface {
+	ExtraBackdropPaths(ctx context.Context, contentIDs []string) (map[string][]string, error)
 }
 
 type imageItemRepository interface {
@@ -81,6 +101,10 @@ func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *
 	if personRepo != nil {
 		persons = personRepo
 	}
+	var backdrops extraBackdropSource
+	if detailSvc != nil {
+		backdrops = detailSvc
+	}
 	return &ImagesHandler{
 		content:      content,
 		codec:        codec,
@@ -88,6 +112,7 @@ func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *
 		images:       images,
 		personRepo:   persons,
 		detailSvc:    detailSvc,
+		backdrops:    backdrops,
 		itemRepo:     itemRepo,
 		folderRepo:   folderRepo,
 		seasonRepo:   seasonRepo,
@@ -108,6 +133,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
 	tag := compatImageRequestTag(r)
+	backdropIndex := compatBackdropIndex(r, imageType)
 	if canonicalRouteID, ok := canonicalCompatImageRouteID(h.codec, routeID); ok {
 		routeID = canonicalRouteID
 		r = withCompatImageProxyRouteRequest(r)
@@ -132,7 +158,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
 		if session == nil {
 			if token, ok := ExtractToken(r); ok {
-				session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
+				session, _, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 			}
 		}
 		h.handlePersonImage(w, r, session, routeID, imageType, tag, personID)
@@ -153,14 +179,14 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		}
 		// A tag the client just received may name artwork newer than this
 		// node's route cache, so tagged requests resolve from the catalog.
-	} else if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
+	} else if imageURL, ok := h.images.LookupSized(routeID, compatImageCacheType(imageType, backdropIndex), "", imageSize); ok {
 		h.serveImageURL(w, r, imageURL)
 		return
 	}
 
 	if session == nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
+			session, _, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 		}
 	}
 
@@ -179,7 +205,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	// protects artwork, which anonymous requests can already fetch.
 	var resolvedImage catalog.ResolvedImageURL
 	if session == nil {
-		resolvedImage, _, err = h.resolveCatalogImageURL(r.Context(), contentID, imageType, imageSize, nil)
+		resolvedImage, _, err = h.resolveCatalogImageURL(r.Context(), contentID, imageType, backdropIndex, imageSize, nil)
 	} else {
 		resolvedImage, err = h.resolveItemImageURL(r.Context(), session, contentID, imageType, r)
 	}
@@ -192,7 +218,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
-	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
+	h.images.RememberSizedUntil(routeID, compatImageCacheType(imageType, backdropIndex), imageURL, imageSize, resolvedImage.ExpiresAt)
 	h.serveImageURL(w, r, imageURL)
 }
 
@@ -273,15 +299,30 @@ func (h *ImagesHandler) resolveItemImageURL(ctx context.Context, session *Sessio
 	if err != nil {
 		return catalog.ResolvedImageURL{}, err
 	}
+	notFound := &HTTPError{StatusCode: http.StatusNotFound, Message: "Image not found"}
 	switch imageType {
 	case "Primary":
 		return catalog.ResolvedImageURL{URL: firstNonEmpty(detail.PosterURL, detail.BackdropURL)}, nil
-	case "Backdrop", "Thumb":
+	case compatBackdropImageType:
+		if index := compatBackdropIndex(r, imageType); index > 0 {
+			if detail.BackdropURL == "" || index >= len(detail.BackdropURLs) {
+				return catalog.ResolvedImageURL{}, notFound
+			}
+			return catalog.ResolvedImageURL{URL: detail.BackdropURLs[index]}, nil
+		}
 		return catalog.ResolvedImageURL{URL: firstNonEmpty(detail.BackdropURL, detail.PosterURL)}, nil
+	case compatImageThumb:
+		return catalog.ResolvedImageURL{URL: firstNonEmpty(detail.ThumbURL, detail.BackdropURL, detail.PosterURL)}, nil
 	case "Logo":
 		return catalog.ResolvedImageURL{URL: detail.LogoURL}, nil
+	case compatImageBanner:
+		return catalog.ResolvedImageURL{URL: detail.BannerURL}, nil
+	case compatImageArt:
+		return catalog.ResolvedImageURL{URL: detail.ClearArtURL}, nil
+	case compatImageDisc:
+		return catalog.ResolvedImageURL{URL: detail.DiscURL}, nil
 	default:
-		return catalog.ResolvedImageURL{}, &HTTPError{StatusCode: http.StatusNotFound, Message: "Image not found"}
+		return catalog.ResolvedImageURL{}, notFound
 	}
 }
 
@@ -290,17 +331,17 @@ func (h *ImagesHandler) resolveItemImageURLFromRepos(ctx context.Context, sessio
 	if h.accessFilter != nil {
 		access = h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
 	}
-	return h.resolveCatalogImageURL(ctx, contentID, imageType, compatRequestImageSize(r, imageType), &access)
+	return h.resolveCatalogImageURL(ctx, contentID, imageType, compatBackdropIndex(r, imageType), compatRequestImageSize(r, imageType), &access)
 }
 
 // resolveCatalogImageURL resolves a movie, series, episode, or season image from
 // the catalog. A non-nil access filter limits it to what that viewer may see;
 // nil serves any item, as Jellyfin does for anonymous image GETs.
-func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, imageType, imageSize string, access *catalog.AccessFilter) (catalog.ResolvedImageURL, bool, error) {
+func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, imageType string, backdropIndex int, imageSize string, access *catalog.AccessFilter) (catalog.ResolvedImageURL, bool, error) {
 	switch imageType {
-	case "Primary", "Backdrop", "Thumb", "Logo":
+	case "Primary", compatBackdropImageType, compatImageThumb, "Logo", compatImageBanner, compatImageArt, compatImageDisc:
 	default:
-		// imageURLForItem has nothing for other types (Chapter, Banner, ...).
+		// Nothing serves other types (Chapter, Screenshot, ...).
 		return catalog.ResolvedImageURL{}, false, nil
 	}
 	// ensureAccessible checks the item (or an episode's or season's series)
@@ -321,7 +362,7 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 			if err := ensureAccessible(item); err != nil {
 				return catalog.ResolvedImageURL{}, false, err
 			}
-			if imageURL := h.imageURLForItem(ctx, item.PosterPath, "poster", item.BackdropPath, item.LogoPath, imageType, imageSize); imageURL.URL != "" {
+			if imageURL := h.imageURLForCatalogItem(ctx, item, imageType, backdropIndex, imageSize); imageURL.URL != "" {
 				return imageURL, true, nil
 			}
 		} else if !errors.Is(err, catalog.ErrItemNotFound) {
@@ -377,7 +418,8 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 func collectionArtworkKey(c *models.LibraryCollection, imageType string) string {
 	switch imageType {
 	case "Primary":
-		return c.PosterURL
+		poster, _ := catalog.AssignedCollectionPoster(c)
+		return poster.Path
 	case "Backdrop":
 		return c.BackdropURL
 	}
@@ -405,7 +447,7 @@ func (h *ImagesHandler) presignCollectionArtwork(ctx context.Context, path strin
 func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollection) (string, bool) {
 	switch imageType {
 	case "Primary":
-		if key := strings.TrimSpace(c.PosterURL); key != "" {
+		if key := strings.TrimSpace(collectionArtworkKey(c, "Primary")); key != "" {
 			return imageTagSeed(routeID, "Primary", compatCardImageSize, key, "", time.Time{}), true
 		}
 		return imageTagSeed(routeID, "Primary", compatCardImageSize, generatedPosterSeed(c.Title), "", time.Time{}), true
@@ -420,8 +462,10 @@ func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollecti
 // serveCollectionImage serves BoxSet artwork. It authorizes via the signed tag
 // (a capability minted only for visible collections) or, when no tag is given,
 // via an authenticated session whose libraries include the collection. Stored
-// artwork is presigned/served as before; collections without a usable poster
-// fall back to a generated gradient poster captioned with the title.
+// artwork is presigned/served as before. A collage tag serves the collage it
+// names, and an untagged request the collage of the session's viewer.
+// Collections without a usable poster fall back to a generated gradient poster
+// captioned with the title.
 func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, tag, collectionID string) {
 	if h.collections == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
@@ -441,6 +485,25 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if imageType == "Primary" {
+		if key, ok := verifiedCollageImageTag(h.imageTags, routeID, tag); ok {
+			// The tag was minted for a viewer this collage belongs to.
+			poster, found, err := h.collectionCollage(r.Context(), collectionID, key)
+			if err != nil {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			if found {
+				if imageURL := h.presignCollectionArtwork(r.Context(), poster.Path); imageURL != "" {
+					h.serveImageURL(w, r, imageURL)
+					return
+				}
+			}
+			h.serveGeneratedPoster(w, collection.Title)
+			return
+		}
+	}
+
 	seed, served := collectionImageTagSeed(routeID, imageType, collection)
 	if !served {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
@@ -448,8 +511,10 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 	}
 
 	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
+	var session *Session
 	if !authorized {
-		ok, err := h.collectionVisibleToRequest(r, collection)
+		session = h.requestSession(r)
+		ok, err := h.collectionVisibleToSession(r.Context(), session, collection)
 		if err != nil {
 			writeCompatUpstreamError(w, err)
 			return
@@ -471,23 +536,45 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
+	// An untagged request authorized by its session gets that viewer's collage.
+	// A request carrying the generated poster's tag keeps getting that poster.
+	if session != nil && h.collectionPosters != nil && h.accessFilter != nil {
+		access := withCompatAccessExclusions(h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID))
+		poster := h.collectionPosters.CollectionPosters(r.Context(), []*models.LibraryCollection{collection}, access)[collection.ID]
+		if imageURL := h.presignCollectionArtwork(r.Context(), poster.Path); imageURL != "" {
+			h.serveImageURL(w, r, imageURL)
+			return
+		}
+	}
 	h.serveGeneratedPoster(w, collection.Title)
 }
 
-// collectionVisibleToRequest reports whether the request's session may see the
-// collection. A missing session resolves to not-visible (anonymous image GETs
-// without a valid tag get a clean 404).
-func (h *ImagesHandler) collectionVisibleToRequest(r *http.Request, collection *models.LibraryCollection) (bool, error) {
+func (h *ImagesHandler) collectionCollage(ctx context.Context, collectionID, key string) (catalog.CollectionPoster, bool, error) {
+	if h.collectionPosters == nil {
+		return catalog.CollectionPoster{}, false, nil
+	}
+	return h.collectionPosters.CollectionCollage(ctx, collectionID, key)
+}
+
+// requestSession returns the request's compat session, if any.
+func (h *ImagesHandler) requestSession(r *http.Request) *Session {
 	session := SessionFromContext(r.Context())
 	if session == nil && h.sessions != nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = h.sessions.Get(token)
+			session, _ = h.sessions.GetContext(r.Context(), token)
 		}
 	}
+	return session
+}
+
+// collectionVisibleToSession reports whether the session may see the
+// collection. A missing session resolves to not-visible (anonymous image GETs
+// without a valid tag get a clean 404).
+func (h *ImagesHandler) collectionVisibleToSession(ctx context.Context, session *Session, collection *models.LibraryCollection) (bool, error) {
 	if session == nil {
 		return false, nil
 	}
-	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	visible, err := visibleLibraryIDSet(ctx, h.content, session)
 	if err != nil {
 		return false, err
 	}
@@ -505,13 +592,7 @@ func (h *ImagesHandler) serveCollectionsViewImage(w http.ResponseWriter, r *http
 	seed := imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{})
 	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
 	if !authorized {
-		session := SessionFromContext(r.Context())
-		if session == nil && h.sessions != nil {
-			if token, ok := ExtractToken(r); ok {
-				session, _ = h.sessions.Get(token)
-			}
-		}
-		if session == nil {
+		if h.requestSession(r) == nil {
 			writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 			return
 		}
@@ -568,6 +649,62 @@ func (h *ImagesHandler) presignLibraryPosterURL(ctx context.Context, posterPath 
 		return ""
 	}
 	return imageURL
+}
+
+// imageURLForCatalogItem presigns a movie's or series' image. Banner, Art
+// (clear art) and Disc have no fallback. A real thumb wins over the backdrop
+// alias Thumb has always been. Backdrop index 0 is the primary backdrop and
+// index i the item's i-th backdrop after it.
+func (h *ImagesHandler) imageURLForCatalogItem(ctx context.Context, item *models.MediaItem, imageType string, backdropIndex int, size string) catalog.ResolvedImageURL {
+	presign := func(path, artType string) catalog.ResolvedImageURL {
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, path, artType, size)
+	}
+	switch imageType {
+	case compatBackdropImageType:
+		if backdropIndex > 0 {
+			if h.backdrops == nil {
+				return catalog.ResolvedImageURL{}
+			}
+			extras, err := h.backdrops.ExtraBackdropPaths(ctx, []string{item.ContentID})
+			if err != nil || backdropIndex > len(extras[item.ContentID]) {
+				return catalog.ResolvedImageURL{}
+			}
+			return presign(extras[item.ContentID][backdropIndex-1], artworkkey.ImageBackdrop)
+		}
+	case compatImageThumb:
+		if thumb := presign(item.ThumbPath, artworkkey.ImageThumb); thumb.URL != "" {
+			return thumb
+		}
+	case compatImageBanner:
+		return presign(item.BannerPath, artworkkey.ImageBanner)
+	case compatImageArt:
+		return presign(item.ClearArtPath, artworkkey.ImageClearArt)
+	case compatImageDisc:
+		return presign(item.DiscPath, artworkkey.ImageDisc)
+	}
+	return h.imageURLForItem(ctx, item.PosterPath, "poster", item.BackdropPath, item.LogoPath, imageType, size)
+}
+
+// compatBackdropIndex reads /Items/{id}/Images/Backdrop/{index}. Other image
+// types have a single image, so their index is ignored as it always was.
+func compatBackdropIndex(r *http.Request, imageType string) int {
+	if imageType != compatBackdropImageType {
+		return 0
+	}
+	index, err := strconv.Atoi(chiURLParam(r, "index"))
+	if err != nil || index < 0 {
+		return 0
+	}
+	return index
+}
+
+// compatImageCacheType keys the route cache by backdrop index, so Backdrop/2
+// never answers from Backdrop/0's entry.
+func compatImageCacheType(imageType string, backdropIndex int) string {
+	if backdropIndex > 0 {
+		return imageType + "/" + strconv.Itoa(backdropIndex)
+	}
+	return imageType
 }
 
 // imageURLForItem presigns the requested image type, and its fallback type

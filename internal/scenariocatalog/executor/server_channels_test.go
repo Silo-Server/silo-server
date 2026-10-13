@@ -55,7 +55,7 @@ func TestRequiredNewServerChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Construct services without starting any notification dispatcher or worker.
-	system := notifications.NewSystem(e.pool, nil, e.stores, nil, nil, nil, nil, cipher, nil)
+	system := notifications.NewSystem(e.pool, nil, e.stores, nil, nil, nil, nil, cipher, nil, nil)
 	server := httptest.NewServer(api.NewRouter(api.Dependencies{Config: e.config(), AppContext: t.Context(), DB: e.pool, SecretCipher: cipher, ClientIPResolver: clientip.NewResolver(nil), NodeID: "fixture-node", PublicURL: publicURL, UserStoreProvider: e.stores, PolicySystem: e.policy, Notifications: system}))
 	defer server.Close()
 	ids := []string{"00000000-0000-4000-8000-000000000101", "00000000-0000-4000-8000-000000000102", "00000000-0000-4000-8000-000000000103"}

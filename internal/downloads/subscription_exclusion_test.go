@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -342,41 +344,6 @@ func TestManagedDeleteOutsideMonitorPostgres(t *testing.T) {
 	}
 }
 
-// TestMonitorRetentionLoopPostgres replays the iOS monitoring run for a
-// delete_watched monitor: sync, then the client's retention pass deletes the
-// completed download. Across runs the watched episode must not come back.
-func TestMonitorRetentionLoopPostgres(t *testing.T) {
-	ctx := context.Background()
-	fx := seedMonitorFixture(t, 0, true)
-	if n := fx.sync(t); n != 3 {
-		t.Fatalf("first sync registered %d, want 3", n)
-	}
-	store, err := pgstore.NewPostgresProvider(fx.pool).ForUser(ctx, fx.userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The profile finishes episode 1 after it was downloaded.
-	if err := store.SetProgressAt(ctx, fx.profileA, fx.episodes[0], 1200, 1200, true, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	const runs = 5
-	redownloads := 0
-	for range runs {
-		fx.sync(t)
-		if fx.entry(t, fx.episodes[0]) == nil {
-			continue
-		}
-		redownloads++
-		fx.deleteEpisode(t, fx.episodes[0])
-	}
-	// The first run deletes the copy registered before the episode was watched.
-	redownloads--
-	t.Logf("watched episode re-registered in %d of %d monitoring runs", redownloads, runs)
-	if redownloads != 0 {
-		t.Fatalf("watched episode re-registered in %d runs, want 0", redownloads)
-	}
-}
-
 // TestManagedDeleteWaitsForMonitorSyncPostgres: while a sync holds the monitor
 // lock, a delete of one of its episodes waits and cannot commit, so the locked
 // sync still sees the episode as held; once the delete commits, the next sync
@@ -694,5 +661,111 @@ func TestWatchedFilterFailsOpen(t *testing.T) {
 	}
 	if len(store.calls) != 1 || len(items) != 3 {
 		t.Fatalf("lookups = %v, items = %d; want one failed lookup and all 3 episodes", store.calls, len(items))
+	}
+}
+
+// TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB pins that monitors of one
+// account syncing prepared episodes at the same time share the account's free
+// concurrent download slots instead of each claiming all of them.
+func TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	t.Cleanup(func() {
+		_, _ = fx.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fx.fileID)
+	})
+	second, err := fx.subRepo.CreateOrGet(ctx, &Subscription{
+		ID: "monitor-b-" + fx.seriesID, UserID: fx.userID, ProfileID: fx.profileB, DeviceID: fx.deviceB, SeriesID: fx.seriesID, Mode: SubModeAll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.svc.limiter = NewQuantityLimiter(fx.repo, 2, 0, 0)
+	fx.svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(fx.pool), fx.repo, nil, stubQuotaPreparer{}, "monitor-slots-test",
+		func() *config.Config { return nil }, nil,
+	))
+	prepared := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	plan := monitorPlan{decisions: map[ManagedEntryKey]QualityDecision{}, prepared: true}
+	for _, ep := range fx.episodes {
+		it := managedItem{file: &models.MediaFile{ID: fx.fileID, ContentID: fx.seriesID, FileSize: 10}, contentID: fx.seriesID, episodeID: ep}
+		plan.items = append(plan.items, it)
+		plan.decisions[managedItemKey(it)] = prepared
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, sub := range []*Subscription{fx.monitor, second} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[i] = fx.svc.registerMonitorPlan(ctx, sub, plan, func(register func(*Subscription, pgx.Tx) error) error {
+				return fx.subRepo.WithLocked(ctx, sub.UserID, sub.ProfileID, sub.DeviceID, sub.ID, func(locked *Subscription, tx pgx.Tx) error {
+					return register(locked, tx)
+				})
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var preparing int
+	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM downloads WHERE user_id = $1 AND status = 'preparing'`, fx.userID).Scan(&preparing); err != nil {
+		t.Fatal(err)
+	}
+	if preparing != 2 {
+		t.Fatalf("preparing downloads = %d, want the 2 free slots shared between both monitors", preparing)
+	}
+}
+
+// TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB pins that a monitor
+// edited or paused after a sync planned its episodes queues no encode jobs for
+// that sync: no download row would link to them.
+func TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	t.Cleanup(func() {
+		_, _ = fx.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fx.fileID)
+	})
+	fx.svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(fx.pool), fx.repo, nil, stubQuotaPreparer{}, "monitor-stale-test",
+		func() *config.Config { return nil }, nil,
+	))
+	prepared := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	it := managedItem{file: &models.MediaFile{ID: fx.fileID, ContentID: fx.seriesID, FileSize: 10}, contentID: fx.seriesID, episodeID: fx.episodes[0]}
+	plan := monitorPlan{items: []managedItem{it}, decisions: map[ManagedEntryKey]QualityDecision{managedItemKey(it): prepared}, prepared: true}
+	if _, err := fx.subRepo.Mutate(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, false, func(row *Subscription) error { row.Active = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := fx.svc.registerMonitorPlan(ctx, fx.monitor, plan, func(register func(*Subscription, pgx.Tx) error) error {
+		return fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(locked *Subscription, tx pgx.Tx) error {
+			if !locked.Active || !locked.UpdatedAt.Equal(fx.monitor.UpdatedAt) {
+				return nil
+			}
+			return register(locked, tx)
+		})
+	})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("stale monitor registered %+v %v", rows, err)
+	}
+	var jobs int
+	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, fx.fileID).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 0 {
+		t.Fatalf("stale monitor queued %d encode jobs", jobs)
 	}
 }

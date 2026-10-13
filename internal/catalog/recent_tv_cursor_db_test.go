@@ -47,8 +47,8 @@ func TestRecentTVCursorFinalEventTuple(t *testing.T) {
 		exec(`INSERT INTO media_items(content_id,type,title,status,genres) VALUES($1,'series','Cursor Series','matched','{}')`, s)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id,first_seen_at) VALUES($1,$2,$3)`, s, folder, base)
 	}
-	// Two grouped runs of the same show have identical time/type/target, so only
-	// event_id can distinguish their continuation boundary.
+	// Separate scan runs of one show at the same instant are one arrival event.
+	// A second, older event of that show must stay separately addressable.
 	addEpisode := func(name, seriesName, runName string, number int, at time.Time, missing bool) {
 		t.Helper()
 		var runID any
@@ -62,8 +62,8 @@ func TestRecentTVCursorFinalEventTuple(t *testing.T) {
 	}
 	addEpisode("a1", "a", "run-a", 1, base, false)
 	addEpisode("a2", "a", "run-a", 2, base, false)
-	addEpisode("a3", "a", "run-b", 3, base, false)
-	addEpisode("a4", "a", "run-b", 4, base, false)
+	addEpisode("a3", "a", "run-b", 3, base.Add(-3*time.Hour), false)
+	addEpisode("a4", "a", "run-b", 4, base.Add(-3*time.Hour), false)
 	addEpisode("b1", "b", "run-c", 1, base, false)
 	addEpisode("c1", "c", "", 1, base, false)
 	addEpisode("missing1", "missing", "run-missing", 1, base, true)
@@ -90,17 +90,20 @@ func TestRecentTVCursorFinalEventTuple(t *testing.T) {
 					if expected[0].ContentID != id("b1") {
 						t.Fatalf("episode tie-break first=%+v", expected[0])
 					}
-					foundNull := false
+					foundEmpty := false
 					for _, target := range expected {
+						if target.ContentID == id("d") {
+							foundEmpty = target.EventID == ""
+						}
 						if target.ContentID == id("c") {
-							foundNull = target.EventID == ""
+							t.Fatalf("lone episode without scan run rendered as series: %+v", target)
 						}
 						if target.ContentID == id("denied") || target.ContentID == id("denied1") || target.ContentID == id("late") || target.ContentID == id("missing1") {
 							t.Fatalf("out of scope event: %+v", target)
 						}
 					}
-					if !foundNull {
-						t.Fatal("NULL scan run not normalized")
+					if !foundEmpty {
+						t.Fatal("series without episode arrivals lacks the empty event ID")
 					}
 					q.CursorPaging = true
 					q.Limit = 1
@@ -154,7 +157,7 @@ func TestRecentTVCursorFinalEventTuple(t *testing.T) {
 	}
 	request.After = result.Next
 	second, _, err := resolver.resolveRecentTVSectionSource(ctx, request, AccessFilter{AllowedContentIDs: allowed}, section)
-	if err != nil || len(second.Items) != 1 || second.Items[0].ContentID != id("a") || second.Next == nil || second.Next.Consumed != 2 {
+	if err != nil || len(second.Items) != 1 || second.Items[0].ContentID != id("c1") || second.Next == nil || second.Next.Consumed != 2 {
 		t.Fatalf("resolver continuation=%+v err=%v", second, err)
 	}
 
@@ -173,7 +176,7 @@ func TestRecentTVCursorFinalEventTuple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page) != 1 || page[0].ContentID != id("a") || page[0].EventID != id("run-a") {
+	if len(page) != 1 || page[0].ContentID != id("c1") {
 		t.Fatalf("continuation after deleted boundary: %+v", page)
 	}
 	q.After = &QueryCursor{Keys: []QueryCursorValue{{Kind: "text", Value: new("bad")}}}

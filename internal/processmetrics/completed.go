@@ -24,6 +24,9 @@ const (
 	// Thumbnail is an ffmpeg run that extracts a still image, such as a
 	// chapter thumbnail, through internal/mediasample.
 	Thumbnail
+	// Trickplay is an ffmpeg run that samples a file's keyframes into
+	// seek-bar preview sheets, through internal/mediasample.
+	Trickplay
 )
 
 func (w Workload) label() string {
@@ -40,6 +43,8 @@ func (w Workload) label() string {
 		return "analysis"
 	case Thumbnail:
 		return "thumbnail"
+	case Trickplay:
+		return "trickplay"
 	default:
 		return "other"
 	}

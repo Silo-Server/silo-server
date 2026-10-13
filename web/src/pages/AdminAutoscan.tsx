@@ -15,12 +15,14 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useAutoscanSettings,
+  useAutoscanSources,
   useTriggerAutoscan,
   useUpdateAutoscanSettings,
 } from "@/hooks/queries/useAutoscan";
 import ConnectionsPanel from "@/pages/admin/autoscan/ConnectionsPanel";
 import ActivityPanel from "@/pages/admin/autoscan/ActivityPanel";
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
+import { showRunNow } from "@/pages/admin/autoscan/runNow";
 import { isLegacyAdvancedTab, normalizeTab } from "@/pages/autoscanSearchParams";
 
 // ---------------------------------------------------------------------------
@@ -111,7 +113,8 @@ function SettingsTab() {
           <span className="text-muted-foreground text-sm">sec</span>
         </div>
         <p className="text-muted-foreground text-xs">
-          Coalesces rapid change events before triggering a scan.
+          Skips repeat reports of an unchanged file within this window. Changed or deleted files
+          still scan.
         </p>
       </div>
       <Button onClick={save} disabled={!activeForm || updateSettings.isPending}>
@@ -149,6 +152,11 @@ export default function AdminAutoscan({ embedded = false }: AdminAutoscanProps =
   const [advancedOpen, setAdvancedOpen] = useState(() => isLegacyAdvancedTab(requestedTab));
 
   const enabled = settings.data?.enabled ?? false;
+
+  // Run now polls every enabled polling source at once, so hide it when
+  // Autoscan is off or no loaded source polls.
+  const sources = useAutoscanSources();
+  const runNowVisible = showRunNow(sources.data, settings.data);
 
   function toggleEnabled(checked: boolean) {
     if (!settings.data || !readAuthority || !isCapturedProfileAuthorityActive(readAuthority))
@@ -205,15 +213,17 @@ export default function AdminAutoscan({ embedded = false }: AdminAutoscanProps =
               aria-label="Enable autoscan"
             />
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={trigger.isPending}
-            onClick={() => trigger.mutate()}
-          >
-            <Play />
-            {trigger.isPending ? "Triggering…" : "Run now"}
-          </Button>
+          {runNowVisible ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={trigger.isPending}
+              onClick={() => trigger.mutate()}
+            >
+              <Play />
+              {trigger.isPending ? "Triggering…" : "Run now"}
+            </Button>
+          ) : null}
         </div>
       </div>
 

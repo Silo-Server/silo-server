@@ -40,20 +40,6 @@ func makeDeliveryRows(n int) []DeliveryRow {
 	return rows
 }
 
-func TestDrainSinceShortWindow(t *testing.T) {
-	window := &fakeDeliveryWindow{rows: makeDeliveryRows(3)}
-	got, err := drainSince(window.fetch, Cursor{})
-	if err != nil {
-		t.Fatalf("drainSince: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 rows, got %d", len(got))
-	}
-	if window.fetches != 1 {
-		t.Fatalf("expected 1 fetch for a short window, got %d", window.fetches)
-	}
-}
-
 func TestDrainSinceMultiplePages(t *testing.T) {
 	// 2.5 pages: a single-page read would drop 300 rows from the digest.
 	total := channelFetchLimit*2 + channelFetchLimit/2

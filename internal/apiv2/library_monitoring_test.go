@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -221,10 +223,10 @@ func TestLibraryCapabilities(t *testing.T) {
 	}
 	var got map[string]any
 	decodeJSON(t, rec.Body, &got)
-	if got["realtime_monitoring"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
+	if got["realtime_monitoring"] != true || got["trickplay"] != true || got["trickplay_supported"] != false || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
 		t.Fatalf("body = %v", got)
 	}
-	if len(got) != 4 {
+	if len(got) != 6 {
 		t.Fatalf("unexpected members: %v", got)
 	}
 	etag := rec.Header().Get("ETag")
@@ -247,5 +249,25 @@ func libraryMonitoringFixtureCases() []fixtureCase {
 			scenario: "Administrator discovery of the library features this build supports.",
 			method:   http.MethodGet, path: Prefix + "/libraries/capabilities", headers: bearer(adminToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/LibraryCapabilities"},
+	}
+}
+
+func TestLibraryCapabilitiesReportsTrickplayStorage(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("storage_%t", configured), func(t *testing.T) {
+			deps := pilotDeps(nil, nil)
+			if configured {
+				deps.ArtworkStore = blobstoretest.New()
+			}
+			rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/libraries/capabilities", "", bearer(adminToken))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			var body LibraryCapabilities
+			decodeJSON(t, rec.Body, &body)
+			if !body.Trickplay || body.TrickplaySupported != configured {
+				t.Fatalf("capability: %+v, configured %t", body, configured)
+			}
+		})
 	}
 }

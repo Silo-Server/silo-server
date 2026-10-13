@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/migrations"
 )
@@ -97,7 +98,7 @@ func TestSeasonStateIsKeyedByAnalysisHashPostgres(t *testing.T) {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	fileID := seedSilenceBackfillFixture(t, pool)[0]
-	state := SeasonState{AnalysisGroupKey: "default|default|und", InputSignature: "signature", Status: seasonStatusComplete}
+	state := SeasonState{AnalysisGroupKey: "default|default|und", InputSignature: "signature", Status: seasonStatusPartial, LastError: "1 fingerprint extraction(s) failed"}
 	if err := pool.QueryRow(ctx, `
 		SELECT e.season_id, mf.media_folder_id
 		FROM media_files mf JOIN episodes e ON e.content_id = mf.episode_id
@@ -107,7 +108,8 @@ func TestSeasonStateIsKeyedByAnalysisHashPostgres(t *testing.T) {
 
 	repo := NewRepository(pool)
 	introHash := DefaultConfig("ffmpeg").AnalysisConfigHash()
-	otherHash := ArtifactConfigHash("credits_test", "season")
+	otherHash := mediaartifact.ConfigHash("credits_test", "season")
+	before := time.Now().Add(-time.Minute)
 	if err := repo.UpsertSeasonState(ctx, state, introHash); err != nil {
 		t.Fatal(err)
 	}
@@ -119,13 +121,22 @@ func TestSeasonStateIsKeyedByAnalysisHashPostgres(t *testing.T) {
 	if err := repo.UpsertSeasonState(ctx, other, otherHash); err != nil {
 		t.Fatal(err)
 	}
-	for hash, want := range map[string]string{introHash: seasonStatusComplete, otherHash: seasonStatusNotFound} {
+	for hash, want := range map[string]string{introHash: seasonStatusPartial, otherHash: seasonStatusNotFound} {
 		loaded, err := repo.LoadSeasonState(ctx, state, hash)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if loaded == nil || loaded.Status != want {
 			t.Fatalf("state under %s = %+v, want status %s", hash, loaded, want)
+		}
+		if hash == introHash {
+			if loaded.LastError != state.LastError || loaded.AnalyzedAt.Before(before) {
+				t.Fatalf("loaded state = %+v, want the saved error and a fresh analyzed_at", loaded)
+			}
+			now := time.Now()
+			if !loaded.settled(now) || loaded.settled(now.Add(partialSeasonRetryInterval)) {
+				t.Fatalf("partial state should hold for the retry interval and lapse after it: %+v", loaded)
+			}
 		}
 	}
 }

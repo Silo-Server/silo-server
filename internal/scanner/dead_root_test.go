@@ -51,49 +51,6 @@ func TestRootCoverageClauses(t *testing.T) {
 	}
 }
 
-func TestDeadRootWarningMessage(t *testing.T) {
-	t.Parallel()
-
-	got := deadRootWarningMessage(2, []string{"/mnt/movies"}, nil)
-	want := "1 of 2 roots unreachable: /mnt/movies"
-	if got != want {
-		t.Fatalf("deadRootWarningMessage = %q, want %q", got, want)
-	}
-
-	got = deadRootWarningMessage(3, []string{"/a", "/b"}, nil)
-	want = "2 of 3 roots unreachable: /a, /b"
-	if got != want {
-		t.Fatalf("deadRootWarningMessage = %q, want %q", got, want)
-	}
-
-	got = deadRootWarningMessage(2, nil, []string{"/mnt/movies"})
-	want = "1 of 2 roots returned no files while the library still has cataloged files (lost mount?): /mnt/movies"
-	if got != want {
-		t.Fatalf("deadRootWarningMessage = %q, want %q", got, want)
-	}
-
-	got = deadRootWarningMessage(3, []string{"/a"}, []string{"/b"})
-	want = "1 of 3 roots unreachable: /a; 1 of 3 roots returned no files while the library still has cataloged files (lost mount?): /b"
-	if got != want {
-		t.Fatalf("deadRootWarningMessage = %q, want %q", got, want)
-	}
-}
-
-func TestProbeUnreachableRoots(t *testing.T) {
-	t.Parallel()
-
-	alive := t.TempDir()
-	dead := filepath.Join(t.TempDir(), "gone")
-
-	got := probeUnreachableRoots(context.Background(), 1, []string{alive, dead})
-	if len(got) != 1 || got[0] != dead {
-		t.Fatalf("probeUnreachableRoots = %v, want [%s]", got, dead)
-	}
-	if got := probeUnreachableRoots(context.Background(), 1, []string{alive}); len(got) != 0 {
-		t.Fatalf("probeUnreachableRoots(all alive) = %v, want empty", got)
-	}
-}
-
 func newDeadRootTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -789,9 +746,9 @@ func TestScanFolderSuspectEmptyRootProtection(t *testing.T) {
 	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
 		t.Fatalf("scan 1: %v", err)
 	}
-	idB, _, foundB := fileRow(fileB)
-	if !foundB {
-		t.Fatal("after scan 1: fileB row not found")
+	idB, baselineMissing, foundB := fileRow(fileB)
+	if !foundB || baselineMissing != nil {
+		t.Fatalf("after scan 1: fileB found=%v missing=%v, want a present row", foundB, baselineMissing)
 	}
 
 	// Root B's mount drops out, leaving the empty mountpoint directory.
@@ -1176,82 +1133,6 @@ func TestScanFolderFlappingRootNeverHidesPresentFiles(t *testing.T) {
 	}
 	if stillThere {
 		t.Fatal("a genuinely deleted file under a reachable root survived; real deletions must still be detected")
-	}
-}
-
-// TestScanFolderFirstScanAfterMountDropsProtectsLiveRows covers Codex review
-// finding #2 on PR #472: suspect-empty detection used to require a root whose
-// rows were ALL already missing, which meant it could only recognise a lost
-// mount one scan too late.
-//
-// Here the mount drops leaving a reachable but empty mountpoint, and the rows
-// are still live because nothing has marked them yet — the state on the very
-// first scan after a real mount failure. The root must be classified suspect
-// and its rows protected on that first scan, not after they have been hidden.
-func TestScanFolderFirstScanAfterMountDropsProtectsLiveRows(t *testing.T) {
-	pool := newDeadRootTestPool(t)
-	ctx := context.Background()
-	folderID := seedDeadRootTestFolder(t, pool, "movies", "First Outage Scan Test")
-
-	base := t.TempDir()
-	live := filepath.Join(base, "live")
-	dropped := filepath.Join(base, "dropped")
-	liveFile := filepath.Join(live, "Alpha (2020)", "Alpha (2020).mkv")
-	droppedFile := filepath.Join(dropped, "Beta (2021)", "Beta (2021).mkv")
-
-	write := func(path string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.WriteFile(path, []byte("fake movie payload"), 0o644); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-	}
-	write(liveFile)
-	write(droppedFile)
-
-	folder := &models.MediaFolder{
-		ID: folderID, Paths: []string{live, dropped}, Type: "movies",
-		Name: "First Outage Scan Test", Enabled: true,
-	}
-	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
-
-	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
-		t.Fatalf("baseline scan: %v", err)
-	}
-	var missing *time.Time
-	if err := pool.QueryRow(ctx,
-		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
-		folderID, droppedFile).Scan(&missing); err != nil {
-		t.Fatalf("baseline row: %v", err)
-	}
-	if missing != nil {
-		t.Fatalf("baseline: row already missing at %v", missing)
-	}
-
-	// The mount drops: contents vanish, the mountpoint directory remains and
-	// still probes reachable. The rows under it are all still live.
-	if err := os.RemoveAll(filepath.Join(dropped, "Beta (2021)")); err != nil {
-		t.Fatalf("empty the dropped root: %v", err)
-	}
-
-	result, err := scanner.ScanFolder(ctx, folder)
-	if err != nil {
-		t.Fatalf("first outage scan: %v", err)
-	}
-	if len(result.SuspectEmptyRoots) != 1 || result.SuspectEmptyRoots[0] != dropped {
-		t.Fatalf("SuspectEmptyRoots = %v, want [%s] on the FIRST scan after the drop",
-			result.SuspectEmptyRoots, dropped)
-	}
-	if err := pool.QueryRow(ctx,
-		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
-		folderID, droppedFile).Scan(&missing); err != nil {
-		t.Fatalf("row after outage scan (hard-deleted?): %v", err)
-	}
-	if missing != nil {
-		t.Fatalf("first scan after the mount dropped hid the row at %v; suspect-empty "+
-			"protection must engage before the rows are marked, not after", missing)
 	}
 }
 

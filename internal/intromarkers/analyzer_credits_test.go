@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -445,7 +446,7 @@ func TestCreditsTailWithoutAudioIsNotDecodedAgain(t *testing.T) {
 	if extractor.creditsExtractCalls != 2 {
 		t.Fatalf("credits extractions = %d, want each file decoded once", extractor.creditsExtractCalls)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != ArtifactUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
+	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
 		t.Fatalf("artifact = %+v, want unusable with no audio", artifact)
 	}
 }

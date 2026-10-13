@@ -97,6 +97,7 @@ type CreateFolderInput struct {
 	MetadataLanguage         string // ISO 639-1 code; defaults to "en" if empty
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
+	TrickplayEnabled         bool
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh; nil applies the default (all provider kinds), an
 	// empty slice disables remote videos.
@@ -123,6 +124,7 @@ type UpdateFolderInput struct {
 	AutoTranslateMetadata    *bool
 	ChapterThumbnailsEnabled *bool
 	IntroDetectionEnabled    *bool
+	TrickplayEnabled         *bool
 	TrailerKinds             *[]string // nil = no change; empty slice disables remote videos
 	// RealtimeMonitoring is nil on the frozen /api/v1 update path, which
 	// never sets it, so the column stays unchanged there.
@@ -191,7 +193,7 @@ func normalizeTrailerKindsInput(kinds []string) []string {
 
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
-const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, poster_path, last_scanned_at,
+const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trickplay_enabled, realtime_monitoring, trailer_kinds, poster_path, last_scanned_at,
 	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order`
 
 // scanFolder scans a single row into a *models.MediaFolder.
@@ -207,6 +209,7 @@ func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
 		&f.AutoTranslateMetadata,
 		&f.ChapterThumbnailsEnabled,
 		&f.IntroDetectionEnabled,
+		&f.TrickplayEnabled,
 		&f.RealtimeMonitoring,
 		&f.TrailerKinds,
 		&f.PosterPath,
@@ -242,6 +245,7 @@ func scanFolders(rows pgx.Rows) ([]*models.MediaFolder, error) {
 			&f.AutoTranslateMetadata,
 			&f.ChapterThumbnailsEnabled,
 			&f.IntroDetectionEnabled,
+			&f.TrickplayEnabled,
 			&f.RealtimeMonitoring,
 			&f.TrailerKinds,
 			&f.PosterPath,
@@ -324,8 +328,8 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		realtimeMonitoring = *input.RealtimeMonitoring
 	}
 
-	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
+	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, realtime_monitoring, trailer_kinds, trickplay_enabled, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
 		RETURNING ` + folderColumns
 
 	row := tx.QueryRow(ctx, query,
@@ -336,6 +340,7 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		input.IntroDetectionEnabled,
 		realtimeMonitoring,
 		trailerKinds,
+		input.TrickplayEnabled,
 	)
 
 	folder, err := scanFolder(row)
@@ -505,6 +510,11 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 	if input.ChapterThumbnailsEnabled != nil {
 		setClauses = append(setClauses, fmt.Sprintf("chapter_thumbnails_enabled = $%d", argIndex))
 		args = append(args, *input.ChapterThumbnailsEnabled)
+		argIndex++
+	}
+	if input.TrickplayEnabled != nil {
+		setClauses = append(setClauses, fmt.Sprintf("trickplay_enabled = $%d", argIndex))
+		args = append(args, *input.TrickplayEnabled)
 		argIndex++
 	}
 	if input.IntroDetectionEnabled != nil {
@@ -1002,6 +1012,12 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 	imgRows, err := q.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = ANY($1)
 		UNION ALL
+		SELECT banner_path, thumb_path, clearart_path FROM media_items WHERE content_id = ANY($1)
+		UNION ALL
+		SELECT disc_path, '', '' FROM media_items WHERE content_id = ANY($1)
+		UNION ALL
+		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = ANY($1)
+		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
@@ -1035,9 +1051,9 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 }
 
 // filterUnreferencedImageDirs returns the candidate directories that no
-// surviving row still has artwork under: no poster, backdrop, logo, season
-// poster or episode still outside deletingContentIDs has a path that starts
-// with the directory.
+// surviving row still has artwork under: no item artwork slot, extra backdrop,
+// season poster or episode still outside deletingContentIDs has a path that
+// starts with the directory.
 //
 // The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
 // and that is what this used to run. A pattern built from a column cannot be
@@ -1093,8 +1109,12 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			FROM unnest($1::text[]) AS t(dir)
 		), referenced_path AS (
 			SELECT a.path FROM media_items mi
-				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path)) AS a(path)
+				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path),
+					(mi.banner_path), (mi.thumb_path), (mi.clearart_path), (mi.disc_path)) AS a(path)
 				WHERE NOT (mi.content_id = ANY($2::text[])) AND a.path <> ''
+			UNION ALL
+			SELECT b.path FROM media_item_backdrops b
+				WHERE NOT (b.content_id = ANY($2::text[])) AND b.path <> ''
 			UNION ALL
 			SELECT s.poster_path FROM seasons s
 				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''

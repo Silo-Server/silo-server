@@ -49,6 +49,9 @@ type RouterTargetStatus struct {
 	Status         Status
 	ExternalStatus string
 	Message        string
+	// Progress is set by a plugin that declares reports_download_progress
+	// while the target has downloads in flight; nil means none.
+	Progress *DownloadProgress
 }
 
 type RouterOption struct {
@@ -73,6 +76,16 @@ type RouterClient interface {
 
 type pluginRouterProvider struct{ resolver RouterClientResolver }
 
+// RouterFeatures reads the capability's declared features when the resolver
+// can; otherwise the capability declares none.
+func (p *pluginRouterProvider) RouterFeatures(ctx context.Context, installationID int, capabilityID string) (RouterFeatures, error) {
+	reader, ok := p.resolver.(RouterFeatureReader)
+	if !ok {
+		return RouterFeatures{}, nil
+	}
+	return reader.RouterFeatures(ctx, installationID, capabilityID)
+}
+
 func NewPluginRouterProvider(r RouterClientResolver) RequestRouterProvider {
 	return &pluginRouterProvider{resolver: r}
 }
@@ -92,6 +105,14 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 	if req.Year != nil {
 		year = *req.Year
 	}
+	// Seasons name the series seasons requested; none means the whole
+	// series. A plugin without supports_seasons ignores them.
+	var seasons []int32
+	if req.MediaType == MediaTypeSeries {
+		for _, season := range req.Seasons {
+			seasons = append(seasons, int32(season))
+		}
+	}
 	return &pluginv1.RequestDescriptor{
 		MediaType:          string(req.MediaType),
 		Title:              req.Title,
@@ -102,6 +123,7 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 		RequesterProfileId: req.RequestedByProfileID,
 		RequesterEmail:     req.RequesterEmail,
 		RequesterUsername:  req.RequesterUsername,
+		Seasons:            seasons,
 	}
 }
 
@@ -179,9 +201,42 @@ func (p *pluginRouterProvider) CheckStatus(ctx context.Context, installationID i
 		out = append(out, RouterTargetStatus{
 			Quality: Quality(st.GetQuality()), ConnectionID: st.GetConnectionId(),
 			Status: Status(st.GetStatus()), ExternalStatus: st.GetExternalStatus(), Message: st.GetMessage(),
+			Progress: downloadProgressFromProto(st.GetProgress()),
 		})
 	}
 	return out, nil
+}
+
+// downloadProgressFromProto normalizes a plugin's progress report. An unknown
+// or empty phase reads as downloading, but a report with neither a phase nor
+// a size carries nothing and maps to nil. Byte counts are clamped so that
+// 0 <= left <= total; a total of 0 means the size is unknown.
+func downloadProgressFromProto(p *pluginv1.DownloadProgress) *DownloadProgress {
+	if p == nil {
+		return nil
+	}
+	phase := DownloadPhase(p.GetPhase())
+	total := max(p.GetBytesTotal(), 0)
+	if phase == "" && total == 0 {
+		return nil
+	}
+	switch phase {
+	case DownloadPhaseQueued, DownloadPhaseDownloading, DownloadPhasePaused,
+		DownloadPhaseStalled, DownloadPhaseImporting, DownloadPhaseImportBlocked:
+	default:
+		phase = DownloadPhaseDownloading
+	}
+	out := &DownloadProgress{
+		Phase:      phase,
+		BytesTotal: total,
+		BytesLeft:  min(max(p.GetBytesLeft(), 0), total),
+		Downloads:  int(max(p.GetDownloads(), 0)),
+	}
+	if eta := p.GetEstimatedCompletion(); eta != nil && eta.IsValid() {
+		at := eta.AsTime().UTC()
+		out.EstimatedCompletion = &at
+	}
+	return out
 }
 
 func (p *pluginRouterProvider) ListConfigOptions(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string][]RouterOption, error) {

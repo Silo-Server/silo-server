@@ -9,6 +9,7 @@ import {
   useUpdateServerSetting,
 } from "./settings";
 import { toast } from "sonner";
+import { useSelectChatGPTAccount, useCompleteChatGPTLogin } from "./chatgpt";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 function fixture() {
@@ -231,7 +232,7 @@ it.each([false, true])(
     expect(result.current.dirtyCount).toBe(1);
     expect(writes).toEqual([{ values: { "branding.server_name": "Casa" }, tag: '"tagA"' }]);
     await act(async () => {
-      if (competitor) await expect(result.current.save()).rejects.toThrow();
+      if (competitor) await expect(result.current.save()).rejects.toBeInstanceOf(Error);
       else await result.current.save();
     });
     expect(writes).toEqual([
@@ -268,4 +269,165 @@ it("refreshes the link capabilities when the public URL changes", async () => {
   expect(client.getQueryState(capabilitiesKey)?.isInvalidated).toBe(true);
   expect(client.getQueryState(listKey)?.isInvalidated).toBe(false);
   expect(client.getQueryState(["auth", "password-reset-capability"])?.isInvalidated).toBe(true);
+});
+
+it.each(["select", "complete"] as const)(
+  "saves retained drafts after acknowledged %s reconciliation",
+  async (operation) => {
+    let stored: Record<string, string> = {
+      "branding.server_name": "Silo",
+      "ai.chat_model": "gpt-6-luna",
+      "ai.reasoning_effort": "high",
+    };
+    let tag = '"A"';
+    const writes: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          stored = { ...stored, "ai.chat_model": "gpt-4o-mini", "ai.reasoning_effort": "" };
+          tag = '"B"';
+          return new Response(operation === "complete" ? null : JSON.stringify({}), {
+            status: operation === "complete" ? 204 : 200,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Silo-Settings-Before-ETag": '"A"',
+              "X-Silo-Settings-After-ETag": '"B"',
+            },
+          });
+        }
+        if (init?.method === "PUT") {
+          const match = new Headers(init.headers).get("If-Match")!;
+          writes.push(match);
+          if (match !== tag)
+            return response({ status: 412, title: "Precondition failed" }, 412, tag);
+          const values = JSON.parse(String(init.body)).values;
+          stored = { ...stored, ...values };
+          tag = '"C"';
+          return response({ values, restart_required: false }, 200, tag);
+        }
+        return String(url).endsWith("/effective") ? response(stored, 200, tag) : response({});
+      }),
+    );
+    const { result } = renderHook(
+      () => ({
+        form: useSettingsForm({
+          keys: ["branding.server_name", "ai.chat_model", "ai.reasoning_effort"],
+        }),
+        select: useSelectChatGPTAccount(),
+        complete: useCompleteChatGPTLogin(),
+      }),
+      fixture(),
+    );
+    await waitFor(() => expect(result.current.form.loaded).toBe(true));
+    act(() => result.current.form.setValue("branding.server_name", "Casa"));
+    const accept = result.current.form.beginSettingsTransition();
+    await act(async () => {
+      const change = await result.current[operation].mutateAsync("fixture");
+      accept(change);
+    });
+    expect(result.current.form.getValue("ai.chat_model")).toBe("gpt-4o-mini");
+    expect(result.current.form.getValue("branding.server_name")).toBe("Casa");
+    await act(async () => {
+      await result.current.form.save();
+    });
+    expect(writes).toEqual(['"B"']);
+    expect(result.current.form.dirtyCount).toBe(0);
+  },
+);
+
+it.each([
+  "ordinary-before",
+  "secret-before",
+  "ordinary-after",
+  "secret-after",
+  "model-draft",
+  "effort-draft",
+  "save-overlap",
+  "authority",
+] as const)("retains conflict protection during activation: %s", async (scenario) => {
+  let stored: Record<string, string> = {
+    "branding.server_name": "Silo",
+    "server.log_level": "info",
+    "ai.chat_model": "gpt-6-luna",
+    "ai.reasoning_effort": "high",
+  };
+  let tag = '"A"';
+  let release!: () => void;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  const writes: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        await gate;
+        const before = scenario.endsWith("before") ? '"competitor"' : '"A"';
+        // Secret mutations change only the validator; their values remain redacted.
+        if (scenario.startsWith("ordinary")) stored["server.log_level"] = "warn";
+        stored = { ...stored, "ai.chat_model": "gpt-4o-mini", "ai.reasoning_effort": "" };
+        tag = scenario.endsWith("after") ? '"competitor"' : '"B"';
+        return new Response(JSON.stringify({}), {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Silo-Settings-Before-ETag": before,
+            "X-Silo-Settings-After-ETag": '"B"',
+          },
+        });
+      }
+      if (init?.method === "PUT") {
+        const match = new Headers(init.headers).get("If-Match")!;
+        writes.push(match);
+        return response({ status: 412, title: "Precondition failed" }, 412, tag);
+      }
+      return String(url).endsWith("/effective") ? response(stored, 200, tag) : response({});
+    }),
+  );
+  const { result, rerender } = renderHook(
+    () => ({
+      form: useSettingsForm({
+        keys: ["branding.server_name", "ai.chat_model", "ai.reasoning_effort"],
+      }),
+      select: useSelectChatGPTAccount(),
+    }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.form.loaded).toBe(true));
+  act(() => {
+    result.current.form.setValue("branding.server_name", "Casa");
+  });
+  const accept = result.current.form.beginSettingsTransition();
+  let pending!: Promise<unknown>;
+  act(() => {
+    pending = result.current.select
+      .mutateAsync("fixture")
+      .then(accept)
+      .catch((error: unknown) => error);
+  });
+  if (scenario === "model-draft")
+    act(() => result.current.form.setValue("ai.chat_model", "custom-draft"));
+  if (scenario === "effort-draft")
+    act(() => result.current.form.setValue("ai.reasoning_effort", "low"));
+  if (scenario === "save-overlap")
+    await act(async () => {
+      await expect(result.current.form.save()).rejects.toThrow();
+    });
+  if (scenario === "authority") {
+    act(() => setProfileId("profile-b"));
+    rerender();
+  }
+  await act(async () => {
+    release();
+    await pending;
+  });
+  if (scenario === "authority") {
+    expect(result.current.form.dirtyCount).toBe(0);
+    return;
+  }
+  expect(result.current.form.getValue("branding.server_name")).toBe("Casa");
+  await act(async () => {
+    await expect(result.current.form.save()).rejects.toThrow();
+  });
+  expect(writes.at(-1)).toBe('"A"');
 });

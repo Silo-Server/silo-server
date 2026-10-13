@@ -8,6 +8,10 @@
     "release_name": "",
     "score": 0,
     "hearing_impaired": false,
-    "created_at": "2026-01-02T03:04:05.678Z"
+    "created_at": "2026-01-02T03:04:05.678Z",
+    "timing": {
+      "offset_ms": 0,
+      "scale": 1
+    }
   }
 }

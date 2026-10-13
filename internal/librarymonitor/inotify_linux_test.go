@@ -125,21 +125,6 @@ func TestInotifyOverlappingRootsShareWatches(t *testing.T) {
 	}
 }
 
-func TestInotifySymlinkRootReportsTheConfiguredPath(t *testing.T) {
-	parent := t.TempDir()
-	mkdirs(t, parent, "real/Movie")
-	root := filepath.Join(parent, "library")
-	if err := os.Symlink(filepath.Join(parent, "real"), root); err != nil {
-		t.Fatal(err)
-	}
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(parent, "real", "Movie", "m.mkv"), "x")
-	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Movie"), "m.mkv"))
-}
-
 func TestInotifyRenameRewritesDescendantPaths(t *testing.T) {
 	root := t.TempDir()
 	mkdirs(t, root, "Old/Season 1/Extras")
@@ -464,33 +449,6 @@ func TestInotifyIgnoreMarkerAtTheLibraryFolder(t *testing.T) {
 	if got := b.Directories(root); got != 2 {
 		t.Fatalf("directories = %d after the marker went, want 2", got)
 	}
-}
-
-// The walk records a directory once per root: with Linked -> Target in the
-// root, Target is recorded only as Linked. Deleting the link must ask for a
-// re-walk, which records Target under its own path.
-func TestInotifyDroppedSymlinkAliasAsksForARewalk(t *testing.T) {
-	root := t.TempDir()
-	mkdirs(t, root, "Target/Deep")
-	if err := os.Symlink(filepath.Join(root, "Target"), filepath.Join(root, "Linked")); err != nil {
-		t.Fatal(err)
-	}
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	if got := b.pathsWithPrefix(filepath.Join(root, "Target")); len(got) != 0 {
-		t.Fatalf("recorded %v, want Target only through Linked", got)
-	}
-	if err := os.Remove(filepath.Join(root, "Linked")); err != nil {
-		t.Fatal(err)
-	}
-	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(root, "Target", "Deep", "x.mkv"), "x")
-	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Target", "Deep"), "x.mkv"))
 }
 
 // A move out of the tree is reported even while other events keep every

@@ -9,6 +9,7 @@ import {
 } from "@/api/v2/adminSettingsSnapshot";
 import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
 import { PASSWORD_RESET_CAPABILITY_KEY } from "@/hooks/queries/passwordReset";
+import { refreshAuthProviders } from "../authProviders";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   captureProfileRequestContext,
@@ -208,6 +209,9 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ];
+      if (keys.includes("auth.local_password_login") || keys.includes("server.public_url")) {
+        invalidations.push(refreshAuthProviders(queryClient));
+      }
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
@@ -276,7 +280,13 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       }
     },
     mutateAsync: async (values: SettingsValues) => {
-      const intent = capture(values);
+      let intent;
+      try {
+        intent = capture(values);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        throw error;
+      }
       const result = await mutation.mutateAsync(intent);
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
@@ -321,6 +331,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ];
+      if (variables.key === "auth.local_password_login" || variables.key === "server.public_url") {
+        invalidations.push(refreshAuthProviders(queryClient));
+      }
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),

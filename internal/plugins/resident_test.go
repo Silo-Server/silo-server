@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,29 +22,38 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-// buildResidentFixture compiles testdata/residentplugin into a temp install
-// dir, writes the manifest the binary reports (checksum included) next to
-// it as manifest.json, and returns the binary path.
+// Each test receives its own writable installation of the compiled fixture.
 func buildResidentFixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	return buildResidentFixtureVersion(t, "0.1.0")
+}
+
+type residentFixtureData struct{ binary, manifest []byte }
+
+// Cache only immutable build outputs. Installation paths and process state
+// remain private to each test, including tests that corrupt or replace files.
+var residentFixtureBuilds sync.Map // version -> func() (residentFixtureData, error)
+
+func compileResidentFixture(version string) (residentFixtureData, error) {
+	dir, err := os.MkdirTemp("", "silo-resident-fixture-")
+	if err != nil {
+		return residentFixtureData{}, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
 	bin := filepath.Join(dir, "residentplugin")
-	build := exec.Command("go", "build", "-o", bin, "./testdata/residentplugin")
+	build := exec.Command("go", "build", "-ldflags", "-X main.version="+version, "-o", bin, "./testdata/residentplugin")
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build residentplugin: %v\n%s", err, out)
+		return residentFixtureData{}, fmt.Errorf("build residentplugin %s: %w\n%s", version, err, out)
 	}
 	raw, err := exec.Command(bin, "manifest").Output()
 	if err != nil {
-		t.Fatalf("read fixture manifest: %v", err)
+		return residentFixtureData{}, fmt.Errorf("read fixture manifest: %w", err)
 	}
-	manifest := &pluginv1.PluginManifest{}
-	if err := protojson.Unmarshal(raw, manifest); err != nil {
-		t.Fatalf("decode fixture manifest: %v", err)
+	if err := protojson.Unmarshal(raw, &pluginv1.PluginManifest{}); err != nil {
+		return residentFixtureData{}, fmt.Errorf("decode fixture manifest: %w", err)
 	}
-	if err := os.WriteFile(InstalledManifestPath(bin), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return bin
+	binary, err := os.ReadFile(bin)
+	return residentFixtureData{binary: binary, manifest: raw}, err
 }
 
 type residentFixture struct {
@@ -90,7 +100,7 @@ func newResidentFixture(t *testing.T, opts ResidentOptions) *residentFixture {
 	service.resident = newResidentSupervisor(service, opts)
 	// Same hook order as NewService and NewNodeService: the row cache is
 	// dropped before the supervisor reads the rows.
-	service.AddLifecycleHook(func(context.Context) { service.invalidateInstallationCache() })
+	service.AddLifecycleHook(func(context.Context) { service.InvalidateInstallationCache() })
 	service.AddLifecycleHook(func(ctx context.Context) { service.resident.Reconcile(ctx) })
 	host.SetExitHandler(service.HandleResidentExit)
 	t.Cleanup(func() {
@@ -346,7 +356,7 @@ func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 	}
 	disabled := false
 	_ = store.Update(context.Background(), 2, UpdateInstallationInput{Enabled: &disabled})
-	service.invalidateInstallationCache()
+	service.InvalidateInstallationCache()
 	if err := service.RestartInstallation(context.Background(), 2); !errors.Is(err, ErrInstallationDisabled) {
 		t.Fatalf("RestartInstallation(disabled) = %v, want ErrInstallationDisabled", err)
 	}
@@ -356,17 +366,18 @@ func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 // of the same plugin: the binary reports the given version in its manifest.
 func buildResidentFixtureVersion(t *testing.T, version string) string {
 	t.Helper()
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "residentplugin")
-	build := exec.Command("go", "build", "-ldflags", "-X main.version="+version, "-o", bin, "./testdata/residentplugin")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build residentplugin %s: %v\n%s", version, err, out)
-	}
-	raw, err := exec.Command(bin, "manifest").Output()
+	build, _ := residentFixtureBuilds.LoadOrStore(version, sync.OnceValues(func() (residentFixtureData, error) {
+		return compileResidentFixture(version)
+	}))
+	fixture, err := build.(func() (residentFixtureData, error))()
 	if err != nil {
-		t.Fatalf("read fixture manifest: %v", err)
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(InstalledManifestPath(bin), raw, 0o644); err != nil {
+	bin := filepath.Join(t.TempDir(), "residentplugin")
+	if err := os.WriteFile(bin, fixture.binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(InstalledManifestPath(bin), fixture.manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return bin

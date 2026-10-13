@@ -18,6 +18,13 @@ type ProgressLister interface {
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error)
 }
 
+// CompletedProgressSinceLister reads a profile's completed rows newer than a
+// cutoff in one bounded query. userstore.UserStore satisfies it; a lister
+// without it falls back to paging ListProgress.
+type CompletedProgressSinceLister interface {
+	ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error)
+}
+
 // ProgressSnapshot pairs a media item with the time its progress row last changed.
 type ProgressSnapshot struct {
 	ContentID string
@@ -42,16 +49,17 @@ func NewContinueWatchingProgressFilter(pool *pgxpool.Pool) *ContinueWatchingProg
 const supersededProgressPageSize = 500
 
 // supersededProgressMaxPages hard-caps how many completed-history pages the
-// superseded-episode walk reads in one request. The updated_at cutoff normally
-// halts paging far sooner (an import-heavy profile's completed rows predate its
-// active in-progress items, so the scan stops on the first page); this bound
-// only engages in the adversarial case of a very old in-progress entry sitting
-// behind a large volume of newer completions. Hitting it means the tail of the
-// completed set went unscanned, so a genuinely-superseded episode could
-// momentarily survive on the Continue Watching row — we log when that happens
-// rather than silently mis-filter, and it self-corrects once the stale
-// in-progress entry ages out of the scanned window.
-const supersededProgressMaxPages = 5
+// superseded-episode walk reads in one request (supersededProgressMaxRows in
+// the one-query form). The cutoff is the oldest in-progress *episode*, so a
+// single episode left unfinished months ago puts every completion since then
+// in range; on a heavy watcher that reaches the cap on every load. Hitting it
+// means the tail of the completed set went unscanned, so an episode superseded
+// only by an older completion can survive on the Continue Watching row. We log
+// when that happens rather than silently mis-filter.
+const (
+	supersededProgressMaxPages = 5
+	supersededProgressMaxRows  = supersededProgressMaxPages * supersededProgressPageSize
+)
 
 // SupersededEpisodeProgressIDs returns the content IDs of in-progress entries
 // whose series has a later episode completed more recently than the entry's
@@ -71,7 +79,10 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 	if f == nil || f.pool == nil {
 		return map[string]struct{}{}, nil
 	}
-	inProgress := ProgressSnapshots(entries)
+	inProgress, err := f.episodeSnapshots(ctx, ProgressSnapshots(entries))
+	if err != nil {
+		return nil, err
+	}
 	if len(inProgress) == 0 {
 		return map[string]struct{}{}, nil
 	}
@@ -84,7 +95,8 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 	// timestamp keeps import-heavy profiles — whose entire back-catalogue is
 	// completed=TRUE with old timestamps — from re-paging hundreds of thousands
 	// of irrelevant rows on every Resume/Continue Watching load (the 60–116s
-	// tail in the 2026-07-06 slow-query comparison).
+	// tail in the 2026-07-06 slow-query comparison). Only episodes can be
+	// superseded, so an old in-progress movie must not pull the cutoff back.
 	oldestInProgress := inProgress[0].UpdatedAt
 	for _, snapshot := range inProgress[1:] {
 		if snapshot.UpdatedAt.Before(oldestInProgress) {
@@ -123,6 +135,39 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 	return superseded, nil
 }
 
+// episodeSnapshots keeps the snapshots whose content is an episode. Callers
+// such as jellycompat Resume do not know each entry's type, and an unfinished
+// movie would otherwise set the completed-walk cutoff.
+func (f *ContinueWatchingProgressFilter) episodeSnapshots(ctx context.Context, snapshots []ProgressSnapshot) ([]ProgressSnapshot, error) {
+	if len(snapshots) == 0 {
+		return snapshots, nil
+	}
+	ids, _ := splitProgressSnapshots(snapshots)
+	rows, err := f.pool.Query(ctx, `SELECT content_id FROM episodes WHERE content_id = ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("querying in-progress episode ids: %w", err)
+	}
+	defer rows.Close()
+	episodes := make(map[string]struct{}, len(ids))
+	for rows.Next() {
+		var contentID string
+		if err := rows.Scan(&contentID); err != nil {
+			return nil, fmt.Errorf("scanning in-progress episode id: %w", err)
+		}
+		episodes[contentID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating in-progress episode ids: %w", err)
+	}
+	kept := snapshots[:0:0]
+	for _, snapshot := range snapshots {
+		if _, ok := episodes[snapshot.ContentID]; ok {
+			kept = append(kept, snapshot)
+		}
+	}
+	return kept, nil
+}
+
 // CompletedProgressCache holds one request's walk of a profile's completed
 // progress rows so repeated superseded-episode checks share it.
 //
@@ -153,6 +198,10 @@ type CompletedProgressCache struct {
 	// either way there is nothing further to read.
 	done   bool
 	capped bool
+	// readSinceAt is the oldest cutoff the one-query form has read down to:
+	// snaps then holds every completed row after it (up to the row cap).
+	readSinceAt time.Time
+	sinceValid  bool
 }
 
 // NewCompletedProgressCache returns a cache for one request.
@@ -172,6 +221,12 @@ func (c *CompletedProgressCache) snapshots(ctx context.Context, store ProgressLi
 		c.seen = make(map[string]struct{})
 	}
 	c.profileID = profileID
+	if lister, ok := store.(CompletedProgressSinceLister); ok {
+		if err := c.readSince(ctx, lister, profileID, notBefore); err != nil {
+			return nil, err
+		}
+		return c.snapshotsAfter(notBefore), nil
+	}
 
 	// Read forward until the unread remainder is entirely at or before the
 	// cutoff, at which point it cannot contain anything this caller wants.
@@ -210,6 +265,45 @@ func (c *CompletedProgressCache) snapshots(ctx context.Context, store ProgressLi
 		}
 	}
 
+	return c.snapshotsAfter(notBefore), nil
+}
+
+// readSince loads the completed rows after notBefore in one query unless an
+// earlier read already covers that cutoff. A later, older cutoff reads only the
+// rows between it and the previous one, so the request reads each row once and
+// the row cap bounds the whole request, as it does for the offset walk. A zero
+// cutoff already covers the whole history.
+func (c *CompletedProgressCache) readSince(ctx context.Context, lister CompletedProgressSinceLister, profileID string, notBefore time.Time) error {
+	if c.capped || (c.sinceValid && (c.readSinceAt.IsZero() || !notBefore.Before(c.readSinceAt))) {
+		return nil
+	}
+	var until time.Time
+	if c.sinceValid {
+		until = c.readSinceAt
+	}
+	remaining := supersededProgressMaxRows - len(c.snaps)
+	entries, err := lister.ListCompletedProgressSince(ctx, profileID, notBefore, until, remaining+1)
+	if err != nil {
+		return fmt.Errorf("listing completed progress for superseded episodes: %w", err)
+	}
+	if len(entries) > remaining {
+		entries = entries[:remaining]
+		c.capped = true
+		slog.WarnContext(ctx, "continue-watching: superseded-episode walk hit page cap; completed-history tail left unscanned",
+			"profile_id", profileID,
+			"pages_scanned", supersededProgressMaxPages,
+			"rows_scanned", len(c.snaps)+len(entries))
+	}
+	// The new rows are all older than the cached ones, so snaps stays
+	// updated_at DESC.
+	c.snaps = append(c.snaps, ProgressSnapshots(entries)...)
+	c.readSinceAt = notBefore
+	c.sinceValid = true
+	return nil
+}
+
+// snapshotsAfter returns the cached snapshots updated after notBefore.
+func (c *CompletedProgressCache) snapshotsAfter(notBefore time.Time) []ProgressSnapshot {
 	// c.snaps is updated_at DESC, so the wanted rows are a prefix of it.
 	result := make([]ProgressSnapshot, 0, len(c.snaps))
 	for _, snapshot := range c.snaps {
@@ -218,7 +312,7 @@ func (c *CompletedProgressCache) snapshots(ctx context.Context, store ProgressLi
 		}
 		result = append(result, snapshot)
 	}
-	return result, nil
+	return result
 }
 
 // CompletedProgressSnapshots pages through the profile's completed progress

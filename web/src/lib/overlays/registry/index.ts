@@ -23,3 +23,13 @@ export const OVERLAY_MAP: ReadonlyMap<OverlayId, OverlayDef> = new Map(
 export function getOverlayDef(id: OverlayId): OverlayDef | undefined {
   return OVERLAY_MAP.get(id);
 }
+
+// Whether settings offer an overlay: a rating badge only while the server
+// shows its source (getRatingsCapability), since cards leave the score out
+// otherwise and the badge would never render.
+export function isOverlayOffered(
+  def: OverlayDef,
+  shownRatingSources: ReadonlySet<string>,
+): boolean {
+  return !def.ratingSource || shownRatingSources.has(def.ratingSource);
+}

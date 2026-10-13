@@ -96,7 +96,8 @@ describe("useSubtitleAppearanceSetting", () => {
     const { wrapper } = createHarness();
     const { result } = renderHook(() => useSubtitleAppearanceSetting(), { wrapper });
 
-    await waitFor(() => expect(result.current.appearance.fontSize).toBe("large"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.appearance.fontSize).toBe("large");
     // A profile-wide appearance is not this device's override, so offering
     // "reset this device" would be a no-op the user cannot see the effect of.
     expect(result.current.hasDeviceOverride).toBe(false);

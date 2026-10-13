@@ -278,6 +278,7 @@ func TestEscalateRefusedProgressiveRemuxV3EscalatesCopyOnlyRemuxes(t *testing.T)
 			}
 			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
 				SessionID: start.SessionID, Status: "started", CopyFMP4RecipeVersion: start.CopyFMP4RecipeVersion,
+				ThrottleSeconds: start.ThrottleSeconds,
 			})
 		default:
 			w.WriteHeader(http.StatusNoContent)

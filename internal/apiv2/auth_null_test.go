@@ -51,6 +51,12 @@ func (s *authNullDeviceSpy) DenyDeviceLogin(ctx context.Context, in auth.DeviceL
 }
 
 func TestOrdinaryAuthRejectsOptionalNullBeforeEffects(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	sessions := &authNullSessionSpy{SessionService: deps.Sessions}
+	devices := &authNullDeviceSpy{DeviceLoginService: deps.Devices}
+	deps.Sessions = sessions
+	deps.Devices = devices
+	h := newTestHandler(t, deps)
 	for _, tc := range []struct {
 		path, body string
 		fields     []string
@@ -65,12 +71,8 @@ func TestOrdinaryAuthRejectsOptionalNullBeforeEffects(t *testing.T) {
 		{"device/deny", `{"token":"br-pending","code":"ABCD-1234"}`, []string{"token", "code"}, 200},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
-			deps := pilotDeps(nil, nil)
-			sessions := &authNullSessionSpy{SessionService: deps.Sessions}
-			devices := &authNullDeviceSpy{DeviceLoginService: deps.Devices}
-			deps.Sessions = sessions
-			deps.Devices = devices
-			h := newTestHandler(t, deps)
+			*sessions = authNullSessionSpy{SessionService: &fakeSessionService{signupOn: true}}
+			*devices = authNullDeviceSpy{DeviceLoginService: fixtureDevices()}
 			headers := with(bearer(memberToken), "X-Profile-Id", "p-owner")
 			for _, field := range tc.fields {
 				t.Run(field, func(t *testing.T) {

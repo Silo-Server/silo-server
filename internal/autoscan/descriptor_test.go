@@ -1,6 +1,9 @@
 package autoscan
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // A capability that declares nothing must behave exactly as sources did before
 // descriptors existed: host-polled, connection allowed but not demanded. This
@@ -337,5 +340,52 @@ func TestApplyCompatibilityDescriptorLeavesUnknownPluginsAlone(t *testing.T) {
 	}
 	if got.Connection != ConnectionOptional {
 		t.Errorf("connection = %q, want untouched default", got.Connection)
+	}
+}
+
+// The Sonarr/Radarr polling plugin cannot reach anything without a server, so
+// until its manifest says so the host must stop the Add dialog offering "no
+// server".
+func TestApplyCompatibilityDescriptorRequiresServerForArrPlugin(t *testing.T) {
+	got := ApplyCompatibilityDescriptor(arrPluginID, arrCapabilityID, DescriptorFromMetadata(nil))
+
+	if got.Connection != ConnectionRequired {
+		t.Errorf("connection = %q, want required", got.Connection)
+	}
+	if want := []string{"sonarr", "radarr"}; !slices.Equal(got.ConnectionKinds, want) {
+		t.Errorf("connection kinds = %v, want %v", got.ConnectionKinds, want)
+	}
+	if !slices.Equal(got.DeliveryModes, []string{DeliveryModePoll}) {
+		t.Errorf("delivery modes = %v, want poll only", got.DeliveryModes)
+	}
+	if got.Summary == "" {
+		t.Error("expected compat summary")
+	}
+	if got.ConfigForm != nil {
+		t.Error("arr plugin has no per-source fields; expected no config form")
+	}
+}
+
+func TestApplyCompatibilityDescriptorArrManifestWins(t *testing.T) {
+	declared := DescriptorFromMetadata(map[string]any{
+		"scan_source": map[string]any{
+			"connection":       "optional",
+			"connection_kinds": []any{"sonarr"},
+		},
+	})
+	got := ApplyCompatibilityDescriptor(arrPluginID, arrCapabilityID, declared)
+
+	if got.Connection != ConnectionOptional {
+		t.Errorf("connection = %q, manifest must win over compat", got.Connection)
+	}
+	if !slices.Equal(got.ConnectionKinds, []string{"sonarr"}) {
+		t.Errorf("connection kinds = %v, manifest must win over compat", got.ConnectionKinds)
+	}
+}
+
+func TestApplyCompatibilityDescriptorArrRequiresBothIdentifiers(t *testing.T) {
+	got := ApplyCompatibilityDescriptor("com.example.other", arrCapabilityID, DescriptorFromMetadata(nil))
+	if got.Connection != ConnectionOptional {
+		t.Errorf("connection = %q, a matching capability id alone must not apply the arr descriptor", got.Connection)
 	}
 }

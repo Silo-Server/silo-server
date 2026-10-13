@@ -27,6 +27,10 @@ func (f *fakeNotificationDestinationTests) TestNotificationServerChannel(ctx con
 }
 
 func TestNotificationDestinationDispatch(t *testing.T) {
+	fake := new(fakeNotificationDestinationTests)
+	deps := pilotDeps(nil, nil)
+	deps.NotificationDestinationTests = fake
+	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name, path, profile string
 		headers             map[string]string
@@ -36,10 +40,7 @@ func TestNotificationDestinationDispatch(t *testing.T) {
 		{"server-channel", Prefix + "/admin/notifications/server-channels/hook/test", "", bearer(adminToken), notifications.ErrServerChannelNotFound, notifications.ErrServerChannelsDisabled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := new(fakeNotificationDestinationTests)
-			deps := pilotDeps(nil, nil)
-			deps.NotificationDestinationTests = fake
-			h := NewHandler(deps)
+			*fake = fakeNotificationDestinationTests{}
 			rec := do(t, h, http.MethodPost, tc.path, "", nil)
 			if rec.Code != 401 || fake.calls != 0 {
 				t.Fatalf("unauthorized dispatch: %d", rec.Code)

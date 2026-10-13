@@ -30,35 +30,16 @@ function Harness({
 }
 
 describe("LimitField", () => {
-  it("reads the sentinel as unlimited and hides it from the input", () => {
-    render(<Harness initial="0" />);
-
-    expect(screen.getByRole("checkbox", { name: "Unlimited" })).toBeChecked();
-    const input = screen.getByLabelText("Per-user bandwidth");
-    expect(input).toBeDisabled();
-    expect(input).toHaveValue(null);
-  });
-
-  it("writes the sentinel when Unlimited is checked", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<Harness initial="50" onChange={onChange} />);
-
-    const checkbox = screen.getByRole("checkbox", { name: "Unlimited" });
-    expect(checkbox).not.toBeChecked();
-
-    await user.click(checkbox);
-    expect(onChange).toHaveBeenLastCalledWith("0");
-    expect(screen.getByLabelText("Per-user bandwidth")).toBeDisabled();
-  });
-
   it("restores the previous limit when Unlimited is unchecked", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<Harness initial="50" onChange={onChange} />);
 
     const checkbox = screen.getByRole("checkbox", { name: "Unlimited" });
+    expect(checkbox).not.toBeChecked();
     await user.click(checkbox);
+    expect(onChange).toHaveBeenLastCalledWith("0");
+    expect(screen.getByLabelText("Per-user bandwidth")).toBeDisabled();
     await user.click(checkbox);
 
     expect(onChange).toHaveBeenLastCalledWith("50");
@@ -70,6 +51,10 @@ describe("LimitField", () => {
     const onChange = vi.fn();
     render(<Harness initial="0" onChange={onChange} />);
 
+    expect(screen.getByRole("checkbox", { name: "Unlimited" })).toBeChecked();
+    const input = screen.getByLabelText("Per-user bandwidth");
+    expect(input).toBeDisabled();
+    expect(input).toHaveValue(null);
     await user.click(screen.getByRole("checkbox", { name: "Unlimited" }));
     expect(onChange).toHaveBeenLastCalledWith("");
     expect(screen.getByLabelText("Per-user bandwidth")).toBeEnabled();

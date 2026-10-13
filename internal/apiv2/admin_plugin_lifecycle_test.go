@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -112,6 +113,19 @@ func TestAdminPluginLifecycleCreate(t *testing.T) {
 	// Network or installer failures are internal without detail.
 	f.err = errors.New("download archive \"https://example.invalid/a.zip\": connection refused")
 	requireProblem(t, do(t, h, http.MethodPost, path, `{"archive_url":"https://example.invalid/a.zip"}`, bearer(adminToken)), TypeInternalError)
+	// A refused package carries its admin-facing reason, never the internal detail.
+	f.err = fmt.Errorf("update plugin: %w", &plugins.PackageError{Message: "The downloaded plugin doesn't match the SHA-256 checksum its catalog lists, so Silo didn't install it.", Err: errors.New("binary checksum mismatch: expected aa, got bb")})
+	p = requireProblem(t, do(t, h, http.MethodPost, path, `{"repository_id":"4","plugin_id":"org.example.a","version":"1.0.0"}`, bearer(adminToken)), TypeValidationFailed)
+	if p.Detail != "The downloaded plugin doesn't match the SHA-256 checksum its catalog lists, so Silo didn't install it." || len(p.Errors) != 1 || strings.Contains(p.Detail+p.Errors[0].Detail, "expected aa") {
+		t.Fatalf("package problem = %+v", p)
+	}
+	// An unreachable download host is retryable, with the same safe reason.
+	f.err = &plugins.PackageError{Message: "Silo couldn't download the plugin: its download host answered HTTP 502.", Transient: true, Err: errors.New("download binary \"https://example.invalid/a\": unexpected status 502")}
+	rec = do(t, h, http.MethodPost, path, `{"repository_id":"4","plugin_id":"org.example.a","version":"1.0.0"}`, bearer(adminToken))
+	p = requireProblem(t, rec, TypeDependencyUnavailable)
+	if p.Detail != "Silo couldn't download the plugin: its download host answered HTTP 502." || rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("transient package problem = %+v, Retry-After %q", p, rec.Header().Get("Retry-After"))
+	}
 	f.err = &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Plugin service not configured"}
 	requireProblem(t, do(t, h, http.MethodPost, path, `{"archive_url":"https://example.invalid/a.zip"}`, bearer(adminToken)), TypeDependencyUnavailable)
 	deps.AdminPluginLifecycle = nil

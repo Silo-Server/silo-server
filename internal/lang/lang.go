@@ -129,6 +129,25 @@ func CodeAliases(value string) []string {
 	return aliases
 }
 
+// ISO6392 returns the ISO 639-2/T code of value's primary language, the form
+// container formats such as MP4 store per track. Undefined, private-use, and
+// malformed values return "".
+func ISO6392(value string) string {
+	primary := PrimaryLanguage(value)
+	if primary == "" {
+		return ""
+	}
+	tag, err := language.Parse(primary)
+	if err != nil {
+		return ""
+	}
+	base, _ := tag.Base()
+	if code := base.ISO3(); code != "und" {
+		return code
+	}
+	return ""
+}
+
 // PrimaryLanguage intentionally drops script and region for language matching.
 // It never infers a language from an undefined or private-use tag.
 func PrimaryLanguage(value string) string {
@@ -193,9 +212,11 @@ func CanonicalCountry(value string) string {
 	return region.String()
 }
 
-// CanonicalCountries returns a copy of values with each entry canonicalized
-// and empties dropped. Preserves nil so callers can keep the SQL NULL
-// distinction from an empty array.
+// CanonicalCountries returns a copy of values with each entry canonicalized,
+// empties dropped, and repeats removed (first occurrence wins). Providers
+// spell the same country differently (TMDB "US", TVDB "usa"), so two codes
+// that differ before canonicalization can collapse to one. Preserves nil so
+// callers can keep the SQL NULL distinction from an empty array.
 func CanonicalCountries(values []string) []string {
 	if values == nil {
 		return nil
@@ -206,6 +227,26 @@ func CanonicalCountries(values []string) []string {
 		if c != "" {
 			out = append(out, c)
 		}
+	}
+	return UniqueCountries(out)
+}
+
+// UniqueCountries returns values with exact repeats removed, keeping the
+// first occurrence's position. It does not canonicalize, so read paths can
+// clean rows stored with duplicate codes without rewriting values an admin
+// entered by hand. Preserves nil.
+func UniqueCountries(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
 	}
 	return out
 }

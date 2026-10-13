@@ -14,7 +14,7 @@ import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
  * one group — so a key added to the manifest cannot silently disappear from
  * this screen.
  */
-export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes";
+export type DeviceSettingGroupId = "picture" | "sound" | "subtitles" | "episodes" | "appearance";
 
 export interface DeviceSettingGroup {
   id: DeviceSettingGroupId;
@@ -29,9 +29,16 @@ const GROUP_META: Record<DeviceSettingGroupId, { title: string; description: str
   sound: { title: "Sound", description: "Audio on this device" },
   subtitles: { title: "Subtitles", description: "On this device" },
   episodes: { title: "Episodes", description: "What happens between episodes" },
+  appearance: { title: "Appearance", description: "How titles look on this device" },
 };
 
-const GROUP_ORDER: DeviceSettingGroupId[] = ["picture", "sound", "subtitles", "episodes"];
+const GROUP_ORDER: DeviceSettingGroupId[] = [
+  "picture",
+  "sound",
+  "subtitles",
+  "episodes",
+  "appearance",
+];
 
 /** Keys whose group is not implied by their manifest category. */
 const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
@@ -62,6 +69,7 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "player.playback_speed": "sound",
   "player.subtitle_sync_ms": "subtitles",
   "player.sleep_timer_default_minutes": "episodes",
+  "ui.title_art": "appearance",
 };
 
 /**

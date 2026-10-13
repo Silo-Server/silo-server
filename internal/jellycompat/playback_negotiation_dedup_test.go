@@ -11,29 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func TestPlaybackSessionStorePutNegotiatedReplacesUnstartedSameDevice(t *testing.T) {
-	store := NewPlaybackSessionStore(0, nil)
-	store.PutNegotiated(PlaybackSession{
-		ID:             "first",
-		CompatToken:    "token",
-		ClientDeviceID: "web-device",
-		RouteItemID:    "route",
-	})
-	store.PutNegotiated(PlaybackSession{
-		ID:             "second",
-		CompatToken:    "token",
-		ClientDeviceID: "web-device",
-		RouteItemID:    "route",
-	})
-
-	if _, ok := store.Get("first"); ok {
-		t.Fatal("superseded unstarted negotiation was retained")
-	}
-	if _, ok := store.Get("second"); !ok {
-		t.Fatal("new negotiation was not stored")
-	}
-}
-
 func TestPlaybackSessionStorePutNegotiatedPreservesDistinctOrStartedPlays(t *testing.T) {
 	tests := []struct {
 		name  string

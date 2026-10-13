@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -78,9 +79,9 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after
 		key.ConfigHash,
 		key.Kind,
 		models.MarkerSourceScanner,
-		ArtifactComplete,
-		ArtifactUnusable,
-		ArtifactFailed,
+		mediaartifact.StatusComplete,
+		mediaartifact.StatusUnusable,
+		mediaartifact.StatusFailed,
 		node,
 		tailDetailNoVideo,
 		tailDetailUnsupportedCodec,

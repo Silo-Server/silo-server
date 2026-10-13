@@ -70,6 +70,8 @@ type LibraryRealtimeMonitoringOutput struct {
 type LibraryCapabilities struct {
 	Capability
 	RealtimeMonitoring bool `json:"realtime_monitoring" doc:"This build supports real-time library monitoring and its status read" example:"true"`
+	Trickplay          bool `json:"trickplay" doc:"This build supports the per-library trickplay_enabled setting, which generates seek-bar previews" example:"true"`
+	TrickplaySupported bool `json:"trickplay_supported" doc:"Whether public asset storage is configured so seek previews can be enabled, including before the first library is created" example:"true"`
 }
 
 func (c LibraryCapabilities) capabilityState() string { return StateAvailable }
@@ -95,7 +97,7 @@ func registerLibraryMonitoring(reg *Registry) {
 			"Discover library features supported by this build."),
 		Class: ClassActingAdmin,
 	}, func(context.Context, *CapabilityInput) (*LibraryCapabilitiesOutput, error) {
-		return &LibraryCapabilitiesOutput{Body: LibraryCapabilities{RealtimeMonitoring: true}}, nil
+		return &LibraryCapabilitiesOutput{Body: LibraryCapabilities{RealtimeMonitoring: true, Trickplay: true, TrickplaySupported: reg.deps.ArtworkStore != nil}}, nil
 	})
 }
 

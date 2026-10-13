@@ -73,8 +73,8 @@ func TestReconcileFollowsLibrariesAndTheServerSwitch(t *testing.T) {
 		row, _ := statusOf(rows, 2)
 		return onlyMonitoring(1, 2)(rows) && row.Directories == 6
 	})
-	if row, _ := statusOf(rows, 2); row.Backend != "inotify" {
-		t.Fatalf("library 2 row = %+v, want inotify", row)
+	if row, _ := statusOf(rows, 2); row.Backend != "inotify" || row.Detail != "" {
+		t.Fatalf("library 2 row = %+v, want inotify with no detail", row)
 	}
 	for _, root := range []string{disabled.Paths[0], optedOut.Paths[0]} {
 		if b.addCount(root) != 0 {
@@ -144,12 +144,13 @@ func TestStalledWalkStopsHoldingOthersBack(t *testing.T) {
 	hung, other := t.TempDir(), t.TempDir()
 	folders := &fakeFolders{}
 	folders.set(library(1, hung), library(2, other))
-	_, b, _, status := fakeMonitor(t, folders, func(cfg *Config) {
-		cfg.WalkStall = 30 * time.Millisecond
-	})
-	b.mu.Lock()
+	// Blocked before the monitor starts, or the walk can finish first.
+	b := newFakeBackend("inotify")
 	b.block[hung] = make(chan struct{}) // never released
-	b.mu.Unlock()
+	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.WalkStall = 30 * time.Millisecond
+		cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
+	})
 
 	waitCall(t, b, "add "+other)
 	rows := waitStatus(t, status, "library 2 monitoring", hasState(2, StateMonitoring))
@@ -162,10 +163,11 @@ func TestRemovingARootCancelsItsWalk(t *testing.T) {
 	root := t.TempDir()
 	folders := &fakeFolders{}
 	folders.set(library(1, root))
-	m, b, _, status := fakeMonitor(t, folders, nil)
-	b.mu.Lock()
+	b := newFakeBackend("inotify")
 	b.block[root] = make(chan struct{})
-	b.mu.Unlock()
+	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
+	})
 	waitCall(t, b, "add "+root)
 
 	folders.set()
@@ -356,7 +358,7 @@ func TestUnsupportedAndFuseFilesystems(t *testing.T) {
 	})
 	unsupported, _ := statusOf(rows, 1)
 	// Single-folder libraries: the detail needs no path prefix.
-	if !strings.HasPrefix(unsupported.Detail, "NFS network filesystems") {
+	if !strings.HasPrefix(unsupported.Detail, "NFS network filesystems") || !strings.Contains(unsupported.Detail, "nightly scan") {
 		t.Fatalf("unsupported detail = %q, want it to name NFS", unsupported.Detail)
 	}
 	caveat, _ := statusOf(rows, 2)
@@ -365,17 +367,6 @@ func TestUnsupportedAndFuseFilesystems(t *testing.T) {
 	}
 	if b.addCount(nfs) != 0 {
 		t.Fatal("an unsupported filesystem was walked")
-	}
-}
-
-func TestMonitoredRootReportsInotify(t *testing.T) {
-	root := t.TempDir()
-	folders := &fakeFolders{}
-	folders.set(library(1, root))
-	_, _, _, status := fakeMonitor(t, folders, nil)
-	rows := waitStatus(t, status, "monitoring", onlyMonitoring(1))
-	if rows[0].Backend != "inotify" || rows[0].Detail != "" {
-		t.Fatalf("row = %+v, want inotify with no detail", rows[0])
 	}
 }
 
@@ -414,8 +405,13 @@ func TestWatchLimitReleasesOnlyThatLibrary(t *testing.T) {
 		return hasState(1, StateLimitReached)(rows) && hasState(2, StateMonitoring)(rows)
 	})
 	row, _ := statusOf(rows, 1)
-	if row.Directories != 7 || row.Backend != "inotify" || !strings.Contains(row.Detail, "(1234)") {
-		t.Fatalf("limit row = %+v, want all 7 directories counted and the limit named", row)
+	if row.Directories != 7 || row.Backend != "inotify" {
+		t.Fatalf("limit row = %+v, want all 7 directories counted and inotify", row)
+	}
+	for _, part := range []string{"max_user_watches (1234)", "7 watches", "on the host"} {
+		if !strings.Contains(row.Detail, part) {
+			t.Errorf("limit detail %q does not contain %q", row.Detail, part)
+		}
 	}
 	if n := m.primary.Directories(tight); n != 0 {
 		t.Fatalf("%d watches kept for a library over the limit, want 0", n)
@@ -699,7 +695,8 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 		mu      sync.Mutex
 		created []*fakeBackend
 	)
-	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+	attempts := make(chan State, 16)
+	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
 		cfg.hooks.primary = func(BackendOptions) (Backend, error) {
 			b := newFakeBackend("inotify")
 			mu.Lock()
@@ -707,19 +704,39 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 			mu.Unlock()
 			return b, nil
 		}
+		cfg.hooks.afterAttempt = func(_ string, state State) { attempts <- state }
 	})
 	waitStatus(t, status, "monitoring", onlyMonitoring(1))
+	if state := <-attempts; state != StateMonitoring {
+		t.Fatalf("first attempt ended %q, want monitoring", state)
+	}
 	mu.Lock()
 	first := created[0]
 	mu.Unlock()
 	waitCall(t, first, "add "+root)
 
+	// The status loop reports only rows that changed, and a replacement fast
+	// enough to coalesce "starting" away leaves nothing new to report. Wait
+	// for the attempt that records the root again instead.
 	_ = first.Close() // the reader fails
-	waitStatus(t, status, "monitoring on a new backend", func(rows []LibraryStatus) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return onlyMonitoring(1)(rows) && len(created) == 2 && created[1].addCount(root) == 1
-	})
+	deadline := time.After(waitTimeout)
+	for state := StateStarting; state != StateMonitoring; {
+		select {
+		case state = <-attempts:
+		case <-deadline:
+			t.Fatal("timed out waiting for the root to be recorded again")
+		}
+	}
+	mu.Lock()
+	backends := len(created)
+	replaced := backends == 2 && created[1].addCount(root) == 1
+	mu.Unlock()
+	m.mu.Lock()
+	rows := m.statusRowsLocked()
+	m.mu.Unlock()
+	if !replaced || !onlyMonitoring(1)(rows) {
+		t.Fatalf("after the backend failed: %d backends, rows %+v; want monitoring on a second backend", backends, rows)
+	}
 }
 
 // A rescan request for a library folder queues one library scan for its

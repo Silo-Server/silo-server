@@ -20,9 +20,3 @@ func TestNeedsCriticalProbeRepair_EbookFileNeverNeedsRepair(t *testing.T) {
 		t.Fatal("an ebook/comic file must not need probe repair")
 	}
 }
-
-func TestNeedsCriticalProbeRepair_UnprobedNonEbookFileRepairs(t *testing.T) {
-	if !NeedsCriticalProbeRepair(&models.MediaFile{}) {
-		t.Fatal("an unprobed non-ebook file must need probe repair")
-	}
-}

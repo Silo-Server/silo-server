@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,7 +128,7 @@ func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
 }
 
 func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
-	for _, credential := range []struct {
+	credentials := []struct {
 		name          string
 		user          int
 		scopes        []string
@@ -136,13 +138,19 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 		{"groups reader", 2, []string{auth.ScopeAdminAccessGroupsRead}, true, false},
 		{"users manager", 2, []string{auth.ScopeAdminUsers}, false, false},
 		{"ordinary account", 1, nil, false, false},
-	} {
+	}
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccessGroups = f
+	keys := make(map[string]*models.APIKey, len(credentials))
+	for i, credential := range credentials {
+		keys["sa_"+strings.ReplaceAll(credential.name, " ", "_")] = &models.APIKey{ID: int64(i + 1), UserID: credential.user, Scopes: credential.scopes}
+	}
+	deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: keys}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
+	h := NewHandler(deps)
+	for _, credential := range credentials {
 		t.Run(credential.name, func(t *testing.T) {
-			f := fixtureAdminAccessGroups()
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAccessGroups = f
-			deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: map[string]*models.APIKey{apiKeyToken: {ID: 9, UserID: credential.user, Scopes: credential.scopes}}}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
-			h := NewHandler(deps)
+			*f = *fixtureAdminAccessGroups()
 			for _, op := range []struct {
 				method, path, body string
 				status             int
@@ -150,7 +158,7 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 				{http.MethodGet, "/admin/access-groups", "", 200}, {http.MethodGet, "/admin/access-groups/7", "", 200},
 				{http.MethodPost, "/admin/access-groups", `{"name":"Tool"}`, 201}, {http.MethodPut, "/admin/access-groups/7", `{"name":"New"}`, 200}, {http.MethodDelete, "/admin/access-groups/7", "", 204},
 			} {
-				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer(apiKeyToken), "If-Match", "*"))
+				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer("sa_"+strings.ReplaceAll(credential.name, " ", "_")), "If-Match", "*"))
 				allowed := credential.writes
 				if op.method == http.MethodGet {
 					allowed = credential.reads
@@ -167,5 +175,34 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 				t.Fatal("denied writer reached service")
 			}
 		})
+	}
+}
+
+// A group's library list is an integer array no foreign key covers, so an id
+// no library carries is refused before the store, on create and update alike.
+func TestAdminAccessGroupRejectsUnknownLibraries(t *testing.T) {
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests()) // knows libraries 1-4
+	deps.AdminAccessGroups = f
+	h := NewHandler(deps)
+	path := Prefix + "/admin/access-groups/7"
+	for _, rec := range []*httptest.ResponseRecorder{
+		do(t, h, http.MethodPost, Prefix+"/admin/access-groups", `{"name":"New","library_ids":["1","9"]}`, actingRequestAdmin),
+		do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", "*")),
+	} {
+		p := requireProblem(t, rec, TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != locationLibraryIDs || p.Errors[0].Detail != "unknown library identifier: 9" {
+			t.Fatalf("errors = %+v", p.Errors)
+		}
+	}
+	// An editor opened before the library was deleted holds an old ETag: 412
+	// tells it to reload, rather than 422 for a library it no longer lists.
+	requireProblem(t, do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", `"stale"`)), TypePreconditionFailed)
+	if f.writes != 0 {
+		t.Fatal("unknown library reached the store")
+	}
+	saved := do(t, h, http.MethodPut, path, `{"library_ids":["2","1"]}`, with(actingRequestAdmin, "If-Match", "*"))
+	if saved.Code != 200 || f.last.LibraryIDs == nil || !slices.Equal(*f.last.LibraryIDs, []int{2, 1}) {
+		t.Fatal(saved.Code, saved.Body.String(), f.last.LibraryIDs)
 	}
 }

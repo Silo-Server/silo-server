@@ -69,30 +69,35 @@ func TestPluginCredentialBundleUsesConnectionIdentityAsAAD(t *testing.T) {
 	}
 }
 
-func TestPluginCredentialBundleIsOnlyWrittenForPluginProviders(t *testing.T) {
+func TestFormerBuiltInConnectionKeepsTokenColumnsUntilRewritten(t *testing.T) {
 	cipher, err := secret.New([]byte("01234567890123456789012345678901"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	repository := NewPostgresRepository(nil, cipher)
-	for _, provider := range []string{"trakt", "simkl", "mdblist"} {
-		encoded, err := repository.pluginCredentialsForConnection(Connection{
-			Provider: provider, UserID: 7, ProfileID: "profile", AccessToken: testAccessToken,
-		})
-		if err != nil {
-			t.Fatalf("pluginCredentialsForConnection(%q): %v", provider, err)
-		}
-		if encoded != "" {
-			t.Fatalf("pluginCredentialsForConnection(%q) = %q, want empty", provider, encoded)
-		}
+	// A connection a former built-in provider wrote has no bundle, so reading it
+	// keeps the tokens from the dedicated columns.
+	conn := Connection{Provider: "trakt", UserID: 7, ProfileID: "profile", AccessToken: testAccessToken, RefreshToken: "refresh"}
+	if err := repository.decodePluginCredentials(&conn, ""); err != nil {
+		t.Fatal(err)
 	}
-	encoded, err := repository.pluginCredentialsForConnection(Connection{
-		Provider: "plugin:4:tracker", UserID: 7, ProfileID: "profile", AccessToken: testAccessToken,
-	})
+	if conn.AccessToken != testAccessToken || conn.RefreshToken != "refresh" {
+		t.Fatalf("tokens after empty bundle = %q/%q", conn.AccessToken, conn.RefreshToken)
+	}
+	// The next write stores the full bundle, so plugin-only fields survive.
+	conn.SecretAttributes = map[string]string{"scope_hint": "sync"}
+	encoded, err := repository.encodePluginCredentials(conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(encoded, "enc:v1:") {
-		t.Fatalf("plugin credential bundle = %q, want encrypted value", encoded)
+		t.Fatalf("credential bundle = %q, want encrypted value", encoded)
+	}
+	reread := Connection{Provider: conn.Provider, UserID: conn.UserID, ProfileID: conn.ProfileID}
+	if err := repository.decodePluginCredentials(&reread, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if reread.AccessToken != testAccessToken || reread.SecretAttributes["scope_hint"] != "sync" {
+		t.Fatalf("decoded bundle = %#v", reread)
 	}
 }

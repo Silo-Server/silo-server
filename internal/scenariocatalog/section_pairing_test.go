@@ -5,10 +5,7 @@ import "testing"
 func TestRequiredSectionReadsCannotShrink(t *testing.T) {
 	for _, id := range RequiredSectionReadScenarios {
 		t.Run(id, func(t *testing.T) {
-			catalogs, err := Load()
-			if err != nil {
-				t.Fatal(err)
-			}
+			catalogs := loadPairingCatalogs(t)
 			selected, err := SectionReadAcceptance(catalogs)
 			if err != nil {
 				t.Fatal(err)

@@ -11,18 +11,22 @@ import (
 
 var _ taskmanager.Task = (*VerifyArtworkDeliveryTask)(nil)
 
+type ArtworkDeliveryReconciler interface {
+	Reconcile(context.Context, metadata.ArtworkDeliveryChecker) (metadata.ArtworkDeliveryStats, error)
+}
+
 type VerifyArtworkDeliveryTask struct {
-	store   *metadata.ArtworkDeliveryStore
+	store   ArtworkDeliveryReconciler
 	checker metadata.ArtworkDeliveryChecker
 }
 
-func NewVerifyArtworkDeliveryTask(store *metadata.ArtworkDeliveryStore, checker metadata.ArtworkDeliveryChecker) *VerifyArtworkDeliveryTask {
+func NewVerifyArtworkDeliveryTask(store ArtworkDeliveryReconciler, checker metadata.ArtworkDeliveryChecker) *VerifyArtworkDeliveryTask {
 	return &VerifyArtworkDeliveryTask{store: store, checker: checker}
 }
 func (t *VerifyArtworkDeliveryTask) Key() string  { return "verify_artwork_delivery" }
 func (t *VerifyArtworkDeliveryTask) Name() string { return "Verify Artwork Delivery" }
 func (t *VerifyArtworkDeliveryTask) Description() string {
-	return "Checks published artwork through storage and client delivery URLs in bounded batches, and schedules repair for missing storage objects."
+	return "Checks published artwork through storage and client delivery URLs, newly published artwork first, and schedules repair for missing storage objects."
 }
 func (t *VerifyArtworkDeliveryTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
@@ -37,9 +41,16 @@ func (t *VerifyArtworkDeliveryTask) DefaultTriggers() []taskmanager.TriggerConfi
 }
 func (t *VerifyArtworkDeliveryTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	stats, err := t.store.Reconcile(ctx, t.checker)
+	progress.SetResultData(stats.JSON())
 	if err != nil {
-		return err
+		return fmt.Errorf("verifying artwork delivery: %w", err)
 	}
-	progress.Report(100, fmt.Sprintf("Checked %d revisions: %d missing objects, %d probe errors", stats.Checked, stats.Missing, stats.Errors))
+	if stats.Checked > 0 && stats.Errors == stats.Checked {
+		return fmt.Errorf("every artwork delivery probe failed (%d revisions): %s", stats.Errors, stats.LastError)
+	}
+	progress.Report(100, fmt.Sprintf(
+		"Checked %d revisions (%d newly published): %d incomplete, %d probe errors, %d overdue",
+		stats.Checked, stats.Pending, stats.Incomplete, stats.Errors, stats.Overdue,
+	))
 	return nil
 }

@@ -8,10 +8,7 @@ import (
 )
 
 func TestAPIKeyListAbsenceOverlayPreservesOriginals(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	before, err := json.Marshal(catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -79,10 +76,7 @@ func TestAPIKeyListAbsenceOverlayRefusesChangedOriginals(t *testing.T) {
 	for _, id := range []string{"keys_list.meaning", "keys_list.shape"} {
 		for _, mutation := range []string{"missing", "duplicate", "id", "oracle", "description", "principal", "request", "row", "pair"} {
 			t.Run(id+"/"+mutation, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				for _, c := range catalogs {
 					for ri := range c.Rows {
 						r := &c.Rows[ri]

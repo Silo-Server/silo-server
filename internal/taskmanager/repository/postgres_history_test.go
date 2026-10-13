@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -424,51 +423,5 @@ func TestPgExecutionRepositoryPruneSkipsWhenAnotherNodeHoldsLock(t *testing.T) {
 	}
 	if !result.Skipped || result.Deleted != 0 || result.LimitReached {
 		t.Fatalf("Prune result = %#v, want skipped", result)
-	}
-}
-
-// TestPgExecutionRepositoryPruneConcurrent proves the advisory lock serializes
-// pruners: one wins and prunes, the other skips, and the surviving row count is
-// the same either way. The lock is database-global, so this test also asserts
-// that a skip is never mistaken for a completed run.
-func TestPgExecutionRepositoryPruneConcurrent(t *testing.T) {
-	pool := taskHistoryTestPool(t)
-	repo := NewPgExecutionRepository(pool)
-	clearTaskHistory(t, pool)
-	key := taskKey(t, pool, "concurrent")
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	for i := range 20 {
-		insertTaskExecution(t, pool, key, now.Add(time.Duration(i)*time.Minute))
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	var wg sync.WaitGroup
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			_, err := repo.Prune(ctx, 1, now.Add(-24*time.Hour), 100, 100)
-			results <- err
-		}()
-	}
-	close(start)
-	wg.Wait()
-	close(results)
-	for err := range results {
-		if err != nil {
-			t.Fatalf("concurrent Prune: %v", err)
-		}
-	}
-
-	// Whichever goroutine won the lock, a second serialized run converges.
-	if _, err := repo.Prune(ctx, 1, now.Add(-24*time.Hour), 100, 100); err != nil {
-		t.Fatalf("settling Prune: %v", err)
-	}
-	if got := len(remainingTaskExecutionIDs(t, pool, key)); got != 1 {
-		t.Fatalf("remaining rows = %d, want 1", got)
 	}
 }

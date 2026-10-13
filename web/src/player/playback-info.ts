@@ -7,7 +7,7 @@ import {
   formatSampleRate,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
-import type { DeliveryV3, PlanV3 } from "./protocol-v3";
+import type { DeliveryV3, EffectiveRecipeV3, PlanV3 } from "./protocol-v3";
 import {
   QUALITY_ORIGINAL_V3,
   TRANSFORMATION_AUDIO_TO_AAC_V3,
@@ -193,11 +193,13 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
  * Resolves a stored resolution-only preference onto the explicit bitrate rung
  * that implements the same policy in the current plan. Plain 2160p/1080p/720p
  * preferences use the ladder's Medium bitrate; when that resolution cap is at
- * or above the source, the source-preserving Original rung is the active one.
+ * or above the source, the source-preserving Original rung is the active one,
+ * unless the plan's delivered recipe shows a bitrate cap reduced it.
  */
 export function resolveActiveQualityOptionId(
   options: QualityOption[],
   preference: string,
+  delivered?: EffectiveRecipeV3,
 ): string | null {
   // A sole rung is effective regardless of the saved preference. Keep the
   // preference unchanged so it applies again when more qualities are available.
@@ -213,14 +215,38 @@ export function resolveActiveQualityOptionId(
     return originalAlias ? (options.find((option) => option.isOriginal)?.id ?? null) : null;
   }
 
-  const medium = options.find((option) => option.id === `${aliasHeight}p-medium`);
-  if (medium) return medium.id;
-
+  // The planner preserves a source that fits the cap, even when the ladder
+  // also publishes same-height rungs below the source bitrate. A bitrate cap,
+  // the viewer's or the server's, can still force a transcode the ladder does
+  // not show; the delivered bitrate reveals it.
   const original = options.find((option) => option.isOriginal);
-  if (original && resolutionHeight(original.resolution) <= aliasHeight) {
+  const deliveredKbps = delivered?.bitrate_kbps;
+  const capped = isPositive(deliveredKbps) && deliveredKbps < (original?.bitrateKbps ?? 0);
+  if (original && !capped && resolutionHeight(original.resolution) <= aliasHeight) {
     return original.id;
   }
-  return null;
+
+  // Otherwise the planner encodes at the Medium bitrate of a ladder class: the
+  // preferred one, or a lower one a bitrate cap chose. The delivered frame
+  // names the class; without it, assume the preferred one.
+  const classHeight = ladderClassHeight(delivered?.width, delivered?.height) ?? aliasHeight;
+  const rungId = classMediumRungId(classHeight);
+  return options.find((option) => option.id === rungId)?.id ?? null;
+}
+
+/**
+ * The menu rung that encodes at a ladder class's Medium bitrate. The 540p
+ * class, which a low bitrate cap can choose, has no menu rung.
+ */
+function classMediumRungId(classHeight: number): string | null {
+  switch (classHeight) {
+    case 480:
+      return "480p";
+    case 540:
+      return null;
+    default:
+      return `${classHeight}p-medium`;
+  }
 }
 
 /**
@@ -232,12 +258,13 @@ export function resolveActiveQualityOptionId(
 export function lowerQualityOption(
   options: QualityOption[],
   preference: string,
-  deliveredBitrateKbps?: number,
+  delivered?: EffectiveRecipeV3,
 ): QualityOption | null {
   const rungs = options
     .filter((option) => option.id !== "auto" && !option.isOriginal && option.bitrateKbps > 0)
     .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
-  const activeId = resolveActiveQualityOptionId(options, preference);
+  const activeId = resolveActiveQualityOptionId(options, preference, delivered);
+  const deliveredBitrateKbps = delivered?.bitrate_kbps;
   const active = rungs.find((option) => option.id === activeId);
   const ceiling =
     active?.bitrateKbps ??
@@ -263,6 +290,29 @@ function qualityPreferenceHeight(preference: string): number | null {
     default:
       return null;
   }
+}
+
+// The server's bitrate ladder classes (bitrateLadder), smallest first.
+const LADDER_CLASS_BOXES = [
+  { width: 854, height: 480 },
+  { width: 960, height: 540 },
+  { width: 1280, height: 720 },
+  { width: 1920, height: 1080 },
+  { width: 3840, height: 2160 },
+] as const;
+
+/**
+ * The ladder class an encoded frame belongs to: the smallest class box that
+ * holds it, as the server's ladderClassForSize decides. A 1280x688 encode is
+ * 720p and a 1920x800 scope encode is 1080p.
+ */
+function ladderClassHeight(width?: number, height?: number): number | null {
+  if (!isPositive(height)) return null;
+  const box = LADDER_CLASS_BOXES.find(
+    (candidate) => height <= candidate.height && (!isPositive(width) || width <= candidate.width),
+  );
+  // A frame larger than every box is in the largest class.
+  return box?.height ?? 2160;
 }
 
 function resolutionHeight(resolution: string): number {

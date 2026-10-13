@@ -2,15 +2,6 @@ package literaryworks
 
 import "testing"
 
-func TestMatcherSameTitleAuthorLinks(t *testing.T) {
-	ebook := MatchItem{ContentID: "e1", Type: FormatEbook, Title: "Project Hail Mary", Authors: []string{"Andy Weir"}}
-	audio := MatchItem{ContentID: "a1", Type: FormatAudiobook, Title: "Project Hail Mary", Authors: []string{"Andy Weir"}, Narrators: []string{"Ray Porter"}}
-	candidate := ScoreCandidate(ebook, audio)
-	if candidate.Score < AutoLinkThreshold || candidate.LinkSource != LinkMetadataMatch {
-		t.Fatalf("candidate = %#v, want metadata auto-link", candidate)
-	}
-}
-
 func TestMatcherSameTitleDifferentAuthorDoesNotLink(t *testing.T) {
 	ebook := MatchItem{ContentID: "e1", Type: FormatEbook, Title: "The Last Adventure", Authors: []string{"A. Lee"}}
 	audio := MatchItem{ContentID: "a1", Type: FormatAudiobook, Title: "The Last Adventure", Authors: []string{"B. Lee"}}

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
@@ -17,7 +15,7 @@ var ErrAccessGroupUnavailable = errors.New("access group administration unavaila
 // memberMovingGroupStore deletes a group after moving its members into the
 // default group in the same transaction (access.GroupStore).
 type memberMovingGroupStore interface {
-	DeleteMovingMembers(context.Context, int64, access.GroupPrecondition, func(context.Context, pgx.Tx, []int) error) ([]int, error)
+	DeleteMovingMembers(context.Context, int64, access.GroupPrecondition) error
 }
 
 type guardedAccessGroupStore interface {
@@ -64,8 +62,9 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 }
 
 // DeleteAdminAccessGroup deletes a group. Its members move into the default
-// group in the same transaction and are signed out, as a single-user group
-// change signs the user out, so no regular account is left without a group.
+// group in the same transaction, so no regular account is left without a
+// group. They stay signed in: the move bumps their access_policy_revision and
+// the next request resolves the default group's policy.
 func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int64, guard access.GroupPrecondition) error {
 	s, ok := guardedGroupStore(h)
 	if !ok {
@@ -76,16 +75,7 @@ func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int6
 		return s.DeleteConditional(ctx, id, guard)
 	}
 	// Set-based, so the group-writer lock is not held for per-member statements.
-	moved, err := mover.DeleteMovingMembers(ctx, id, guard, auth.RevokeSignInsForUsersInTransaction)
-	if err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		for _, userID := range moved {
-			h.OnUserSessionsRevoked(ctx, userID)
-		}
-	}
-	return nil
+	return mover.DeleteMovingMembers(ctx, id, guard)
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {
