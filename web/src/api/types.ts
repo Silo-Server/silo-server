@@ -1681,7 +1681,7 @@ export interface LibraryTabResponse {
 
 // One library's bucket of server (admin-curated) collections in the aggregated
 // server-collections response. `collections` is a capped teaser slice;
-// `total_count` is the full visible count, used for the "See all (N)" link.
+// `total_count` is the full visible count.
 export interface ServerCollectionsLibrary {
   library_id: number;
   library_name: string;
