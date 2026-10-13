@@ -358,7 +358,10 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		AuthorizationURL string `json:"authorization_url" format:"uri" doc:"Send the browser here to approve the provider"`
 		RedirectURI      string `json:"redirect_uri" format:"uri" doc:"Address that must be registered on the provider app"`
 	}
-	type WatchProviderOAuthStartOutput struct{ Body WatchProviderOAuthStart }
+	type WatchProviderOAuthStartOutput struct {
+		SetCookie http.Cookie `header:"Set-Cookie" doc:"HttpOnly SameSite=Lax binder scoped to the oauth callback path; only this browser can finish the sign-in"`
+		Body      WatchProviderOAuthStart
+	}
 	Register(reg, op(http.MethodPost, "/watch-providers/{provider}/auth/authorize", "startWatchProviderOAuth", "Start browser sign-in with a watch provider."), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderOAuthStartOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
@@ -366,27 +369,29 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		oauth, ok := providers.(interface {
 			OAuthRedirectURI() (string, error)
-			StartOAuth(context.Context, int, string, string) (string, error)
+			StartOAuth(context.Context, int, string, string) (watchsync.OAuthStart, error)
 		})
 		if !ok {
 			return nil, unavailable("watch provider sign-in")
 		}
-		redirectURI, err := oauth.OAuthRedirectURI()
+		if _, err := oauth.OAuthRedirectURI(); err != nil {
+			return nil, watchProviderProblem(err)
+		}
+		started, err := oauth.StartOAuth(ctx, u, p, in.Provider)
 		if err != nil {
 			return nil, watchProviderProblem(err)
 		}
-		authorizationURL, err := oauth.StartOAuth(ctx, u, p, in.Provider)
-		if err != nil {
-			return nil, watchProviderProblem(err)
-		}
-		return &WatchProviderOAuthStartOutput{Body: WatchProviderOAuthStart{AuthorizationURL: authorizationURL, RedirectURI: redirectURI}}, nil
+		return &WatchProviderOAuthStartOutput{
+			SetCookie: started.BinderCookie,
+			Body:      WatchProviderOAuthStart{AuthorizationURL: started.AuthorizationURL, RedirectURI: started.RedirectURI},
+		}, nil
 	})
 	callback := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/watch-providers/oauth/callback", OperationID: "completeWatchProviderOAuth", Tags: []string{requestsTag}, Summary: "Finish browser sign-in and redirect to watch-provider settings.", Parameters: []*huma.Param{
 		{Name: "state", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: "code", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: "error", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
-	}, Responses: map[string]*huma.Response{"302": {Description: "Sign-in outcome redirect to watch-provider settings", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString}}}, Content: map[string]*huma.MediaType{"text/html": {Schema: &huma.Schema{Type: huma.TypeString}}}}}}, Class: ClassPublic, ServiceBacked: true}
-	RegisterRaw(reg, RawOperation{Operation: callback, Protocol: "redirect", Reason: "The provider redirects the browser here without Silo login headers; the stored one-time state authenticates the sign-in."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}, Responses: map[string]*huma.Response{"302": {Description: "Sign-in outcome redirect to watch-provider settings", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString}}}, Content: map[string]*huma.MediaType{"text/html": {Schema: &huma.Schema{Type: huma.TypeString}}}}}}, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain}
+	RegisterRaw(reg, RawOperation{Operation: callback, Protocol: "redirect", Reason: "The provider redirects the browser here without Silo login headers; the stored one-time state and browser-binding cookie authenticate the sign-in."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		redirectBack := func(provider, code string) {
@@ -404,18 +409,37 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			http.Redirect(w, r, target, http.StatusFound)
 		}
 		oauth, ok := providers.(interface {
-			FinishOAuth(context.Context, string, string) (string, error)
+			FinishOAuth(context.Context, string, string, string) (string, error)
+			OAuthRedirectURI() (string, error)
 		})
 		if !ok {
 			redirectBack("", "unavailable")
 			return
 		}
 		query := r.URL.Query()
+		state := query.Get("state")
+		callbackURL, _ := oauth.OAuthRedirectURI()
+		if callbackURL == "" {
+			callbackURL = watchsync.OAuthCallbackPath
+		}
+		clearBinder := func() {
+			if state == "" {
+				return
+			}
+			cookie := watchsync.ClearOAuthBinderCookie(state, callbackURL)
+			http.SetCookie(w, &cookie)
+		}
 		if query.Get("error") != "" {
+			clearBinder()
 			redirectBack("", "denied")
 			return
 		}
-		provider, err := oauth.FinishOAuth(r.Context(), query.Get("state"), query.Get("code"))
+		binder := ""
+		if c, err := r.Cookie(watchsync.OAuthBinderCookieNameForState(state)); err == nil {
+			binder = c.Value
+		}
+		provider, err := oauth.FinishOAuth(r.Context(), state, query.Get("code"), binder)
+		clearBinder()
 		if err != nil {
 			code := "exchange_failed"
 			switch {

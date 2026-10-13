@@ -201948,7 +201948,7 @@
         ],
         "x-silo-class": "public",
         "x-silo-raw-protocol": "redirect",
-        "x-silo-raw-reason": "The provider redirects the browser here without Silo login headers; the stored one-time state authenticates the sign-in.",
+        "x-silo-raw-reason": "The provider redirects the browser here without Silo login headers; the stored one-time state and browser-binding cookie authenticate the sign-in.",
         "x-silo-service-backed": true
       }
     },
@@ -202204,7 +202204,15 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "description": "HttpOnly SameSite=Lax binder scoped to the oauth callback path; only this browser can finish the sign-in",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {

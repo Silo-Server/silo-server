@@ -132,6 +132,23 @@ func (r *serviceFakeRepo) GetAuthSession(_ context.Context, id string) (DeviceAu
 	return session, nil
 }
 
+func (r *serviceFakeRepo) ClaimAuthSession(_ context.Context, id string, at time.Time) (DeviceAuthSession, error) {
+	session, ok := r.sessions[id]
+	if !ok {
+		return DeviceAuthSession{}, errors.New("missing auth session")
+	}
+	if session.CompletedAt != nil {
+		return session, ErrAuthSessionCompleted
+	}
+	if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(at) {
+		return session, ErrAuthSessionExpired
+	}
+	completedAt := at
+	session.CompletedAt = &completedAt
+	r.sessions[id] = session
+	return session, nil
+}
+
 func (r *serviceFakeRepo) UpsertConnection(
 	_ context.Context,
 	conn Connection,

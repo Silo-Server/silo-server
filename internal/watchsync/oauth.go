@@ -2,9 +2,14 @@ package watchsync
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -14,8 +19,10 @@ import (
 )
 
 const (
-	oauthSessionUserCode = "oauth"
-	oauthSessionTTL      = 10 * time.Minute
+	oauthSessionUserCodePrefix = "oauth."
+	oauthSessionTTL            = 10 * time.Minute
+	oauthBinderCookiePrefix    = "silo_watch_oauth_"
+	oauthBinderCookieSkew      = time.Hour
 )
 
 // authorizationCodeAuth is the browser sign-in a watch-sync plugin implements
@@ -23,6 +30,14 @@ const (
 type authorizationCodeAuth interface {
 	StartAuthorization(ctx context.Context, redirectURI, state string) (authorizationURL string, providerState []byte, err error)
 	ExchangeAuthorizationCode(ctx context.Context, redirectURI, code string, providerState []byte) (TokenSet, error)
+}
+
+// OAuthStart is the browser sign-in URL plus the cookie that binds completion
+// to the browser that started the flow.
+type OAuthStart struct {
+	AuthorizationURL string
+	RedirectURI      string
+	BinderCookie     http.Cookie
 }
 
 func (s *Service) SetPublicURL(publicURL string) {
@@ -53,33 +68,43 @@ func (s *Service) OAuthRedirectURI() (string, error) {
 	if parsed.Scheme != "https" {
 		return "", ErrPublicURLNotHTTPS
 	}
-	return origin + OAuthCallbackPath, nil
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + OAuthCallbackPath
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String(), nil
 }
 
 // StartOAuth begins a browser sign-in and returns the provider's authorization URL.
-func (s *Service) StartOAuth(ctx context.Context, userID int, profileID, providerKey string) (string, error) {
+func (s *Service) StartOAuth(ctx context.Context, userID int, profileID, providerKey string) (OAuthStart, error) {
 	if userID <= 0 {
-		return "", fmt.Errorf("user id is required")
+		return OAuthStart{}, fmt.Errorf("user id is required")
 	}
 	if profileID == "" {
-		return "", fmt.Errorf("profile id is required")
+		return OAuthStart{}, fmt.Errorf("profile id is required")
 	}
 	redirectURI, err := s.OAuthRedirectURI()
 	if err != nil {
-		return "", err
+		return OAuthStart{}, err
 	}
 	provider, ok := s.registry.Get(providerKey)
 	if !ok {
-		return "", UnknownProviderError{Key: providerKey}
+		return OAuthStart{}, UnknownProviderError{Key: providerKey}
 	}
 	starter, ok := provider.(authorizationCodeAuth)
 	if !ok || authMethodOf(provider) != AuthMethodAuthorizationCode {
-		return "", ProviderCapabilityError{Key: providerKey, What: "does not support browser sign-in"}
+		return OAuthStart{}, ProviderCapabilityError{Key: providerKey, What: "does not support browser sign-in"}
+	}
+	binderValue, binderHash, err := newOAuthBinder()
+	if err != nil {
+		return OAuthStart{}, err
 	}
 	sessionID := uuid.NewString()
 	authorizationURL, state, err := starter.StartAuthorization(ctx, redirectURI, sessionID)
 	if err != nil {
-		return "", err
+		return OAuthStart{}, fmt.Errorf("watch provider authorization start failed")
 	}
 	if _, err := s.repo.UpsertAuthSession(ctx, DeviceAuthSession{
 		ID:              sessionID,
@@ -87,18 +112,23 @@ func (s *Service) StartOAuth(ctx context.Context, userID int, profileID, provide
 		UserID:          userID,
 		ProfileID:       profileID,
 		DeviceCode:      base64.RawURLEncoding.EncodeToString(state),
-		UserCode:        oauthSessionUserCode,
-		VerificationURL: authorizationURL,
+		UserCode:        oauthSessionUserCodePrefix + binderHash,
+		VerificationURL: redirectURI,
 		ExpiresAt:       s.now().Add(oauthSessionTTL),
 	}); err != nil {
-		return "", err
+		return OAuthStart{}, err
 	}
-	return authorizationURL, nil
+	return OAuthStart{
+		AuthorizationURL: authorizationURL,
+		RedirectURI:      redirectURI,
+		BinderCookie:     oauthBinderCookie(sessionID, binderValue, redirectURI, int((oauthSessionTTL+oauthBinderCookieSkew)/time.Second)),
+	}, nil
 }
 
 // FinishOAuth exchanges the provider's code for the session state names.
 // The returned provider key is the one the browser should land on.
-func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, error) {
+// binder is the value of the HttpOnly cookie StartOAuth set on the initiating browser.
+func (s *Service) FinishOAuth(ctx context.Context, state, code, binder string) (string, error) {
 	if _, err := uuid.Parse(strings.TrimSpace(state)); err != nil {
 		return "", ErrAuthSessionMismatch
 	}
@@ -113,8 +143,12 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if session.UserCode != oauthSessionUserCode {
+	binderHash, ok := oauthBinderHashFromUserCode(session.UserCode)
+	if !ok {
 		return "", ErrAuthSessionMismatch
+	}
+	if !oauthBinderMatches(binder, binderHash) {
+		return session.Provider, ErrAuthSessionMismatch
 	}
 	if session.CompletedAt != nil {
 		return session.Provider, ErrAuthSessionCompleted
@@ -122,6 +156,11 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, 
 	if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 		return session.Provider, ErrAuthSessionExpired
 	}
+	claimed, err := s.repo.ClaimAuthSession(ctx, state, s.now())
+	if err != nil {
+		return session.Provider, err
+	}
+	session = claimed
 	provider, ok := s.registry.Get(session.Provider)
 	if !ok {
 		return session.Provider, UnknownProviderError{Key: session.Provider}
@@ -130,9 +169,12 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, 
 	if !ok {
 		return session.Provider, ProviderCapabilityError{Key: session.Provider, What: "does not support browser sign-in"}
 	}
-	redirectURI, err := s.OAuthRedirectURI()
-	if err != nil {
-		return session.Provider, err
+	redirectURI := strings.TrimSpace(session.VerificationURL)
+	if redirectURI == "" {
+		redirectURI, err = s.OAuthRedirectURI()
+		if err != nil {
+			return session.Provider, err
+		}
 	}
 	providerState, err := base64.RawURLEncoding.DecodeString(session.DeviceCode)
 	if err != nil {
@@ -144,7 +186,7 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, 
 	}
 	tokens, err := exchanger.ExchangeAuthorizationCode(ctx, redirectURI, code, providerState)
 	if err != nil {
-		return session.Provider, err
+		return session.Provider, fmt.Errorf("watch provider authorization exchange failed")
 	}
 	accountProvider, ok := provider.(AuthProvider)
 	if !ok {
@@ -152,15 +194,75 @@ func (s *Service) FinishOAuth(ctx context.Context, state, code string) (string, 
 	}
 	account, err := accountProvider.LookupAccount(ctx, cfg, connectionWithTokens(Connection{}, tokens))
 	if err != nil {
-		return session.Provider, err
+		return session.Provider, fmt.Errorf("watch provider account lookup failed")
 	}
 	if _, err := s.persistConnection(ctx, session.Provider, session.UserID, session.ProfileID, tokens, account); err != nil {
 		return session.Provider, err
 	}
-	completedAt := s.now()
-	session.CompletedAt = &completedAt
-	if _, err := s.repo.UpsertAuthSession(ctx, session); err != nil {
-		return session.Provider, err
-	}
 	return session.Provider, nil
+}
+
+// ClearOAuthBinderCookie expires the browser-binding cookie for state.
+func ClearOAuthBinderCookie(state, callbackURL string) http.Cookie {
+	return oauthBinderCookie(state, "", callbackURL, -1)
+}
+
+func isOAuthAuthSession(session DeviceAuthSession) bool {
+	return strings.HasPrefix(session.UserCode, oauthSessionUserCodePrefix)
+}
+
+func oauthBinderHashFromUserCode(userCode string) (string, bool) {
+	if !strings.HasPrefix(userCode, oauthSessionUserCodePrefix) {
+		return "", false
+	}
+	hash := strings.TrimPrefix(userCode, oauthSessionUserCodePrefix)
+	return hash, hash != ""
+}
+
+func newOAuthBinder() (value, hash string, err error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", fmt.Errorf("generating watch provider oauth binder: %w", err)
+	}
+	value = base64.RawURLEncoding.EncodeToString(buf)
+	return value, oauthBinderHash(value), nil
+}
+
+func oauthBinderHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func oauthBinderMatches(presented, storedHash string) bool {
+	if presented == "" || storedHash == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(oauthBinderHash(presented)), []byte(storedHash)) == 1
+}
+
+// OAuthBinderCookieNameForState is the browser-binding cookie StartOAuth sets
+// for this authorization state.
+func OAuthBinderCookieNameForState(state string) string {
+	sum := sha256.Sum256([]byte(state))
+	return oauthBinderCookiePrefix + hex.EncodeToString(sum[:8])
+}
+
+func oauthBinderCookie(state, value, callbackURL string, maxAge int) http.Cookie {
+	path := OAuthCallbackPath
+	secure := false
+	if u, err := url.Parse(callbackURL); err == nil {
+		if u.Path != "" {
+			path = u.Path
+		}
+		secure = strings.EqualFold(u.Scheme, "https")
+	}
+	return http.Cookie{
+		Name:     OAuthBinderCookieNameForState(state),
+		Value:    value,
+		Path:     path,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
 }

@@ -643,11 +643,13 @@ function WatchProviderCard({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => {
-                void navigator.clipboard.writeText(connection.oauth_redirect_uri ?? "").then(
-                  () => toast.success("Redirect URI copied"),
-                  () => toast.error("Failed to copy the redirect URI"),
-                );
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(connection.oauth_redirect_uri ?? "");
+                  toast.success("Redirect URI copied");
+                } catch {
+                  toast.error("Failed to copy the redirect URI");
+                }
               }}
             >
               <Copy className="h-4 w-4" />
@@ -946,8 +948,8 @@ export default function WatchProvidersSettings() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     const provider = params.get("watch_provider");
-    if (!provider) return;
     const error = params.get("watch_provider_error");
+    if (!provider && !error) return;
     if (error) toast.error(oauthReturnMessages[error] ?? oauthReturnMessages.exchange_failed);
     else toast.success("Watch provider connected");
     const next = new URLSearchParams(params);

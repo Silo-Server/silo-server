@@ -522,7 +522,7 @@ func (s *Service) PollDeviceAuth(
 	if err != nil {
 		return Connection{}, err
 	}
-	if session.UserID != userID || session.ProfileID != profileID || session.Provider != providerKey || session.UserCode == oauthSessionUserCode {
+	if session.UserID != userID || session.ProfileID != profileID || session.Provider != providerKey || isOAuthAuthSession(session) {
 		return Connection{}, ErrAuthSessionMismatch
 	}
 	if session.CompletedAt != nil {

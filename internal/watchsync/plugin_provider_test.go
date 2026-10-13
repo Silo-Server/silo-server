@@ -807,6 +807,23 @@ func TestPluginProviderRejectsConnectionConfigForDeviceAuthorization(t *testing.
 	}
 }
 
+func TestPluginProviderKeepsAPIKeyWhenAuthCodeHasConnectionConfig(t *testing.T) {
+	provider, err := NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{AuthMethods: []pluginv1.WatchSyncAuthMethod{
+			pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_AUTHORIZATION_CODE,
+			pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY,
+		}, ExportWatched: true},
+		ConnectionConfigSchema: []*pluginv1.ConfigSchema{{Key: "server"}},
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+			return &fakeWatchSyncPluginClient{}, nil
+		},
+	})
+	if err != nil || provider.AuthMethod() != AuthMethodAPIKey {
+		t.Fatalf("auth method = %q err=%v", provider.AuthMethod(), err)
+	}
+}
+
 func TestPluginProviderRefreshReturnsCredentialsAlongsideFault(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{refreshResponse: &pluginv1.WatchSyncCredentialResponse{
 		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testRotatedAccessToken, TokenType: testBearerTokenType},
