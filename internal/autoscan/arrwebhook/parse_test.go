@@ -204,11 +204,11 @@ func TestParseSeriesAndMovieDeleteAreNoOps(t *testing.T) {
 	}
 }
 
-// A deletedFiles value that is neither a bool nor a list of files is still
-// malformed, so a broken upgrade payload is not accepted with its replaced
-// files dropped.
+// Outside SeriesDelete and MovieDelete, a deletedFiles value that is not a list
+// of files is malformed, so a broken upgrade payload is not accepted with its
+// replaced files dropped.
 func TestParseMalformedDeletedFiles(t *testing.T) {
-	for _, deleted := range []string{`[1]`, `{"path":"/tv/x/old.mkv"}`, `"/tv/x/old.mkv"`, `1`} {
+	for _, deleted := range []string{`[1]`, `{"path":"/tv/x/old.mkv"}`, `"/tv/x/old.mkv"`, `1`, `true`} {
 		body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"deletedFiles":` + deleted + `}`)
 		if _, err := Parse(ProviderAuto, body); !errors.Is(err, ErrMalformedPayload) {
 			t.Fatalf("deletedFiles %s: want ErrMalformedPayload, got %v", deleted, err)
