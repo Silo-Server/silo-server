@@ -119,7 +119,7 @@ func TestStatusIncludesResourceSample(t *testing.T) {
 }
 
 // Operators who scrape must get the same numbers the UI shows, without a
-// credential — the same posture the API listener's own /metrics has.
+// credential — the same posture as the main server's dedicated metrics listener.
 func TestMetricsEndpointIsMountedAndUnauthenticated(t *testing.T) {
 	server := newTestServer(t)
 	recorder := httptest.NewRecorder()
