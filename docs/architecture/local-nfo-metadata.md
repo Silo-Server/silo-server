@@ -567,7 +567,9 @@ to read here, and banner, thumb, clear art and disc art cannot be applied. Each
 local choice has the provider ID `local`, keeps its fingerprinted `file://`
 source as `original_url`, and shows a 300-pixel-wide WebP preview as an inline
 `data:` URI (the web client authenticates with a bearer token, so an `<img>`
-cannot fetch an authenticated preview route). The preview is read under the same
+cannot fetch an authenticated preview route). Local choices lead the list, ahead
+of every provider's, in discovery order, so each slot's first local choice is
+the sidecar file a refresh uses when it takes local artwork. The preview is read under the same
 root confinement, symlink and size checks as the processor; a file that fails
 them is left out of the list, and the list's `provider_errors` reports it under
 `local`. Only the movie and series list does this: any other list treats a
