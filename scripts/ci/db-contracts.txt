@@ -137,6 +137,7 @@
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
+./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
@@ -185,6 +186,9 @@
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
+
+# A retried push attempt key migration keeps the key an earlier run built.
+./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB

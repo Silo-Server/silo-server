@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -72,6 +73,10 @@ type UnmatchedItemView = unmatchedItemResponse
 func (h *LibraryHandler) ListLibraries(ctx context.Context) ([]LibraryView, error) {
 	folders, err := h.folderRepo.List(ctx)
 	if err != nil {
+		if ctxerr.Abandoned(ctx, err) {
+			// The client left; nothing failed, so there is nothing to log.
+			return nil, err
+		}
 		slog.ErrorContext(ctx, "listing libraries", "component", "api", "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list libraries")
 	}

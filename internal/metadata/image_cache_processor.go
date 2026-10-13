@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1053,29 +1054,14 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 	if !localImagePathWithinRoots(localPath, roots) {
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
+		p.markFailed(ctx, job, localImageOutsideRootsError(localPath).Error())
 		return imageCacheProcessResult{outcome: "failed"}
 	}
-	// The lexical check above cannot see through symlinks. Resolve the path and
-	// roots and re-confine so an intermediate directory symlink planted inside a
-	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
-	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
-	// symlinked root still matches. This is a confinement GATE only: the read
-	// below still uses the logical path so readLocalImageFile's Lstat keeps
-	// rejecting a symlinked leaf. A not-yet-existent path (ErrNotExist) falls
-	// through to the reader, which classifies it as the stable "missing" failure.
-	// Either failure first asks whether this server has the file's storage
-	// mounted at all; when it does not, the job waits for one that does
-	// (deferLocalJobWithoutStorage).
-	if _, err := localImagePathResolvedWithinRoots(localPath, roots); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
-			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
-		}
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-
-	data, err := readLocalImageFile(localPath)
+	// readConfinedLocalImage re-confines the path through symlinks and reads it
+	// through an opened library root. A failure there first asks whether this
+	// server has the file's storage mounted at all; when it does not, the job
+	// waits for one that does (deferLocalJobWithoutStorage).
+	data, err := readConfinedLocalImage(localPath, roots)
 	if err != nil {
 		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
 			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
@@ -1143,6 +1129,115 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	return processResult
 }
 
+// readConfinedLocalImage reads the sidecar image at localPath (a cleaned
+// logical path, without the file:// scheme or fingerprint) after confining it
+// to roots. Its error texts are the stable local failures
+// isStableProviderImageFailure matches.
+func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
+	if !localImagePathWithinRoots(localPath, roots) {
+		return nil, localImageOutsideRootsError(localPath)
+	}
+	// Open every library root before resolving anything. All reads go through
+	// one of these handles, so a root or an intermediate directory replaced
+	// after this point cannot redirect the read outside the library.
+	opened := openLibraryRoots(roots)
+	defer closeLibraryRoots(opened)
+	// The lexical check above cannot see through symlinks. Resolve the path and
+	// roots and re-confine so an intermediate directory symlink planted inside a
+	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
+	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
+	// symlinked root still matches. A not-yet-existent path (ErrNotExist) is the
+	// stable "missing" failure.
+	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(localPath, roots)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("local image missing: %s", localPath)
+	}
+	if err != nil {
+		return nil, localImageOutsideRootsError(localPath)
+	}
+	// The resolved root must be one of the directories opened above; a root
+	// replaced in between resolves somewhere else and is refused.
+	root, err := openedLibraryRootFor(opened, resolvedRoot)
+	if err != nil {
+		// A root that could not be opened or stat'ed is a read failure, not a
+		// path outside the library: keep it off the stable-failure texts so a
+		// transient error (EMFILE, EIO, a mount hiccup) is retried normally.
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, fmt.Errorf("local image forbidden: %s", localPath)
+		}
+		return nil, fmt.Errorf("local image read failed: library root: %w", err)
+	}
+	rel, relErr := filepath.Rel(resolvedRoot, resolvedPath)
+	if root == nil || relErr != nil || !filepath.IsLocal(rel) {
+		return nil, localImageOutsideRootsError(localPath)
+	}
+	return readLocalImageFile(localPath, root, rel)
+}
+
+// openedLibraryRoot is a library root opened before the image path is
+// resolved, or the error that kept it from opening.
+type openedLibraryRoot struct {
+	path   string
+	handle *os.Root
+	err    error
+}
+
+// openLibraryRoots opens each library root that exists as an os.Root. A root
+// that exists but fails to open keeps its error.
+func openLibraryRoots(roots []string) []openedLibraryRoot {
+	opened := make([]openedLibraryRoot, 0, len(roots))
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." || !filepath.IsAbs(root) {
+			continue
+		}
+		handle, err := os.OpenRoot(root)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		opened = append(opened, openedLibraryRoot{path: root, handle: handle, err: err})
+	}
+	return opened
+}
+
+func closeLibraryRoots(opened []openedLibraryRoot) {
+	for _, root := range opened {
+		if root.handle != nil {
+			_ = root.handle.Close()
+		}
+	}
+}
+
+// openedLibraryRootFor returns the opened root that is the same directory as
+// resolvedRoot. It returns nil and no error when no opened root is that
+// directory, which means the path left the library. An error means the
+// matching root failed to open, or a directory could not be stat'ed, so
+// nothing is known about confinement.
+func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
+	current, err := os.Stat(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	var failure error
+	for _, root := range opened {
+		if root.handle == nil {
+			if info, err := os.Stat(root.path); err == nil && os.SameFile(info, current) && failure == nil {
+				failure = root.err
+			}
+			continue
+		}
+		info, err := root.handle.Stat(".")
+		if err != nil {
+			failure = cmp.Or(failure, err)
+			continue
+		}
+		if os.SameFile(info, current) {
+			return root.handle, nil
+		}
+	}
+	return nil, failure
+}
+
 // deleteStaleLocalPrefix removes the previous hashed local/ image prefix
 // after a re-cache stored the artwork under a different key.
 func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previousCachedPath, cachedPath string) {
@@ -1170,17 +1265,23 @@ func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previo
 // when a fully symlink-resolved path escapes every resolved library root.
 var errLocalImageOutsideRoots = errors.New("local image path outside library roots")
 
+// localImageOutsideRootsError is the stable failure text for a path outside
+// the library roots, which isStableProviderImageFailure matches.
+func localImageOutsideRootsError(path string) error {
+	return errors.New(errLocalImageOutsideRoots.Error() + ": " + path)
+}
+
 // localImagePathResolvedWithinRoots resolves symlinks on both the path and the
-// library roots and returns the real path when it stays within a real root.
+// library roots and returns the real path and the real root containing it.
 // This closes the gap the lexical check leaves open — an intermediate directory
 // symlink planted inside a root that points outside it. Resolving both sides
 // keeps a legitimately symlinked root valid. A path that does not exist yet
 // surfaces as fs.ErrNotExist for the caller to treat as a stable "missing"
 // failure via the reader; any other resolution failure fails closed.
-func localImagePathResolvedWithinRoots(path string, roots []string) (string, error) {
+func localImagePathResolvedWithinRoots(path string, roots []string) (string, string, error) {
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, root := range roots {
 		resolvedRoot, err := filepath.EvalSymlinks(strings.TrimSpace(root))
@@ -1188,10 +1289,10 @@ func localImagePathResolvedWithinRoots(path string, roots []string) (string, err
 			continue
 		}
 		if localImagePathWithinRoots(resolvedPath, []string{resolvedRoot}) {
-			return resolvedPath, nil
+			return resolvedPath, resolvedRoot, nil
 		}
 	}
-	return "", errLocalImageOutsideRoots
+	return "", "", errLocalImageOutsideRoots
 }
 
 // localImagePathWithinRoots confines path (already cleaned, logical) to the
@@ -1219,11 +1320,13 @@ func localImagePathWithinRoots(path string, roots []string) bool {
 	return false
 }
 
-// readLocalImageFile reads a sidecar image with the same guards as discovery:
-// Lstat rejects symlinked leaves and non-regular files, the opened handle is
-// fstat-re-checked, and reads cap at MaxArtworkSourceBytes. ENOENT/EPERM
-// map to the stable-failure texts matched by isStableProviderImageFailure.
-func readLocalImageFile(path string) ([]byte, error) {
+// readLocalImageFile reads rel inside root with the same guards as discovery.
+// path is the logical path, used for the leaf check and in error texts: Lstat
+// on it rejects symlinked leaves and non-regular files, the handle opened
+// through root is fstat-re-checked against it, and reads cap at
+// MaxArtworkSourceBytes. ENOENT/EPERM map to the stable-failure texts
+// matched by isStableProviderImageFailure.
+func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) {
 	classify := func(err error) error {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -1244,7 +1347,10 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if info.Size() > MaxArtworkSourceBytes {
 		return nil, fmt.Errorf("local image exceeds %d byte limit: %s", MaxArtworkSourceBytes, path)
 	}
-	file, err := os.Open(path)
+	// Open through the root handle: it refuses any path that leaves the root,
+	// including through a directory swapped for a symlink after resolution,
+	// so confinement holds at the open itself.
+	file, err := root.Open(rel)
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -1253,10 +1359,8 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, classify(err)
 	}
-	// Close the symlink-swap window: os.Open follows symlinks, so a leaf swapped
-	// to a symlink between the Lstat above and this Open would be followed to its
-	// target. Reject unless the opened handle is the exact file Lstat inspected,
-	// so an out-of-root target can never be pulled into the public cache.
+	// Reject unless the opened handle is the exact file the Lstat above
+	// inspected, so a leaf swapped between the two cannot be read instead.
 	if !os.SameFile(info, stat) {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}

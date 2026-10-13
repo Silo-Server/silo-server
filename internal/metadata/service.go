@@ -465,8 +465,11 @@ type MetadataService struct {
 	imageCacher     ImageCacher
 	imageCacheJobs  ImageCacheJobEnqueuer
 	localArtwork    LocalArtworkCopier
-	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
-	imageResolver   interface {
+	libraryRoots    LibraryRootResolver
+	// localImageProvider overrides the built-in sidecar discovery in tests.
+	localImageProvider ImageProvider
+	autoCacheImages    atomic.Bool // hot-reloaded from metadata.cache_images
+	imageResolver      interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
 
@@ -609,6 +612,12 @@ func (s *MetadataService) SetImageCacher(c ImageCacher) {
 
 func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
 	s.imageCacheJobs = enqueuer
+}
+
+// SetLibraryRootResolver sets the resolver that confines local sidecar artwork
+// reads for the admin image picker to the item's library roots.
+func (s *MetadataService) SetLibraryRootResolver(resolver LibraryRootResolver) {
+	s.libraryRoots = resolver
 }
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
@@ -1193,14 +1202,28 @@ func (s *MetadataService) collectDirectorySidecarSearchPaths(files []*models.Med
 	if len(files) == 0 {
 		return nil, nil
 	}
+	// Every episode of a series usually shares one observed root, so check
+	// each distinct root and group once rather than once per file.
+	type observedRootKey struct {
+		folderID        int
+		root            string
+		groupKeyVersion int
+		contentGroupKey string
+	}
+	checkedRoots := make(map[observedRootKey]bool)
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file == nil || file.ObservedRootPath == "" {
 			continue
 		}
-		ok, err := usable(file)
-		if err != nil {
-			return nil, err
+		key := observedRootKey{file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey}
+		ok, checked := checkedRoots[key]
+		if !checked {
+			var err error
+			if ok, err = usable(file); err != nil {
+				return nil, err
+			}
+			checkedRoots[key] = ok
 		}
 		if ok {
 			paths = append(paths, file.ObservedRootPath)
@@ -6049,12 +6072,15 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		} else {
 			writes := make([]preparedEpisodeWrite, 0, len(episodes))
 			modelsToPersist := make([]*models.Episode, 0, len(episodes))
+			freshEpisodeIDs := make([]map[string]string, 0, len(episodes))
 			for _, ep := range episodes {
 				if write, ok := prepareEpisode(ep, false); ok {
 					writes = append(writes, write)
 					modelsToPersist = append(modelsToPersist, write.model)
+					freshEpisodeIDs = append(freshEpisodeIDs, ep.ProviderIDs)
 				}
 			}
+			releaseInheritedEpisodeProviderIDs(ctx, seriesID, modelsToPersist, freshEpisodeIDs)
 			if len(modelsToPersist) > 0 {
 				successfulWrites := bulkUpsertWithFallback(writes,
 					func([]preparedEpisodeWrite) error {
@@ -6079,6 +6105,92 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
 	return true
+}
+
+// uniqueEpisodeProviderIDs are the episode provider ID columns that the
+// episodes table keeps unique.
+var uniqueEpisodeProviderIDs = []struct {
+	provider string
+	field    func(*models.Episode) *string
+}{
+	{"imdb", func(ep *models.Episode) *string { return &ep.ImdbID }},
+	{"tmdb", func(ep *models.Episode) *string { return &ep.TmdbID }},
+	{"tvdb", func(ep *models.Episode) *string { return &ep.TvdbID }},
+}
+
+// releaseInheritedEpisodeProviderIDs keeps each provider ID on one episode of
+// a write batch; freshIDs holds each episode's provider result IDs. The
+// canonical merge keeps an episode's stored IDs, so after a provider moves an
+// ID to another episode number, as when it renumbers specials, both episodes
+// carry it. The repository then rejects the whole bulk write, and the
+// single-row fallback that follows leaves the ID on whichever row it writes
+// last. An episode that only inherited the ID gives it up to the episode whose
+// provider result carries it, and takes its own provider result's ID instead
+// when no other episode in the batch holds that one. When several provider
+// results carry the ID, the first in batch order keeps it.
+func releaseInheritedEpisodeProviderIDs(ctx context.Context, seriesID string, episodes []*models.Episode, freshIDs []map[string]string) {
+	for _, column := range uniqueEpisodeProviderIDs {
+		holders := make(map[string][]int)
+		var ids []string
+		for i, ep := range episodes {
+			id := *column.field(ep)
+			if id == "" {
+				continue
+			}
+			if len(holders[id]) == 0 {
+				ids = append(ids, id)
+			}
+			holders[id] = append(holders[id], i)
+		}
+		for _, id := range ids {
+			indexes := holders[id]
+			if len(indexes) < 2 {
+				continue
+			}
+			keep := indexes[0]
+			for _, i := range indexes {
+				if freshIDs[i][column.provider] == id {
+					keep = i
+					break
+				}
+			}
+			kept := episodes[keep]
+			for _, i := range indexes {
+				if i == keep {
+					continue
+				}
+				released := episodes[i]
+				fresh := freshIDs[i][column.provider]
+				if fresh == id {
+					*column.field(released) = ""
+					slog.DebugContext(ctx, "metadata: provider gave one episode ID to several episodes", "component", "metadata",
+						"series_id", seriesID,
+						"provider", column.provider,
+						"provider_id", id,
+						"kept_season", kept.SeasonNumber,
+						"kept_episode", kept.EpisodeNumber,
+						"released_season", released.SeasonNumber,
+						"released_episode", released.EpisodeNumber)
+					continue
+				}
+				replacement := ""
+				if fresh != "" && len(holders[fresh]) == 0 {
+					replacement = fresh
+					holders[fresh] = []int{i}
+				}
+				*column.field(released) = replacement
+				slog.InfoContext(ctx, "metadata: moved an episode provider ID to the episode its provider now gives it", "component", "metadata",
+					"series_id", seriesID,
+					"provider", column.provider,
+					"provider_id", id,
+					"kept_season", kept.SeasonNumber,
+					"kept_episode", kept.EpisodeNumber,
+					"released_season", released.SeasonNumber,
+					"released_episode", released.EpisodeNumber,
+					"released_new_id", replacement)
+			}
+		}
+	}
 }
 
 // syncSeriesEpisodeState relinks a series' files to its episodes and re-syncs
@@ -9077,8 +9189,7 @@ func primaryProviderID(ids map[string]string) string {
 // providerIDs should come from the parent MediaItem (for seasons/episodes,
 // the caller resolves up to the series item). contentType is "movie" or "series".
 func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]RemoteImage, map[string]string, error) {
-	contentLevel := contentType
-	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
+	chain, err := s.resolveChainCached(ctx, folderID, contentType)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}

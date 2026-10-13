@@ -28,7 +28,7 @@ func newLogoutTestHandler(t *testing.T) (*Handler, *memTokenStore, *staticConfig
 // raw token + JTI. Mirrors mintAndPersistRefresh in login_refresh_test.go.
 func mintAndPersistAccess(t *testing.T, store *memTokenStore, cfg *staticConfig, userID, jti string) string {
 	t.Helper()
-	access, err := IssueAccessToken(cfg.secret, userID, "", jti, time.Hour)
+	access, err := IssueAccessToken(cfg.secret, userID, "", nil, jti, time.Hour)
 	if err != nil {
 		t.Fatalf("mint access: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestHandleLogout_WrongSignature_200(t *testing.T) {
 	jti := "victim-jti"
 	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "victim", JTI: jti})
 
-	bogus, err := IssueAccessToken([]byte("attacker-secret"), "victim", "", jti, time.Hour)
+	bogus, err := IssueAccessToken([]byte("attacker-secret"), "victim", "", nil, jti, time.Hour)
 	if err != nil {
 		t.Fatalf("mint bogus: %v", err)
 	}

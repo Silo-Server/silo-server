@@ -418,7 +418,7 @@ Each entry in `disks`:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `path` | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own bearer-authed `/status`, and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`. |
+| `path` | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own `/status`, which needs a [signed request](architecture/worker-http-protocol.md#authentication), and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`. |
 | `role` | string | What the mount is for: `scratch`, or `library-N` positionally per media root. Assigned when the sample is built, so it names the same mount on `/health`, `/status`, `/admin/system/resources` and the `streamapp_node_disk_*` series, and it stays with the mount even when a probe cannot measure it. |
 | `used_gb`, `total_gb` | float | Capacity in GiB. `used_gb` counts filesystem-reserved blocks, as `df` does. `total_gb` is the capacity usable by the node process — used plus still-available — so it reads lower than the device's nameplate size on a volume that reserves blocks for root, and `used_gb`/`total_gb` is the ratio `df` prints as Use%. |
 | `stale` | bool | The numbers are real but carried over from an earlier pass because the current probe has not returned — the normal reading for a network mount whose server went away. Omitted when false. |
@@ -763,7 +763,7 @@ this route can legitimately outlive the API listener's ordinary 120-second
 as a hung request. This re-probes only — it does not reload configuration or tear
 anything down.
 
-Under the hood this is a bearer-authenticated `POST
+Under the hood this is a [signed](architecture/worker-http-protocol.md#authentication) `POST
 /admin/reprobe-capabilities` on the node's own listener, which both transcode
 nodes and proxy nodes serve. That route is internal to the cluster and is not
 part of any client contract.

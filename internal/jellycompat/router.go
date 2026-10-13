@@ -477,6 +477,9 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.SessionStore = NewSessionStore(deps.Config.JellyfinCompat.SessionTTL, deps.Now)
 		}
 	}
+	if deps.SessionStore != nil && deps.SessionStore.loginSessions == nil && deps.AuthService != nil {
+		deps.SessionStore.WithLoginSessions(deps.AuthService)
+	}
 	if deps.IDCodec == nil {
 		deps.IDCodec = NewResourceIDCodec()
 	}

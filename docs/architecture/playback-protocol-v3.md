@@ -994,11 +994,15 @@ fallback to another media version must remap the selected subtitle. It
 prefers a version with an equivalent track; when none has one, playback
 continues with subtitles off and the plan carries `subtitle_track_unavailable`
 rather than ending in a terminal. A selection the effective file cannot honor
-on a direct start degrades the same way. A replan that would have to drop the
+on a direct start degrades the same way. When the file being planned was
+refused with `subtitle_conversion_unsupported` and the only other versions that
+play drop the subtitle, the server plays that file with subtitles off instead
+of moving to one of them, provided that plan can run; when no other version
+plays, the terminal stands. A replan that would have to drop the
 subtitle to return to the requested version stays on the version already
 playing, unless quality `original` pins the requested version; the requested
-version remains a fallback without the subtitle if no version that keeps it can
-play. Malformed
+version remains a fallback without the subtitle, ahead of any other version
+without it, if no version that keeps it can play. Malformed
 selections (a track identity that does not parse or names another file, or a
 negative index) are still rejected.
 
@@ -1240,7 +1244,7 @@ The plan will play, but something the user might notice was given up.
 | `bandwidth_cap_applied` | `bandwidth_cap_kbps` limited the selection |
 | `evidence_insufficient_for_direct` | Evidence tier blocked a direct route |
 | `audio_track_unavailable` | The selected audio track is not on the effective file; its default track plays |
-| `subtitle_track_unavailable` | The selected subtitle has no equivalent on the effective file; playback starts with subtitles off |
+| `subtitle_track_unavailable` | The selected subtitle has no equivalent on the effective file, or is on it but cannot be shown there; playback continues with subtitles off. `message` says which |
 
 ### 7.3 Terminal reasons
 

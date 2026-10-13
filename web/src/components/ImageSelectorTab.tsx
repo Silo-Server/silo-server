@@ -34,6 +34,8 @@ export default function ImageSelectorTab({
   const availableTabs = item.type === "season" ? SEASON_TABS : IMAGE_TABS;
   const [activeTab, setActiveTab] = useState<ImageTab>("poster");
   const [textlessOnly, setTextlessOnly] = useState(false);
+  // null shows every provider's choices.
+  const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<RemoteImage | null>(null);
   // Track which images were applied in this session (original_url per type).
   const [appliedImages, setAppliedImages] = useState<Record<string, string>>({});
@@ -41,7 +43,7 @@ export default function ImageSelectorTab({
   const { data, isLoading, isError } = useItemImages(item.content_id, enabled);
   const applyMutation = useApplyItemImage();
 
-  const images = data?.images ?? [];
+  const images = useMemo(() => data?.images ?? [], [data]);
 
   useEffect(() => {
     onApplyPendingChange?.(applyMutation.isPending);
@@ -53,13 +55,28 @@ export default function ImageSelectorTab({
 
   const tabConfig = IMAGE_TABS.find((t) => t.key === activeTab)!;
 
-  const filteredImages = useMemo(() => {
-    let result = images.filter((img) => img.type === activeTab);
-    if (textlessOnly && activeTab !== "logo") {
-      result = result.filter((img) => img.language === "");
-    }
-    return result;
-  }, [images, activeTab, textlessOnly]);
+  const { providers, visibleImages, filteredImages, activeProvider } = useMemo(() => {
+    const ofType = images.filter((img) => img.type === activeTab);
+    const visible =
+      textlessOnly && activeTab !== "logo" ? ofType.filter((img) => img.language === "") : ofType;
+    // Chips follow the server's order, so local artwork's chip comes first.
+    const counts = new Map<string, number>(ofType.map((img) => [img.provider_id, 0]));
+    for (const img of visible) counts.set(img.provider_id, (counts.get(img.provider_id) ?? 0) + 1);
+    // A filter for a provider that is no longer listed falls back to All.
+    const active = providerFilter !== null && counts.has(providerFilter) ? providerFilter : null;
+    return {
+      providers: [...counts].map(([id, count]) => ({ id, count })),
+      visibleImages: visible,
+      filteredImages:
+        active === null ? visible : visible.filter((img) => img.provider_id === active),
+      activeProvider: active,
+    };
+  }, [images, activeTab, textlessOnly, providerFilter]);
+
+  const selectProvider = (id: string | null) => {
+    setProviderFilter(id);
+    setSelectedImage(null);
+  };
 
   // The "current" image for this tab. We first check session-local applied
   // images (which use original_url), then fall back to the server's stored
@@ -128,6 +145,7 @@ export default function ImageSelectorTab({
               setActiveTab(tab.key);
               setSelectedImage(null);
               setTextlessOnly(false);
+              setProviderFilter(null);
             }}
             className={cn(
               "rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
@@ -144,7 +162,11 @@ export default function ImageSelectorTab({
         {activeTab !== "logo" && (
           <button
             type="button"
-            onClick={() => setTextlessOnly(!textlessOnly)}
+            onClick={() => {
+              setTextlessOnly(!textlessOnly);
+              // Don't leave a selection the filter hides ready to apply.
+              setSelectedImage(null);
+            }}
             className={cn(
               "ml-auto rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors",
               textlessOnly
@@ -156,6 +178,33 @@ export default function ImageSelectorTab({
           </button>
         )}
       </div>
+
+      {/* Provider filter — only useful with more than one source */}
+      {providers.length > 1 && (
+        <div
+          role="group"
+          aria-label="Filter by provider"
+          className="flex shrink-0 flex-wrap items-center gap-1"
+        >
+          {[{ id: null, count: visibleImages.length }, ...providers].map((p) => (
+            <button
+              key={p.id === null ? "all" : `provider:${p.id}`}
+              type="button"
+              aria-pressed={activeProvider === p.id}
+              onClick={() => selectProvider(p.id)}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                activeProvider === p.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {p.id === null ? "All" : p.id.toUpperCase()}
+              <span className="tabular-nums opacity-60">{p.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Provider errors */}
       {providerErrors && Object.keys(providerErrors).length > 0 && (

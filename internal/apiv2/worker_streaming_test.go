@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -53,7 +54,7 @@ func TestWorkerStreamingRefusalDescription(t *testing.T) {
 		for _, authenticated := range []bool{false, true} {
 			req := httptest.NewRequest(op.Method, path, nil)
 			if authenticated {
-				req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+				nodeauthtest.Sign(t, req, cfg.Auth.JWTSecret)
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, req)
@@ -72,7 +73,7 @@ func TestWorkerStreamingRefusalDescription(t *testing.T) {
 	// Proxy manifest HEAD is forwarded unchanged to a worker that registers GET
 	// only. The existing node therefore refuses it; do not promise HEAD support.
 	req := httptest.NewRequest(http.MethodHead, "/transcode/missing/master.m3u8", nil)
-	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+	nodeauthtest.Sign(t, req, cfg.Auth.JWTSecret)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, req)
 	if response.Code != 405 {

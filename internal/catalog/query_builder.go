@@ -27,6 +27,9 @@ type QueryBuilder struct {
 	profileID   string
 	libraryIDs  []int
 	mediaScope  string
+	// titleNotNull records that the relation behind alias is media_items,
+	// whose title and sort_title are NOT NULL, so its title key never is.
+	titleNotNull bool
 	// requireUserHistoryCTE is set when an emitted clause references the
 	// per-user history aggregate (audit 2026-05-01 §3.1 Pattern B). The
 	// executor reads this flag to inject the user_last_watched CTE and
@@ -53,6 +56,14 @@ func (qb *QueryBuilder) WithUserScope(userID int, profileID string) *QueryBuilde
 
 func (qb *QueryBuilder) WithLibraryScope(libraryIDs []int) *QueryBuilder {
 	qb.libraryIDs = append([]int(nil), libraryIDs...)
+	return qb
+}
+
+// WithMediaItemsRelation declares that alias is media_items itself rather than
+// a derived relation (episodes, search unions), so sort keys built from its
+// NOT NULL columns can be marked notNull for cursor seeks.
+func (qb *QueryBuilder) WithMediaItemsRelation() *QueryBuilder {
+	qb.titleNotNull = true
 	return qb
 }
 
@@ -267,7 +278,7 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 
 	switch sortConfig.Field {
 	case "title":
-		qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC"}, {expression: qb.alias + ".content_id"}}
+		qb.cursorTerms = []queryCursorTerm{{expression: titleExpr, descending: dir == "DESC", notNull: qb.titleNotNull}, {expression: qb.alias + ".content_id", notNull: true}}
 		plan.OrderBy = fmt.Sprintf("ORDER BY %s %s, %s.content_id ASC", titleExpr, dir, qb.alias)
 		return plan, nil
 	case "release_date":

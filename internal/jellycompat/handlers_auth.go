@@ -156,10 +156,18 @@ func (h *AuthHandler) HandlePublicUsers(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, []any{})
 }
 
+// maxAuthenticateByNameBodyBytes bounds the anonymous sign-in body, which
+// holds only a username and password.
+const maxAuthenticateByNameBodyBytes = 64 << 10
+
 // HandleAuthenticateByName serves POST /Users/AuthenticateByName.
 func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
 	var req authenticateByNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthenticateByNameBodyBytes)).Decode(&req); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, "PayloadTooLarge", "Request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
 		return
 	}

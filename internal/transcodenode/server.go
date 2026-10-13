@@ -1583,7 +1583,9 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	})
 }
 
-// requireBearer verifies signed worker requests and legacy bearer credentials.
+// requireBearer is middleware that admits only API servers and proxies: it
+// checks the request's node signature (see nodeauth). The name predates
+// signing and is kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1890,7 +1892,7 @@ func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request
 // identity-only by design (see internal/noderecipe), and a header-authenticated
 // (tokenless) attempt, where no client-visible URL carries a credential and the
 // relayed request therefore has no token to forward. The token was never this
-// route's authorization — the static bearer already authenticated the caller —
+// route's authorization — the node signature already authenticated the caller —
 // so its absence only removes a recipe source, never a permission.
 //
 // Returns nil when no source yields a complete transcode recipe for the session
@@ -2253,7 +2255,7 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-// handleRemux executes a progressive remux on demand. The static bearer
+// handleRemux executes a progressive remux on demand. The node signature
 // authenticates the proxy process; the independently verified stream token
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {

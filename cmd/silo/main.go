@@ -2149,6 +2149,9 @@ func main() {
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
 			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
 			metadataService.SetLocalArtworkCopier(metadataImageCacheProcessor)
+			// The admin image picker previews and applies the same local files,
+			// under the same confinement.
+			metadataService.SetLibraryRootResolver(deps.FolderRepo)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
 			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {
@@ -3392,8 +3395,10 @@ func main() {
 			Files:    deps.FileRepo,
 			Settings: settingsRepo,
 			Auth: &audiobooks.SiloCredValidator{
-				Auth: absAuthSvc,
-				Pool: deps.DB,
+				Auth:        absAuthSvc,
+				Pool:        deps.DB,
+				Stores:      userStoreProvider,
+				PINAttempts: deps.ProfilePINAttempts,
 			},
 			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore),
 			Recs:           recommendations.NewRepo(deps.DB),
