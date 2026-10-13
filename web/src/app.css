@@ -518,8 +518,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      atmosphere where media artwork is the star.                    */
   [data-theme="midnight-cinema"] {
     --radius: 0.75rem;
-    --font-body: "Outfit", sans-serif;
-    --font-display: "Outfit", sans-serif;
+    --font-body: "Plus Jakarta Sans", sans-serif;
+    --font-display: "Plus Jakarta Sans", sans-serif;
 
     /* Surfaces: near-black with subtle cool undertone */
     --contrast-boost: #ffffff;
