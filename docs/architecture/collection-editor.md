@@ -57,9 +57,9 @@ then position). That order reaches viewers in two places:
 - **The Server collections list** on every profile's Collections page opens with each
   library's first 20 in this order (`ListServerCollections`, `capServerCollections`) and adds the
   rest of each library's Collections tab list after them, straight away for a picked library and
-  at the end of the grid in the default view (All, or the only library). Pinned collections lead
-  each library's collections there, whatever their shelf's order. This is why Pin stays available
-  on a shelf that sorts itself, and why its help line names that list.
+  one library at a time at the end of the grid in the default view (All, or the only library).
+  Pinned collections lead each library's collections there, whatever their shelf's order. This is
+  why Pin stays available on a shelf that sorts itself, and why its help line names that list.
 
 `featured` is a column on the collection, so a Pin set from one library's Arrange applies in every
 library the collection is in, while its shelf and position stay per library. Pin's help line says so

@@ -377,6 +377,42 @@ describe("Server collections", () => {
     expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
   });
 
+  it("loads one library's rest each time the end of the grid is reached under All", async () => {
+    const kiki = { ...oscarWinners, id: "lc-kiki", title: "Kiki's Delivery Service" };
+    v2Recorder.answer("GET /api/v2/collections/server", {
+      libraries: [
+        serverLibrary("1", "Movies", [oscarWinners], 3),
+        serverLibrary("2", "Kids", [ghibli], 2),
+      ],
+    });
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", (call: { path: string }) =>
+      call.path === "/api/v2/library/1/collections"
+        ? libraryTab("1", [oscarWinners, heistNight, spaceOperas])
+        : libraryTab("2", [ghibli, kiki]),
+    );
+    show();
+    const server = await screen.findByRole("region", { name: "Server collections" });
+    await userEvent.click(await within(server).findByRole("button", { name: "Load more" }));
+    await within(server).findByRole("link", { name: "Space operas" });
+    expect(libraryReads()).toEqual(["/api/v2/library/1/collections"]);
+    expect(within(server).queryByRole("link", { name: kiki.title })).toBeNull();
+
+    await userEvent.click(await within(server).findByRole("button", { name: "Load more" }));
+    await within(server).findByRole("link", { name: kiki.title });
+    expect(libraryReads()).toEqual([
+      "/api/v2/library/1/collections",
+      "/api/v2/library/2/collections",
+    ]);
+    expect(cardsIn(server)).toEqual([
+      oscarWinners.title,
+      "Studio Ghibli",
+      "Heist night",
+      "Space operas",
+      kiki.title,
+    ]);
+    expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
   it("loads the rest under All once the end of the grid scrolls into view", async () => {
     const observed: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
     vi.stubGlobal(

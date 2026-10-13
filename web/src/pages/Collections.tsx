@@ -704,11 +704,11 @@ function ServerCollectionsSection() {
  * answer carries only each library's first 20, so the rest come from the
  * libraries' Collections tabs, which list the same collections in the same
  * order. A picked library loads its rest straight away. The page's default
- * view (All, or a lone library) loads them when the end of the grid nears the
- * viewport or the viewer presses Load more, so opening the page reads only the
- * capped answer unless the grid is short. Every library's first 20 come before
- * any library's rest. If a list fails, that library's first 20 stay with a link
- * to its Collections tab.
+ * view (All, or a lone library) loads one library's rest at a time, each time
+ * the end of the grid nears the viewport or the viewer presses Load more, so
+ * opening the page reads only the capped answer unless the grid is short.
+ * Every library's first 20 come before any library's rest. If a list fails,
+ * that library's first 20 stay with a link to its Collections tab.
  */
 function ServerCollectionsGrid({
   libraries,
@@ -717,14 +717,15 @@ function ServerCollectionsGrid({
   libraries: ServerCollectionsLibrary[];
   loadOnScroll: boolean;
 }) {
-  const [reachedEnd, setReachedEnd] = useState(false);
-  const loadRest = !loadOnScroll || reachedEnd;
+  // The libraries whose rest the default view asked for, one per end of grid.
+  const [requested, setRequested] = useState<ReadonlySet<number>>(() => new Set());
   const cutShort = (entry: ServerCollectionsLibrary) =>
     entry.collections.length < entry.total_count;
   const fullLists = useQueries({
     queries: libraries.map((entry) => {
       const options = libraryCollectionsQueryOptions(entry.library_id);
-      return { ...options, enabled: options.enabled && loadRest && cutShort(entry) };
+      const asked = !loadOnScroll || requested.has(entry.library_id);
+      return { ...options, enabled: options.enabled && asked && cutShort(entry) };
     }),
   });
   const lists = libraries.map((entry, index) => {
@@ -739,7 +740,9 @@ function ServerCollectionsGrid({
       entry,
       first: entry.collections,
       rest: full ? full.filter((collection) => !inFirst.has(collection.id)) : [],
-      pending: cutShort(entry) && !full && !query?.isError,
+      // Still to load: asked for and on its way, or waiting for the next ask.
+      loading: cutShort(entry) && !full && !query?.isError && query?.fetchStatus !== "idle",
+      waiting: cutShort(entry) && !full && !query?.isError && query?.fetchStatus === "idle",
       failed: cutShort(entry) && !full && query?.isError === true,
     };
   });
@@ -764,11 +767,15 @@ function ServerCollectionsGrid({
       return [{ collection, libraryId: inSeveral ? undefined : entry.library_id }];
     }),
   );
-  const pending = lists.some((list) => list.pending);
+  const loading = lists.some((list) => list.loading);
+  const next = lists.find((list) => list.waiting)?.entry;
   const failed = lists.filter((list) => list.failed);
+  const loadNext = () => {
+    if (next) setRequested((asked) => new Set(asked).add(next.library_id));
+  };
   const sentinelRef = useIntersectionObserver({
-    onIntersect: () => setReachedEnd(true),
-    enabled: pending && !loadRest,
+    onIntersect: loadNext,
+    enabled: loadOnScroll && !loading && next !== undefined,
   });
   return (
     <>
@@ -784,12 +791,12 @@ function ServerCollectionsGrid({
           </li>
         ))}
       </ul>
-      {pending && loadRest ? <PosterGridSkeleton /> : null}
-      {pending && !loadRest ? (
+      {loading ? <PosterGridSkeleton /> : null}
+      {!loading && next ? (
         // Scrolling near it presses it; it stays for keyboard and screen
         // reader users, who may read the grid without scrolling.
         <div ref={sentinelRef} className="flex justify-center">
-          <Button variant="outline" size="sm" onClick={() => setReachedEnd(true)}>
+          <Button variant="outline" size="sm" onClick={loadNext}>
             Load more
           </Button>
         </div>
