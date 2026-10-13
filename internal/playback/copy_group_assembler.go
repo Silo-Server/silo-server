@@ -322,7 +322,7 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 		return err
 	}
 	if math.Abs(run.shift) > 1e-6 {
-		if err := shiftFMP4Decode(joined, run.shift, run.scales); err != nil {
+		if joined, err = shiftFMP4Decode(joined, run.shift, run.scales, run.trackID); err != nil {
 			return err
 		}
 	}

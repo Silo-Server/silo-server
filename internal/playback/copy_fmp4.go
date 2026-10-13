@@ -287,54 +287,273 @@ func fmp4TrackTimescales(init []byte) (map[uint32]uint32, error) {
 	return scales, nil
 }
 
-// shiftFMP4Decode moves every track fragment in a media segment shift seconds
-// later on its timeline by rewriting its tfdt, in place. It reports an error
-// for a track without a known timescale, or a decode time that would go
-// negative or overflow a version 0 tfdt.
-func shiftFMP4Decode(segment []byte, shift float64, scales map[uint32]uint32) error {
+// shiftFMP4Decode returns a media segment with every track fragment moved
+// shift seconds later on its timeline. It reports an error for a track without
+// a known timescale, or a decode time that would overflow a version 0 tfdt.
+//
+// An audio fragment the shift would start before zero, which a tfdt can't
+// express, loses its leading samples until the next one starts at or after
+// zero. That is an encoder's priming: a run that transcodes audio from the
+// file's start emits it before the video, so its offset is later than the
+// run the timeline came from. The samples kept stay where the timeline puts
+// them, so the stream stays continuous; only its first audio frame or two
+// goes. A video fragment that would start before zero is an error: a run is
+// placed by its first keyframe.
+func shiftFMP4Decode(segment []byte, shift float64, scales map[uint32]uint32, videoTrack uint32) ([]byte, error) {
 	top, err := fmp4Boxes(segment)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(segment))
+	for _, b := range top {
+		if b.typ == boxMoof {
+			moof, err := shiftMoof(b, shift, scales, videoTrack)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, moof...)
+			continue
+		}
+		out = append(out, b.raw...)
+	}
+	return out, nil
+}
+
+// shiftMoof returns moof with its track fragments shifted (shiftFMP4Decode).
+func shiftMoof(moof fmp4Box, shift float64, scales map[uint32]uint32, videoTrack uint32) ([]byte, error) {
+	children, err := fmp4Boxes(moof.payload)
+	if err != nil {
+		return nil, err
+	}
+	payload := make([]byte, 0, len(moof.payload))
+	// skipped is, for each traf at an offset in payload, the media size of
+	// the samples its trun dropped.
+	skipped := map[int]uint32{}
+	trimmed := false
+	for _, c := range children {
+		if c.typ != boxTraf {
+			payload = append(payload, c.raw...)
+			continue
+		}
+		at := len(payload)
+		traf, dropped, err := shiftTraf(c, shift, scales, videoTrack)
+		if err != nil {
+			return nil, err
+		}
+		skipped[at] = dropped
+		trimmed = trimmed || dropped > 0 || len(traf) != len(c.raw)
+		payload = append(payload, traf...)
+	}
+	if !trimmed {
+		out := append([]byte(nil), moof.raw[:len(moof.raw)-len(moof.payload)]...)
+		return append(out, payload...), nil
+	}
+	// The dropped trun entries shorten the moof, which brings the media the
+	// truns point at, in the mdat after it, that much nearer.
+	shrink := int64(len(moof.raw) - (8 + len(payload)))
+	for at, dropped := range skipped {
+		traf, err := fmp4Boxes(payload[at:])
+		if err != nil || len(traf) == 0 {
+			return nil, errFMP4Box
+		}
+		if err := moveTrunData(traf[0].payload, int64(dropped)-shrink); err != nil {
+			return nil, err
+		}
+	}
+	return appendFMP4Box(nil, boxMoof, payload), nil
+}
+
+// shiftTraf returns traf with its tfdt shifted, and the media size of any
+// samples dropped from its start (shiftFMP4Decode).
+func shiftTraf(traf fmp4Box, shift float64, scales map[uint32]uint32, videoTrack uint32) ([]byte, uint32, error) {
+	raw := append([]byte(nil), traf.raw...)
+	payload := raw[len(raw)-len(traf.payload):]
+	tfhd, ok := fmp4Child(payload, "tfhd")
+	if !ok || len(tfhd) < 8 {
+		return nil, 0, fmt.Errorf("%w: track fragment without tfhd", errFMP4Box)
+	}
+	trackID := binary.BigEndian.Uint32(tfhd[4:])
+	scale, ok := scales[trackID]
+	if !ok {
+		return nil, 0, fmt.Errorf("%w: track fragment for an unknown track", errFMP4Box)
+	}
+	tfdt, ok := fmp4Child(payload, "tfdt")
+	if !ok {
+		return raw, 0, nil
+	}
+	var v int64
+	switch {
+	case tfdt[0] == 1 && len(tfdt) >= 12:
+		v = int64(binary.BigEndian.Uint64(tfdt[4:]))
+	case len(tfdt) >= 8:
+		v = int64(binary.BigEndian.Uint32(tfdt[4:]))
+	default:
+		return nil, 0, errFMP4Box
+	}
+	v += int64(math.Round(shift * float64(scale)))
+	if v >= 0 {
+		return raw, 0, putFMP4DecodeTime(tfdt, v)
+	}
+	if trackID == videoTrack {
+		return nil, 0, fmt.Errorf("%w: negative decode time", errFMP4Box)
+	}
+	return trimTrafStart(payload, tfhd, v)
+}
+
+func putFMP4DecodeTime(tfdt []byte, v int64) error {
+	if tfdt[0] == 1 && len(tfdt) >= 12 {
+		binary.BigEndian.PutUint64(tfdt[4:], uint64(v))
+		return nil
+	}
+	if v < 0 || v > math.MaxUint32 {
+		return fmt.Errorf("%w: decode time out of range", errFMP4Box)
+	}
+	binary.BigEndian.PutUint32(tfdt[4:], uint32(v))
+	return nil
+}
+
+// trimTrafStart rebuilds a track fragment that would start at decode time
+// v < 0 without its leading samples up to zero, and returns it with the media
+// size of the dropped samples. Its media must count from the moof
+// (default-base-is-moof, as FFmpeg writes it), so the moof can shrink.
+func trimTrafStart(traf, tfhd []byte, v int64) ([]byte, uint32, error) {
+	flags := binary.BigEndian.Uint32(tfhd) & 0xFFFFFF
+	if flags&0x1 != 0 || flags&0x020000 == 0 {
+		return nil, 0, fmt.Errorf("%w: negative decode time in a fragment not based on its moof", errFMP4Box)
+	}
+	off := 8
+	if flags&0x2 != 0 { // sample description index
+		off += 4
+	}
+	var defaultDuration, defaultSize uint32
+	for _, f := range []struct {
+		bit uint32
+		v   *uint32
+	}{{0x8, &defaultDuration}, {0x10, &defaultSize}} {
+		if flags&f.bit == 0 {
+			continue
+		}
+		if len(tfhd) < off+4 {
+			return nil, 0, errFMP4Box
+		}
+		*f.v = binary.BigEndian.Uint32(tfhd[off:])
+		off += 4
+	}
+
+	children, err := fmp4Boxes(traf)
+	if err != nil {
+		return nil, 0, err
+	}
+	var payload []byte
+	var dropped uint32
+	truns := 0
+	for _, c := range children {
+		if c.typ != "trun" {
+			payload = append(payload, c.raw...)
+			continue
+		}
+		if truns++; truns > 1 {
+			return nil, 0, fmt.Errorf("%w: negative decode time in a fragment with several truns", errFMP4Box)
+		}
+		var trun []byte
+		if trun, dropped, err = trimTrunStart(c.payload, defaultDuration, defaultSize, &v); err != nil {
+			return nil, 0, err
+		}
+		payload = appendFMP4Box(payload, "trun", trun)
+	}
+	if truns == 0 {
+		return nil, 0, fmt.Errorf("%w: negative decode time in a fragment without samples", errFMP4Box)
+	}
+	// v is now the first kept sample's decode time.
+	if tfdt, ok := fmp4Child(payload, "tfdt"); ok {
+		if err := putFMP4DecodeTime(tfdt, v); err != nil {
+			return nil, 0, err
+		}
+	}
+	return appendFMP4Box(nil, boxTraf, payload), dropped, nil
+}
+
+// trimTrunStart drops a trun's leading samples while *v, the next sample's
+// decode time, is negative, moving *v past each. It returns the new trun
+// payload and the media size of the dropped samples.
+func trimTrunStart(trun []byte, defaultDuration, defaultSize uint32, v *int64) ([]byte, uint32, error) {
+	if len(trun) < 8 {
+		return nil, 0, errFMP4Box
+	}
+	flags := binary.BigEndian.Uint32(trun) & 0xFFFFFF
+	count := int(binary.BigEndian.Uint32(trun[4:]))
+	header := 8
+	for _, bit := range []uint32{0x1, 0x4} { // data offset, first sample flags
+		if flags&bit != 0 {
+			header += 4
+		}
+	}
+	entry := 0
+	for _, bit := range []uint32{0x100, 0x200, 0x400, 0x800} { // duration, size, flags, composition offset
+		if flags&bit != 0 {
+			entry += 4
+		}
+	}
+	if count < 0 || len(trun) < header+count*entry {
+		return nil, 0, errFMP4Box
+	}
+	if flags&0x100 == 0 && defaultDuration == 0 || flags&0x200 == 0 && defaultSize == 0 {
+		return nil, 0, fmt.Errorf("%w: negative decode time in a trun without sample durations or sizes", errFMP4Box)
+	}
+	drop := 0
+	var dropped uint32
+	for ; *v < 0 && drop < count; drop++ {
+		e := trun[header+drop*entry:]
+		duration, size := defaultDuration, defaultSize
+		if flags&0x100 != 0 {
+			duration, e = binary.BigEndian.Uint32(e), e[4:]
+		}
+		if flags&0x200 != 0 {
+			size = binary.BigEndian.Uint32(e)
+		}
+		*v += int64(duration)
+		dropped += size
+	}
+	if drop == count {
+		return nil, 0, fmt.Errorf("%w: negative decode time for a whole fragment", errFMP4Box)
+	}
+	out := append(append([]byte(nil), trun[:header]...), trun[header+drop*entry:]...)
+	binary.BigEndian.PutUint32(out[4:], uint32(count-drop))
+	return out, dropped, nil
+}
+
+// moveTrunData moves the data offset of every trun in a traf by delta. The
+// offsets must count from the moof.
+func moveTrunData(traf []byte, delta int64) error {
+	tfhd, ok := fmp4Child(traf, "tfhd")
+	if !ok || len(tfhd) < 8 {
+		return fmt.Errorf("%w: track fragment without tfhd", errFMP4Box)
+	}
+	if flags := binary.BigEndian.Uint32(tfhd) & 0xFFFFFF; flags&0x1 != 0 || flags&0x020000 == 0 {
+		return fmt.Errorf("%w: a moof that changed size has a fragment not based on it", errFMP4Box)
+	}
+	children, err := fmp4Boxes(traf)
 	if err != nil {
 		return err
 	}
-	for _, b := range top {
-		if b.typ != boxMoof {
+	for _, c := range children {
+		if c.typ != "trun" {
 			continue
 		}
-		trafs, err := fmp4Boxes(b.payload)
-		if err != nil {
-			return err
+		if len(c.payload) < 12 || binary.BigEndian.Uint32(c.payload)&0x1 == 0 {
+			return fmt.Errorf("%w: trun without a data offset in a moof that changed size", errFMP4Box)
 		}
-		for _, traf := range trafs {
-			if traf.typ != boxTraf {
-				continue
-			}
-			tfhd, ok := fmp4Child(traf.payload, "tfhd")
-			if !ok || len(tfhd) < 8 {
-				return fmt.Errorf("%w: track fragment without tfhd", errFMP4Box)
-			}
-			scale, ok := scales[binary.BigEndian.Uint32(tfhd[4:])]
-			if !ok {
-				return fmt.Errorf("%w: track fragment for an unknown track", errFMP4Box)
-			}
-			tfdt, ok := fmp4Child(traf.payload, "tfdt")
-			if !ok {
-				continue
-			}
-			delta := int64(math.Round(shift * float64(scale)))
-			if tfdt[0] == 1 && len(tfdt) >= 12 {
-				v := int64(binary.BigEndian.Uint64(tfdt[4:])) + delta
-				if v < 0 {
-					return fmt.Errorf("%w: negative decode time", errFMP4Box)
-				}
-				binary.BigEndian.PutUint64(tfdt[4:], uint64(v))
-			} else if len(tfdt) >= 8 {
-				v := int64(binary.BigEndian.Uint32(tfdt[4:])) + delta
-				if v < 0 || v > math.MaxUint32 {
-					return fmt.Errorf("%w: decode time out of range", errFMP4Box)
-				}
-				binary.BigEndian.PutUint32(tfdt[4:], uint32(v))
-			}
+		o := int64(int32(binary.BigEndian.Uint32(c.payload[8:]))) + delta
+		if o < 0 || o > math.MaxInt32 {
+			return fmt.Errorf("%w: data offset out of range", errFMP4Box)
 		}
+		binary.BigEndian.PutUint32(c.payload[8:], uint32(o))
 	}
 	return nil
+}
+
+func appendFMP4Box(out []byte, typ string, payload []byte) []byte {
+	out = binary.BigEndian.AppendUint32(out, uint32(8+len(payload)))
+	out = append(out, typ...)
+	return append(out, payload...)
 }

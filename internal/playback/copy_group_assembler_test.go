@@ -17,8 +17,8 @@ func TestCopyGroupAssemblerMatchesNearbyKeyframes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for n := range 3 {
-		data := testGroup(false)
-		if err := shiftFMP4Decode(data, float64(n)*.004, map[uint32]uint32{1: 12800, 2: 48000}); err != nil {
+		data, err := shiftFMP4Decode(testGroup(false), float64(n)*.004, map[uint32]uint32{1: 12800, 2: 48000}, 1)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if err := a.mapGroupLocked(a.run, filepath.Join(dir, plannedSegmentName(n)), data); err != nil {

@@ -275,6 +275,10 @@ type TranscodeSession struct {
 	// copyGroups joins FFmpeg's keyframe groups into the planned segments;
 	// set with copyPlan.
 	copyGroups *copyGroupAssembler
+	// planStreamOrigin and planSeekAnchorResolved are the first run's copy
+	// seek anchor, which RecipeOpts restores for a planned session.
+	planStreamOrigin       float64
+	planSeekAnchorResolved bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -431,7 +435,11 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
+	copyPlan, err := resolveCopyPlan(ctx, opts)
+	if err != nil {
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
+	}
 	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
@@ -450,20 +458,22 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// transcode process outlives a disconnected manifest request.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s := &TranscodeSession{
-		cancel:               cancel,
-		opts:                 opts,
-		outputDir:            opts.OutputDir,
-		running:              true,
-		done:                 make(chan struct{}),
-		stderr:               newBoundedTailBuffer(stderrTailMaxBytes),
-		lastRequestedSegment: opts.StartSegmentNumber,
-		lastCompletedSegment: opts.StartSegmentNumber - 1,
-		lastPruneFloor:       opts.StartSegmentNumber - 1,
-		lastPruneHighWater:   opts.StartSegmentNumber - 1,
-		segmentIncarnation:   uuid.NewString(),
-		hwWorkloadDevice:     hwWorkloadDevice,
-		copyPlan:             copyPlan,
-		copyGroups:           copyGroups,
+		cancel:                 cancel,
+		opts:                   opts,
+		outputDir:              opts.OutputDir,
+		running:                true,
+		done:                   make(chan struct{}),
+		stderr:                 newBoundedTailBuffer(stderrTailMaxBytes),
+		lastRequestedSegment:   opts.StartSegmentNumber,
+		lastCompletedSegment:   opts.StartSegmentNumber - 1,
+		lastPruneFloor:         opts.StartSegmentNumber - 1,
+		lastPruneHighWater:     opts.StartSegmentNumber - 1,
+		segmentIncarnation:     uuid.NewString(),
+		hwWorkloadDevice:       hwWorkloadDevice,
+		copyPlan:               copyPlan,
+		copyGroups:             copyGroups,
+		planStreamOrigin:       opts.StreamOriginSeconds,
+		planSeekAnchorResolved: opts.CopySeekAnchorResolved,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -3091,6 +3101,23 @@ func (s *TranscodeSession) Opts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.opts
+}
+
+// RecipeOpts returns the opts to persist for rebuilding the session. A
+// keyframe-planned session's timeline is its plan, wherever a restart has
+// moved the current run, so its recipe starts from the beginning like its
+// first run: the rebuild plans the same segments again (the planner takes
+// only a session from the start), and a segment request restarts FFmpeg at
+// the player's position.
+func (s *TranscodeSession) RecipeOpts() TranscodeOpts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	opts := s.opts
+	if s.copyPlan != nil {
+		opts.SeekSeconds, opts.StartSegmentNumber = 0, 0
+		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, s.planSeekAnchorResolved
+	}
+	return opts
 }
 
 // SetAudioTrackIndex updates the audio track index in the session's opts.
