@@ -150,7 +150,6 @@ const SubtitleAppearanceSettings = lazy(
   () => import("@/pages/settings/SubtitleAppearanceSettings"),
 );
 const HomeScreenSettings = lazy(() => import("@/pages/settings/HomeScreenSettings"));
-const CardOverlaySettings = lazy(() => import("@/pages/settings/CardOverlaySettings"));
 const TitlePagesSettings = lazy(() => import("@/pages/settings/TitlePagesSettings"));
 const PersonalizeSettings = lazy(() => import("@/pages/settings/PersonalizeSettings"));
 const ConnectAppsSettings = lazy(() => import("@/pages/settings/ConnectAppsSettings"));
@@ -611,7 +610,11 @@ function AppRoutes() {
                   <Route path="watch-providers" element={<WatchProvidersSettings />} />
                   <Route path="subtitle-appearance" element={<SubtitleAppearanceSettings />} />
                   <Route path="home-screen" element={<HomeScreenSettings />} />
-                  <Route path="card-overlays" element={<CardOverlaySettings />} />
+                  {/* Card overlays merged into Navigation & Cards. */}
+                  <Route
+                    path="card-overlays"
+                    element={<Navigate to="/settings/interface" replace />}
+                  />
                   <Route path="title-pages" element={<TitlePagesSettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
                   <Route path="requests" element={<RequestsSettings />} />
