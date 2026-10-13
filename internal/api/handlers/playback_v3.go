@@ -1785,12 +1785,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 				// The planner pinned the requested file's refusal on the
 				// subtitle, and every sibling that plays drops the subtitle
 				// too. Playing the requested file without it keeps its
-				// picture, when that plan succeeds.
-				withoutSubtitle := baseReq
-				withoutSubtitle.SubtitleTrackID, withoutSubtitle.SubtitleTrackIndex = "", nil
-				candidateResult, candidateToneMapErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: withoutSubtitle, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
-				if candidateResult.Terminal == nil {
-					droppedSubtitle = &alternateCandidateV3{file: effectiveFile, request: withoutSubtitle, audioIndex: baseAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
+				// picture, when that plan can run.
+				if candidate := h.planWithoutSubtitleV3(r.Context(), playback.PlannerInputV3{Request: baseReq, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)}); candidate != nil {
+					droppedSubtitle = candidate
 					subtitleNotShown = true
 				}
 			}
@@ -5146,8 +5143,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				}
 				if candidateResult.Terminal == nil && subtitleDropped {
 					// Prefer a version that keeps the viewer's subtitle; hold
-					// this one back in case none does.
-					if droppedSubtitle == nil {
+					// this one back in case none does. The requested edition,
+					// listed last when it was passed over only for the
+					// subtitle, outranks any other version held back.
+					if droppedSubtitle == nil || candidateFile.ID == requestedFile.ID {
 						droppedSubtitle = &alternateCandidateV3{file: candidateFile, request: candidateStart, audioIndex: candidateAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
 					}
 					continue
@@ -5174,12 +5173,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				// The planner pinned the effective file's refusal on the
 				// subtitle, and every sibling that plays drops the subtitle
 				// too. Playing the effective file without it keeps its
-				// picture, when that plan succeeds.
-				withoutSubtitle := baseStart
-				withoutSubtitle.SubtitleTrackID, withoutSubtitle.SubtitleTrackIndex = "", nil
-				candidateResult, candidateToneMapErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: withoutSubtitle, RequestedFile: plannerRequestedFile, EffectiveFile: baseEffectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, baseEffectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile)})
-				if candidateResult.Terminal == nil {
-					droppedSubtitle = &alternateCandidateV3{file: baseEffectiveFile, request: withoutSubtitle, audioIndex: baseAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
+				// picture, when that plan can run.
+				if candidate := h.planWithoutSubtitleV3(r.Context(), playback.PlannerInputV3{Request: baseStart, RequestedFile: plannerRequestedFile, EffectiveFile: baseEffectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, baseEffectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile)}); candidate != nil {
+					droppedSubtitle = candidate
 					subtitleNotShown = true
 				}
 			}
@@ -6015,6 +6011,23 @@ func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 // then play with the subtitle cleared; callers re-plan it to find out.
 func subtitleRefusalV3(terminal *playback.TerminalV3) bool {
 	return terminal != nil && terminal.Reason == terminalSubtitleConversionUnsupportedV3
+}
+
+// planWithoutSubtitleV3 plans input's file again with the selected subtitle
+// cleared. It returns nil unless that plan can run: a progressive remux this
+// attempt cannot reach must escalate here, because the caller drops a sibling
+// that already plays in favor of the result.
+func (h *PlaybackHandler) planWithoutSubtitleV3(ctx context.Context, input playback.PlannerInputV3) *alternateCandidateV3 {
+	input.Request.SubtitleTrackID, input.Request.SubtitleTrackIndex = "", nil
+	result, toneMapErr := h.planPlaybackWithCapabilitiesV3(ctx, input)
+	if result.Terminal != nil {
+		return nil
+	}
+	result, escalateErr := h.escalateRefusedProgressiveRemuxV3(ctx, headerAuthenticatedMediaV3(input.Request.ClientFeatures), func() playback.PlannerInputV3 { return input }, result)
+	if escalateErr != nil {
+		return nil
+	}
+	return &alternateCandidateV3{file: input.EffectiveFile, request: input.Request, audioIndex: input.AudioTrackIndex, result: result, toneMapErr: toneMapErr}
 }
 
 // alternateCandidateV3 is a planned alternate version held back while the
