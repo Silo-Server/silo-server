@@ -334,11 +334,12 @@ func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 // seconds apart: 256 frames, a whole cycle of the 8-bit picture order count.
 // After each jump through a list the decoder computes the previous
 // keyframe's count again and drops the keyframe as a duplicate. With a
-// keyframe every 64 frames, the window that reads the samples again decodes
-// every keyframe, and every sample must show its scene. With a keyframe every
-// 256 frames the keyframes collide in the window too, since skipped pictures
-// do not advance the count, and the run must fail rather than repeat the
-// first scene.
+// keyframe every 64 frames, the repair that lists the lost samples again
+// decodes every keyframe, and every sample must show its scene. With a
+// keyframe every 256 frames the keyframes collide in the repair and in the
+// window that reads the samples again too, since skipped pictures do not
+// advance the count, and the run must fail rather than repeat the first
+// scene.
 func TestRunSheetsOpenGOPHEVCWithRealFFmpeg(t *testing.T) {
 	ffmpeg, caps := realFFmpeg(t)
 	grays := []int{20, 60, 100, 140, 180, 220}
@@ -379,8 +380,10 @@ func TestRunSheetsOpenGOPHEVCWithRealFFmpeg(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
-			if len(result.Sheets) != 1 || result.SheetFrames != (SheetFrames{Decoded: 6}) {
-				t.Fatalf("got %d sheets, frames %+v; want 1 sheet of 6 decoded samples", len(result.Sheets), result.SheetFrames)
+			// The list loses the keyframes after its first jump, and the
+			// repair, which lists them again, finds every one.
+			if len(result.Sheets) != 1 || result.SheetFrames != (SheetFrames{Decoded: 6, Refined: 5}) {
+				t.Fatalf("got %d sheets, frames %+v; want 1 sheet of 6 decoded samples, 5 of them repaired", len(result.Sheets), result.SheetFrames)
 			}
 			img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
 			if err != nil {
@@ -493,5 +496,56 @@ func TestRunSheetsToneMapsHDRWithRealFFmpeg(t *testing.T) {
 	}
 	if mean := sum / len(ycc.Y); mean < 30 {
 		t.Fatalf("tone-mapped sheet has mean luma %d, want a visible picture", mean)
+	}
+}
+
+// TestRunSheetsRepairsLongGOPWithRealFFmpeg samples a clip whose brightness
+// follows the clock, with a keyframe every 25 seconds, ten seconds apart.
+// The list gives several samples the same keyframe, and the repair decodes
+// each of them at its own time, so every cell shows its sample's moment.
+func TestRunSheetsRepairsLongGOPWithRealFFmpeg(t *testing.T) {
+	ffmpeg, caps := realFFmpeg(t)
+	clip := filepath.Join(t.TempDir(), "long-gop.mkv")
+	args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=64x36:r=24:d=60,geq=lum='clip(4*T\\,0\\,255)':cb=128:cr=128",
+		"-c:v", "libx264", "-threads", "1", "-g", "600", "-keyint_min", "600", "-sc_threshold", "0", "-bf", "2", clip}
+	if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+		t.Skipf("cannot encode the clip with libx264: %v: %s", err, output)
+	}
+	seconds := []float64{5, 15, 25, 35, 45, 55}
+	req := Request{
+		Input:   clip,
+		Samples: &Samples{Seconds: seconds},
+		Sheets:  &SheetsOutput{TileWidth: 64, TileHeight: 36, Columns: 3, Rows: 2, Quality: 90},
+		Threads: 1,
+	}
+	if err := caps.Require(req); err != nil {
+		t.Skipf("ffmpeg cannot sample sheets: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}.Run(ctx, req)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// Keyframes at 0, 25, and 50 s serve the samples at 5, 25, and 55 s; the
+	// other three repeat them until repaired.
+	if result.SheetFrames != (SheetFrames{Decoded: 6, Refined: 3}) {
+		t.Fatalf("frames %+v, want 6 decoded, 3 of them repaired", result.SheetFrames)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ycc := img.(*image.YCbCr)
+	// The moment each cell shows: its own keyframe for the samples at 5, 25,
+	// and 55 s, and the repaired samples' own times.
+	shown := []float64{0, 15, 25, 35, 45, 50}
+	for cell, at := range shown {
+		x, y := (cell%3)*64+32, (cell/3)*36+18
+		// geq writes limited-range luma, which the sheet expands to full.
+		want := math.Max(0, (4*at-16)*255/219)
+		if got := float64(ycc.Y[ycc.YOffset(x, y)]); math.Abs(got-want) > 6 {
+			t.Errorf("cell %d: luma %g, want about %g, the frame at %g s", cell, got, want, at)
+		}
 	}
 }

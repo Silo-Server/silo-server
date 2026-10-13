@@ -1448,7 +1448,8 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 			}
 		}
 	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1, playback.TransportFeatureTrickplayExtractV1)
+	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
+		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }

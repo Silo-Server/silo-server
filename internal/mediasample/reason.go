@@ -133,6 +133,10 @@ var (
 		"unknown decoder",
 		"decoder not found",
 		"requested output format",
+		// A hardware decoder that cannot decode the stream: ffmpeg falls
+		// back to software frames, which the GPU chain then refuses.
+		"failed setup for format",
+		"doesn't support hardware accelerated",
 	}
 )
 

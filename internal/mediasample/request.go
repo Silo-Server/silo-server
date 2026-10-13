@@ -198,6 +198,9 @@ func (r Request) Validate() error {
 		if err := r.Images.validate(); err != nil {
 			return err
 		}
+		if r.Images.ToneMap != nil && r.Images.ToneMap.Source != "" {
+			return errors.New("images keep their tone-map chains and take no source signal")
+		}
 	}
 	if r.Sheets != nil {
 		if r.Samples == nil || r.Stats != nil {

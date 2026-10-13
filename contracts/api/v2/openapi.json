@@ -217948,6 +217948,10 @@
           "filled": {
             "format": "int64",
             "type": "integer"
+          },
+          "refined": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -218087,6 +218091,9 @@
         "properties": {
           "allow_software": {
             "type": "boolean"
+          },
+          "source": {
+            "type": "string"
           }
         },
         "type": "object"
