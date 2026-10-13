@@ -162,6 +162,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 			item.LogoURL,
 		)
 	}
+	m.applyExtraImageTags(&dto, item)
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
 	}
@@ -277,6 +278,12 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		TmdbID:            item.TmdbID,
 		TvdbID:            item.TvdbID,
 		UserData:          item.UserData,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         item.BannerPath,
+		ThumbPath:          item.ThumbPath,
+		ClearArtPath:       item.ClearArtPath,
+		DiscPath:           item.DiscPath,
+		ExtraBackdropPaths: item.ExtraBackdropPaths,
 	}, isFavorite, progress, allDetailFields)
 
 	if wantField("people") {
@@ -988,4 +995,41 @@ func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[
 		}}
 	}
 	return out
+}
+
+// applyExtraImageTags advertises a movie's or series' banner, thumb, clear art
+// (Jellyfin's Art) and disc art in ImageTags, and its backdrops after the
+// primary in BackdropImageTags, so BackdropImageTags[i] names
+// /Items/{id}/Images/Backdrop/{i}. The tags are seeded by cached path, so they
+// change with the image, not with each presigned URL. Jellyfin clients fall
+// back to the backdrop for a thumb they are not offered.
+func (m *mapper) applyExtraImageTags(dto *baseItemDTO, item upstreamListItem) {
+	if item.Type != "movie" && item.Type != "series" {
+		return
+	}
+	for _, art := range []struct{ imageType, path string }{
+		{compatImageBanner, item.BannerPath},
+		{compatImageThumb, item.ThumbPath},
+		{compatImageArt, item.ClearArtPath},
+		{compatImageDisc, item.DiscPath},
+	} {
+		if art.path == "" {
+			continue
+		}
+		dto.ImageTags[art.imageType] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, art.imageType, compatCardImageSize, art.path, "", item.UpdatedAt),
+			"",
+		)
+	}
+	// Without a primary there is no Backdrop/0, so the extra indexes would
+	// name the wrong images.
+	if len(dto.BackdropImageTags) == 0 {
+		return
+	}
+	for i, path := range item.ExtraBackdropPaths {
+		dto.BackdropImageTags = append(dto.BackdropImageTags, m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, compatBackdropImageType+"/"+strconv.Itoa(i+1), compatCardImageSize, path, "", item.UpdatedAt),
+			"",
+		))
+	}
 }

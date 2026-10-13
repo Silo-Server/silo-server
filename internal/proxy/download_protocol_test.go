@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
@@ -24,7 +25,7 @@ func TestDownloadProtocolRemoteStatusAndHead(t *testing.T) {
 	} {
 		t.Run(tc.method+strconv.Itoa(tc.origin), func(t *testing.T) {
 			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != tc.method || r.Header.Get("Authorization") != "Bearer "+secret || r.Header.Get("If-Match") != "fixture" {
+				if r.Method != tc.method || !nodeauthtest.Signed(r, secret) || r.Header.Get("If-Match") != "fixture" {
 					t.Error("origin request changed")
 				}
 				w.Header().Set("Content-Type", "application/x-worker-fixture")

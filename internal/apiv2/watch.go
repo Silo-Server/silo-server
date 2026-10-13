@@ -428,7 +428,7 @@ func watchVersionOf(v catalogpkg.FileVersion) WatchFileVersion {
 		Credits:                  watchMarkerOf(v.Credits),
 		Recap:                    watchMarkerOf(v.Recap),
 		Preview:                  watchMarkerOf(v.Preview),
-		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments()),
+		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments(), v.MarkerPreviews),
 		TrickplayAvailable:       v.Trickplay != nil,
 	}
 	for _, t := range v.VideoTracks {

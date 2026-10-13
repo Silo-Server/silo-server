@@ -112,7 +112,7 @@ func (m *Monitor) retryOrDrop(ctx context.Context, c change, err error) {
 func (m *Monitor) resolve(ctx context.Context, r Resolver, c change) (*scantrigger.Target, error) {
 	switch c.kind {
 	case changeFile, changeDir:
-		return r.Resolve(ctx, scantrigger.Request{Path: c.path, Trigger: Trigger})
+		return r.Resolve(ctx, scantrigger.Request{Path: c.path, Trigger: Trigger, SidecarFolder: true})
 	case changeVanishedFile:
 		return r.ResolveVanishedPath(ctx, c.path, Trigger)
 	case changeVanishedDir:

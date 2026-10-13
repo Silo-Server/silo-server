@@ -62,13 +62,28 @@ func TestOperationalDiscoveryImageLadderAndOptionalProfile(t *testing.T) {
 	if err := json.Unmarshal(legacy.Body.Bytes(), &want); err != nil {
 		t.Fatal(err)
 	}
-	if actual.SeasonListArtworkParam != want.SeasonListArtworkParam || actual.SeasonListArtworkParam != "include_artwork" || actual.State != StateAvailable || actual.Revision == "" || actual.Param != want.Param || actual.OriginalMaxWidthPx != want.OriginalMaxWidthPx || !reflect.DeepEqual(actual.Sizes, want.Sizes) || len(actual.Widths) != len(want.Widths) {
+	if !actual.EpisodeStillProvenance || !actual.ExtendedItemArtwork || actual.SeasonListArtworkParam != want.SeasonListArtworkParam || actual.SeasonListArtworkParam != "include_artwork" || actual.State != StateAvailable || actual.Revision == "" || actual.Param != want.Param || actual.OriginalMaxWidthPx != want.OriginalMaxWidthPx || !reflect.DeepEqual(actual.Sizes, want.Sizes) || len(actual.Widths) != len(want.Widths)+len(extendedItemArtworkTypes) {
 		t.Fatalf("v2=%+v legacy=%+v", actual, want)
 	}
 	for key, expected := range want.Widths {
 		width, ok := actual.Widths[key]
 		if !ok || width.Small != expected.Small || width.Medium != expected.Medium || width.Large != expected.Large {
 			t.Fatalf("image width %s: got %+v, want %+v", key, width, expected)
+		}
+	}
+	// The extended artwork types are a v2 addition: the frozen v1 view must
+	// not list them, and v2 reports their ladder.
+	for key, expected := range map[string]ImageSizeWidths{
+		"banner":   {Small: 500, Medium: 500, Large: 1000},
+		"thumb":    {Small: 300, Medium: 500, Large: 1280},
+		"clearart": {Small: 500, Medium: 500, Large: 1000},
+		"disc":     {Small: 300, Medium: 500, Large: 1000},
+	} {
+		if _, ok := want.Widths[key]; ok {
+			t.Fatalf("v1 image capability lists %s", key)
+		}
+		if got := actual.Widths[key]; got != expected {
+			t.Fatalf("image width %s: got %+v, want %+v", key, got, expected)
 		}
 	}
 	requireProblem(t, do(t, handler, http.MethodGet, Prefix+"/images/capabilities", "", nil), TypeAuthenticationRequired)

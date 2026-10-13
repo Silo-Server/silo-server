@@ -1233,7 +1233,14 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const flushWatchProgress = useWatchProgress(sessionId, videoRef, timelineOffsetRef);
+  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
+  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const flushWatchProgress = useWatchProgress(
+    sessionId,
+    videoRef,
+    timelineOffsetRef,
+    markSessionEnded,
+  );
 
   const buildExitState = useCallback((): PlaybackExitState => {
     const video = videoRef.current;
@@ -1400,6 +1407,17 @@ export function VideoPlayer({
   const handleExit = useCallback(async () => {
     await handleLeave("exit");
   }, [handleLeave]);
+
+  // The server ended the session for good (an administrator stopped it while
+  // this player could not be told directly): leave instead of reconnecting.
+  const sessionEndedHandledRef = useRef(false);
+  useEffect(() => {
+    if (connectionStatus !== "ended" && !progressSessionEnded) return;
+    if (sessionEndedHandledRef.current) return;
+    sessionEndedHandledRef.current = true;
+    toast.info("An administrator ended this playback session.");
+    void handleExit();
+  }, [connectionStatus, handleExit, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
@@ -3917,7 +3935,7 @@ export function VideoPlayer({
       ) : null}
 
       {/* Mid-stream connection loss: retrying, or given up */}
-      {!isDetached && connectionStatus !== "connected" && (
+      {!isDetached && connectionStatus !== "connected" && connectionStatus !== "ended" && (
         <div
           role={connectionStatus === "reconnecting" ? "status" : "alert"}
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6"

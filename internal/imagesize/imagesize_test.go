@@ -3,7 +3,10 @@ package imagesize
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 )
 
 func TestParse(t *testing.T) {
@@ -94,12 +97,44 @@ func TestVariantMatrix(t *testing.T) {
 			Large:    "w500",
 			Original: "original",
 		},
+		"banner": {
+			Small:    "w500",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
+		"thumb": {
+			Small:    "w300",
+			Medium:   "w500",
+			Large:    "w1280",
+			Original: "original",
+		},
+		"clearart": {
+			Small:    "w500",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
+		"disc": {
+			Small:    "w300",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
 	}
 
 	for imageType, sizes := range want {
 		for size, wantVariant := range sizes {
 			if got := Variant(imageType, size); got != wantVariant {
 				t.Errorf("Variant(%q, %q) = %q, want %q", imageType, size, got, wantVariant)
+			}
+		}
+		// Every size must name a variant the cacher generates for the type, or
+		// a request for it misses.
+		generated := artworkkey.VariantNames(imageType)
+		for size, variant := range sizes {
+			if !slices.Contains(generated, variant) {
+				t.Errorf("Variant(%q, %q) = %q is not among the generated variants %v", imageType, size, variant, generated)
 			}
 		}
 	}

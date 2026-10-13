@@ -225,6 +225,8 @@ func applyEpisodeBrowseMetadata(resp *itemListResponse, meta episodeBrowseMetada
 	if resp == nil {
 		return
 	}
+	resp.PosterIsEpisodeStill = new(meta.StillPath != "" && resp.posterPath == meta.StillPath)
+	resp.BackdropIsEpisodeStill = new(meta.StillPath != "" && resp.backdropPath == meta.StillPath)
 	resp.SeriesID = meta.SeriesID
 	resp.SeriesTitle = meta.SeriesTitle
 	resp.SeasonNumber = meta.SeasonNumber

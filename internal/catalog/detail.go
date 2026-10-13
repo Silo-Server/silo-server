@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -241,6 +243,24 @@ type ItemDetail struct {
 	BackdropURL       string `json:"backdrop_url,omitempty"`
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
+
+	// Banner, thumb, clear art and disc art, and every backdrop in display
+	// order with the primary first, for movies and series. Kept out of this
+	// JSON contract because /api/v1 is frozen; apiv2 emits them on item
+	// detail. BackdropURLs is filled only on single-item detail; the cached
+	// paths seed the Jellyfin-compatible image tags.
+	BannerURL          string   `json:"-"`
+	BannerThumbhash    string   `json:"-"`
+	ThumbURL           string   `json:"-"`
+	ThumbThumbhash     string   `json:"-"`
+	ClearArtURL        string   `json:"-"`
+	DiscURL            string   `json:"-"`
+	BackdropURLs       []string `json:"-"`
+	BannerPath         string   `json:"-"`
+	ThumbPath          string   `json:"-"`
+	ClearArtPath       string   `json:"-"`
+	DiscPath           string   `json:"-"`
+	ExtraBackdropPaths []string `json:"-"`
 
 	// Literary work linkage. Present for linked ebook/audiobook items.
 	WorkID      string              `json:"work_id,omitempty"`
@@ -520,6 +540,7 @@ type FileVersion struct {
 	Recap                    *Marker                `json:"recap,omitempty"`
 	Preview                  *Marker                `json:"preview,omitempty"`
 	MarkerSegments           []models.MarkerSegment `json:"-"`
+	MarkerPreviews           []VersionMarkerPreview `json:"-"`
 	// Trickplay is the layout of the file's servable seek-bar previews, nil
 	// when it has none. The v2 watch and Jellyfin views carry it; the frozen
 	// v1 view does not.
@@ -538,6 +559,16 @@ func (v *FileVersion) SetMarkers(file *models.MediaFile) {
 	v.Recap = markerFromRange(file.RecapStart, file.RecapEnd)
 	v.Preview = markerFromRange(file.PreviewStart, file.PreviewEnd)
 	v.MarkerSegments = models.EffectiveMarkerSegments(file)
+	previews := make([]VersionMarkerPreview, 0, len(v.MarkerPreviews))
+	for _, image := range v.MarkerPreviews {
+		for _, segment := range v.MarkerSegments {
+			if image.MarkerSegment == segment {
+				previews = append(previews, image)
+				break
+			}
+		}
+	}
+	v.MarkerPreviews = previews
 }
 
 func (v FileVersion) EffectiveMarkerSegments() []models.MarkerSegment {
@@ -776,6 +807,7 @@ type DetailService struct {
 	videoRepo         *VideoRepository
 	ratingSourceRepo  *RatingSourceRepository
 	extraRepo         *ExtraRepository
+	backdropRepo      itemBackdropLister
 	rootClaimRepo     *RootClaimRepository
 	groupClaimRepo    *GroupClaimRepository
 	imageResolver     ImageResolver
@@ -812,6 +844,7 @@ func NewDetailService(
 		videoRepo:        NewVideoRepository(itemRepo.pool),
 		ratingSourceRepo: NewRatingSourceRepository(itemRepo.pool),
 		extraRepo:        NewExtraRepository(itemRepo.pool),
+		backdropRepo:     NewItemBackdropRepository(itemRepo.pool),
 		fileFetcher:      fileFetcher,
 	}
 }
@@ -871,7 +904,7 @@ func (s *DetailService) markTrickplay(ctx context.Context, versions []FileVersio
 	}
 	grids, err := availability.TrickplayGrids(ctx, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "trickplay lookup failed", "component", "catalog", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "trickplay lookup failed", "component", "catalog", "error", err)
 		return
 	}
 	for i := range versions {
@@ -903,7 +936,7 @@ func (s *DetailService) prefetchTrickplay(ctx context.Context, filesByID map[str
 	}
 	grids, err := s.trickplay.TrickplayGrids(ctx, fileIDs)
 	if err != nil {
-		slog.WarnContext(ctx, "trickplay lookup failed", "component", "catalog", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "trickplay lookup failed", "component", "catalog", "error", err)
 		grids = nil
 	}
 	return prefetchedTrickplay(grids)
@@ -1496,7 +1529,12 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	}
 	switch {
 	case target.item != nil:
-		return s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+		detail, err := s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+		if err != nil {
+			return nil, err
+		}
+		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, string(filter.ImageSize), true)
+		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
 	case target.episode != nil:
@@ -1821,11 +1859,13 @@ type fileVersionBatchFetcher interface {
 // batching the shared per-item lookups that GetItemDetail otherwise issues
 // one-at-a-time: row load (GetByIDs), access checks (EnsureAccessibleIDs +
 // presentation-library membership), localization, credits, media files, and
-// work summaries. The detail produced for each id is byte-for-byte identical to
-// calling GetItemDetail(id): the same builder (buildMediaItemDetail) assembles
-// it, only fed pre-resolved inputs via itemDetailPrefetch. Any input building
-// block missing a batch form falls back to its inline per-item lookup, so the
-// output never drifts from the unbatched path.
+// work summaries. The detail produced for each id matches calling
+// GetItemDetail(id): the same builder (buildMediaItemDetail) assembles it, only
+// fed pre-resolved inputs via itemDetailPrefetch. Any input building block
+// missing a batch form falls back to its inline per-item lookup, so the output
+// never drifts from the unbatched path. The one difference is the URLs that only
+// single-item detail returns: the banner, thumb, clear art and disc art URLs and
+// BackdropURLs are left empty, and their paths are set instead.
 //
 // IDs that are not item-typed media (e.g. episodes or seasons — handled by
 // GetEpisodeDetailsForSeries / GetItemDetail respectively), are access-filtered,
@@ -2007,6 +2047,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 		result[id] = detail
 	}
+	s.attachExtraBackdrops(ctx, slices.Collect(maps.Values(result)), string(filter.ImageSize), false)
 	return result, nil
 }
 
@@ -2019,7 +2060,7 @@ func (s *DetailService) fetchItemVideos(ctx context.Context, contentID string, p
 	} else if s.videoRepo != nil {
 		fetched, err := s.videoRepo.GetByContentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item videos", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item videos", "content_id", contentID, "error", err)
 			return nil
 		}
 		videos = fetched
@@ -2051,7 +2092,7 @@ func (s *DetailService) fetchItemRatingSources(ctx context.Context, contentID st
 	} else if s.ratingSourceRepo != nil {
 		fetched, err := s.ratingSourceRepo.GetByContentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item rating sources", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item rating sources", "content_id", contentID, "error", err)
 			return nil
 		}
 		sources = fetched
@@ -2079,7 +2120,7 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, p
 	} else if s.extraRepo != nil {
 		fetched, err := s.extraRepo.ListWithFilesByParentID(ctx, contentID)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to fetch item extras", "content_id", contentID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "failed to fetch item extras", "content_id", contentID, "error", err)
 			return nil
 		}
 		extras = fetched
@@ -2221,6 +2262,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
 	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
 	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
+	copyExtraArtwork(detail, item)
 
 	// File versions and subtitle aggregation only apply to movies.
 	// For series, each episode file shares the series content_id, so
@@ -3906,7 +3948,10 @@ func (s *DetailService) buildPlaybackInfoWith(
 			Recap:                    versionRecap,
 			Preview:                  versionPreview,
 			MarkerSegments:           models.EffectiveMarkerSegments(f),
-			Unreadable:               f.ProbeRejected(),
+			MarkerPreviews: BuildMarkerPreviews(ctx, f, func(ctx context.Context, paths []string) map[string]ResolvedImageURL {
+				return s.PresignURLsWithExpiry(ctx, paths, "card")
+			}),
+			Unreadable: f.ProbeRejected(),
 		})
 
 		for _, sub := range f.SubtitleTracks {

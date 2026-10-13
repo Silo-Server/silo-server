@@ -67,7 +67,7 @@ func TestV2PluginBrowserLaunchPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") }()
-	if _, err := pool.Exec(t.Context(), `CREATE TABLE users (id int PRIMARY KEY, role text NOT NULL); INSERT INTO users(id,role) VALUES (1,'user'); CREATE TABLE auth_sessions (id text PRIMARY KEY, user_id int NOT NULL REFERENCES users(id), expires_at timestamptz, revoked_at timestamptz); INSERT INTO auth_sessions(id,user_id,expires_at) VALUES ('browser-session',1,now()+interval '1 hour')`); err != nil {
+	if _, err := pool.Exec(t.Context(), `CREATE TABLE users (id int PRIMARY KEY, role text NOT NULL); INSERT INTO users(id,role) VALUES (1,'user'); CREATE TABLE auth_sessions (id text PRIMARY KEY, user_id int NOT NULL REFERENCES users(id), expires_at timestamptz, revoked_at timestamptz, purpose text NOT NULL DEFAULT 'account', bound_profile_id text); INSERT INTO auth_sessions(id,user_id,expires_at) VALUES ('browser-session',1,now()+interval '1 hour')`); err != nil {
 		t.Fatal(err)
 	}
 	sessions := auth.NewSessionRepository(pool)

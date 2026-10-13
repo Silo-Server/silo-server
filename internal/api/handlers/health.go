@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,11 +41,13 @@ type healthStatus struct {
 	ServerID   string `json:"server_id,omitempty"`
 }
 
-// Readiness status values. The v1 shape is frozen; "degraded" is additive.
+// Readiness status values. The v1 shape is frozen; "degraded" and
+// "shutting_down" are additive.
 const (
-	readyStatusOK       = "ok"
-	readyStatusError    = "error"
-	readyStatusDegraded = "degraded"
+	readyStatusOK           = "ok"
+	readyStatusError        = "error"
+	readyStatusDegraded     = "degraded"
+	readyStatusShuttingDown = "shutting_down"
 )
 
 // readyStatus represents the JSON response for the readiness endpoint.
@@ -95,6 +98,17 @@ type ReadyHandler struct {
 	artworkMu      sync.Mutex
 	artworkChecked time.Time
 	artworkOK      bool
+	// shuttingDown reports whether the process has begun shutting down; nil
+	// means it never does as far as readiness is concerned.
+	shuttingDown func() bool
+	// lastProbes holds the most recent dependency probe results, which a
+	// shutting-down answer reports instead of probing again.
+	lastProbes atomic.Pointer[readyProbes]
+}
+
+// readyProbes is one round of readiness dependency probes.
+type readyProbes struct {
+	postgres, s3, artwork bool
 }
 
 // NewReadyHandler creates a ReadyHandler with the given PG and S3 dependencies.
@@ -108,15 +122,30 @@ func NewReadyHandler(pg PGPinger, s3 S3HealthChecker, artwork ...ArtworkHealthCh
 	return &ReadyHandler{pg: pg, s3: s3, artwork: checker}
 }
 
-// ServeHTTP checks PostgreSQL and storage health. It returns 503 when
-// PostgreSQL is unreachable and 200 otherwise, with "degraded" in the body when
-// a configured storage backend failed its probe.
-func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+// SetShuttingDown makes readiness fail once fn reports true, so a load
+// balancer or Kubernetes routes new requests away while this process is still
+// serving the ones it has. Call it while building the router, before the
+// handler serves; fn itself may be read concurrently.
+func (h *ReadyHandler) SetShuttingDown(fn func() bool) {
+	h.shuttingDown = fn
+}
 
-	pgOK := h.checkPostgres(ctx)
-	s3OK := h.checkS3(ctx)
-	artworkOK := h.checkArtwork(ctx)
+// ServeHTTP checks PostgreSQL and storage health. It returns 503 when
+// PostgreSQL is unreachable or the process is shutting down, and 200 otherwise,
+// with "degraded" in the body when a configured storage backend failed its
+// probe.
+func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// A shutting-down answer does not wait on the dependencies: it reports
+	// their last probe, so a slow storage probe cannot hold back the 503 that
+	// routes traffic away. It probes only when nothing has probed before, and
+	// a shutdown that began while it probed still fails the answer.
+	shuttingDown := h.isShuttingDown()
+	probes := h.lastProbes.Load()
+	if !shuttingDown || probes == nil {
+		probes = h.probe(r.Context())
+		shuttingDown = h.isShuttingDown()
+	}
+	pgOK, s3OK, artworkOK := probes.postgres, probes.s3, probes.artwork
 
 	// Readiness answers "can this node serve requests", which the database
 	// decides. Object and artwork storage are reported so operators can see an
@@ -128,13 +157,19 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// any other answer carries every dependency boolean, with an unconfigured
 	// dependency reporting true. "degraded" is additive to that contract.
 	status := readyStatus{Status: readyStatusOK}
-	if !pgOK || !s3OK || !artworkOK {
+	if !pgOK || !s3OK || !artworkOK || shuttingDown {
 		status.Postgres = new(pgOK)
 		status.S3 = new(s3OK)
 		status.Artwork = new(artworkOK)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case shuttingDown:
+		// The process is about to stop serving. Saying so before it does is
+		// what lets a load balancer take it out of rotation without cutting
+		// requests; see docs/architecture/api-contract.md.
+		status.Status = readyStatusShuttingDown
+		w.WriteHeader(http.StatusServiceUnavailable)
 	case !pgOK:
 		status.Status = readyStatusError
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -145,6 +180,22 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+// isShuttingDown reports whether the process has begun shutting down.
+func (h *ReadyHandler) isShuttingDown() bool {
+	return h.shuttingDown != nil && h.shuttingDown()
+}
+
+// probe checks every dependency and remembers the results.
+func (h *ReadyHandler) probe(ctx context.Context) *readyProbes {
+	probes := &readyProbes{
+		postgres: h.checkPostgres(ctx),
+		s3:       h.checkS3(ctx),
+		artwork:  h.checkArtwork(ctx),
+	}
+	h.lastProbes.Store(probes)
+	return probes
 }
 
 func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {

@@ -165,6 +165,7 @@ export function providerChainFromV2(levels: ProviderChainLevelV2[]): LibraryProv
       provider_slug: entry.provider_slug,
       priority: entry.priority,
       enabled: entry.enabled,
+      local: entry.local ?? false,
     }));
   }
   return { levels: mapped };

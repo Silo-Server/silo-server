@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	return recorder
@@ -61,7 +62,7 @@ func TestReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
 	// The reported hash must describe the report the capability endpoint would
 	// now serve, or the API would refetch and store something else.
 	capabilityRequest := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	capabilityRequest.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, capabilityRequest, testSecret)
 	capabilityRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(capabilityRecorder, capabilityRequest)
 	if capabilityRecorder.Code != http.StatusOK {
@@ -210,7 +211,7 @@ func TestReloadConfigKeepsActiveSessions(t *testing.T) {
 	server.activeJobs.Store(1)
 
 	request := httptest.NewRequest(http.MethodPost, "/admin/reload-config", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 

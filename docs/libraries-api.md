@@ -103,7 +103,9 @@ exposes safe `JobFailure` data in `failure`; polling itself still returns `200`.
 Internal request documents, storage details, operator messages, and raw errors are
 never included. Clients use `terminal` rather than an exhaustive state list.
 
-`GET /api/v2/library-jobs/{job_id}` is available to administrator accounts, supports
+`GET /api/v2/library-jobs/{job_id}` is available to an administrator account acting
+through its primary profile (or with no profile while the household requires none;
+a declared profile is verified, with `X-Profile-Token` when it has a PIN), supports
 ETag/`If-None-Match`, and sends `Retry-After` while nonterminal. The validator covers
 the entire authorized body and is deterministic across API replicas. Authorization
 precedes conditional evaluation. Unknown jobs and jobs hidden from the caller return

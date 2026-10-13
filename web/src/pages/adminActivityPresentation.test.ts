@@ -72,6 +72,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     source_bitrate_kbps: overrides.source_bitrate_kbps ?? 9000,
     source_video_codec: overrides.source_video_codec ?? "h264",
     source_video_resolution: overrides.source_video_resolution ?? "1080p",
+    source_video_height: overrides.source_video_height,
     video_decision: overrides.video_decision,
     target_video_codec: overrides.target_video_codec ?? "h264",
     target_resolution: overrides.target_resolution ?? "1080p",
@@ -175,6 +176,30 @@ describe("adminActivityPresentation", () => {
     expect(formatDeliveredVideoSummary(session)).toBe("H.264 · 1080p");
     expect(formatDeliveredAudioSummary(session)).toBe("AAC 5.1");
     expect(formatTranscodeModeSummary(session)).toBe("HW/SW unknown");
+  });
+
+  it("labels a full-resolution transcode like its source and keeps a downscale's label", () => {
+    const scope4K = {
+      play_method: "transcode",
+      video_decision: "transcode",
+      source_video_codec: "hevc",
+      source_video_resolution: "2160p",
+      source_video_height: 1600,
+      target_video_codec: "hevc",
+    } as const;
+    const fullSize = makeSession({ ...scope4K, target_resolution: "1600p" });
+    expect(formatVideoSummary(fullSize)).toBe("HEVC · 2160p");
+    expect(formatDeliveredVideoSummary(fullSize)).toBe("HEVC · 2160p");
+    expect(formatVideoDetail(fullSize)).toBe("Output → HEVC · 2160p");
+
+    expect(
+      formatDeliveredVideoSummary(makeSession({ ...scope4K, target_resolution: "720p" })),
+    ).toBe("HEVC · 720p");
+    expect(
+      formatDeliveredVideoSummary(
+        makeSession({ ...scope4K, source_video_height: undefined, target_resolution: "1600p" }),
+      ),
+    ).toBe("HEVC · 1600p");
   });
 
   it("does not infer an output container from HLS or an unknown route", () => {

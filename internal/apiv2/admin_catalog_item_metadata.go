@@ -1,11 +1,14 @@
 package apiv2
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -13,7 +16,7 @@ import (
 
 type AdminItemMetadataService interface {
 	CreateItemMetadataRefresh(context.Context, string, adminjob.ItemRefreshMode, int) (*models.AdminJob, error)
-	UpdateCatalogItemMetadata(context.Context, string, handlers.UpdateItemMetadataRequest) (*catalogsvc.ItemDetail, error)
+	UpdateCatalogItemMetadata(context.Context, string, handlers.UpdateItemMetadataRequest, []string) (*catalogsvc.ItemDetail, error)
 }
 type AdminItemMetadataUpdate struct {
 	Title            *string   `json:"title,omitempty" nullable:"true"`
@@ -28,17 +31,17 @@ type AdminItemMetadataUpdate struct {
 	Studios          *[]string `json:"studios,omitempty" nullable:"true"`
 	Networks         *[]string `json:"networks,omitempty" nullable:"true"`
 	Countries        *[]string `json:"countries,omitempty" nullable:"true"`
-	ReleaseDate      *string   `json:"release_date,omitempty" nullable:"true"`
-	FirstAirDate     *string   `json:"first_air_date,omitempty" nullable:"true"`
-	LastAirDate      *string   `json:"last_air_date,omitempty" nullable:"true"`
-	AirTime          *string   `json:"air_time,omitempty" nullable:"true"`
-	AirTimezone      *string   `json:"air_timezone,omitempty" nullable:"true"`
-	AirDate          *string   `json:"air_date,omitempty" nullable:"true"`
+	ReleaseDate      *string   `json:"release_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
+	FirstAirDate     *string   `json:"first_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
+	LastAirDate      *string   `json:"last_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
+	AirTime          *string   `json:"air_time,omitempty" nullable:"true" doc:"Null clears the stored time"`
+	AirTimezone      *string   `json:"air_timezone,omitempty" nullable:"true" doc:"IANA time zone; null clears it"`
+	AirDate          *string   `json:"air_date,omitempty" nullable:"true" doc:"Season or episode air date; null clears it"`
 	Status           *string   `json:"status,omitempty" nullable:"true"`
-	RatingIMDB       *float64  `json:"rating_imdb,omitempty" nullable:"true"`
-	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true"`
-	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true"`
-	RatingRTAudience *int      `json:"rating_rt_audience,omitempty" nullable:"true"`
+	RatingIMDB       *float64  `json:"rating_imdb,omitempty" nullable:"true" doc:"Null clears it, along with any IMDb score a metadata plugin stored"`
+	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true" doc:"Null clears it, along with any TMDB score a metadata plugin stored"`
+	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored"`
+	RatingRTAudience *int      `json:"rating_rt_audience,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes audience score a metadata plugin stored"`
 	ImdbID           *string   `json:"imdb_id,omitempty" nullable:"true"`
 	TmdbID           *string   `json:"tmdb_id,omitempty" nullable:"true"`
 	TvdbID           *string   `json:"tvdb_id,omitempty" nullable:"true"`
@@ -49,6 +52,9 @@ type AdminItemMetadataUpdate struct {
 type AdminItemMetadataUpdateInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body AdminItemMetadataUpdate
+	// RawBody tells an explicit null from an omitted member, which Body
+	// cannot: Huma decodes both to nil.
+	RawBody []byte
 }
 type AdminItemMetadataRefreshInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
@@ -75,13 +81,16 @@ func (reg *Registry) refreshAdminItemMetadata(ctx context.Context, in *AdminItem
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
-	return &AdminCatalogJobAcceptedOutput{Location: Prefix + "/admin/jobs/" + job.ID, RetryAfter: "5", Body: reg.adminTaskJobOf(ctx, job, claims.Role == models.RoleAdmin)}, nil
+	// The job already exists; a failed acting-admin lookup only narrows what
+	// the response shows.
+	actingAdmin, _ := apimw.ActingAdmin(ctx)
+	return &AdminCatalogJobAcceptedOutput{Location: Prefix + "/admin/jobs/" + job.ID, RetryAfter: "5", Body: reg.adminTaskJobOf(ctx, job, actingAdmin)}, nil
 }
 func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemMetadataUpdateInput) (*CatalogItemDetailOutput, error) {
 	if reg.deps.AdminItemMetadata == nil {
 		return nil, unavailable("item metadata")
 	}
-	detail, err := reg.deps.AdminItemMetadata.UpdateCatalogItemMetadata(ctx, in.ID, handlers.UpdateItemMetadataRequest(in.Body))
+	detail, err := reg.deps.AdminItemMetadata.UpdateCatalogItemMetadata(ctx, in.ID, handlers.UpdateItemMetadataRequest(in.Body), clearedItemMetadataFields(in.RawBody))
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
@@ -89,4 +98,20 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	// stored rating back.
 	detail.ViewerCurates = true
 	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail, reg.ratingSelection(ctx))}, nil
+}
+
+// clearedItemMetadataFields lists the clearable members the body sets to
+// null. A null on any other member leaves it unchanged, like omission.
+func clearedItemMetadataFields(raw []byte) []string {
+	// Huma already validated the body; one that does not decode here has no
+	// members to clear.
+	var members map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &members)
+	var cleared []string
+	for _, field := range catalogsvc.ClearableMetadataFields {
+		if value, ok := members[field]; ok && bytes.Equal(bytes.TrimSpace(value), jsonNull) {
+			cleared = append(cleared, field)
+		}
+	}
+	return cleared
 }
