@@ -241,6 +241,18 @@ func h264LevelFor(width, height int, frameRate float64, kbps int) int {
 	return 60
 }
 
+// H264LevelFor is h264LevelFor for callers outside this package.
+func H264LevelFor(width, height int, frameRate float64, kbps int) int {
+	return h264LevelFor(width, height, frameRate, kbps)
+}
+
+// H264EquivalentKbps is the rate an H.264 encode of a source at sourceKbps in
+// sourceCodec needs for the same quality (sourceEquivalentKbps), or 0 when
+// the source's rate is unknown.
+func H264EquivalentKbps(sourceKbps int, sourceCodec string) int {
+	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, transcodeCodecH264)
+}
+
 // h264LevelBitrateKbps is the highest cap whose rate and doubled buffer fit
 // the given level; 0 for an unknown level.
 func h264LevelBitrateKbps(idc int) int {
@@ -254,6 +266,9 @@ func h264LevelBitrateKbps(idc int) int {
 
 // h264HighProfileV3 is the profile every H.264 encode here produces.
 const h264HighProfileV3 = "high"
+
+// H264EncodeProfile is h264HighProfileV3 for callers outside this package.
+const H264EncodeProfile = h264HighProfileV3
 
 // downloadDecoder is the decoder bound a download encode must fit. Zero
 // fields are unbounded.

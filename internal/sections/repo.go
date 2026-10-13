@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -495,7 +496,28 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 	return maxPosition + 1, nil
 }
 
+// hasEnabledSharedHomeRecentlyAdded reports whether home has an enabled
+// Recently Added row that covers every video library.
+func hasEnabledSharedHomeRecentlyAdded(home []*PageSection) bool {
+	return slices.ContainsFunc(home, func(s *PageSection) bool {
+		return s.Enabled && IsSharedHomeRecentlyAddedSection(s)
+	})
+}
+
 func (r *Repository) createGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
+	if IsVideoLibraryType(libraryType) {
+		home, err := r.ListByScopeAll(ctx, "home", nil)
+		if err != nil {
+			return nil, fmt.Errorf("listing home sections: %w", err)
+		}
+		// An enabled shared Recently Added row already shows the new library.
+		// Homes from older defaults, or whose admin disabled the shared row,
+		// still get per-library rows.
+		if hasEnabledSharedHomeRecentlyAdded(home) {
+			return nil, nil
+		}
+	}
+
 	existing, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing generated home sections: %w", err)

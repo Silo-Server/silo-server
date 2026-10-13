@@ -74,6 +74,10 @@ vi.mock("@/hooks/useOnViewTranslation", () => ({
   useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => ({ hideImages: false, hideOverviews: false }),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null }),
 }));

@@ -258,8 +258,8 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		if input.Role != nil {
 			role = *input.Role
 		}
-		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil || input.BreakGlass != nil))) {
-			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+		if err := checkScopedAPIKeyUpdate(ctx, current, input); err != nil {
+			return false, err
 		}
 		if input.BreakGlass != nil && *input.BreakGlass && role != roleAdmin {
 			return false, fieldError("break_glass", "Only admin accounts can be break-glass accounts")

@@ -2,15 +2,21 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Home viewer seams: the profile-scoped /home reads and the recipe gallery
@@ -83,31 +89,180 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 				Items:           []*models.MediaItem{},
 			}
 		}
-		withItems.ItemLimit = s.ItemLimit
-		items := []sections.SectionWithItems{withItems}
-		var userStates map[string]*itemUserStateResponse
-		if hideWatched {
-			// The direct section endpoint returns the section even if the
-			// filter empties it; only aggregate Home drops such sections.
-			items, userStates = h.filterWatchedHomeSections(ctx, items, []sections.ResolvedSection{s})
-		}
-		resp := h.buildSectionsWithUserStates(ctx, items, nil, viewer.Access, viewer.ImageSize, userStates)
-		if len(resp.Sections) == 0 {
-			return resolvedSectionResponse{
-				ID:          withItems.ID,
-				SectionType: string(withItems.SectionType),
-				Title:       withItems.Title,
-				Featured:    withItems.Featured,
-				ItemLimit:   withItems.ItemLimit,
-				TotalCount:  withItems.TotalCount,
-				IsCustom:    withItems.IsCustom,
-				Customized:  withItems.Customized,
-				Items:       []sectionItemResponse{},
-			}, nil
-		}
-		return resp.Sections[0], nil
+		return h.homeSectionRow(ctx, s, withItems, hideWatched, viewer), nil
 	}
 	return SectionView{}, apiError(http.StatusNotFound, "not_found", "Section not found")
+}
+
+// homeSectionRow turns one fetched Home row into the cards HomeSectionItems
+// answers: the hide-watched filter, then user states, overlays, playable
+// targets and artwork. The cross-row diversity filter does not run, and a row
+// the filter empties is kept. s is the row's unwidened section, so the row is
+// cut back to its display limit.
+func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.ResolvedSection, withItems sections.SectionWithItems, hideWatched bool, viewer SectionViewer) SectionView {
+	withItems.ItemLimit = s.ItemLimit
+	rows := []sections.SectionWithItems{withItems}
+	var userStates map[string]*itemUserStateResponse
+	if hideWatched {
+		// The direct section endpoint returns the section even if the
+		// filter empties it; only aggregate Home drops such sections.
+		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{s})
+	}
+	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.ImageSize, userStates).Sections
+	if len(built) == 0 {
+		return resolvedSectionResponse{
+			ID:          withItems.ID,
+			SectionType: string(withItems.SectionType),
+			Title:       withItems.Title,
+			Featured:    withItems.Featured,
+			ItemLimit:   withItems.ItemLimit,
+			TotalCount:  withItems.TotalCount,
+			IsCustom:    withItems.IsCustom,
+			Customized:  withItems.Customized,
+			Items:       []sectionItemResponse{},
+		}
+	}
+	return built[0]
+}
+
+// MaxHomeLayoutIncludedSections is the most rows HomeLayoutWithItems
+// carries items for. A Home page shows about this many rows above the fold;
+// the rest load from the per-row endpoint as the viewer scrolls.
+const MaxHomeLayoutIncludedSections = 4
+
+// homeLayoutIncludedRowsBudget bounds how long the home layout waits for the
+// rows it was asked to carry, counted from the start of their item fetches
+// and covering each row's whole build: the fetch and the card lookups. The
+// layout gates every Home render, so one slow row must not delay it: a row
+// that is not built in time is left out, and the client loads it from the
+// per-row endpoint instead. A warm resolved-list cache answers well inside
+// this budget; a cold rebuild that misses it keeps running detached (see the
+// resolved-list cache), so the follow-up per-row request usually finds it
+// ready.
+const homeLayoutIncludedRowsBudget = 300 * time.Millisecond
+
+// HomeLayoutView is the home layout plus the cards of its first rows.
+type HomeLayoutView struct {
+	Layout SectionLayoutView
+	// IncludedSections are the first rows of the layout, in display order,
+	// each as HomeSectionItems answers it. A row that failed or missed the
+	// budget is absent. Never nil.
+	IncludedSections []SectionView
+}
+
+// HomeLayoutWithItems answers the home layout for the profile on the
+// context and, when includeItems is positive, the cards of its first
+// includeItems rows (at most MaxHomeLayoutIncludedSections). The layout is
+// resolved once and the rows are built in parallel; rows that error or
+// take longer than the budget are omitted rather than failing the layout.
+func (h *SectionHandler) HomeLayoutWithItems(ctx context.Context, viewer SectionViewer, includeItems int) (HomeLayoutView, error) {
+	return h.homeLayoutWithItems(ctx, viewer, includeItems, homeLayoutIncludedRowsBudget)
+}
+
+func (h *SectionHandler) homeLayoutWithItems(ctx context.Context, viewer SectionViewer, includeItems int, budget time.Duration) (HomeLayoutView, error) {
+	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
+	if err != nil {
+		return HomeLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
+	}
+	userID := apimw.GetUserID(ctx)
+	resolved = h.maybeInjectNextUp(ctx, resolved, userID)
+	view := HomeLayoutView{Layout: sectionLayoutOf(resolved), IncludedSections: []SectionView{}}
+	n := min(includeItems, MaxHomeLayoutIncludedSections, len(resolved))
+	if n <= 0 || h.fetcher == nil {
+		return view, nil
+	}
+	view.IncludedSections = h.includedHomeRows(ctx, resolved[:n], h.homeHidesWatchedItems(ctx), viewer, budget,
+		func(ctx context.Context, s sections.ResolvedSection) (sections.SectionWithItems, error) {
+			return h.fetcher.FetchOne(ctx, s, nil, libraryIDs, userID, profileID, accessFilter)
+		})
+	return view, nil
+}
+
+// homeRowFetch fetches one Home row's items.
+type homeRowFetch func(context.Context, sections.ResolvedSection) (sections.SectionWithItems, error)
+
+// includedHomeRows builds every section's row in parallel, each fetched and
+// then turned into cards as HomeSectionItems does, and returns, in section
+// order, the rows built without error before budget elapsed (or ctx ended).
+// It never waits past the budget: rows still building are canceled when it
+// returns, and each writes only to its own buffered channel, which nothing
+// reads after that.
+func (h *SectionHandler) includedHomeRows(ctx context.Context, included []sections.ResolvedSection, hideWatched bool, viewer SectionViewer, budget time.Duration, fetch homeRowFetch) []SectionView {
+	type result struct {
+		row SectionView
+		err error
+	}
+	buildCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make([]chan result, len(included))
+	for i, s := range included {
+		ch := make(chan result, 1)
+		results[i] = ch
+		go func() {
+			row, err := h.includedHomeRow(buildCtx, s, hideWatched, viewer, fetch)
+			ch <- result{row: row, err: err}
+		}()
+	}
+
+	// Only the wait carries the deadline; the builds see plain cancellation.
+	waitCtx, stopWaiting := context.WithTimeout(ctx, budget)
+	defer stopWaiting()
+	out := make([]SectionView, 0, len(included))
+	for i, ch := range results {
+		var r result
+		select {
+		case r = <-ch:
+		case <-waitCtx.Done():
+			// Out of time: still take a row that is already built.
+			select {
+			case r = <-ch:
+			default:
+				slog.DebugContext(ctx, "home layout row missed its budget", "component", "api", "section_id", included[i].ID, "budget_ms", budget.Milliseconds())
+				continue
+			}
+		}
+		if r.err != nil {
+			logIncludedHomeRowError(ctx, included[i], r.err)
+			continue
+		}
+		out = append(out, r.row)
+	}
+	return out
+}
+
+// includedHomeRow fetches and builds one row for includedHomeRows. It runs
+// on its own goroutine, out of reach of the request's panic recovery, so a
+// panic becomes the row's error.
+func (h *SectionHandler) includedHomeRow(ctx context.Context, s sections.ResolvedSection, hideWatched bool, viewer SectionViewer, fetch homeRowFetch) (row SectionView, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.ErrorContext(ctx, "home layout row build panicked", "component", "api", "section_id", s.ID,
+				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+			row, err = SectionView{}, errors.New("home layout row build panicked")
+		}
+	}()
+	withItems, err := fetch(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0])
+	if err != nil {
+		return SectionView{}, err
+	}
+	row = h.homeSectionRow(ctx, s, withItems, hideWatched, viewer)
+	// The card lookups log and skip a canceled call rather than failing, so
+	// a row built after its context ended may be missing state or artwork.
+	if err := ctx.Err(); err != nil {
+		return SectionView{}, err
+	}
+	return row, nil
+}
+
+// logIncludedHomeRowError records a row left out of the home layout because
+// its build failed. As in sections.LogFetchError, a row whose collection was
+// deleted is expected and logs at debug, as does a row the request canceled.
+func logIncludedHomeRowError(ctx context.Context, s sections.ResolvedSection, err error) {
+	level := slog.LevelWarn
+	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) || errors.Is(err, context.Canceled) {
+		level = slog.LevelDebug
+	}
+	slog.Log(ctx, level, "home layout row left out after a build error", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", logredact.SanitizeText(err.Error()))
 }
 
 // RecipeCategoryView is one gallery category with its recipes.

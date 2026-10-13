@@ -12,6 +12,9 @@ import {
 } from "./plugins";
 import { adminKeys } from "../keys";
 
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+
 const installation = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
   repository_id: "4",
@@ -209,3 +212,30 @@ it("deletes once and surfaces a 409 conflict detail", async () => {
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/admin/plugins/installations/7");
   expect(fetchMock.mock.calls[0]?.[1].method).toBe("DELETE");
 });
+
+it.each([
+  [
+    422,
+    "validation_failed",
+    "The downloaded plugin doesn't match the SHA-256 checksum its catalog lists.",
+  ],
+  [
+    503,
+    "dependency_unavailable",
+    "Silo couldn't read the Silo maintained catalog. Try again in a moment.",
+  ],
+] as const)(
+  "shows the server's reason when an install fails with %i",
+  async (status, type, detail) => {
+    toastError.mockReset();
+    const fetchMock = vi.fn().mockResolvedValue(problem(type, status, detail));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(useInstallPlugin, fixture());
+    act(() =>
+      result.current.mutate({ repository_id: 4, plugin_id: "org.example.a", version: "1.0.0" }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(toastError).toHaveBeenCalledWith(detail);
+  },
+);

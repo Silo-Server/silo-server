@@ -34,12 +34,16 @@ func TestProviderIdentityHintsFromNFOFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "movie.nfo"), []byte(nfoBody), 0o644); err != nil {
 		t.Fatalf("write nfo: %v", err)
 	}
+	if err := os.WriteFile(moviePath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write media: %v", err)
+	}
 
 	var hinter metadata.IdentityHintProvider = NewProvider()
 	hints := hinter.IdentityHints(context.Background(), metadata.SearchQuery{
-		Title:       "Obscure Film",
-		ContentType: "movie",
-		FilePath:    moviePath,
+		Title:                     "Obscure Film",
+		ContentType:               "movie",
+		FilePath:                  moviePath,
+		PrimarySidecarSearchPaths: []string{dir},
 	})
 	if hints["tmdb"] != "424242" {
 		t.Errorf("tmdb hint = %q, want 424242", hints["tmdb"])
@@ -54,9 +58,13 @@ func TestProviderIdentityHintsFromNFOFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(titleOnly, "movie.nfo"), []byte(`<movie><title>Home Video</title></movie>`), 0o644); err != nil {
 		t.Fatalf("write nfo: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(titleOnly, "Home Video.mkv"), []byte("video"), 0o644); err != nil {
+		t.Fatalf("write media: %v", err)
+	}
 	hints = hinter.IdentityHints(context.Background(), metadata.SearchQuery{
-		ContentType: "movie",
-		FilePath:    filepath.Join(titleOnly, "Home Video.mkv"),
+		ContentType:               "movie",
+		FilePath:                  filepath.Join(titleOnly, "Home Video.mkv"),
+		PrimarySidecarSearchPaths: []string{titleOnly},
 	})
 	if len(hints) != 0 {
 		t.Errorf("title-only NFO hints = %v, want none", hints)

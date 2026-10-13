@@ -33,6 +33,17 @@ type MetadataRefresher interface {
 	RefreshScheduledTarget(ctx context.Context, targetType, contentID string) error
 }
 
+// LocalSidecarTargetChecker is implemented by refreshers that re-apply a
+// target's local sidecar metadata (NFO, artwork) when its files changed. A
+// scheduled refresh fills only empty fields, so this is what carries an edited
+// NFO to a target the task visits. It runs before the scheduled refresh, which
+// can move a local item to a new content ID. It returns the target's content
+// ID afterwards: a new one when the check re-anchored the item, or "" when the
+// item moved to an ID it could not tell, leaving nothing to refresh.
+type LocalSidecarTargetChecker interface {
+	CheckLocalSidecarTarget(ctx context.Context, targetType, contentID string) (currentID string, err error)
+}
+
 // MetadataRefreshBatcher is implemented by refreshers that can defer
 // series-wide follow-up work across a claimed batch. Targets refreshed with the
 // returned context share the batch, and the task calls flush once after every
@@ -176,6 +187,8 @@ func (t *RefreshMetadataTask) refreshBatch(
 		defer flush(batchCtx)
 	}
 
+	sidecarChecker, _ := t.refresher.(LocalSidecarTargetChecker)
+
 	type refreshJob struct {
 		candidate worker.RefreshCandidate
 	}
@@ -210,7 +223,21 @@ func (t *RefreshMetadataTask) refreshBatch(
 				))
 
 				itemCtx, cancel := context.WithTimeout(itemParent, 2*time.Minute)
-				err := t.refresher.RefreshScheduledTarget(itemCtx, job.candidate.TargetType, job.candidate.ContentID)
+				refreshID := job.candidate.ContentID
+				if sidecarChecker != nil {
+					currentID, checkErr := sidecarChecker.CheckLocalSidecarTarget(itemCtx, job.candidate.TargetType, job.candidate.ContentID)
+					if checkErr != nil {
+						slog.WarnContext(ctx, "refresh task: local sidecar check failed", "component", "taskmanager",
+							"target_type", job.candidate.TargetType,
+							"content_id", job.candidate.ContentID,
+							"error", checkErr)
+					}
+					refreshID = currentID
+				}
+				var err error
+				if refreshID != "" {
+					err = t.refresher.RefreshScheduledTarget(itemCtx, job.candidate.TargetType, refreshID)
+				}
 				cancel()
 
 				mu.Lock()

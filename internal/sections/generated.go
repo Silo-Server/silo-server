@@ -188,3 +188,21 @@ func GeneratedHomeLibraryRecentSyncedTitle(s *PageSection, libraryName string) s
 	kind := generatedHomeLibraryRecentKindForSection(s)
 	return generatedHomeLibraryRecentTitle(kind, s.SectionType, libraryName)
 }
+
+// IsSharedHomeRecentlyAddedSection reports whether s is a home Recently Added
+// row that covers every video library: no library filter, no single-type
+// filter, and a media scope of video or none.
+func IsSharedHomeRecentlyAddedSection(s *PageSection) bool {
+	if s == nil || s.Scope != "home" || s.LibraryID != nil || s.SectionType != SectionRecentlyAdded {
+		return false
+	}
+	if _, generated := ParseGeneratedHomeLibraryRecentConfig(s.Config); generated {
+		return false
+	}
+	filters := recentlyAddedConfigFilters(s.Config)
+	if filters.FilterType != "" || len(filters.LibraryIDs()) > 0 {
+		return false
+	}
+	def, err := ParseQueryDefinition(s.Config)
+	return err != nil || def.MediaScope == "" || def.MediaScope == catalog.MediaScopeVideo
+}

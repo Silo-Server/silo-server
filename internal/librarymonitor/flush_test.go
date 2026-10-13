@@ -79,7 +79,7 @@ func TestFlushResolvesEachKindAndDeduplicates(t *testing.T) {
 
 	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "a.mkv"}, t0)
 	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "b.mkv"}, t0)
-	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "poster.jpg"}, t0)
+	m.tracker.observe(Event{Kind: EventCloseWrite, Dir: "/lib/M", Name: "notes.txt"}, t0)
 	m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib/M", Name: "old.mkv"}, t0)
 	m.tracker.observe(Event{Kind: EventDelete, Dir: "/lib", Name: "Gone", IsDir: true}, t0)
 

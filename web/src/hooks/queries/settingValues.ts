@@ -195,26 +195,136 @@ export function useEffectiveSettings(options?: {
 
   return useQuery({
     queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds, deviceId, profileId }),
-    queryFn: async () => {
-      const result = await v2("GET /api/v2/settings/values/effective", {
-        query: {
-          keys: keys?.length ? [...keys] : undefined,
-          library_ids: libraryIds?.length ? libraryIds.map(String) : undefined,
-          series_ids: seriesIds?.length ? [...seriesIds] : undefined,
-          device_id: deviceId || undefined,
-          profile_id: profileId || undefined,
-        },
-      });
-      const byKey: EffectiveSettingsMap = {};
-      for (const item of result.items) {
-        const setting = effectiveSettingFromV2(item);
-        if (setting) byKey[setting.key] = setting;
-      }
-      return byKey;
-    },
+    queryFn: () =>
+      keys?.length
+        ? loadEffectiveSettingsBatched({ keys, libraryIds, seriesIds, deviceId, profileId })
+        : fetchEffectiveSettings({ libraryIds, seriesIds, deviceId, profileId }),
     enabled: options?.enabled ?? true,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+interface EffectiveSettingsRequest {
+  keys?: readonly SettingKey[];
+  libraryIds?: readonly number[];
+  seriesIds?: readonly string[];
+  deviceId?: string;
+  profileId?: string;
+}
+
+async function fetchEffectiveSettings(
+  request: EffectiveSettingsRequest,
+): Promise<EffectiveSettingsMap> {
+  const { keys, libraryIds, seriesIds, deviceId, profileId } = request;
+  const result = await v2("GET /api/v2/settings/values/effective", {
+    query: {
+      keys: keys?.length ? [...keys] : undefined,
+      library_ids: libraryIds?.length ? libraryIds.map(String) : undefined,
+      series_ids: seriesIds?.length ? [...seriesIds] : undefined,
+      device_id: deviceId || undefined,
+      profile_id: profileId || undefined,
+    },
+  });
+  const byKey: EffectiveSettingsMap = {};
+  for (const item of result.items) {
+    const setting = effectiveSettingFromV2(item);
+    if (setting) byKey[setting.key] = setting;
+  }
+  return byKey;
+}
+
+const EFFECTIVE_BATCH_MAX_KEYS = 50;
+
+interface PendingEffectiveBatch {
+  request: Omit<EffectiveSettingsRequest, "keys">;
+  keys: Set<SettingKey>;
+  waiters: {
+    keys: readonly SettingKey[];
+    resolve: (value: EffectiveSettingsMap) => void;
+    reject: (reason: unknown) => void;
+  }[];
+}
+
+const pendingEffectiveBatches = new Map<string, PendingEffectiveBatch>();
+
+function effectiveBatchScope(request: EffectiveSettingsRequest): string {
+  const { libraryIds, seriesIds, deviceId, profileId } = request;
+  return JSON.stringify([
+    profileId ?? activeProfileId() ?? "",
+    deviceId ?? "",
+    libraryIds ? [...libraryIds].sort() : [],
+    seriesIds ? [...seriesIds].sort() : [],
+  ]);
+}
+
+/**
+ * Keyed reads that start in the same tick for the same scope share one request.
+ *
+ * Screens read settings one key at a time (useSettingValue), so a first render
+ * of the app shell would otherwise send a dozen requests at once and, on
+ * HTTP/1.1, hold up the requests the page actually needs behind them. Each
+ * caller keeps its own query key and cache entry; only the network read is
+ * shared, and every caller gets back exactly the keys it asked for.
+ */
+function loadEffectiveSettingsBatched(
+  request: EffectiveSettingsRequest & { keys: readonly SettingKey[] },
+): Promise<EffectiveSettingsMap> {
+  const scope = effectiveBatchScope(request);
+  let batch = pendingEffectiveBatches.get(scope);
+  if (batch && batch.keys.size + request.keys.length > EFFECTIVE_BATCH_MAX_KEYS) {
+    flushEffectiveBatch(scope, batch);
+    batch = undefined;
+  }
+  if (!batch) {
+    const { libraryIds, seriesIds, deviceId, profileId } = request;
+    const opened: PendingEffectiveBatch = {
+      request: { libraryIds, seriesIds, deviceId, profileId },
+      keys: new Set(),
+      waiters: [],
+    };
+    pendingEffectiveBatches.set(scope, opened);
+    setTimeout(() => flushEffectiveBatch(scope, opened), 0);
+    batch = opened;
+  }
+  for (const key of request.keys) batch.keys.add(key);
+  const { waiters } = batch;
+  return new Promise((resolve, reject) => {
+    waiters.push({ keys: request.keys, resolve, reject });
+  });
+}
+
+function flushEffectiveBatch(scope: string, batch: PendingEffectiveBatch) {
+  if (pendingEffectiveBatches.get(scope) === batch) pendingEffectiveBatches.delete(scope);
+  if (batch.waiters.length === 0) return;
+  const waiters = batch.waiters.splice(0);
+  fetchEffectiveSettings({ ...batch.request, keys: [...batch.keys] }).then(
+    (byKey) => {
+      for (const waiter of waiters) {
+        const own: EffectiveSettingsMap = {};
+        for (const key of waiter.keys) {
+          const setting = byKey[key];
+          if (setting) own[key] = setting;
+        }
+        waiter.resolve(own);
+      }
+    },
+    (error: unknown) => {
+      // The server rejects the whole read (422, a query.keys error) when any
+      // one key is missing from its contract. Re-read each caller's own keys so
+      // only the caller that asked for the unknown key fails, as it did before
+      // batching.
+      if (waiters.length > 1 && isUnknownSettingKeyError(error)) {
+        for (const waiter of waiters) {
+          fetchEffectiveSettings({ ...batch.request, keys: waiter.keys }).then(
+            waiter.resolve,
+            waiter.reject,
+          );
+        }
+        return;
+      }
+      for (const waiter of waiters) waiter.reject(error);
+    },
+  );
 }
 
 /**
@@ -283,6 +393,14 @@ export function useStoredSettingValues(options: {
     enabled: (options.enabled ?? true) && keys.length > 0,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+function isUnknownSettingKeyError(error: unknown): boolean {
+  return (
+    error instanceof V2ProblemError &&
+    error.status === 422 &&
+    (error.problem.errors?.some((detail) => detail.location === "query.keys") ?? false)
+  );
 }
 
 /** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */

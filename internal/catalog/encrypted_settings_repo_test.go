@@ -257,6 +257,7 @@ func TestEncryptedSettings_UpdateAtomicUsesPlaintextContract(t *testing.T) {
 func TestSensitiveSettingKeys_Audited(t *testing.T) {
 	mustHave := []string{
 		"auth.jwt_secret",
+		"ai.chatgpt.credentials",
 		"audiobooks.abs.jwt_secret",
 		"s3.public_secret_key",
 		"s3.operational_secret_key", // legacy alias still read as a fallback

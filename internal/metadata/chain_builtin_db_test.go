@@ -96,8 +96,9 @@ func TestMigrationSeedsReservedBuiltinInstallation(t *testing.T) {
 	if md == nil {
 		t.Fatal("silo.builtin nfo capability missing")
 	}
-	if extractDefaultEnabled(md) {
-		t.Error("nfo capability default_enabled must be false")
+	// Local metadata is on by default (20261011201709_local_metadata_default_on).
+	if !extractDefaultEnabled(md) {
+		t.Error("nfo capability default_enabled must be true")
 	}
 	if got := extractDefaultPriority(md, "movie"); got != 1 {
 		t.Errorf("nfo movie default_priority = %d, want 1", got)
@@ -214,8 +215,9 @@ func TestChainlessFallback_SkipsDefaultDisabledCapability(t *testing.T) {
 
 // Startup sync: a library whose chain rows are only legacy content_level=”
 // must be materialized per level (same order/enabled, ” rows left in place),
-// then the builtin appended disabled at MAX(priority)+1. The resolved
-// (enabled-filtered) chain must be identical before and after.
+// then the builtins appended (enabled only when default_enabled) and moved to
+// the front. Apart from the default-enabled NFO provider joining first, the
+// resolved (enabled-filtered) chain keeps its providers and order.
 func TestSyncBuiltinProviderChains_LegacyMaterializationFixture(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
@@ -252,23 +254,40 @@ func TestSyncBuiltinProviderChains_LegacyMaterializationFixture(t *testing.T) {
 		t.Fatalf("get chain after sync: %v", err)
 	}
 
-	// Enabled-filtered resolution must be identical (modulo the now-real level).
-	var enabledAfter []ChainEntry
+	// Enabled-filtered resolution keeps its providers and order (modulo the
+	// now-real level and renumbered priorities), with the default-enabled
+	// NFO provider joining first.
+	type resolvedEntry struct {
+		installationID int
+		capabilityID   string
+	}
+	var enabledAfter []resolvedEntry
 	for _, e := range after {
 		if e.Enabled {
-			e.ContentLevel = ""
-			enabledAfter = append(enabledAfter, e)
+			enabledAfter = append(enabledAfter, resolvedEntry{e.PluginInstallationID, e.CapabilityID})
 		}
 	}
-	var enabledBefore []ChainEntry
+	var enabledBefore []resolvedEntry
 	for _, e := range resolvedBefore {
 		if e.Enabled {
-			e.ContentLevel = ""
-			enabledBefore = append(enabledBefore, e)
+			enabledBefore = append(enabledBefore, resolvedEntry{e.PluginInstallationID, e.CapabilityID})
 		}
 	}
-	if !reflect.DeepEqual(enabledBefore, enabledAfter) {
+	if len(enabledAfter) == 0 || enabledAfter[0].capabilityID != "nfo" {
+		t.Fatalf("resolved chain after sync = %+v, want the NFO provider first", enabledAfter)
+	}
+	if !reflect.DeepEqual(enabledBefore, enabledAfter[1:]) {
 		t.Errorf("resolved chain changed across sync:\nbefore=%+v\nafter=%+v", enabledBefore, enabledAfter)
+	}
+	// Builtin rows lead the stored chain; the plugin row follows them.
+	seenRemote := false
+	for _, e := range after {
+		if !e.Local {
+			seenRemote = true
+		} else if seenRemote {
+			t.Errorf("stored chain = %+v, want the builtin rows first", after)
+			break
+		}
 	}
 
 	// The editor now sees real per-level rows: the materialized plugin row plus
@@ -288,7 +307,7 @@ func TestSyncBuiltinProviderChains_LegacyMaterializationFixture(t *testing.T) {
 		case e.PluginInstallationID == builtinInstallID && e.CapabilityID == builtinCapID:
 			foundBuiltin = true
 			if e.Enabled {
-				t.Error("builtin must be appended disabled")
+				t.Error("a default_enabled=false builtin must be appended disabled")
 			}
 		}
 	}

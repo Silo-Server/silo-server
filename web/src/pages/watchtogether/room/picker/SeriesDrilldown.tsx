@@ -4,7 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSeasons, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { cn } from "@/lib/utils";
 import type { EpisodeListItem, Season } from "@/api/types";
 import type { ItemMemberState } from "@/api/v2/watchTogetherMemberState";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
@@ -86,14 +89,16 @@ function seasonProgressLabel(season: Season) {
   return `${seen} of ${total} watched`;
 }
 
-function EpisodeStill({ episode }: { episode: EpisodeListItem }) {
+function EpisodeStill({ episode, hidden }: { episode: EpisodeListItem; hidden: boolean }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhash = episode.still_thumbhash ? decodeThumbhash(episode.still_thumbhash) : "";
   return (
     <div
       className="media-card-image bg-surface hidden aspect-video w-28 shrink-0 @xl:block @3xl:w-36"
       style={
-        thumbhash ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" } : undefined
+        !hidden && thumbhash
+          ? { backgroundImage: `url(${thumbhash})`, backgroundSize: "cover" }
+          : undefined
       }
     >
       {episode.still_url ? (
@@ -102,7 +107,11 @@ function EpisodeStill({ episode }: { episode: EpisodeListItem }) {
           alt=""
           loading="lazy"
           onLoad={() => setLoaded(true)}
-          className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+          className={cn(
+            "h-full w-full object-cover transition-opacity duration-300",
+            loaded ? "opacity-100" : "opacity-0",
+            hidden && SPOILER_IMAGE_CLASS,
+          )}
         />
       ) : null}
     </div>
@@ -146,6 +155,7 @@ export function SeriesDrilldown({
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
   const item = detail.data;
   const seasons = useSeasons(series.content_id);
+  const spoilerPrefs = useEpisodeSpoilerPrefs();
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
   const [season, setSeason] = useState<number | null>(initialSeason ?? null);
   // Without a season from the shelf, open where the viewer left off: the
@@ -330,6 +340,7 @@ export function SeriesDrilldown({
               : episodes.map((episode) => {
                   const isNext = nextUp?.episode.content_id === episode.content_id;
                   const isPicked = picked?.episode.content_id === episode.content_id;
+                  const unwatched = isEpisodeUnwatched(episode.user_data);
                   const pick = () =>
                     onPick({ episode, series, seasonNumber: season ?? episode.season_number });
                   return (
@@ -350,7 +361,14 @@ export function SeriesDrilldown({
                         aria-label={pickLabel(episode)}
                         className="flex min-w-0 flex-1 items-start gap-3 text-left"
                       >
-                        <EpisodeStill episode={episode} />
+                        <EpisodeStill
+                          episode={episode}
+                          hidden={
+                            spoilerPrefs.hideImages &&
+                            unwatched &&
+                            isEpisodeStill(episode.still_is_episode_still)
+                          }
+                        />
                         <span className="min-w-0 flex-1">
                           {isNext && nextUp ? (
                             <span className="block text-[10px] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
@@ -366,7 +384,7 @@ export function SeriesDrilldown({
                               {episode.runtime ? `${episode.runtime}m` : ""}
                             </span>
                           </span>
-                          {episode.overview ? (
+                          {episode.overview && !(spoilerPrefs.hideOverviews && unwatched) ? (
                             <span className="text-muted-foreground mt-0.5 line-clamp-2 text-xs leading-relaxed">
                               {episode.overview}
                             </span>

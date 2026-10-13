@@ -33,6 +33,14 @@ func TestHEVCEncodingHonorsHLSCodecProfileConditions(t *testing.T) {
 			wantCodec: "h264",
 		},
 		{
+			// An HEVC encode's reference frames are unknown and get no stand-in.
+			name: "required output reference frames are unknown",
+			codecProfile: CodecProfile{Type: "Video", Codec: "hevc", Container: "hls", SubContainer: "mp4", Conditions: []ProfileCondition{
+				{Condition: "LessThanEqual", Property: "RefFrames", Value: "4", IsRequired: true},
+			}},
+			wantCodec: "h264",
+		},
+		{
 			name: "HLS MP4 audio channel limit",
 			codecProfile: CodecProfile{Type: "VideoAudio", Codec: "aac", Container: "hls", SubContainer: "mp4", Conditions: []ProfileCondition{
 				{Condition: "LessThanEqual", Property: "AudioChannels", Value: "1", IsRequired: true},
