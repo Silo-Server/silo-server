@@ -4038,6 +4038,30 @@ describe("VideoPlayer progressive remux after a long pause", () => {
     );
   });
 
+  it.each([
+    ["reopens once a replan in flight ends without a new plan", 1, 1],
+    ["leaves the stream to a replan in flight that lands a new plan", 2, 0],
+  ])("%s", (_, revisionAfterReplan, reopens) => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container, rerenderPlayer } = renderPlayer({
+      plan: remuxPlan,
+      onReanchorSeek,
+      replanning: true,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+    fireEvent.pause(video);
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+
+    rerenderPlayer({ replanning: false, planRevision: revisionAfterReplan });
+
+    expect(onReanchorSeek).toHaveBeenCalledTimes(reopens);
+  });
+
   it("hands a reopen the session refuses to the reconnect", async () => {
     const { video, onReanchorSeek, onConnectionLost } = playThenPause();
     // The session expired during the pause, so the replan is turned down.

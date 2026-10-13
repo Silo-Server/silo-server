@@ -669,6 +669,9 @@ client causes once its buffer is full. A client cannot resume such a stream
 where it stopped and has to open a new one at that position. The web player
 does this with a `seek_reanchor` replan (§6) when playback resumes after a
 minute idle, and falls back to its reconnect (§6.2) when the replan is refused.
+It does not do this in a watch-together room, whose transport the room
+controls; a room member who pauses past the stall window is not recovered this
+way.
 
 `client_playback_context.deliveries` is keyed by **class**, because a client's
 answer to "can you play HLS" does not differ between a remux and a transcode —

@@ -1213,17 +1213,24 @@ export function VideoPlayer({
   );
 
   // See PROGRESSIVE_REMUX_IDLE_REOPEN_MS. The element plays from its buffer
-  // until the reopened stream replaces it. A room keeps its own transport, and
-  // a replan already in flight replaces this stream anyway.
+  // until the reopened stream replaces it. A room keeps its own transport. A
+  // replan already in flight replaces this stream when it lands a plan; the
+  // reopen waits for it and runs only if it does not.
   const isProgressiveRemux = plan.delivery === "server_remux_progressive";
   const replanningRef = useRef(replanning);
   replanningRef.current = replanning;
   const planRevisionRef = useRef(planRevision);
   planRevisionRef.current = planRevision;
+  // The plan revision a deferred reopen is waiting to see replaced.
+  const reopenAfterReplanRef = useRef<number | null>(null);
   const reopenIdleProgressiveRemux = useCallback(() => {
     const video = videoRef.current;
     if (!video || !isProgressiveRemux || watchTogetherRoomId) return;
-    if (replanningRef.current || connectionStatusRef.current !== "connected") return;
+    if (connectionStatusRef.current !== "connected") return;
+    if (replanningRef.current) {
+      reopenAfterReplanRef.current = planRevisionRef.current;
+      return;
+    }
     // A seek inside the buffer that the element has not reached yet is where
     // the viewer wants to be.
     const position =
@@ -1256,6 +1263,18 @@ export function VideoPlayer({
     watchTogetherRoomId,
   ]);
   reopenIdleProgressiveRemuxRef.current = reopenIdleProgressiveRemux;
+
+  useEffect(() => {
+    const waitingOn = reopenAfterReplanRef.current;
+    if (waitingOn === null || replanning) return;
+    reopenAfterReplanRef.current = null;
+    // The replan landed a new stream, which is not idle.
+    if (planRevision !== waitingOn) return;
+    // A viewer who paused meanwhile is still on the idle stream; the next
+    // play reopens it.
+    if (videoRef.current?.paused) transportIdleSinceRef.current = 0;
+    else reopenIdleProgressiveRemux();
+  }, [planRevision, reopenIdleProgressiveRemux, replanning]);
 
   const handlePlayerSeek = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
