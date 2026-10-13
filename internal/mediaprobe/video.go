@@ -3,11 +3,11 @@
 package mediaprobe
 
 import (
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -119,7 +119,7 @@ func (d *SideData) UnmarshalJSON(data []byte) error {
 // ProbePrimaryVideoTrack runs a metadata-only FFprobe and returns the first
 // playable video stream using the same normalization as a catalog scan.
 func ProbePrimaryVideoTrack(ctx context.Context, ffprobePath, filePath string) (models.VideoTrack, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	cmd := workerinput.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",

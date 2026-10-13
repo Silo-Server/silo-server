@@ -4,10 +4,13 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/Silo-Server/silo-server/internal/workerregistration"
 )
 
 const workerProtocolsExtension = "x-silo-worker-protocols"
@@ -35,6 +38,7 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations := append(proxy.ProtocolReads(schemas), transcodenode.ProtocolReads(schemas)...)
 	operations = append(operations, proxy.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolControls(schemas)...)
+	operations = append(operations, transcodenode.ProtocolStandalone(schemas)...)
 	operations = append(operations, transcodenode.ProtocolChapterExtraction(schemas))
 	operations = append(operations, transcodenode.ProtocolTrickplayExtraction(schemas))
 	operations = append(operations, transcodenode.ProtocolMediaSample(schemas))
@@ -51,5 +55,8 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations = append(operations, proxy.ProtocolStreaming()...)
 	operations = append(operations, transcodenode.ProtocolStreaming()...)
 	operations = append(operations, proxy.ProtocolNetworkAccess(schemas)...)
+	operations = append(operations, workercontrolcore.ProtocolControls(schemas)...)
+	operations = append(operations, workercontrolcore.ProtocolGateway(schemas)...)
+	operations = append(operations, workerregistration.ProtocolEnrollment(schemas))
 	return workerProtocolRegistry{Operations: operations, Schemas: schemas.Map()}
 }

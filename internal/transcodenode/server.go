@@ -207,8 +207,9 @@ func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeSt
 
 // HealthResponse is the JSON response for GET /api/v1/health.
 type HealthResponse struct {
-	Status     string `json:"status"`
-	ActiveJobs int32  `json:"active_jobs"`
+	Status         string `json:"status"`
+	ActiveJobs     int32  `json:"active_jobs"`
+	WorkerProtocol string `json:"worker_protocol,omitempty"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
 	// snapshot. It is read from the stored snapshot only — health must stay a
 	// cheap liveness answer, so it never triggers a probe — and is empty until
@@ -277,6 +278,7 @@ type sessionTracker interface {
 }
 
 type progressiveRemuxRequest struct {
+	inputPath         string
 	id                uint64
 	playbackSessionID string
 	cancel            context.CancelFunc
@@ -286,6 +288,12 @@ type progressiveRemuxRequest struct {
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher           *nodeconfig.Watcher
+	runtime           RuntimeConfig
+	verifyCommand     func(*http.Request) error
+	executeHandler    http.Handler
+	workerProtocol    string
+	verifyToken       func(context.Context, string) (*streamtoken.Claims, error)
+	executionDenied   func(context.Context, string) bool
 	streamDeny        *playback.StreamDeny
 	nodeRowID         func() (int, bool)
 	registeredNodeURL func() (string, bool)
@@ -327,6 +335,7 @@ type Server struct {
 	// retry must revisit them even if the watcher has already adopted a new URL.
 	pendingAuthorityRevocations []string
 	activeJobs                  atomic.Int32
+	jobs                        jobCeiling
 	// inFlight counts requests for work activeJobs does not count; see
 	// trackInFlight.
 	inFlight atomic.Int32
@@ -510,7 +519,7 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 	if !ok || live != session {
 		return playback.ErrSessionSuperseded
 	}
-	return session.Restart(ctx, seekSeconds, startSegment)
+	return session.Restart(s.sessionJobContext(ctx, session), seekSeconds, startSegment)
 }
 
 // restartSegmentLocked resolves and applies missing-segment recovery while the
@@ -529,7 +538,7 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	return session.RestartSegment(s.sessionJobContext(ctx, session), segNum)
 }
 
 // NewServer creates a new transcode server.
@@ -538,6 +547,12 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	if tracker != nil {
 		trackerImpl = tracker
 	}
+	s := newServer(watcher, trackerImpl)
+	s.watcher = watcher
+	return s
+}
+
+func newServer(watcher RuntimeConfig, trackerImpl sessionTracker) *Server {
 	transcodeDir := config.DefaultTranscodeDir
 	artifactDir := ""
 	if watcher != nil {
@@ -553,7 +568,6 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		artifactRoot = config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 	}
 	s := &Server{
-		watcher:                   watcher,
 		tracker:                   trackerImpl,
 		transcodeDir:              transcodeDir,
 		artifactRoot:              artifactRoot,
@@ -611,16 +625,21 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 // snapshot — can wait for it instead of racing it.
 func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	if s == nil || s.watcher == nil || ctx == nil {
+	if s == nil || s.runtimeConfig() == nil || ctx == nil {
 		close(done)
 		return done
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		close(done)
 		return done
 	}
 	playbackCfg := cfg.Playback
+	ctx, releaseJob, ok := s.acquireJobContext(ctx, "")
+	if !ok {
+		close(done)
+		return done
+	}
 	// Claimed here, before the goroutine exists. Warmup is a real smoke encode
 	// and the listener opens while it may still be running, so an admin re-probe
 	// arriving in a node's first seconds must not see an idle gate — and a claim
@@ -630,6 +649,7 @@ func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{}
 	s.gpu.holdWork()
 	go func() {
 		defer close(done)
+		defer releaseJob()
 		defer s.gpu.endWork()
 		if err := playback.WarmHardwareEncoder(ctx, playbackCfg.FFmpegPath, playbackCfg.HWAccel, playbackCfg.HWDevice); err != nil {
 			slog.DebugContext(ctx, "transcode node hardware encoder warmup failed", "component", "transcodenode", "error", err)
@@ -799,6 +819,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 // encoder is counted by nothing and a re-probe admitted in the gap smoke-encodes
 // beside it.
 func (s *Server) closeSessionOffGPU(session *playback.TranscodeSession) error {
+	defer s.releaseSessionJob(session)
 	return s.retireGPUSession(session.Close)
 }
 
@@ -878,6 +899,9 @@ func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
 // session is still cut. A missing or invalid token only removes the second
 // lookup; the token was never this route's authorization.
 func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
+	if s.executionDenied != nil && s.executionDenied(r.Context(), transportID) {
+		return true
+	}
 	if s.streamDeny == nil {
 		return false
 	}
@@ -892,6 +916,9 @@ func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
 
 // claimsDenied is sessionDenied for a path that has already verified its token.
 func (s *Server) claimsDenied(ctx context.Context, claims *streamtoken.Claims, transportID string) bool {
+	if s.executionDenied != nil && s.executionDenied(ctx, transportID) {
+		return true
+	}
 	if s.streamDeny == nil {
 		return false
 	}
@@ -944,6 +971,9 @@ func (s *Server) router() chi.Router {
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireBearer)
+		if s.executeHandler != nil {
+			r.Post("/worker/execute", s.handleWorkerExecute)
+		}
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
 		r.Post("/trickplay/extract", s.handleTrickplayExtract)
@@ -994,7 +1024,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
@@ -1026,6 +1056,13 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	// recipe resolution just below runs ffmpeg probes on it too. Serving an
 	// artifact that already exists touches neither, so a re-probe must not
 	// refuse it.
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "download-artifact-"+req.ArtifactID)
+	if !admitted {
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	if !s.gpu.beginWork() {
 		http.Error(w, "node is re-probing its hardware; retry shortly", http.StatusServiceUnavailable)
 		return
@@ -1223,7 +1260,7 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
@@ -1265,7 +1302,7 @@ func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Req
 		http.NotFound(w, r)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
@@ -1320,6 +1357,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(HealthResponse{
 		Status:           s.healthStatus(),
 		ActiveJobs:       s.activeJobs.Load(),
+		WorkerProtocol:   s.workerProtocol,
 		CapabilitiesHash: s.storedCapabilityHash(),
 		System:           snapshot.System,
 		GPU:              snapshot.GPU,
@@ -1377,16 +1415,19 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 var ErrCapabilityBuildBusy = errors.New("capability build refused while the node is re-probing")
 
 func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
+	ctx, releaseJob, admitted := s.acquireJobContext(ctx, "")
+	if !admitted {
+		return playback.HWAccelInfo{}, ErrCapabilityBuildBusy
+	}
+	defer releaseJob()
 	// A snapshot runs ffmpeg on the GPU whenever the probe caches are cold, so
 	// it registers as GPU work. That is what stops a manual re-probe from
 	// claiming an apparently idle encoder and running its own smoke matrix
 	// beside this one.
 	//
-	// It deliberately does *not* refuse while transcodes are running. A node
-	// under sustained load would then never refresh its inventory, and its
-	// advertised hash would go stale indefinitely — a worse failure than the
-	// cold-start contention this would avoid, which a positive probe result
-	// caches away after the first success and which the next snapshot corrects.
+	// The default unlimited ceiling preserves periodic refresh under load. An
+	// operator limit can defer a refresh; the previous capability hash remains
+	// authoritative until a later successful snapshot.
 	if !s.gpu.beginWork() {
 		return playback.HWAccelInfo{}, ErrCapabilityBuildBusy
 	}
@@ -1407,7 +1448,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	ffmpegPath := ""
 	configuredHWAccel := playback.HWAccelNone
 	hwDevice := ""
-	if cfg := s.watcher.Config(); cfg != nil {
+	if cfg := s.runtimeConfig().Config(); cfg != nil {
 		ffmpegPath = cfg.Playback.FFmpegPath
 		configuredHWAccel = cfg.Playback.HWAccel
 		hwDevice = cfg.Playback.HWDevice
@@ -1542,7 +1583,7 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", "node not configured")
 		return
@@ -1551,6 +1592,13 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 	// so it takes the same exclusion a transcode does. Without this the route
 	// leaves the gate looking idle — it never touches activeJobs either — and a
 	// re-probe could smoke-encode beside a live extraction.
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "")
+	if !admitted {
+		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", errJobCeiling)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	if !s.gpu.beginWork() {
 		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable",
 			"node is re-probing its hardware; retry shortly")
@@ -1591,12 +1639,17 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.watcher.Config()
+		cfg := s.runtimeConfig().Config()
 		if cfg == nil {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
+		if s.verifyCommand != nil {
+			if s.verifyCommand(r) != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		} else if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1641,11 +1694,22 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), req.SessionID)
+	if !admitted {
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer func() {
+		if releaseJob != nil {
+			releaseJob()
+		}
+	}()
+	r = r.WithContext(jobContext)
 	// Held from here until the handler returns, by which point activeJobs
 	// covers the session. Without the overlap a re-probe could start in the gap
 	// between admitting this transcode and it becoming visible as an active
@@ -1724,7 +1788,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
 	}
@@ -1818,6 +1882,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	s.holdSessionJob(session, jobContext, releaseJob)
+	releaseJob = nil
 	s.sessions[req.SessionID] = session
 	published = true
 	s.noteSessionAccessLocked(req.SessionID)
@@ -1905,11 +1971,11 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	var card playback.RecipeCard
 	tokenComplete := false
 	if tokenStr := r.Header.Get("X-Silo-Stream-Token"); tokenStr != "" {
-		cfg := s.watcher.Config()
+		cfg := s.runtimeConfig().Config()
 		if cfg == nil {
 			return nil, nil
 		}
-		claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
+		claims, err := s.verifyStreamToken(r.Context(), tokenStr)
 		if err != nil {
 			slog.WarnContext(r.Context(), "transcode node reconstruct: invalid stream token", "component", "transcodenode", "error", err,
 				"session", sessionID, "playback_session_id", sessionID)
@@ -1923,7 +1989,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		if !recipeServesTransport(card, sessionID) {
 			return nil, nil
 		}
-		tokenComplete = recipeIsComplete(card)
+		tokenComplete = s.runtime == nil && recipeIsComplete(card)
 	}
 	// Without a complete token recipe the store is the only remaining source; with
 	// no store wired there is nothing to rebuild from, so 404.
@@ -2007,10 +2073,20 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if ok {
 		return existing, nil
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		return nil, nil
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), sessionID)
+	if !admitted {
+		return nil, nil
+	}
+	defer func() {
+		if releaseJob != nil {
+			releaseJob()
+		}
+	}()
+	r = r.WithContext(jobContext)
 	// A reconstruct spawns ffmpeg on the GPU exactly as a fresh start does, so
 	// it takes the same exclusion against a running capability re-probe. Held
 	// until this call returns, by which point activeJobs covers the session.
@@ -2052,7 +2128,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if s.shuttingDown || s.reportedDrained() {
 		return nil, nil
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		return nil, nil
 	}
 
@@ -2158,6 +2234,8 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		_ = session.CloseProcess()
 		return existing, nil
 	}
+	s.holdSessionJob(session, jobContext, releaseJob)
+	releaseJob = nil
 	s.sessions[sessionID] = session
 	s.noteSessionAccessLocked(sessionID)
 	s.mu.Unlock()
@@ -2261,13 +2339,13 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
-	cfg := s.watcher.Config()
-	if cfg == nil || cfg.Auth.JWTSecret == "" {
+	cfg := s.runtimeConfig().Config()
+	if cfg == nil || s.verifyToken == nil && cfg.Auth.JWTSecret == "" {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
 	token := strings.TrimSpace(r.Header.Get("X-Silo-Stream-Token"))
-	claims, err := streamtoken.Verify(token, cfg.Auth.JWTSecret)
+	claims, err := s.verifyStreamToken(r.Context(), token)
 	if err != nil {
 		http.Error(w, "invalid stream token", http.StatusUnauthorized)
 		return
@@ -2338,7 +2416,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
@@ -2359,6 +2437,14 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), transportID)
+	if !admitted {
+		s.reloadMu.RUnlock()
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
@@ -2393,7 +2479,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{
-		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done,
+		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done, inputPath: claims.MediaPath,
 	}
 	s.mu.Unlock()
 	unlock()
@@ -2867,7 +2953,7 @@ func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 	// against a config this reload is in the middle of replacing.
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	if err := s.watcher.ForceReload(r.Context()); err != nil {
+	if err := s.runtimeConfig().ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2886,7 +2972,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	if s.nodeRowID != nil {
 		previousNodeID, _ = s.nodeRowID()
 	}
-	if err := s.watcher.ForceReload(r.Context()); err != nil {
+	if err := s.runtimeConfig().ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

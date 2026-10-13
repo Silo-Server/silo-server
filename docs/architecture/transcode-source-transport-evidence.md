@@ -7,8 +7,8 @@ verified HTTPS on a test LAN. Median within-round readiness overhead was
 for a fresh seek. Longer producer jobs retained 98.69% and 96.71% of the
 local-file rate, respectively.
 
-These observations support HTTP/HTTPS source transport for the proposed
-standalone worker. They measure direct packaged FFmpeg execution, not a
+These observations support HTTP/HTTPS source transport for the
+[standalone worker](standalone-transcode-workers.md). They measure direct packaged FFmpeg execution, not a
 complete standalone Silo worker or its control plane. The retained worker
 contracts are described in [worker-http-protocol.md](worker-http-protocol.md).
 
@@ -127,7 +127,7 @@ and elapsed samples are in milliseconds; producer progress entries are
 within-round differences and producer slopes directly from these fields.
 
 The local-file baseline is synthetic host tmpfs. NFS/SMB storage, real WAN,
-cold-cache behavior, HDR, real-library workloads, the proposed Go adapter,
+cold-cache behavior, HDR, real-library workloads, the Go adapter,
 full Silo boot/auth/control/reconstruction/output-grant behavior and maximum
 sustained capacity remain unmeasured. The findings support source-transport
 feasibility and provide a comparison for the eventual implementation; they

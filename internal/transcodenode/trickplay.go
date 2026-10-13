@@ -62,11 +62,18 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: errNodeDraining})
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: "node not configured"})
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "")
+	if !admitted {
+		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: errJobCeiling})
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	if !s.trickplay.busy.TryLock() {
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: "node is already making trickplay sheets"})
 		return

@@ -73,6 +73,13 @@ func (s *Server) handleReprobeCapabilities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer s.gpu.endReprobe()
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "")
+	if !admitted {
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 
 	// Held across the invalidation and the rebuild together: discarding the
 	// verdicts and recomputing them has to be one step, or the scheduled

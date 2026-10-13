@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workerinput"
+
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -137,7 +139,7 @@ func supportsLeadingPictureDropFilter(bin string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
+	out, err := workerinput.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
 	available := err == nil && slices.Contains(strings.Fields(string(out)), "-drop")
 	if !available {
 		slog.Warn("ffmpeg's noise bitstream filter has no drop expression; HEVC resume remuxes keep their leading pictures", "ffmpeg", bin)
@@ -407,7 +409,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	// probe when the filter would actually run.
 	dropLeadingPictures = dropLeadingPictures && seekSeconds > 0 && !audioOnly && supportsLeadingPictureDropFilter(bin)
 	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures)
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := workerinput.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -550,7 +552,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	// Check file exists before starting ffmpeg to return a proper 404.
 	// Headers must be written before streaming begins, so we can't detect
 	// ffmpeg errors after WriteHeader(200) has been sent.
-	if _, err := os.Stat(filePath); err != nil {
+	if err := validateRemuxInput(r.Context(), filePath); err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return err
@@ -610,4 +612,12 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 			return nil // EOF or error — done streaming.
 		}
 	}
+}
+
+func validateRemuxInput(ctx context.Context, path string) error {
+	if workerinput.IsStandalone(ctx) {
+		return workerinput.Validate(ctx, path)
+	}
+	_, err := os.Stat(path)
+	return err
 }

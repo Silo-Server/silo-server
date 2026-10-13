@@ -34,6 +34,7 @@ const (
 	internalProxyDir         = "internal/proxy"
 	internalTranscodeNodeDir = "internal/transcodenode"
 	internalDebugServerDir   = "internal/debugserver"
+	internalWorkerControlDir = "internal/workercontrolcore"
 	debugServerHandlerFile   = "internal/debugserver/handlers.go"
 )
 
@@ -53,6 +54,14 @@ func DefaultConfig(root string) Config {
 		Root: root,
 		Listeners: []ListenerSpec{
 			debugListenerSpec(),
+			{
+				ID:          ListenerWorkerControl,
+				Description: "Sealed core worker-control service behind the API listener's exact internal gateway routes; node identity, execution and source authority stay on core.",
+				Dir:         internalWorkerControlDir,
+				Recv:        "Service",
+				Func:        "Handler",
+				Constructor: "router",
+			},
 			{
 				ID:          ListenerMetrics,
 				Kind:        ListenerKindServeMux,
@@ -108,6 +117,7 @@ func DefaultConfig(root string) Config {
 		},
 		AuditDirs: []string{
 			internalDebugServerDir,
+			internalWorkerControlDir,
 			internalAPIDir,
 			"internal/api/handlers",
 			internalAPIV2Dir,

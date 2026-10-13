@@ -1,6 +1,8 @@
 package tonemap
 
 import (
+	"context"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -207,4 +209,14 @@ func normalizeRevisionTime(value time.Time) time.Time {
 func hashRevisionValue(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// ValidatePathContext validates core-pinned inputs under their current execution authority.
+func (r SourceRevision) ValidatePathContext(ctx context.Context, path string) error {
+	if workerinput.IsStandalone(ctx) {
+		h, ok := workerinput.Lookup(ctx, path)
+		if !ok || !r.IsZero() && (r.MediaFileID <= 0 || r.FileSize != h.Size()) { return ErrSourceRevisionChanged }
+		return nil
+	}
+	return r.ValidatePath(path)
 }

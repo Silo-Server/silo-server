@@ -115,6 +115,9 @@ type ArtworkDelivery struct {
 }
 
 type Dependencies struct {
+	// WorkerHTTP serves the separately authenticated standalone worker control
+	// and source protocol; it contains no viewer-facing API operations.
+	WorkerHTTP http.Handler
 	Config *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
@@ -495,6 +498,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Routes outside the admin groups that widen what an admin sees or may do
 	// ask apimw.ActingAdmin, which answers with this same decision.
 	r.Use(apimw.ProvideActingAdmin(actingAdmin))
+	if deps.WorkerHTTP != nil {
+		workers := workerGateway{handler: deps.WorkerHTTP}
+		r.Post("/api/internal/workers/enroll", workers.enroll)
+		r.Post("/api/internal/workers/output-grant", workers.outputGrant)
+		r.Post("/api/internal/workers/{node}/snapshot", workers.snapshot)
+		r.Post("/api/internal/workers/{node}/report", workers.report)
+		r.Get("/api/internal/workers/{node}/recipes/{work}", workers.recipe)
+		r.Head("/api/internal/workers/{node}/recipes/{work}", workers.recipe)
+		r.Delete("/api/internal/workers/{node}/recipes/{work}", workers.closeWork)
+		r.Post("/api/internal/workers/{node}/revoke", workers.revoke)
+		r.Post("/api/internal/workers/{node}/tokens", workers.token)
+		r.Post("/api/internal/workers/{node}/sources/{grant}/renew", workers.renew)
+		r.Get("/api/internal/workers/{node}/sources/{grant}", workers.source)
+		r.Head("/api/internal/workers/{node}/sources/{grant}", workers.source)
+	}
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings

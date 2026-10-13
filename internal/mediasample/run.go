@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 	"io"
 	"os"
 	"os/exec"
@@ -57,7 +58,7 @@ const waitDelay = 5 * time.Second
 // never started). Background processes start at lowered priority where the
 // platform supports it (see startBackground).
 func execFFmpeg(ctx context.Context, background bool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := workerinput.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -424,6 +425,11 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 // when that is not nil, writing its stdout to stdout when that is not nil,
 // and routing its log to handlers.
 func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
+	var sourceErr error
+	args, stdinBytes, sourceErr = prepareSourceInput(a.attemptCtx, req.Input, args, stdinBytes)
+	if sourceErr != nil {
+		return &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: sourceErr}
+	}
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)

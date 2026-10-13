@@ -35,7 +35,7 @@
     }
   },
   "$defs": {
-    "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node"] },
+    "listener": { "enum": ["root", "api", "api_v2", "proxy", "transcode_node", "worker_control_core"] },
     "namespace": { "enum": ["api_v1", "api_v2", "legacy_unversioned", "operational"] },
     "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
     "path": { "type": "string", "pattern": "^/" },
@@ -88,6 +88,7 @@
         "ebooks",
         "node-proxy",
         "node-transcode",
+        "node-worker-control",
         "notifications",
         "operational",
         "personal-collections",
@@ -338,7 +339,7 @@
           "then": { "properties": { "disposition_rule": { "enum": ["default_ported", "maintainer_decision"] } } }
         },
         {
-          "if": { "properties": { "disposition": { "const": "ported" }, "listener": { "enum": ["proxy", "transcode_node"] } } },
+          "if": { "properties": { "disposition": { "const": "ported" }, "listener": { "enum": ["proxy", "transcode_node", "worker_control_core"] } } },
           "then": { "properties": { "disposition_rule": { "enum": ["default_ported", "listener_delegation", "maintainer_decision"] } } }
         },
         {
@@ -394,10 +395,10 @@
           }
         },
         {
-          "$comment": "Node-listener routes are retained on their own listener: a ratified proxy/transcode_node row keeps v2 unset and states its retention in notes. The listener_delegation rule records that the route is delivered by the listener that owns it, described through x-silo-worker-protocols, never aliased under /api/v2.",
+          "$comment": "Node-listener routes are retained on their own listener: a ratified proxy/transcode_node/worker_control_core row keeps v2 unset and states its retention in notes. The listener_delegation rule records that the route is delivered by the listener that owns it, described through x-silo-worker-protocols, never aliased under /api/v2.",
           "if": {
             "properties": {
-              "listener": { "enum": ["proxy", "transcode_node"] },
+              "listener": { "enum": ["proxy", "transcode_node", "worker_control_core"] },
               "disposition": { "enum": ["ported", "redesigned", "replaced"] },
               "review_state": { "const": "ratified" },
               "disposition_rule": { "not": { "const": "contract_root_probes" } }
@@ -407,7 +408,7 @@
             "properties": {
               "v2": { "$ref": "#/$defs/v2Unset" },
               "disposition_rule": { "const": "listener_delegation" },
-              "notes": { "pattern": "^Retained on (proxy|transcode_node) listener" }
+              "notes": { "pattern": "^Retained on (proxy|transcode_node|worker_control_core) listener" }
             }
           }
         },

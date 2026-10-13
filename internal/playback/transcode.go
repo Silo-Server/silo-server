@@ -19,11 +19,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workerinput"
+
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"github.com/google/uuid"
 )
 
 func init() {
@@ -39,6 +42,8 @@ type TranscodeOpts struct {
 	// subtitleFilterInputPath is a parser-safe local alias used only by the
 	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
 	subtitleFilterInputPath string
+	subtitleFilterFontsDir  string
+	subtitleFilterStaged    bool
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
 	OutputSubdir         string
@@ -419,7 +424,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
-	if err := prepareSubtitleFilterInput(&opts); err != nil {
+	if err := prepareSubtitleFilterInputContext(ctx, &opts); err != nil {
 		releaseHWDevice()
 		return nil, err
 	}
@@ -463,7 +468,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := workerinput.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -719,7 +724,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePathContext(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -1467,11 +1472,7 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 // toneMappedTextSubtitleFilter places CPU subtitle rendering after conversion
 // and downloads or uploads frames only where the selected backend requires it.
 func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles='%s':si=%d", escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := workerSubtitleFilter(opts, false)
 	scale := resolutionToScale(opts.TargetResolution)
 	cpuTail := subFilter
 	if scale != "" {
@@ -1803,12 +1804,7 @@ func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv b
 // [scale,] subtitles → hwupload → hwmap.
 func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	scale := resolutionToScale(opts.TargetResolution)
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles=filename='%s':si=%d",
-		escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := workerSubtitleFilter(opts, true)
 
 	// Build the CPU filter portion: scale (if any) then subtitle overlay.
 	// Scale must come before subtitles so text is rendered at target resolution.
@@ -3301,7 +3297,7 @@ func (s *TranscodeSession) restart(
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := workerinput.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()

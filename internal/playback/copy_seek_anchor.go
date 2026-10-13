@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -53,6 +55,9 @@ func ResolveCopySeekAnchor(
 	if strings.TrimSpace(inputPath) == "" {
 		return 0, 0, fmt.Errorf("resolve copy seek anchor: empty input path")
 	}
+	if err := workerinput.Validate(ctx, inputPath); err != nil {
+		return 0, 0, err
+	}
 	if segmentDuration <= 0 {
 		segmentDuration = DefaultSegmentDuration
 	}
@@ -60,10 +65,14 @@ func ResolveCopySeekAnchor(
 	resolvedFFmpegPath := ResolveFFmpegPath(ffmpegPath)
 	key := strings.Join([]string{
 		resolvedFFmpegPath,
-		inputPath,
+		workerinput.StableIdentity(ctx, inputPath),
 		strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64),
 		strconv.Itoa(segmentDuration),
 	}, "\x00")
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		return 0, 0, leaseErr
+	}
 	resultCh := copySeekProbeGroup.DoChan(key, func() (any, error) {
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
 		defer cancel()
@@ -79,8 +88,13 @@ func ResolveCopySeekAnchor(
 
 	select {
 	case <-ctx.Done():
+		go func() {
+			<-resultCh
+			releaseLease()
+		}()
 		return 0, 0, ctx.Err()
 	case result := <-resultCh:
+		releaseLease()
 		if result.Err != nil {
 			return 0, 0, result.Err
 		}
@@ -97,7 +111,7 @@ func resolveCopySeekAnchor(
 	segmentDuration int,
 ) (float64, int, error) {
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := workerinput.CommandContext(ctx, ffmpegPath,
 		"-v", "error",
 		"-fflags", "+genpts+fastseek",
 		"-analyzeduration", "3000000",

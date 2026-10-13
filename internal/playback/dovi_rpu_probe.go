@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 )
 
 // Some Dolby Vision sources carry an RPU that ffmpeg's dovi_rpu bitstream
@@ -114,7 +116,16 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 	if p == nil || strings.TrimSpace(inputPath) == "" {
 		return true
 	}
-	key, ok := dvRPUProbeKey(bin, inputPath)
+	if err := workerinput.Validate(ctx, inputPath); err != nil {
+		return false
+	}
+	var key string
+	var ok bool
+	if h, remote := workerinput.Lookup(ctx, inputPath); remote {
+		key, ok = bin+":"+h.Identity(), true
+	} else {
+		key, ok = dvRPUProbeKey(bin, inputPath)
+	}
 	if !ok {
 		// The file cannot even be stat'd; leave the verdict to whatever
 		// actually tries to open it.
@@ -135,6 +146,12 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 			return true
 		}
 	}
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		p.mu.Unlock()
+		return false
+	}
+	defer releaseLease()
 	call := &dvRPUCall{done: make(chan struct{}), strippable: true}
 	p.inflight[key] = call
 	p.mu.Unlock()
@@ -209,7 +226,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 	probeCtx, cancel := context.WithTimeout(ctx, dvRPUProbeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(
+	cmd := workerinput.CommandContext(
 		probeCtx,
 		bin,
 		"-hide_banner",

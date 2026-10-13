@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 	"net/http"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -30,6 +31,7 @@ func DoTrustedNode(client *http.Client, req *http.Request, operation string) (*h
 	copy := req.Clone(ctx)
 	InjectTrusted(ctx, copy.Header)
 	isolated := *client
+	isolated.Transport = nodehttp.Wrap(isolated.Transport)
 	isolated.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := isolated.Do(copy)
 	observedErr := err

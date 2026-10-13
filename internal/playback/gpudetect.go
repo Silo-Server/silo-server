@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/executionlease"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
@@ -1060,6 +1061,10 @@ func cachedHardwareProbeContext(ctx context.Context, backend, ffmpegPath, device
 	// before the call closes the window: from here on the flight is counted
 	// whether or not it has started, and whether or not anyone still waits for
 	// it. See HWProbesInFlight.
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		return false, leaseErr.Error()
+	}
 	hwProbesInFlight.Add(1)
 	resultCh := hwProbeCache.group.DoChan(cacheKey, func() (any, error) {
 		hwProbeCache.Lock()
@@ -1071,7 +1076,7 @@ func cachedHardwareProbeContext(ctx context.Context, backend, ffmpegPath, device
 		if flightStarted != nil {
 			flightStarted()
 		}
-		probeCtx, cancel := context.WithTimeout(context.Background(), time.Duration(probe.commandCount)*commandTimeout+time.Second)
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(probe.commandCount)*commandTimeout+time.Second)
 		defer cancel()
 		result := probe.run(probeCtx, ffmpegPath, device, commandTimeout)
 		entry := hwProbeCacheEntry{result: result}
@@ -1092,10 +1097,12 @@ func cachedHardwareProbeContext(ctx context.Context, backend, ffmpegPath, device
 		go func() {
 			<-resultCh
 			hwProbesInFlight.Add(-1)
+			releaseLease()
 		}()
 		return false, ctx.Err().Error()
 	case shared := <-resultCh:
 		hwProbesInFlight.Add(-1)
+		releaseLease()
 		if shared.Err != nil {
 			return false, shared.Err.Error()
 		}
@@ -1261,10 +1268,15 @@ func cachedVideoToolboxProbeContext(ctx context.Context, ffmpegPath string) hard
 			return hardwareProbeResult{reason: ctx.Err().Error()}
 		}
 	}
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		videoToolboxProbes.Unlock()
+		return hardwareProbeResult{reason: leaseErr.Error()}
+	}
 	call := &videoToolboxProbeCall{done: make(chan struct{})}
 	videoToolboxProbes.inFlight[cacheKey] = call
 	// Counted for the life of the smoke encode, not the life of the caller: the
-	// goroutine below is rooted at Background so an abandoned request cannot
+	// goroutine below ignores cancellation so an abandoned request cannot
 	// kill work another is waiting on, and it keeps ffmpeg on the card after
 	// every caller has returned. Raised here, before the goroutine exists, so
 	// the claim cannot be observed unraised by anyone this call returns to.
@@ -1275,10 +1287,11 @@ func cachedVideoToolboxProbeContext(ctx context.Context, ffmpegPath string) hard
 	retryDelay := videoToolboxProbeRetryDelay
 	started := videoToolboxProbeStarted
 	go func() {
+		defer releaseLease()
 		if started != nil {
 			started()
 		}
-		probeCtx, cancel := context.WithTimeout(context.Background(), 4*commandTimeout+time.Second)
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*commandTimeout+time.Second)
 		defer cancel()
 		defer hwProbesInFlight.Add(-1)
 		result := probeFFmpegVideoToolboxContext(probeCtx, execPath, commandTimeout)
