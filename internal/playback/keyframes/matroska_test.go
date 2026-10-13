@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"slices"
 	"testing"
@@ -209,5 +210,91 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 	}, nil)
 	if _, err := read(file); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
+	}
+}
+
+func TestReadMatroskaRejectsDependentVideoCues(t *testing.T) {
+	for name, dependency := range map[string][]byte{
+		"frame reference": el(idCueReference, uintEl(0x96, 0)),
+		"codec state":     uintEl(idCueCodecState, 100),
+	} {
+		t.Run(name, func(t *testing.T) {
+			point := el(idCuePoint, uintEl(idCueTime, 2000),
+				el(idCueTrackPos, dependency, uintEl(idCueTrack, 2)))
+			file := slices.Concat(ebmlHeader, el(idSegment, info, tracks,
+				el(idCues, cuePoint(0, 2), point, cuePoint(4000, 2))))
+			if _, err := read(file); !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrNoIndex", err)
+			}
+		})
+	}
+}
+
+func TestReadMatroskaAllowsUnrelatedCueDependencies(t *testing.T) {
+	point := el(idCuePoint, uintEl(idCueTime, 2000),
+		el(idCueTrackPos, uintEl(idCueTrack, 1), uintEl(idCueCodecState, 100),
+			el(idCueReference, uintEl(0x96, 0))),
+		el(idCueTrackPos, uintEl(idCueTrack, 2), uintEl(idCueCodecState, 0)))
+	idx, err := read(slices.Concat(ebmlHeader, el(idSegment, info, tracks,
+		el(idCues, cuePoint(0, 2), point, cuePoint(4000, 2)))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []float64{0, 2, 4}; !slices.Equal(idx.Keyframes, want) {
+		t.Fatalf("keyframes = %v, want %v", idx.Keyframes, want)
+	}
+}
+
+func TestReadMatroskaRejectsMalformedInfo(t *testing.T) {
+	// The scale declares eight payload bytes but only one is available.
+	malformed := el(idInfo, []byte{0x2A, 0xD7, 0xB1, 0x88, 0x00})
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idInfo), uintEl(idSeekPosition, pos)))
+	}
+	infoPos := len(seekHead(0)) + len(tracks) + len(cues) + len(cluster)
+	for name, segment := range map[string][]byte{
+		"before clusters":   el(idSegment, malformed, tracks, cues),
+		"through seek head": el(idSegment, seekHead(uint64(infoPos)), tracks, cues, cluster, malformed),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := read(slices.Concat(ebmlHeader, segment)); !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrNoIndex", err)
+			}
+		})
+	}
+}
+
+func TestReadMatroskaDefaultsAbsentTimestampScale(t *testing.T) {
+	defaultInfo := el(idInfo, floatEl(idDuration, 12500))
+	idx, err := read(slices.Concat(ebmlHeader, el(idSegment, defaultInfo, tracks, cues)))
+	wantIndex(t, idx, err)
+}
+
+type headerErrorReader struct {
+	io.ReaderAt
+	offset int64
+	bytes  int
+	err    error
+}
+
+func (r headerErrorReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == r.offset {
+		n, _ := r.ReaderAt.ReadAt(p[:r.bytes], off)
+		return n, r.err
+	}
+	return r.ReaderAt.ReadAt(p, off)
+}
+
+func TestReadMatroskaPreservesHeaderReadErrors(t *testing.T) {
+	file := slices.Concat(ebmlHeader, el(idSegment, info, tracks, cues))
+	failure := errors.New("storage read failed")
+	for _, count := range []int{1, 12} {
+		reader := headerErrorReader{
+			ReaderAt: bytes.NewReader(file), offset: int64(len(ebmlHeader) + 12),
+			bytes: count, err: failure,
+		}
+		if _, err := ReadMatroska(reader, int64(len(file))); !errors.Is(err, failure) {
+			t.Errorf("read %d bytes: err = %v, want storage error", count, err)
+		}
 	}
 }
