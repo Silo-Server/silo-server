@@ -209,7 +209,14 @@ func (r Request) Validate() error {
 		if err := r.Sheets.validate(); err != nil {
 			return err
 		}
-		if err := r.Sheets.validateRun(len(r.Samples.Seconds)); err != nil {
+		run := *r.Sheets
+		if run.UseInputAspect {
+			// The probe sets the tile height, and samples checks the run
+			// again with it before any tile is decoded. Until then, only a
+			// run too large at any height is refused.
+			run.TileHeight = minSheetTile
+		}
+		if err := run.validateRun(len(r.Samples.Seconds)); err != nil {
 			return err
 		}
 	}

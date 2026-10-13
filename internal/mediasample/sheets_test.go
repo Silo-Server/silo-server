@@ -87,6 +87,35 @@ func TestSheetsRequestBoundsARunsPixels(t *testing.T) {
 	if err := chunk.Validate(); err != nil {
 		t.Fatalf("trickplay chunk refused: %v", err)
 	}
+	// A height the probe will replace does not count against the run: a
+	// rotated file's catalog height can exceed the height it decodes at.
+	rotated := chunk
+	rotated.Sheets = &SheetsOutput{TileWidth: 300, TileHeight: 1920, Columns: 10, Rows: 8, Quality: 80, UseInputAspect: true}
+	if err := rotated.Validate(); err != nil {
+		t.Fatalf("run with a probed height refused before probing: %v", err)
+	}
+	rotated.Sheets.UseInputAspect = false
+	if err := rotated.Validate(); err == nil {
+		t.Fatal("run of tall tiles with a fixed height: want it refused")
+	}
+}
+
+// TestRunSheetsBoundsTheProbedRun refuses a run whose probed tile height
+// makes it too large, before ffmpeg decodes anything.
+func TestRunSheetsBoundsTheProbedRun(t *testing.T) {
+	req := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: secondsFrom(5, 10, 880)},
+		Sheets: &SheetsOutput{TileWidth: 300, TileHeight: 16, Columns: 10, Rows: 8, Quality: 80, UseInputAspect: true}}
+	var calls [][]string
+	runner := Runner{Exec: func(_ context.Context, _ string, args []string, _ io.Reader, _, stderr io.Writer) error {
+		calls = append(calls, args)
+		// A portrait picture: 300-pixel tiles 534 pixels high.
+		_, _ = io.WriteString(stderr, "Input #0, matroska,webm, from '/media/a.mkv':\n  Duration: 02:00:00.00, start: 0.000000, bitrate: 900 kb/s\n  Stream #0:0: Video: hevc (Main), yuv420p(tv), 1080x1920, SAR 1:1 DAR 9:16\n")
+		return nil
+	}}
+	_, err := runner.Run(t.Context(), req)
+	if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonArgs || len(calls) != 1 {
+		t.Fatalf("error %v after %d runs, want the probed run refused as args after the probe", err, len(calls))
+	}
 }
 
 func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
