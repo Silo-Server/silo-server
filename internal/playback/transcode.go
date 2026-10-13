@@ -3257,19 +3257,25 @@ func (s *TranscodeSession) restart(
 	s.restartCount++
 	s.segmentGeneration++
 	s.segmentPruneRunning = false
+	// An identical-recipe rollback keeps the retained output's download
+	// progress, including completions received while the probe ran.
+	if !restorePrevious {
+		s.lastRequestedSegment = startSegment
+		s.lastCompletedSegment = startSegment - 1
+		s.lastPruneHighWater = startSegment - 1
+	}
 	preStartRangePrunable := opts.SegmentRetentionSeconds > 0 && s.lastPruneFloor < startSegment
-	s.lastRequestedSegment = startSegment
-	s.lastCompletedSegment = startSegment - 1
 	if preStartRangePrunable {
 		// Every restart preserves files below startSegment. Keep an older prune
 		// cursor reachable until replacement downloads age out that range, even
 		// when the reported restart position trails the download high-water mark.
 		s.pruneBeforeStart = true
 	} else {
+		// Even an identical recipe can recreate previously pruned files from
+		// its original start, so the prune cursor must revisit that range.
 		s.lastPruneFloor = startSegment - 1
 		s.pruneBeforeStart = false
 	}
-	s.lastPruneHighWater = startSegment - 1
 	hwWorkloadDevice := s.hwWorkloadDevice
 	s.mu.Unlock()
 
@@ -3370,8 +3376,10 @@ func (s *TranscodeSession) restart(
 	flight.err = probeErr
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
-	s.lastRequestedSegment = startSegment
-	s.lastCompletedSegment = startSegment - 1
+	if !restorePrevious {
+		s.lastRequestedSegment = startSegment
+		s.lastCompletedSegment = startSegment - 1
+	}
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
 	s.done = make(chan struct{})

@@ -460,6 +460,68 @@ func TestRestartSegmentLocked_CopyRecoveryProbeFailureRestoresProgress(t *testin
 	}
 }
 
+func TestRestartSegmentLocked_CopyRecoveryRollbackPreservesDownloadState(t *testing.T) {
+	for _, limit := range []int{1, 0} {
+		for _, release := range []byte{'f', 'm'} {
+			for _, pruneBeforeStart := range []bool{false, true} {
+				t.Run(fmt.Sprintf("limit_%d_%c_pre_start_%t", limit, release, pruneBeforeStart), func(t *testing.T) {
+					encodinglimit.Configure(limit)
+					t.Cleanup(func() { encodinglimit.Configure(0) })
+					m, session, events := newCopyRecoverySession(t)
+					pruneFloor := 10
+					if pruneBeforeStart {
+						pruneFloor = 7
+					}
+					session.mu.Lock()
+					session.opts.SegmentRetentionSeconds = 4
+					session.lastRequestedSegment = 11
+					session.lastCompletedSegment = 10
+					session.lastPruneFloor = pruneFloor
+					session.lastPruneHighWater = 10
+					session.pruneBeforeStart = pruneBeforeStart
+					session.mu.Unlock()
+					generation := session.SegmentGeneration()
+					results := startCopyRecovery(m, session)
+					probe := awaitCopyRecoveryProcess(t, events)
+					if !probe.isProbe() {
+						t.Fatal("recovery did not start an anchor probe")
+					}
+					// A retained segment may finish downloading during the probe.
+					// Rollback must preserve that completion as well as earlier state.
+					session.ReportSegmentDownloadedForGeneration(11, generation)
+					if _, err := probe.conn.Write([]byte{release}); err != nil {
+						t.Fatal(err)
+					}
+					result := awaitCopyRecoveryResult(t, results)
+					if result.ok || release == 'f' && result.err == nil || release == 'm' && result.err != nil {
+						t.Fatalf("failed or unmapped probe outcome = %+v", result)
+					}
+					restored := awaitCopyRecoveryProcess(t, events)
+					if restored.isProbe() || !session.IsRunning() {
+						t.Fatal("rollback did not restore the encoder")
+					}
+					if session.SegmentGeneration() == generation {
+						t.Fatal("rollback reused the old process generation")
+					}
+					session.ReportSegmentDownloadedForGeneration(12, generation)
+					session.mu.Lock()
+					requested, completed := session.lastRequestedSegment, session.lastCompletedSegment
+					floor, highWater := session.lastPruneFloor, session.lastPruneHighWater
+					preStart, pruning := session.pruneBeforeStart, session.segmentPruneRunning
+					session.mu.Unlock()
+					if requested != 11 || completed != 11 {
+						t.Errorf("rollback download progress = requested %d, completed %d; want 11, 11", requested, completed)
+					}
+					wantFloor := min(pruneFloor, session.Opts().StartSegmentNumber-1)
+					if floor != wantFloor || highWater != 10 || preStart != pruneBeforeStart || pruning {
+						t.Errorf("rollback prune state = floor %d, high water %d, pre-start %t, running %t; want %d, 10, %t, false", floor, highWater, preStart, pruning, wantFloor, pruneBeforeStart)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestRestartSegmentLocked_CopyRecoveryRestoreFailureAllowsCleanup(t *testing.T) {
 	encodinglimit.Configure(1)
 	t.Cleanup(func() { encodinglimit.Configure(0) })
@@ -742,5 +804,70 @@ func awaitCopyRecoveryMonitor(t *testing.T, finished <-chan struct{}) {
 	case <-finished:
 	case <-time.After(5 * time.Second):
 		t.Fatal("exit monitor did not finish")
+	}
+}
+
+func TestRestartSegmentLocked_CopyRecoveryRollbackKeepsReplayedSegmentsPrunable(t *testing.T) {
+	for _, release := range []byte{'f', 'm'} {
+		t.Run(string(release), func(t *testing.T) {
+			encodinglimit.Configure(0)
+			t.Cleanup(func() { encodinglimit.Configure(0) })
+			m, session, events := newCopyRecoverySession(t)
+			session.mu.Lock()
+			session.opts.SegmentRetentionSeconds = 4
+			session.lastRequestedSegment = 22
+			session.lastCompletedSegment = 22
+			session.lastPruneFloor = 20
+			session.lastPruneHighWater = 22
+			session.mu.Unlock()
+			results := startCopyRecovery(m, session)
+			probe := awaitCopyRecoveryProcess(t, events)
+			if !probe.isProbe() {
+				t.Fatal("expected probe")
+			}
+			if _, err := probe.conn.Write([]byte{release}); err != nil {
+				t.Fatal(err)
+			}
+			result := awaitCopyRecoveryResult(t, results)
+			if result.ok || (release == 'f' && result.err == nil) || (release == 'm' && result.err != nil) {
+				t.Fatalf("result: %+v", result)
+			}
+			restored := awaitCopyRecoveryProcess(t, events)
+			if restored.isProbe() {
+				t.Fatal("expected restored encoder")
+			}
+			opts := session.Opts()
+			replayed := opts.StartSegmentNumber + startupSegmentRequirement(opts)
+			if replayed >= 20 {
+				t.Fatalf("fixture startup window too large: %d", replayed)
+			}
+			// An exact original-start recipe regenerates the range previously pruned.
+			// Age this recreated file past the fresh-file guard without wall-clock sleeps.
+			replayPath := filepath.Join(opts.OutputDir, segmentFilename(replayed, opts))
+			old := time.Now().Add(-time.Minute)
+			writePrunerTestFile(t, replayPath, []byte("replayed segment"), old)
+			manifest := recoveryTestManifest
+			for segment := 12; segment <= 40; segment++ {
+				manifest += fmt.Sprintf("#EXTINF:2.000000,\nseg_%05d.m4s\n", segment)
+			}
+			if err := os.WriteFile(filepath.Join(opts.OutputDir, "stream.m3u8"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session.mu.Lock()
+			generation := session.segmentGeneration
+			session.lastRequestedSegment = 40
+			session.lastCompletedSegment = 40
+			session.lastPruneHighWater = 40
+			session.segmentPruneRunning = true
+			before := session.lastPruneFloor
+			session.mu.Unlock()
+			session.pruneDownloadedSegments(generation, 40, false)
+			session.mu.Lock()
+			after := session.lastPruneFloor
+			session.mu.Unlock()
+			if _, err := os.Stat(replayPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("replayed segment %d below preserved floor survived completed prune (floor %d -> %d), stat=%v", replayed, before, after, err)
+			}
+		})
 	}
 }
