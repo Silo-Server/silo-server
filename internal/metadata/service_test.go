@@ -1293,6 +1293,91 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	}
 }
 
+func TestSyncRefreshDebtForItemWakesTerminalEpisodeDebtWhenRecentWindowCloses(t *testing.T) {
+	seed := func(t *testing.T, episode *models.Episode) (*testHarness, *fakeRefreshDebtRepo) {
+		t.Helper()
+		h := newTestHarness()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		rating := 7.5
+		h.itemRepo.items["series-1"] = &models.MediaItem{
+			ContentID:                 "series-1",
+			Type:                      "series",
+			Status:                    "matched",
+			Overview:                  "Complete",
+			PosterPath:                testPosterPath,
+			BackdropPath:              testBackdropPath,
+			RatingTMDB:                &rating,
+			EpisodeMetadataIncomplete: true,
+		}
+		if err := episodes.Upsert(context.Background(), episode); err != nil {
+			t.Fatalf("seed episode: %v", err)
+		}
+		debts.debts["series-1"] = &models.MetadataRefreshDebt{
+			TargetType:   RefreshTargetItem,
+			ContentID:    "series-1",
+			ReasonMask:   RefreshDebtReasonEpisodeIncomplete,
+			AttemptCount: refreshDebtEpisodeTerminalAttempts,
+		}
+		return h, debts
+	}
+	syncDebt := func(t *testing.T, h *testHarness, debts *fakeRefreshDebtRepo) *models.MetadataRefreshDebt {
+		t.Helper()
+		if err := h.service.syncRefreshDebtForItem(context.Background(), "series-1"); err != nil {
+			t.Fatalf("syncRefreshDebtForItem: %v", err)
+		}
+		debt, err := debts.Get(context.Background(), "series-1")
+		if err != nil {
+			t.Fatalf("Get debt: %v", err)
+		}
+		if debt.ReasonMask != RefreshDebtReasonEpisodeIncomplete {
+			t.Fatalf("reason mask = %d, want only episode incomplete", debt.ReasonMask)
+		}
+		return debt
+	}
+
+	t.Run("recent TBD episode caps the terminal delay", func(t *testing.T) {
+		aired := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		h, debts := seed(t, &models.Episode{
+			ContentID:      "episode-recent-tbd",
+			SeriesID:       "series-1",
+			SeasonID:       "season-1",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "TBD",
+			StillPath:      "s3://still.jpg",
+			AirDate:        &aired,
+			TmdbID:         "3812334",
+			MetadataSource: "provider",
+		})
+
+		debt := syncDebt(t, h, debts)
+		if want := aired.Add(EpisodeRecentStillWindow + time.Minute); !debt.NextRefreshAt.Equal(want) {
+			t.Fatalf("next refresh = %v, want %v (window close, not the %v terminal delay)", debt.NextRefreshAt, want, refreshDebtTerminalDelay)
+		}
+	})
+
+	t.Run("old fallback episode keeps the terminal delay", func(t *testing.T) {
+		h, debts := seed(t, &models.Episode{
+			ContentID:      "episode-fallback",
+			SeriesID:       "series-1",
+			SeasonID:       "season-1",
+			SeasonNumber:   1,
+			EpisodeNumber:  2,
+			Title:          "Episode 2",
+			MetadataSource: "scanner_fallback",
+		})
+
+		before := time.Now().UTC()
+		debt := syncDebt(t, h, debts)
+		if debt.NextRefreshAt.Before(before.Add(refreshDebtTerminalDelay)) {
+			t.Fatalf("next refresh = %v, want the %v terminal delay", debt.NextRefreshAt, refreshDebtTerminalDelay)
+		}
+	})
+}
+
 func TestSyncRefreshDebtForItemClearsDebtAfterSecondaryTMDBRejected(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()

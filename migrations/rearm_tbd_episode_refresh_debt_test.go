@@ -1,9 +1,15 @@
 package migrations
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRearmTBDEpisodeRefreshDebtPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
+	// A zone east of UTC, with a DST change inside the 45-day window for much
+	// of the year, catches cutoffs that use the session time zone.
+	migrationExec(t, tx, `SET LOCAL TimeZone = 'Australia/Sydney'`)
 	migrationExec(t, tx, `
 CREATE TABLE episodes (
 	content_id TEXT PRIMARY KEY, season_id TEXT, series_id TEXT NOT NULL,
@@ -33,14 +39,26 @@ INSERT INTO metadata_refresh_debt (target_type, content_id, reason_mask, next_re
 
 	migrationExec(t, tx, adminMigrationSQL(t, "20260928120000_rearm_tbd_episode_refresh_debt", schema, false))
 
+	// The Go check reads air_date as UTC midnight (as pgx does) and adds
+	// EpisodeRecentStillWindow plus a minute; compute the expectation the same way.
+	var recentAirDate string
+	if err := tx.QueryRow(t.Context(), `SELECT (CURRENT_DATE - 10)::text`).Scan(&recentAirDate); err != nil {
+		t.Fatalf("recent air date: %v", err)
+	}
+	aired, err := time.Parse(time.DateOnly, recentAirDate)
+	if err != nil {
+		t.Fatalf("parse recent air date: %v", err)
+	}
+	recentWindowClose := "'" + aired.Add(45*24*time.Hour+time.Minute).Format(time.RFC3339) + "'"
+
 	want := map[string]string{
 		// Old real TBD rows wait an hour so a previous release cannot re-park them.
 		"episode/old-tbd": "NOW() + INTERVAL '1 hour'",
 		"season/season-a": "NOW() + INTERVAL '1 hour'",
 		"item/series-a":   "NOW() + INTERVAL '1 hour'",
 		// Recent rows come due when the 45-day window closes.
-		"episode/recent-tba": "(CURRENT_DATE - 10) + INTERVAL '45 days 1 minute'",
-		"season/season-b":    "(CURRENT_DATE - 10) + INTERVAL '45 days 1 minute'",
+		"episode/recent-tba": recentWindowClose,
+		"season/season-b":    recentWindowClose,
 		// Rows already due sooner, without episode-incomplete debt, or for
 		// episodes the corrected check still flags are left alone.
 		"episode/recent-soon":  "NOW() + INTERVAL '1 day'",

@@ -14,6 +14,10 @@
 -- still inside the window come due when it closes, as new debt does. Each
 -- refresh re-evaluates its target and deletes or recomputes the debt, leaving
 -- any other gaps in place.
+--
+-- The Go check reads air_date as UTC midnight and adds whole 24-hour days, so
+-- the cutoffs add the interval to the DATE and read the result as UTC instead
+-- of letting the session time zone (and its DST changes) shift them.
 
 -- +goose Up
 -- +goose StatementBegin
@@ -22,8 +26,8 @@ SELECT e.content_id,
        e.season_id,
        e.series_id,
        CASE
-           WHEN e.air_date < (NOW() - INTERVAL '45 days') THEN NOW() + INTERVAL '1 hour'
-           ELSE e.air_date + INTERVAL '45 days 1 minute'
+           WHEN (e.air_date + INTERVAL '45 days') AT TIME ZONE 'UTC' < NOW() THEN NOW() + INTERVAL '1 hour'
+           ELSE (e.air_date + INTERVAL '45 days 1 minute') AT TIME ZONE 'UTC'
        END AS due_at
 FROM episodes e
 WHERE BTRIM(COALESCE(e.title, '')) ~* '^(tba|tbd)$'

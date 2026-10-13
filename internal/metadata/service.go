@@ -3698,6 +3698,20 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		return err
 	}
 	now := time.Now().UTC()
+	// A series row that keeps episode debt must wake when its episodes' recent
+	// window closes, like the season and episode rows that hold the same debt.
+	var actionable []*models.Episode
+	if hasRefreshDebtReason(reasonMask, RefreshDebtReasonEpisodeIncomplete) && s.episodeRepo != nil {
+		episodes, err := s.episodeRepo.ListBySeries(ctx, contentID)
+		if err != nil {
+			return err
+		}
+		for _, episode := range episodes {
+			if EpisodeHasActionableMetadataDebt(episode, now) {
+				actionable = append(actionable, episode)
+			}
+		}
+	}
 	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount,
 		refreshAttemptCounted(ctx, RefreshTargetItem, contentID))
 	return s.refreshDebtRepo.MarkSuccess(
@@ -3705,7 +3719,7 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		contentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
