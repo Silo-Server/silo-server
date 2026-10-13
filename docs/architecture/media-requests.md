@@ -541,6 +541,16 @@ request's state and `outcome_reason`, and each target's quality, status and
 `/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
 return them to everyone.
 
+On these profile routes, v1 and v2 alike, "admin" means the acting admin
+(`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
+acting through its primary profile, an admin API key, or an admin login session
+with no profile while no profile on the account has a PIN or an access limit, the
+same decision the admin request queue's gate makes. Only the acting admin reads or cancels another
+account's request, gets another account's `request_id` in request state, or
+cancels while requests are turned off. Any other profile on an admin's account,
+such as a child profile, is a requester like any other: it reads and cancels
+its own account's requests, including ones its household's other profiles made.
+
 ## Admin queue
 
 The admin queue groups requests by what an admin does next, from status and

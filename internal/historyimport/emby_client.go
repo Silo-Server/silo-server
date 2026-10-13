@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -239,7 +238,11 @@ func (c *EmbyClient) FetchResumeItems(ctx context.Context, auth embyLocalAuth) (
 // one body racing the client timeout.
 func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
+	var budget listingBudget
 	for startIndex := 0; ; {
+		if err := budget.startPage(); err != nil {
+			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
+		}
 		query := url.Values{}
 		query.Set("Recursive", "true")
 		query.Set("EnableUserData", "true")
@@ -250,7 +253,10 @@ func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoin
 		}
 		query.Set("StartIndex", strconv.Itoa(startIndex))
 		query.Set("Limit", strconv.Itoa(embyPageSize))
-		payload, err := c.getItems(ctx, auth, endpoint, query)
+		payload, err := c.getItems(ctx, auth, endpoint, query, &budget)
+		if err == nil {
+			err = budget.addItems(len(payload.Items))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
@@ -284,7 +290,7 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
-		payload, err := c.getItems(ctx, auth, "Items", query)
+		payload, err := c.getItems(ctx, auth, "Items", query, nil)
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
@@ -293,7 +299,8 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 	return items, nil
 }
 
-func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint string, query url.Values) (embyItemsResponse, error) {
+// getItems reads one /Users/{id} item list response; budget may be nil.
+func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint string, query url.Values, budget *listingBudget) (embyItemsResponse, error) {
 	path := fmt.Sprintf("%s/Users/%s/%s?%s", auth.BaseURL, url.PathEscape(auth.UserID), endpoint, query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -302,13 +309,18 @@ func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint 
 	req.Header.Set("X-Emby-Token", auth.AccessToken)
 	req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader(auth.UserID, auth.AccessToken))
 	var payload embyItemsResponse
-	if err := c.doJSON(req, &payload); err != nil {
+	if err := c.doJSONWithBudget(req, &payload, budget); err != nil {
 		return embyItemsResponse{}, err
 	}
 	return payload, nil
 }
 
 func (c *EmbyClient) doJSON(req *http.Request, out any) error {
+	return c.doJSONWithBudget(req, out, nil)
+}
+
+// doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
+func (c *EmbyClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
@@ -319,14 +331,14 @@ func (c *EmbyClient) doJSON(req *http.Request, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body := readUpstreamErrorBody(resp.Body)
 		return &embyHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if out == nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		discardUpstreamBody(resp.Body)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return decodeUpstreamJSON(resp.Body, out, budget)
 }
 
 type embyHTTPError struct {

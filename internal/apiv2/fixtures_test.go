@@ -1754,7 +1754,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, personalCollectionContainsFixtureCases()...)
 	cases = append(cases, loginSessionFixtureCases()...)
 	cases = append(cases, adminDownloadStorageFixtureCases()...)
-	return append(cases, homeLayoutItemsFixtureCases()...)
+	cases = append(cases, homeLayoutItemsFixtureCases()...)
+	return append(cases, catalogLettersFixtureCases()...)
 }
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its

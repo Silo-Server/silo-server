@@ -885,6 +885,22 @@ acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refres
 admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
 This is the same critical bridge fix.
 
+Routes outside the admin groups that widen what an admin sees or may do (another account's
+media requests and their download-server fields, another account's downloaded subtitles,
+on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+that reach from the same decision, the acting admin, never from the account role: v1 and v2 handlers call `apimw.ActingAdmin`, which answers with
+the decider the router hands the acting-admin gate. It counts a declared profile only after the
+viewer gate verified it in the same request, so an operation that relies on it runs the viewer
+gate (v2 `profile_scoped`, optionally with `ProfileOptional`). Without a decider it answers
+false. Another profile on an admin's account is treated like any profile on a regular account.
+
+A remote-playback handoff session is narrower still: it acts only as its bound profile, with
+the account role `user`, on the v2 routes a TV needs to play and browse, and ends at its
+`session_expires_at` however often it refreshes. Every other route answers the existing 403
+(v2 `permission_denied`, v1 `forbidden`). The rules are in
+[device sign-in](device-login.md#remote-playback-handoff); the v1 change is a critical bridge
+fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
@@ -2074,6 +2090,15 @@ update ignores the toggles. See
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
 dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
 the same way; see [dropped-shows.md](dropped-shows.md).
+
+Provider connection settings are v2-only in the same way. A plugin declares them in its
+watch-sync descriptor, and `GET /watch-providers` lists them per provider as
+`connection_settings` (key, label, description, `type`, `default_value`). The settings
+projection returns their values for the connection in `connection_settings`, defaults
+included, and PATCH accepts a partial `connection_settings` object whose keys are merged
+into the stored values. An undeclared key or a value of the wrong type fails with
+`validation_failed`. `boolean` is the only type so far; a client skips a setting whose
+type it does not know. See [watch-provider-plugins.md](watch-provider-plugins.md).
 
 ### Webhook connection management
 

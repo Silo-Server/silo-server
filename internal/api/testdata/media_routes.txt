@@ -475,6 +475,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -1741,6 +1742,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media

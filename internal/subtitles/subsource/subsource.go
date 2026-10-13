@@ -2,12 +2,9 @@
 package subsource
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -103,12 +100,11 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("subsource: search returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("subsource: search returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	var movieResp movieSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&movieResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(resp.Body)).Decode(&movieResp); err != nil {
 		return nil, fmt.Errorf("subsource: decode search response: %w", err)
 	}
 
@@ -152,12 +148,11 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 	defer subResp.Body.Close()
 
 	if subResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(subResp.Body)
-		return nil, fmt.Errorf("subsource: subtitle list returned %d: %s", subResp.StatusCode, string(body))
+		return nil, fmt.Errorf("subsource: subtitle list returned %d: %s", subResp.StatusCode, subtitles.ProviderErrorBody(subResp.Body))
 	}
 
 	var subListResp subtitleListResponse
-	if err := json.NewDecoder(subResp.Body).Decode(&subListResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(subResp.Body)).Decode(&subListResp); err != nil {
 		return nil, fmt.Errorf("subsource: decode subtitle list: %w", err)
 	}
 
@@ -227,7 +222,7 @@ func (p *Provider) fetchSubtitles(ctx context.Context, movieID int, lang string)
 	}
 
 	var resp subtitleListResponse
-	if err := json.NewDecoder(subResp.Body).Decode(&resp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(subResp.Body)).Decode(&resp); err != nil {
 		return nil, err
 	}
 	return resp.Data, nil
@@ -251,11 +246,10 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("subsource: download returned %d: %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("subsource: download returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := subtitles.ReadProviderResponse(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("subsource: read download: %w", err)
 	}
@@ -263,47 +257,17 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 	// API returns a ZIP; extract the first subtitle file
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "zip") {
-		return extractSubtitleFromZip(data)
+		content, format, err := subtitles.ExtractSubtitleFromZip(data)
+		if err != nil {
+			return nil, "", fmt.Errorf("subsource: %w", err)
+		}
+		return content, format, nil
 	}
 
 	// Detect format from content-disposition or default to srt
 	contentDisp := resp.Header.Get("Content-Disposition")
 	format := detectFormatFromHeader(contentDisp)
 	return data, format, nil
-}
-
-// extractSubtitleFromZip finds the first subtitle file in a ZIP archive.
-func extractSubtitleFromZip(data []byte) ([]byte, subtitles.SubtitleFormat, error) {
-	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return nil, "", fmt.Errorf("subsource: open zip: %w", err)
-	}
-
-	subtitleExts := map[string]subtitles.SubtitleFormat{
-		".srt": subtitles.FormatSRT,
-		".ass": subtitles.FormatASS,
-		".ssa": subtitles.FormatSSA,
-		".vtt": subtitles.FormatVTT,
-		".sub": subtitles.FormatSUB,
-	}
-
-	for _, f := range reader.File {
-		ext := strings.ToLower(filepath.Ext(f.Name))
-		if format, ok := subtitleExts[ext]; ok {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, "", fmt.Errorf("subsource: open zip entry: %w", err)
-			}
-			content, err := io.ReadAll(rc)
-			rc.Close()
-			if err != nil {
-				return nil, "", fmt.Errorf("subsource: read zip entry: %w", err)
-			}
-			return content, format, nil
-		}
-	}
-
-	return nil, "", fmt.Errorf("subsource: no subtitle file found in zip archive")
 }
 
 func reverseLanguageMap(name string) string {

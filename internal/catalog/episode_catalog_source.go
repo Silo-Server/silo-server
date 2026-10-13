@@ -119,11 +119,14 @@ func isEpisodeCatalogScope(scope string) bool {
 	return scope == "episode"
 }
 
+// mediaItemsBaseRelation is the catalog's default base relation.
+const mediaItemsBaseRelation = "media_items mi"
+
 func catalogBaseRelationForScope(scope string) string {
 	if isEpisodeCatalogScope(scope) {
 		return episodeCatalogBaseRelation
 	}
-	return "media_items mi"
+	return mediaItemsBaseRelation
 }
 
 func episodeCatalogBaseRelationForLibraries(

@@ -713,6 +713,7 @@ export const v2Operations = {
   "POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback": "createThemeSongPlayback",
   "POST /api/v2/catalog/items/{id}/trailers/refresh": "refreshCatalogItemTrailers",
   "POST /api/v2/catalog/items/{id}/translate-description": "translateCatalogItemDescription",
+  "POST /api/v2/catalog/letters": "queryCatalogLetters",
   "POST /api/v2/catalog/people/{id}/refresh": "refreshPerson",
   "POST /api/v2/catalog/query": "queryCatalogItems",
   "POST /api/v2/collections": "createCollection",

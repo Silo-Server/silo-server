@@ -561,7 +561,7 @@ func (h *ImagesHandler) requestSession(r *http.Request) *Session {
 	session := SessionFromContext(r.Context())
 	if session == nil && h.sessions != nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = h.sessions.Get(token)
+			session, _ = h.sessions.GetContext(r.Context(), token)
 		}
 	}
 	return session
@@ -592,13 +592,7 @@ func (h *ImagesHandler) serveCollectionsViewImage(w http.ResponseWriter, r *http
 	seed := imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{})
 	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
 	if !authorized {
-		session := SessionFromContext(r.Context())
-		if session == nil && h.sessions != nil {
-			if token, ok := ExtractToken(r); ok {
-				session, _ = h.sessions.Get(token)
-			}
-		}
-		if session == nil {
+		if h.requestSession(r) == nil {
 			writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 			return
 		}

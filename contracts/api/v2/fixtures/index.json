@@ -12813,6 +12813,28 @@
       "body_file": "query_catalog_items_profile_header_required.json"
     },
     {
+      "name": "query_catalog_letters_ok",
+      "operation_id": "queryCatalogLetters",
+      "scenario": "The letter index of a library sorted by title: each letter with titles, its count, and its first list position.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/letters",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"library_id\":\"1\",\"type\":\"movie\",\"order\":\"asc\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogLetters",
+      "body_file": "query_catalog_letters_ok.json"
+    },
+    {
       "name": "rate_limited",
       "operation_id": null,
       "scenario": "The authenticated-route limiter refused the request; Retry-After is the only rate-limit header on v2.",

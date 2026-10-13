@@ -147,22 +147,6 @@ const (
 	ebookReaderAnnotationMaxBodySize = 256 << 10 // 256 KiB
 )
 
-// decodeEbookReaderBody decodes a JSON request body with a hard size cap.
-// It writes the error response and returns false when decoding fails.
-func decodeEbookReaderBody(w http.ResponseWriter, r *http.Request, maxBodySize int64, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Request body is too large")
-			return false
-		}
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return false
-	}
-	return true
-}
-
 type ebookReaderProgressRequest struct {
 	FileID   int     `json:"file_id"`
 	Location string  `json:"location"`
@@ -245,7 +229,7 @@ func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.R
 	}
 
 	var req ebookReaderProgressRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderProgressMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderProgressMaxBodySize, &req, false) {
 		return
 	}
 	req.Location = strings.TrimSpace(req.Location)
@@ -313,7 +297,7 @@ func (h *EbookReaderHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	var req ebookReaderConfigRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderConfigMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderConfigMaxBodySize, &req, false) {
 		return
 	}
 	if !jsonObject(req.Config) {
@@ -357,7 +341,7 @@ func (h *EbookReaderHandler) HandleCreateAnnotation(w http.ResponseWriter, r *ht
 		return
 	}
 	var req ebookReaderAnnotationRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
 		return
 	}
 	annotation, _, err := h.createReaderAnnotation(r.Context(), userID, profileID, contentID, "", req)
@@ -379,7 +363,7 @@ func (h *EbookReaderHandler) HandleUpdateAnnotation(w http.ResponseWriter, r *ht
 		return
 	}
 	var req ebookReaderAnnotationPatchRequest
-	if !decodeEbookReaderBody(w, r, ebookReaderAnnotationMaxBodySize, &req) {
+	if !decodeLimitedJSONBody(w, r, ebookReaderAnnotationMaxBodySize, &req, false) {
 		return
 	}
 	updated, err := h.patchReaderAnnotation(r.Context(), userID, profileID, contentID, annotationID, req, nil)

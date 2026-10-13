@@ -454,6 +454,11 @@ func newPlexMetadataServer(t *testing.T) *httptest.Server {
 
 func parsePlex(t *testing.T, server *httptest.Server, payload string) (*CanonicalEvent, error) {
 	t.Helper()
+	return parsePlexAt(t, t.Context(), server, payload)
+}
+
+func parsePlexAt(t *testing.T, ctx context.Context, server *httptest.Server, payload string) (*CanonicalEvent, error) {
+	t.Helper()
 	var body strings.Builder
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("payload", payload); err != nil {
@@ -466,7 +471,27 @@ func parsePlex(t *testing.T, server *httptest.Server, payload string) (*Canonica
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	conn := &Connection{UserID: 7, BaseURL: server.URL, AccessToken: "owner-token"}
 	trusted := historyimport.NewLocalNetworkAccess(staticSettings{historyimport.SettingAllowPrivateDestinations: "true"}, nil)
-	return NewPlexProvider(historyimport.NewPlexClient()).ParseWebhook(trusted.Context(t.Context(), conn.UserID), conn, req)
+	return NewPlexProvider(historyimport.NewPlexClient()).ParseWebhook(trusted.Context(ctx, conn.UserID), conn, req)
+}
+
+// The receipt time is when the delivery started arriving, not when its body
+// finished uploading, so a slow upload cannot look newer than Silo activity
+// written meanwhile.
+func TestPlexProviderUsesRecordedReceiptTime(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	receivedAt := time.Now().Add(-time.Minute)
+	play, err := parsePlexAt(t, withWebhookReceivedAt(t.Context(), receivedAt), server, `{"event":"media.play","Account":{"id":5,"title":"Kid"},"Metadata":{"ratingKey":"42","type":"movie"}}`)
+	if err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	if want := receivedAt.UTC().Truncate(time.Microsecond); !play.OccurredAt.Equal(want) {
+		t.Fatalf("OccurredAt = %v, want receipt time %v", play.OccurredAt, want)
+	}
 }
 
 func TestPlexProviderUsesEventStateNotOwnerMetadata(t *testing.T) {
