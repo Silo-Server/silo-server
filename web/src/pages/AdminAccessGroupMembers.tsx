@@ -425,9 +425,11 @@ function ConfirmMoveDialog({
     (key) => key !== "none" && !groups.some((candidate) => String(candidate.id) === key),
   );
   // Request limits and approval are stored per group apart from the group's
-  // policy. They only matter where the target lets members request.
+  // policy. An account override can allow requests even when the target doesn't.
   const requestSettings = useRequestSettings();
-  const termsMatter = move.target.requests_allowed;
+  const termsMatter = move.users.some(
+    (user) => user.requests_allowed ?? move.target.requests_allowed,
+  );
   const limitIds = termsMatter
     ? [
         ...new Set(
@@ -455,8 +457,8 @@ function ConfirmMoveDialog({
             Move {count} {count === 1 ? "user" : "users"} to {move.target.name}?
           </AlertDialogTitle>
           <AlertDialogDescription>
-            Settings a user has overridden on their own account stay as they are. Their current
-            sessions are signed out so the new access applies.
+            Settings a user has overridden on their own account stay as they are. They get the new
+            access right away, without being signed out.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="max-h-72 space-y-3 overflow-y-auto text-sm">
