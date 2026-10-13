@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -28,8 +29,8 @@ func (v2WiringTokens) ValidateToken(string) (*auth.Claims, error) {
 
 type v2WiringSessions struct{}
 
-func (v2WiringSessions) ActiveSessionRole(context.Context, string) (string, bool, error) {
-	return "user", true, nil
+func (v2WiringSessions) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+	return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeAccount}, true, nil
 }
 
 type v2WiringViewer struct{}

@@ -117,6 +117,9 @@ type ItemsHandler struct {
 	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	MarkerPopulation         MarkerPopulationService
 	MarkerFileResolver       FilePathResolver
+	MarkerImageURLs          interface {
+		ResolveURLs(context.Context, []string) map[string]catalog.ResolvedImageURL
+	}
 }
 
 // NewItemsHandler creates a new ItemsHandler.
@@ -328,32 +331,36 @@ type itemListResponse struct {
 	// logo to the v2 card renderer. json:"-" because /api/v1 is frozen: the
 	// fields exist on the Go struct only, and apiv2 emits them under its own
 	// names.
-	AdvisoryAge       *int                        `json:"-"`
-	AdvisorySource    string                      `json:"-"`
-	Status            string                      `json:"status"`
-	ShowStatus        string                      `json:"show_status,omitempty"`
-	RatingIMDB        *float64                    `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64                    `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                        `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                        `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                      `json:"original_language,omitempty"`
-	Overview          string                      `json:"overview,omitempty"`
-	PosterURL         string                      `json:"poster_url,omitempty"`
-	PosterThumbhash   string                      `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                      `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                      `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                      `json:"-"`
-	ReleaseDate       *string                     `json:"release_date,omitempty"`
-	LastAirDate       *string                     `json:"last_air_date,omitempty"`
-	AddedAt           *time.Time                  `json:"added_at,omitempty"`
-	MangaChapterCount *int                        `json:"manga_chapter_count,omitempty"`
-	MangaVolumeCount  *int                        `json:"manga_volume_count,omitempty"`
-	OverlaySummary    *models.OverlaySummary      `json:"overlay_summary,omitempty"`
-	SortMetrics       *sortMetricsResponse        `json:"sort_metrics,omitempty"`
-	UserState         *itemUserStateResponse      `json:"user_state,omitempty"`
-	WorkID            string                      `json:"work_id,omitempty"`
-	WorkTitle         string                      `json:"work_title,omitempty"`
-	WorkFormats       []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+	AdvisoryAge            *int     `json:"-"`
+	AdvisorySource         string   `json:"-"`
+	Status                 string   `json:"status"`
+	ShowStatus             string   `json:"show_status,omitempty"`
+	RatingIMDB             *float64 `json:"rating_imdb,omitempty"`
+	RatingTMDB             *float64 `json:"rating_tmdb,omitempty"`
+	RatingRTCritic         *int     `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience       *int     `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage       string   `json:"original_language,omitempty"`
+	Overview               string   `json:"overview,omitempty"`
+	posterPath             string
+	backdropPath           string
+	PosterIsEpisodeStill   *bool                       `json:"-"`
+	BackdropIsEpisodeStill *bool                       `json:"-"`
+	PosterURL              string                      `json:"poster_url,omitempty"`
+	PosterThumbhash        string                      `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                      `json:"backdrop_url,omitempty"`
+	BackdropThumbhash      string                      `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                      `json:"-"`
+	ReleaseDate            *string                     `json:"release_date,omitempty"`
+	LastAirDate            *string                     `json:"last_air_date,omitempty"`
+	AddedAt                *time.Time                  `json:"added_at,omitempty"`
+	MangaChapterCount      *int                        `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount       *int                        `json:"manga_volume_count,omitempty"`
+	OverlaySummary         *models.OverlaySummary      `json:"overlay_summary,omitempty"`
+	SortMetrics            *sortMetricsResponse        `json:"sort_metrics,omitempty"`
+	UserState              *itemUserStateResponse      `json:"user_state,omitempty"`
+	WorkID                 string                      `json:"work_id,omitempty"`
+	WorkTitle              string                      `json:"work_title,omitempty"`
+	WorkFormats            []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
 }
 
 type sortMetricsResponse struct {
@@ -437,21 +444,22 @@ type episodeFileResponse struct {
 
 // episodeResponse is the shape of an episode in API responses.
 type episodeResponse struct {
-	ContentID      string                  `json:"content_id"`
-	SeasonNumber   int                     `json:"season_number"`
-	EpisodeNumber  int                     `json:"episode_number"`
-	Title          string                  `json:"title"`
-	Overview       string                  `json:"overview,omitempty"`
-	AirDate        string                  `json:"air_date,omitempty"`
-	Runtime        int                     `json:"runtime"`
-	ImdbID         string                  `json:"imdb_id,omitempty"`
-	TmdbID         string                  `json:"tmdb_id,omitempty"`
-	TvdbID         string                  `json:"tvdb_id,omitempty"`
-	StillURL       string                  `json:"still_url,omitempty"`
-	StillThumbhash string                  `json:"still_thumbhash,omitempty"`
-	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
-	Files          []episodeFileResponse   `json:"files,omitempty"`
-	OverlaySummary *models.OverlaySummary  `json:"overlay_summary,omitempty"`
+	StillIsEpisodeStill *bool                   `json:"-"`
+	ContentID           string                  `json:"content_id"`
+	SeasonNumber        int                     `json:"season_number"`
+	EpisodeNumber       int                     `json:"episode_number"`
+	Title               string                  `json:"title"`
+	Overview            string                  `json:"overview,omitempty"`
+	AirDate             string                  `json:"air_date,omitempty"`
+	Runtime             int                     `json:"runtime"`
+	ImdbID              string                  `json:"imdb_id,omitempty"`
+	TmdbID              string                  `json:"tmdb_id,omitempty"`
+	TvdbID              string                  `json:"tvdb_id,omitempty"`
+	StillURL            string                  `json:"still_url,omitempty"`
+	StillThumbhash      string                  `json:"still_thumbhash,omitempty"`
+	UserData            *catalog.SeasonUserData `json:"user_data,omitempty"`
+	Files               []episodeFileResponse   `json:"files,omitempty"`
+	OverlaySummary      *models.OverlaySummary  `json:"overlay_summary,omitempty"`
 }
 
 type episodeImageFallback struct {
@@ -983,6 +991,8 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(ctx context.Context, v Item
 
 func itemListResponseShell(item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse) itemListResponse {
 	resp := itemListResponse{
+		posterPath:        item.PosterPath,
+		backdropPath:      item.BackdropPath,
 		ContentID:         item.ContentID,
 		PlayContentID:     item.PlayContentID,
 		Type:              item.Type,
@@ -1141,6 +1151,7 @@ func signListingLogos(ctx context.Context, svc *catalog.DetailService, logoPaths
 }
 
 type episodeBrowseMetadata struct {
+	StillPath     string
 	SeriesID      string
 	SeriesTitle   string
 	SeasonNumber  *int
@@ -1204,6 +1215,7 @@ func (h *ItemsHandler) listEpisodeBrowseMetadata(
 		seasonNumber := episode.SeasonNumber
 		episodeNumber := episode.EpisodeNumber
 		result[episode.ContentID] = episodeBrowseMetadata{
+			StillPath:     episode.StillPath,
 			SeriesID:      episode.SeriesID,
 			SeriesTitle:   seriesTitles[episode.SeriesID],
 			SeasonNumber:  &seasonNumber,
@@ -1238,16 +1250,17 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		stillThumbhash = fallback.Thumbhash
 	}
 	resp := episodeResponse{
-		ContentID:      ep.ContentID,
-		SeasonNumber:   ep.SeasonNumber,
-		EpisodeNumber:  ep.EpisodeNumber,
-		Title:          ep.Title,
-		Overview:       ep.Overview,
-		Runtime:        ep.Runtime,
-		ImdbID:         ep.ImdbID,
-		TmdbID:         ep.TmdbID,
-		TvdbID:         ep.TvdbID,
-		StillThumbhash: stillThumbhash,
+		StillIsEpisodeStill: new(strings.TrimSpace(ep.StillPath) != ""),
+		ContentID:           ep.ContentID,
+		SeasonNumber:        ep.SeasonNumber,
+		EpisodeNumber:       ep.EpisodeNumber,
+		Title:               ep.Title,
+		Overview:            ep.Overview,
+		Runtime:             ep.Runtime,
+		ImdbID:              ep.ImdbID,
+		TmdbID:              ep.TmdbID,
+		TvdbID:              ep.TvdbID,
+		StillThumbhash:      stillThumbhash,
 	}
 
 	if ep.AirDate != nil {
@@ -2583,7 +2596,18 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		return false
 	}
 	if claims.Role == "admin" {
-		return true
+		// Only the acting admin sees paths by role. Another profile on the
+		// admin's account needs metadata curation assigned to the account,
+		// the bar the curation gate holds it to.
+		actingAdmin, err := apimw.ActingAdmin(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "checking file path visibility for an admin account", "component", "api", "user_id", claims.UserID, "error", err)
+			return false
+		}
+		if actingAdmin {
+			return true
+		}
+		return h.hasAssignedMetadataCuration(ctx, claims.UserID)
 	}
 	if h == nil || h.UserRepo == nil {
 		return false
@@ -2594,4 +2618,19 @@ func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
 		return false
 	}
 	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+}
+
+// hasAssignedMetadataCuration reports whether the account has metadata
+// curation assigned explicitly, not by its admin role. A failed lookup fails
+// closed.
+func (h *ItemsHandler) hasAssignedMetadataCuration(ctx context.Context, userID int) bool {
+	if h == nil || h.UserRepo == nil {
+		return false
+	}
+	user, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "checking file path visibility permissions", "component", "api", "user_id", userID, "error", err)
+		return false
+	}
+	return user != nil && user.Enabled && auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
 }

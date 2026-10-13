@@ -137,7 +137,7 @@ func sanitizeProviderIDValue(key, value string) (string, bool) {
 		}
 	case "imdb":
 		value = strings.ToLower(value)
-		if !isValidIMDbProviderID(value) {
+		if !providerid.IsIMDbID(value) {
 			return "", false
 		}
 	}
@@ -153,15 +153,6 @@ func sanitizedMatchHintProviderIDs(hints *MatchHints) *MatchHints {
 	sanitized.TvdbID, _ = sanitizeProviderIDValue("tvdb", hints.TvdbID)
 	sanitized.ImdbID, _ = sanitizeProviderIDValue("imdb", hints.ImdbID)
 	return &sanitized
-}
-
-func isValidIMDbProviderID(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if !strings.HasPrefix(value, "tt") {
-		return false
-	}
-	digits := strings.TrimPrefix(value, "tt")
-	return len(digits) >= 7 && len(digits) <= 10 && providerid.IsPositiveDecimal(digits)
 }
 
 const (

@@ -170,7 +170,7 @@ const GenericRunError = "The import failed. Review the source configuration befo
 func PublicRunError(message string) string {
 	switch message {
 	case "", ErrRunConfigurationChanged.Error(), LegacyDispatchUnavailableMessage, StaleRunInterruptedMessage,
-		ErrPersonalCredentialsUnavailable.Error(), RunErrorSourceRejected, RunErrorStoppedEarly, RunErrorNotCompleted,
+		ErrPersonalCredentialsUnavailable.Error(), RunErrorSourceRejected, RunErrorStoppedEarly, RunErrorNotCompleted, RunErrorSourceTooLarge,
 		PrivateAddressMessage, BlockedAddressMessage:
 		return message
 	default:

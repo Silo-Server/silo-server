@@ -34,12 +34,23 @@ administrator, another reset) retires outstanding links without other writers
 knowing this table exists. Resolving also requires the account to be enabled and
 to use local password sign-in.
 
+**Retired on recovery email changes.** A database trigger deletes the account's
+link in the transaction that changes `users.email`, covering every account writer.
+Rolling back the email change preserves the link; restoring an earlier address
+does not revive a deleted link. The column's `citext` comparison treats a change
+of letter case as the same recovery identity. Issuance locks the account before
+the link and checks that its email still matches the address read for delivery.
+If the email changes first, no link is issued; if issuance wins, the email change
+deletes that link. Mail sent after a concurrent change can therefore carry only
+an unusable link to the previous address.
+
 **Uniform not-found.** Lookup and completion return the same `ErrNotFound` for
 unknown, expired, used, replaced, and outdated links, so a probe learns nothing.
 The public operations spend the `password_reset` per-IP rate-limit budget; with
 256-bit tokens this is anti-probe hygiene, not the guard.
 
-**One transaction.** Completion locks the link and account rows, re-checks
+**One transaction.** Completion locks the account before the link, matching
+issuance, promotion and recovery email changes. It re-checks
 expiry against `clock_timestamp()`, deletes the link, replaces the password,
 clears `password_change_required`, and revokes every login session the account
 owns or impersonates from, then commits. The same transaction revokes the

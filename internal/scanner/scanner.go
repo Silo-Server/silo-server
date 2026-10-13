@@ -542,6 +542,7 @@ func walkLogicalTree(
 	ignoreRulesStack []ignoreRules,
 	filePaths *[]string,
 	walkFailures *[]string,
+	sidecars SidecarListing,
 	readDir func(string) ([]os.DirEntry, error),
 ) error {
 	if ctx != nil {
@@ -571,7 +572,7 @@ func walkLogicalTree(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, readDir)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, sidecars, readDir)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
@@ -615,6 +616,9 @@ func walkLogicalTree(
 		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
+	if sidecars != nil {
+		sidecars.record(logicalPath, entries)
+	}
 
 	childRules, skip := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
 	if skip {
@@ -651,7 +655,7 @@ func walkLogicalTree(
 				if ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 					return err
 				}
 				continue
@@ -664,7 +668,7 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 				return err
 			}
 			continue
@@ -695,15 +699,27 @@ func walkLogicalTree(
 // matters: a dangling symlink is permanent, and protecting its entire library
 // root would suppress missing-file reconciliation there on every future scan.
 func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, error) {
+	filePaths, walkFailures, _, err := collectLogicalFilePathsAndSidecars(ctx, walkRoots, libraryType, libraryRoots)
+	return filePaths, walkFailures, err
+}
+
+// collectLogicalFilePathsAndSidecars is collectLogicalFilePaths that also
+// returns the local metadata sidecars in every directory a video walk read
+// (nil for other library types).
+func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, SidecarListing, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
 	walkFailures := make([]string, 0)
+	var sidecars SidecarListing
+	if mode == walkModeVideo || mode == walkModeMovie {
+		sidecars = make(SidecarListing)
+	}
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
@@ -719,12 +735,12 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, os.ReadDir); err != nil {
-			return nil, nil, err
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, os.ReadDir); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	return filePaths, walkFailures, nil
+	return filePaths, walkFailures, sidecars, nil
 }
 
 func (s *Scanner) scanPaths(
@@ -766,10 +782,11 @@ func (s *Scanner) scanPaths(
 		Message:      "Discovering media files",
 		CurrentScope: firstScope(reconcileRoots),
 	})
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -1682,10 +1699,11 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -1940,6 +1958,12 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
+	if src.Sidecars != nil {
+		if dst.Sidecars == nil {
+			dst.Sidecars = make(SidecarListing, len(src.Sidecars))
+		}
+		dst.Sidecars.merge(src.Sidecars)
+	}
 }
 
 // markMissingExcludingProtected marks every cataloged file the walk did not

@@ -79,6 +79,7 @@ type MediaFile struct {
 	SubtitleTracks               []SubtitleTrack    // JSONB
 	ExternalSubtitles            []ExternalSubtitle // JSONB
 	Chapters                     []MediaChapter     // JSONB; nil means not yet probed for chapters
+	MarkerThumbnails             []MarkerThumbnail  `json:"-"`
 	ChapterThumbnailRetryAfter   *time.Time
 	ChapterThumbnailFailureCount int
 	ChapterThumbnailLastError    string
@@ -142,6 +143,9 @@ type MediaFile struct {
 	FirstSeenScanRunID   string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+
+	// Non-nil only for an ephemeral on-demand overlay; fences canonical edits.
+	MarkerThumbnailBaseSegments []MarkerSegment `json:"-"`
 }
 
 // MediaChapter represents a single media chapter derived from embedded file metadata.
@@ -590,6 +594,11 @@ type ItemPerson struct {
 	Kind      PersonKind
 	Character string
 	SortOrder int
+	// LocalPhotoSource is a photo the item's local metadata (an NFO actor
+	// <thumb>) names for the person: a file:// sidecar or an http(s) URL. It
+	// travels through the metadata pipeline only; the person's photo takes it
+	// when the person has no cached photo (see metadata.applyLocalPersonPhotos).
+	LocalPhotoSource string
 }
 
 // AudiobookSeriesMembership captures a book's membership in an audiobook
@@ -707,6 +716,37 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
+	// set by the query that picks an episode card's artwork: true when the
+	// path is the episode's own still, false for season or series artwork, nil
+	// when no such query loaded the item. They travel with the paths so a
+	// cached item never pairs old artwork with newer provenance. json:"-"
+	// because some frozen v1 responses serialize MediaItem directly.
+	PosterIsEpisodeStill   *bool `json:"-"`
+	BackdropIsEpisodeStill *bool `json:"-"`
+	// Banner, thumb (landscape), clear art and disc art follow the poster,
+	// backdrop and logo slots. Clear art and disc art are cut-outs and, like
+	// the logo, carry no thumbhash. json:"-" for the same frozen v1 responses.
+	BannerPath         string `json:"-"`
+	BannerSourcePath   string `json:"-"`
+	BannerThumbhash    string `json:"-"`
+	ThumbPath          string `json:"-"`
+	ThumbSourcePath    string `json:"-"`
+	ThumbThumbhash     string `json:"-"`
+	ClearArtPath       string `json:"-"`
+	ClearArtSourcePath string `json:"-"`
+	DiscPath           string `json:"-"`
+	DiscSourcePath     string `json:"-"`
+}
+
+// ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops
+// row. Ordinal 1 is the second backdrop the item shows.
+type ItemBackdrop struct {
+	ID         int64
+	Ordinal    int
+	Path       string
+	SourcePath string
+	Thumbhash  string
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.

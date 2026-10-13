@@ -419,6 +419,7 @@ func (h *LibraryHandler) LibraryProviderDefaults(ctx context.Context, libraryTyp
 			ProviderSlug:         e.CapabilityID,
 			Priority:             e.Priority,
 			Enabled:              e.Enabled,
+			Local:                e.Local,
 		})
 	}
 	return out, nil
@@ -1280,6 +1281,7 @@ func (h *LibraryHandler) LibraryProviders(ctx context.Context, id int) (map[stri
 			ProviderSlug:         e.CapabilityID,
 			Priority:             e.Priority,
 			Enabled:              e.Enabled,
+			Local:                e.Local,
 		})
 	}
 	return levels, nil

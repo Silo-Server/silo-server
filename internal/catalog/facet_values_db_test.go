@@ -162,7 +162,7 @@ func TestSearchColumnFacetDB(t *testing.T) {
 		}
 		// Only the oversize marker is cached, so later keystrokes skip the
 		// list build.
-		if len(tiny.entries) != 1 || !tiny.lru.next.list.oversize {
+		if len(tiny.entries) != 1 || !tiny.lru.next.value.oversize {
 			t.Errorf("cache holds %d entries; want just the oversize marker", len(tiny.entries))
 		}
 	})

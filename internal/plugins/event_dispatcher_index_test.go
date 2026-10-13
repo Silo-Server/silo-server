@@ -97,8 +97,8 @@ type delivery struct {
 }
 
 // deliveryRecorder resolves every installation to a client that records the
-// call. fanOut waits for its deliveries, so a direct dispatch call has
-// finished recording by the time it returns.
+// call. dispatchBusEvent and dispatchEnvelope wait for their deliveries, so
+// they have finished recording by the time they return.
 type deliveryRecorder struct {
 	mu   sync.Mutex
 	seen []delivery
@@ -171,14 +171,14 @@ func mediaAdded() cache.Event {
 }
 
 // TestDispatcherStoreReadsPerEvent measures how many plugin store reads one
-// event costs once the dispatcher is warm. Progress and playback events reach
-// the dispatcher on every replica, so this count is paid per event per
-// replica.
+// event costs once the dispatcher is warm. Every progress and playback event
+// reaches the dispatcher on the replica that produced it, so this count is
+// paid per event.
 func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 	ctx := context.Background()
 	store := newIndexFixture()
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	// Warm up: the first event may build whatever the dispatcher caches.
 	d.dispatchBusEvent(ctx, mediaAdded())
@@ -234,15 +234,15 @@ func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 // TestDispatcherFollowsPluginsChangedFromAnotherReplica simulates an admin
 // enabling, then disabling, a plugin on another API replica: that replica
 // writes the database and publishes cache.EventPluginsChanged, which reaches
-// this replica's dispatcher over the event bus. Each notification costs one
-// rebuild (1+N store reads, spent on the notification itself), and the events
-// after it cost none.
+// this replica's dispatcher over the event bus. Each notification drops the
+// index, the next event rebuilds it (1+N store reads), and the events after
+// it cost none.
 func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	bus := newFakeBus()
 	store := newIndexFixture()
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(bus, nil, store, recorder, 4)
+	d := NewEventDispatcher(bus, nil, store, recorder, newMemoryDeliveryStore(), 4)
 	if err := d.Start(ctx); err != nil {
 		t.Fatalf("start dispatcher: %v", err)
 	}
@@ -250,9 +250,7 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 
 	publish := func() []int {
 		t.Helper()
-		if err := bus.Publish(ctx, cache.ChannelCatalog, mediaAdded()); err != nil {
-			t.Fatalf("publish: %v", err)
-		}
+		d.dispatchBusEvent(ctx, mediaAdded())
 		var ids []int
 		for _, delivered := range recorder.take() {
 			ids = append(ids, delivered.installationID)
@@ -290,32 +288,36 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 	}
 	wantReads("event before plugins_changed", 0)
 
-	// ListEnabled plus ListCapabilities for installations 1, 2, 3, and 5.
 	pluginsChanged("")
-	wantReads("plugins_changed after enable elsewhere", 5)
+	wantReads("plugins_changed after enable elsewhere", 0)
 	if got := sortedInts(publish()); !reflect.DeepEqual(got, []int{1, 5}) {
 		t.Fatalf("deliveries after enable elsewhere = %v, want [1 5]", got)
 	}
-	wantReads("event after enable elsewhere", 0)
+	// ListEnabled plus ListCapabilities for installations 1, 2, 3, and 5.
+	wantReads("first event after enable elsewhere", 5)
+	publish()
+	wantReads("next event after enable elsewhere", 0)
 
-	// ListEnabled plus ListCapabilities for installations 2, 3, and 5.
 	store.disable(1)
 	pluginsChanged(`{"installation_id":1}`)
-	wantReads("plugins_changed after disable elsewhere", 4)
+	wantReads("plugins_changed after disable elsewhere", 0)
 	if got := publish(); !reflect.DeepEqual(got, []int{5}) {
 		t.Fatalf("deliveries after disable elsewhere = %v, want [5]", got)
 	}
-	wantReads("event after disable elsewhere", 0)
+	// ListEnabled plus ListCapabilities for installations 2, 3, and 5.
+	wantReads("first event after disable elsewhere", 4)
+	publish()
+	wantReads("next event after disable elsewhere", 0)
 }
 
 // TestServiceLifecycleChangeRebuildsDispatcherIndex covers a change made on
 // this replica: OnLifecycleChange runs after every install, enable, disable,
-// upgrade, and uninstall. Without an event bus the next event rebuilds the
-// index. With one, main.go registers PublishLifecycleChanges before
+// upgrade, and uninstall, and the next event rebuilds the index. With an
+// event bus, main.go registers PublishLifecycleChanges before
 // SetEventDispatcher, and this replica's dispatcher also receives its own
-// plugins_changed; that echo must not cost a second rebuild. The fake bus
-// delivers the echo while the publish hook runs, before any hook registered
-// after it.
+// plugins_changed; that echo only drops the index again and costs no second
+// rebuild. The fake bus delivers the echo while the publish hook runs, before
+// any hook registered after it.
 func TestServiceLifecycleChangeRebuildsDispatcherIndex(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -328,10 +330,10 @@ func TestServiceLifecycleChangeRebuildsDispatcherIndex(t *testing.T) {
 		eventReads  int
 	}{
 		{name: "without event bus", echo: false, changeReads: 0, eventReads: 5},
-		{name: "with plugins_changed echo", echo: true, changeReads: 5, eventReads: 0},
+		{name: "with plugins_changed echo", echo: true, changeReads: 0, eventReads: 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := newIndexFixture()
 			recorder := &deliveryRecorder{}
 			svc := &Service{}
@@ -340,7 +342,7 @@ func TestServiceLifecycleChangeRebuildsDispatcherIndex(t *testing.T) {
 				bus = newFakeBus()
 				svc.PublishLifecycleChanges(bus)
 			}
-			d := NewEventDispatcher(bus, nil, store, recorder, 4)
+			d := NewEventDispatcher(bus, nil, store, recorder, newMemoryDeliveryStore(), 4)
 			if err := d.Start(ctx); err != nil {
 				t.Fatalf("start dispatcher: %v", err)
 			}
@@ -384,7 +386,7 @@ func TestServiceLifecycleChangeRebuildsDispatcherIndex(t *testing.T) {
 func TestDispatcherDeliversOncePerInstallation(t *testing.T) {
 	ctx := context.Background()
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(newFakeBus(), nil, newIndexFixture(), recorder, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, newIndexFixture(), recorder, newMemoryDeliveryStore(), 4)
 
 	d.dispatchBusEvent(ctx, mediaAdded())
 	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
@@ -404,7 +406,7 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 	ctx := context.Background()
 	store := newIndexFixture()
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	store.onListEnabled = d.invalidateIndex
 	d.dispatchBusEvent(ctx, mediaAdded())
@@ -433,7 +435,7 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 func TestDispatcherIndexExpires(t *testing.T) {
 	ctx := context.Background()
 	store := newIndexFixture()
-	d := NewEventDispatcher(newFakeBus(), nil, store, &deliveryRecorder{}, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, store, &deliveryRecorder{}, newMemoryDeliveryStore(), 4)
 	now := time.Unix(1_700_000_000, 0)
 	d.now = func() time.Time { return now }
 
@@ -463,7 +465,7 @@ func TestDispatcherTargetedEventReachesOnlyTarget(t *testing.T) {
 		eventConsumer(5, "watcher", "plugin.silo.alpha.submitted"),
 	)
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	d.dispatchEnvelope(ctx, events.Envelope{Channel: events.ChannelPlugins, Event: "plugin.silo.alpha.submitted"})
 	if got := len(recorder.take()); got != 2 {
@@ -502,7 +504,7 @@ func TestDispatcherIndexWithUnreadableInstallationIsNotKept(t *testing.T) {
 	)
 	store.capabilitiesErr = map[int]error{5: errors.New("connection reset")}
 	recorder := &deliveryRecorder{}
-	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, 4)
+	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	d.dispatchBusEvent(ctx, mediaAdded())
 	if got := recorder.take(); len(got) != 1 || got[0].installationID != 1 {
@@ -526,4 +528,29 @@ func sortedInts(values []int) []int {
 	out := slices.Clone(values)
 	slices.Sort(out)
 	return out
+}
+
+// TestLifecycleChangeIsAnnouncedBeforeSlowHooks: another API server stores
+// the events it produces by its own subscriber index until plugins_changed
+// reaches it, so the announcement goes out before slow hooks such as the
+// resident reconcile.
+func TestLifecycleChangeIsAnnouncedBeforeSlowHooks(t *testing.T) {
+	ctx := t.Context()
+	svc := &Service{}
+	var order []string
+	svc.AddLifecycleHook(func(context.Context) { order = append(order, "reconcile") })
+	bus := newFakeBus()
+	if err := bus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type == cache.EventPluginsChanged {
+			order = append(order, "announce")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.PublishLifecycleChanges(bus)
+
+	svc.OnLifecycleChange(ctx)
+	if want := []string{"announce", "reconcile"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
 }

@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -117,6 +118,21 @@ type loginResolver interface {
 	Resolve(ctx context.Context, combinedUsername, password, userAgent, remoteIP string) (*Session, error)
 }
 
+// quickConnectLogin is the login resolver's Quick Connect exchange
+// (LoginResolver.ResolveQuickConnect).
+type quickConnectLogin interface {
+	ResolveQuickConnect(ctx context.Context, secret string) (*Session, error)
+}
+
+// quickConnectRequest is Jellyfin's QuickConnectDto.
+type quickConnectRequest struct {
+	Secret string `json:"Secret"`
+}
+
+// maxQuickConnectBody bounds the AuthenticateWithQuickConnect body, which
+// holds one 64-character secret.
+const maxQuickConnectBody = 4 << 10
+
 // AuthHandler serves Jellyfin login/current-user routes.
 type AuthHandler struct {
 	cfg           func() *config.Config
@@ -140,10 +156,18 @@ func (h *AuthHandler) HandlePublicUsers(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, []any{})
 }
 
+// maxAuthenticateByNameBodyBytes bounds the anonymous sign-in body, which
+// holds only a username and password.
+const maxAuthenticateByNameBodyBytes = 64 << 10
+
 // HandleAuthenticateByName serves POST /Users/AuthenticateByName.
 func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Request) {
 	var req authenticateByNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAuthenticateByNameBodyBytes)).Decode(&req); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, "PayloadTooLarge", "Request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid request body")
 		return
 	}
@@ -170,6 +194,48 @@ func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Re
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, authenticateByNameResponse{
+		AccessToken: session.Token,
+		ServerID:    h.cfg().JellyfinCompat.ServerID,
+		User:        user,
+		SessionInfo: h.sessionInfo(session),
+	})
+}
+
+// HandleAuthenticateWithQuickConnect serves POST
+// /Users/AuthenticateWithQuickConnect: the secret of an approved Quick
+// Connect request buys one session, answered as AuthenticateByName answers.
+// A secret that is not an approved, uncollected request is 404, as Jellyfin
+// answers one it does not hold.
+func (h *AuthHandler) HandleAuthenticateWithQuickConnect(w http.ResponseWriter, r *http.Request) {
+	quick, ok := h.loginResolver.(quickConnectLogin)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", quickConnectDisabledMessage)
+		return
+	}
+	var req quickConnectRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQuickConnectBody)).Decode(&req); err != nil || req.Secret == "" {
+		writeError(w, http.StatusBadRequest, "BadRequest", "The secret is required")
+		return
+	}
+	session, err := quick.ResolveQuickConnect(r.Context(), req.Secret)
+	if errors.Is(err, ErrQuickConnectNotAuthorized) {
+		writeError(w, http.StatusNotFound, "NotFound", "Unable to find request")
+		return
+	}
+	if err != nil {
+		status, code, message := mapLoginError(err)
+		writeError(w, status, code, message)
+		return
+	}
+	attributeActivity(r, session)
+
+	user, err := h.resolvedUserDTO(r.Context(), session)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, authenticateByNameResponse{
 		AccessToken: session.Token,
 		ServerID:    h.cfg().JellyfinCompat.ServerID,

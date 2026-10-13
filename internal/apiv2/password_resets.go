@@ -135,8 +135,10 @@ func passwordResetProblem(err error) *Problem {
 		return NewProblem(TypeNotFound, "Account not found.")
 	case errors.Is(err, auth.ErrPasswordLoginDisabled):
 		return NewProblem(TypeConflict, "An external provider manages this account's sign-in; it has no password to reset.")
-	case errors.Is(err, passwordreset.ErrAccountDisabled), errors.Is(err, passwordreset.ErrNotEligible):
+	case errors.Is(err, passwordreset.ErrAccountDisabled):
 		return NewProblem(TypeConflict, "The account is disabled or does not sign in with a password.")
+	case errors.Is(err, passwordreset.ErrNotEligible):
+		return NewProblem(TypeConflict, "The account changed while issuing the reset link. Reload the account and try again.")
 	case errors.Is(err, passwordreset.ErrNoEmail):
 		return NewProblem(TypeConflict, "The account has no email address; share a reset link instead.")
 	case errors.Is(err, mail.ErrNotConfigured):

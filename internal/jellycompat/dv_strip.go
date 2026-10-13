@@ -172,10 +172,10 @@ func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool
 		return false
 	}
 	for _, nodeURL := range enumerator.TranscodeNodeURLs() {
-		// The URL list includes unhealthy nodes; only a node route selection
-		// could pick right now makes the strip executable.
+		// The URL list includes unhealthy and draining nodes; only a node route
+		// selection could pick right now makes the strip executable.
 		node, ok := lookup.TranscodeNodeByURL(nodeURL)
-		if !ok || !node.Enabled || !node.Healthy {
+		if !ok || !node.TakesNewWork() {
 			continue
 		}
 		if info, ok := compatNodeReport(node); ok && compatSupportsDVStrip(info.Transformations) &&

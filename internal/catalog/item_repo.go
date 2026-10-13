@@ -5,16 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -204,12 +207,23 @@ const (
 	advisorySourceColumn = "advisory_source"
 )
 
+// Served-path columns of the banner, thumb, clear art and disc slots, shared
+// by the item select lists in this package.
+const (
+	bannerPathColumn   = "banner_path"
+	thumbPathColumn    = "thumb_path"
+	clearArtPathColumn = "clearart_path"
+	discPathColumn     = "disc_path"
+)
+
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
 	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_source_path", "backdrop_thumbhash", "logo_path", "logo_source_path",
+	bannerPathColumn, "banner_source_path", "banner_thumbhash", thumbPathColumn, "thumb_source_path", "thumb_thumbhash",
+	clearArtPathColumn, "clearart_source_path", discPathColumn, "disc_source_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -319,6 +333,16 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.BackdropThumbhash,
 		&item.LogoPath,
 		&item.LogoSourcePath,
+		&item.BannerPath,
+		&item.BannerSourcePath,
+		&item.BannerThumbhash,
+		&item.ThumbPath,
+		&item.ThumbSourcePath,
+		&item.ThumbThumbhash,
+		&item.ClearArtPath,
+		&item.ClearArtSourcePath,
+		&item.DiscPath,
+		&item.DiscSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -387,6 +411,16 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.BackdropThumbhash,
 		&item.LogoPath,
 		&item.LogoSourcePath,
+		&item.BannerPath,
+		&item.BannerSourcePath,
+		&item.BannerThumbhash,
+		&item.ThumbPath,
+		&item.ThumbSourcePath,
+		&item.ThumbThumbhash,
+		&item.ClearArtPath,
+		&item.ClearArtSourcePath,
+		&item.DiscPath,
+		&item.DiscSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -615,7 +649,9 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			matched_at, last_refreshed, refresh_failures,
 			episode_metadata_incomplete, episode_metadata_last_checked_at, status,
 			content_rating_age,
-			advisory_age, advisory_source
+			advisory_age, advisory_source,
+			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
+			clearart_path, clearart_source_path, disc_path, disc_source_path
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -628,7 +664,9 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$42, $43, $44,
 			$45, $46, $47,
 			$48,
-			$49, $50
+			$49, $50,
+			$51, $52, $53, $54, $55, $56,
+			$57, $58, $59, $60
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -684,6 +722,16 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age = EXCLUDED.content_rating_age,
 			advisory_age = EXCLUDED.advisory_age,
 			advisory_source = EXCLUDED.advisory_source,
+			banner_path = EXCLUDED.banner_path,
+			banner_source_path = EXCLUDED.banner_source_path,
+			banner_thumbhash = EXCLUDED.banner_thumbhash,
+			thumb_path = EXCLUDED.thumb_path,
+			thumb_source_path = EXCLUDED.thumb_source_path,
+			thumb_thumbhash = EXCLUDED.thumb_thumbhash,
+			clearart_path = EXCLUDED.clearart_path,
+			clearart_source_path = EXCLUDED.clearart_source_path,
+			disc_path = EXCLUDED.disc_path,
+			disc_source_path = EXCLUDED.disc_source_path,
 			updated_at = NOW()`
 	}
 
@@ -743,6 +791,16 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		contentRatingAge,
 		advisoryAge,
 		advisorySource,
+		item.BannerPath,
+		item.BannerSourcePath,
+		item.BannerThumbhash,
+		item.ThumbPath,
+		item.ThumbSourcePath,
+		item.ThumbThumbhash,
+		item.ClearArtPath,
+		item.ClearArtSourcePath,
+		item.DiscPath,
+		item.DiscSourcePath,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)
@@ -1060,6 +1118,12 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 	// Collect image paths before deletion.
 	imgRows, err := tx.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT banner_path, thumb_path, clearart_path FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT disc_path, '', '' FROM media_items WHERE content_id = $1
+		UNION ALL
+		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = $1
 		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = $1
 		UNION ALL
@@ -1483,26 +1547,108 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	if !ok || len(titleTokens) == 0 {
 		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
 	}
+	// Compare without spaces so "Live Stream From Hell" is an exact match for
+	// "Livestream from Hell" and "spiderman" for "Spider-Man".
+	compactTitle, compactQuery := compactFuzzyTokens(titleTokens), compactFuzzyTokens(queryTokens)
 	score := fuzzyTitleScore{
-		exact:       title == query,
-		contiguous:  strings.Contains(title, query),
+		exact:       compactTitle == compactQuery,
+		contiguous:  strings.Contains(compactTitle, compactQuery),
 		extraTokens: absInt(len(titleTokens) - len(queryTokens)),
 	}
-	for _, queryToken := range queryTokens {
-		maxEdits := fuzzyAutoMaxEdits(len(queryToken))
-		best := maxEdits + 1
-		for _, titleToken := range titleTokens {
-			distance := boundedLevenshteinRunes(queryToken, titleToken, maxEdits)
-			if distance < best {
-				best = distance
+	// A query word may also match two adjacent title words joined, and two
+	// adjacent query words joined may match one title word.
+	titleTerms := slices.Concat(titleTokens, joinAdjacentFuzzyTokens(titleTokens))
+	matches := make([]fuzzyTokenMatch, len(queryTokens))
+	for i, token := range queryTokens {
+		matches[i] = bestFuzzyTokenMatch(token, titleTerms)
+	}
+	for i := 0; i < len(queryTokens); i++ {
+		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) && fuzzyTokensJoinable(queryTokens[i], queryTokens[i+1]) {
+			if pair := bestFuzzyPairMatch(queryTokens[i], queryTokens[i+1], titleTerms); pair.ok {
+				score.matchedTokens += 2
+				score.editDistance += pair.distance
+				i++
+				continue
 			}
 		}
-		if best <= maxEdits {
+		if matches[i].ok {
 			score.matchedTokens++
 		}
-		score.editDistance += best
+		score.editDistance += matches[i].distance
 	}
 	return score
+}
+
+type fuzzyTokenMatch struct {
+	distance int
+	ok       bool // distance is within the token's typo allowance
+}
+
+func bestFuzzyTokenMatch(token []rune, terms [][]rune) fuzzyTokenMatch {
+	maxEdits := fuzzyAutoMaxEdits(len(token))
+	best := maxEdits + 1
+	for _, term := range terms {
+		if distance := boundedLevenshteinRunes(token, term, maxEdits); distance < best {
+			best = distance
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= maxEdits}
+}
+
+// bestFuzzyPairMatch matches two adjacent query words against one term split
+// into two parts, each part within its own word's typo allowance. Splitting
+// keeps a short word from being dropped: "ed wood" does not match "Wood", nor
+// "a spider" match "Spider".
+func bestFuzzyPairMatch(first, second []rune, terms [][]rune) fuzzyTokenMatch {
+	firstEdits, secondEdits := fuzzyAutoMaxEdits(len(first)), fuzzyAutoMaxEdits(len(second))
+	best := firstEdits + secondEdits + 1
+	for _, term := range terms {
+		if absInt(len(term)-len(first)-len(second)) > firstEdits+secondEdits {
+			continue
+		}
+		for split := max(0, len(first)-firstEdits); split <= min(len(term), len(first)+firstEdits); split++ {
+			head := boundedLevenshteinRunes(first, term[:split], firstEdits)
+			if head > firstEdits {
+				continue
+			}
+			if tail := boundedLevenshteinRunes(second, term[split:], secondEdits); tail <= secondEdits {
+				best = min(best, head+tail)
+			}
+		}
+	}
+	return fuzzyTokenMatch{distance: best, ok: best <= firstEdits+secondEdits}
+}
+
+func joinAdjacentFuzzyTokens(tokens [][]rune) [][]rune {
+	if len(tokens) < 2 {
+		return nil
+	}
+	joined := make([][]rune, 0, len(tokens)-1)
+	for i := 0; i+1 < len(tokens); i++ {
+		if fuzzyTokensJoinable(tokens[i], tokens[i+1]) {
+			joined = append(joined, slices.Concat(tokens[i], tokens[i+1]))
+		}
+	}
+	return joined
+}
+
+// compactFuzzyTokens joins tokens without spaces, except between two numbers.
+func compactFuzzyTokens(tokens [][]rune) string {
+	var b strings.Builder
+	for i, token := range tokens {
+		if i > 0 && !fuzzyTokensJoinable(tokens[i-1], token) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(string(token))
+	}
+	return b.String()
+}
+
+// fuzzyTokensJoinable reports whether two adjacent words may be read as one.
+// Normalization turns number words into digits, so joining "1 2" into "12"
+// would make "One Two" an exact match for "Twelve".
+func fuzzyTokensJoinable(left, right []rune) bool {
+	return !unicode.IsDigit(left[len(left)-1]) || !unicode.IsDigit(right[0])
 }
 
 func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {
@@ -2216,7 +2362,8 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 }
 
 // UpdateMetadata builds a dynamic UPDATE query for the media_items table,
-// setting only the non-nil fields in upd. Always bumps updated_at.
+// setting only the non-nil fields in upd and NULLing the ones it clears. A
+// cleared rating also loses its per-source row. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
 	tx, err := r.pool.Begin(ctx)
@@ -2343,6 +2490,7 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 		setClauses = append(setClauses, "logo_source_path = ''")
 	}
 	addString("logo_source_path", upd.LogoSourcePath)
+	setClauses = append(setClauses, upd.nullClauses(itemClearableColumns...)...)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
@@ -2356,6 +2504,16 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
+	}
+	// The UPDATE above locked the item row before its rating sources, the
+	// order every rating source writer follows (see lockRatingSourceItem).
+	if sources := upd.clearedRatingSources(); len(sources) > 0 {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM media_item_rating_sources
+			WHERE content_id = $1 AND source = ANY($2::text[])`,
+			contentID, sources); err != nil {
+			return fmt.Errorf("deleting cleared rating sources: %w", err)
+		}
 	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
@@ -2399,6 +2557,27 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND logo_source_path = $2`
+		args = []any{contentID, sourcePath, cachedPath}
+	case artworkkey.ImageBanner, artworkkey.ImageThumb:
+		// imageType is one of the two literals matched above, so it is safe
+		// to splice into the column names.
+		query = fmt.Sprintf(`
+			UPDATE media_items
+			SET %[1]s_path = $3,
+				%[1]s_source_path = $2,
+				%[1]s_thumbhash = $4,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND %[1]s_source_path = $2`, imageType)
+		args = []any{contentID, sourcePath, cachedPath, thumbhash}
+	case artworkkey.ImageClearArt, artworkkey.ImageDisc:
+		query = fmt.Sprintf(`
+			UPDATE media_items
+			SET %[1]s_path = $3,
+				%[1]s_source_path = $2,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND %[1]s_source_path = $2`, imageType)
 		args = []any{contentID, sourcePath, cachedPath}
 	default:
 		return false, fmt.Errorf("unsupported media item artwork type %q", imageType)

@@ -140,8 +140,9 @@ delivery classes a client negotiates in. §4 gives the folding.
 entries come from the installed FFmpeg probe; pooled transcode nodes contribute
 their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
 administrator-enabled hardware or software policy and a successful device-level
-smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind. A
-client must not assume a
+smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind, or,
+for Dolby Vision Profile 5 and compatibility ID `0`, the `dolby_vision` kind,
+which only RPU-applying executors smoke. A client must not assume a
 transformation exists because this document names it.
 
 `enabled` survives from the rollout period and is now constant `true`; the
@@ -206,7 +207,7 @@ constant:
 | Field | Omitted | Present |
 | --- | --- | --- |
 | `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary). It is required when `progress_persistence` is `client` | Exactly that position. `0` means *start over* |
-| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable` |
+| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override. Only tracks FFmpeg can decode are candidates while the file has one, so a track ffprobe names no codec for (AVS3 audio, for example) is passed over | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable`. A track FFmpeg cannot decode ends in the non-retryable `audio_conversion_unsupported` terminal |
 
 `progress_persistence` separates the live session clock from durable resume
 ownership. Omission (or `server`) means session progress may update the item's
@@ -1252,7 +1253,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+`subtitle_conversion_unsupported`. `audio_conversion_unsupported` is not
+retryable when the selected audio track has no codec FFmpeg can name, and so
+no decoder: the planner refuses it before any route is tried, and choosing
+another track is the remedy. `source_metadata_incomplete` is retryable:
 the file has not been probed yet or lacks a field a route needs.
 `source_unreadable` is not: ffprobe rejected the effective file (empty,
 corrupt, truncated) and it carries no stream metadata. The scanner and the
@@ -1648,7 +1652,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and a bounded silent-frame smoke test executes the exact stereo-downmix limiter graph |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
-| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor |
+| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor. The Dolby Vision kind is smoke-tested only on executors whose filter applies an RPU (`tonemapx`, `tonemap_opencl`, `tonemap_cuda`, each run with `apply_dovi=1`) |
 
 `GET /playback/capability` reports the union of currently eligible local and
 pooled executors. The generic tone-map transformation does not reveal hardware
@@ -1657,8 +1661,21 @@ recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
-legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR. ID `0`,
-Profile 5, and a declared absent base layer remain unsupported. Missing,
+legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
+resolve to the `dolby_vision` source kind. Only executors that apply the RPU
+advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC
+`tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot, so a
+pool of those executors still refuses these sources with
+`hdr_transcode_unsupported`. A source without an RPU, or with a declared absent
+base layer, remains unsupported. Profile 5 is accepted from its configuration
+record. ID `0` on any other profile says nothing about the base, so it is
+accepted only when the stream is tagged PQ, and the decoded samples must carry
+both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
+SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
+complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
+other kinds cached. A `dolby_vision` smoke that fails for any other reason is
+retried after five minutes instead of being cached. Missing,
 reserved, legacy, or contradictory signaling
 is only a candidate classification: the selected executor must successfully
 decode and normalize samples near the beginning, midpoint, and end before the
@@ -1744,9 +1761,10 @@ unverified bytes.
 
 **Ambiguous Dolby Vision provenance fails closed.** Resolving a DV source for
 tone mapping requires authoritative evidence that the configuration record was
-present, that the base-layer compatibility ID was present and nonzero, and that
-a base layer exists. Profile 5 and incomplete provenance are refused rather than
-guessed at. Because a row written before the provenance columns existed decodes
+present, that the base-layer compatibility ID was present, and that a base
+layer exists. Profile 5 and compatibility ID `0` additionally need an RPU and
+an executor that applies it (see the `dolby_vision` source kind above), and
+incomplete provenance is refused rather than guessed at. Because a row written before the provenance columns existed decodes
 to explicit `false` — indistinguishable from a source that genuinely has none —
 the scanner records whether those keys were literally present, and a row that
 predates them is reprobed once rather than trusted. A failed repair probe
