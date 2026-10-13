@@ -26,7 +26,7 @@ INSERT INTO access_groups (id, name) VALUES (1, 'Household'), (2, 'Guests');
 INSERT INTO users (id, role, access_group_id) VALUES (1, 'user', 1), (2, 'user', 2), (4, 'admin', 2), (5, 'user', NULL);
 INSERT INTO users (id, role, access_group_id, max_profiles) VALUES (3, 'user', 1, 2), (6, 'admin', 2, 8);`)
 
-	const migration = "20261011230133_access_group_max_profiles"
+	const migration = "20261013231605_access_group_max_profiles"
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, false))
 
 	// A stored 5 was the default and now inherits; other values stay overrides.
