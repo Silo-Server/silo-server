@@ -1,8 +1,9 @@
 {
-  "revision": "7d9cdfc989ebf949d76d1e3d8b9b8bb99f8b68c4082b535dbd665fc513bca3ec",
+  "revision": "bb7c9622c71dd44c107f2aa42e5d4253e853209fbffac2d7e851b96bfa9b557f",
   "state": "available",
   "allowed": true,
   "episode_still_provenance": true,
+  "extended_item_artwork": true,
   "season_list_artwork_param": "include_artwork",
   "param": "image_size",
   "sizes": [
@@ -16,6 +17,21 @@
       "small": 300,
       "medium": 1920,
       "large": 1920
+    },
+    "banner": {
+      "small": 500,
+      "medium": 500,
+      "large": 1000
+    },
+    "clearart": {
+      "small": 500,
+      "medium": 500,
+      "large": 1000
+    },
+    "disc": {
+      "small": 300,
+      "medium": 500,
+      "large": 1000
     },
     "logo": {
       "small": 500,
@@ -36,6 +52,11 @@
       "small": 300,
       "medium": 500,
       "large": 780
+    },
+    "thumb": {
+      "small": 300,
+      "medium": 500,
+      "large": 1280
     }
   },
   "original_max_width_px": 1920,

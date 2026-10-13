@@ -435,6 +435,7 @@ type MetadataService struct {
 	libraryRepo             metadataLibraryRepo
 	folderRepo              metadataFolderRepo
 	itemLocalizationRepo    *catalog.MediaItemLocalizationRepository
+	itemBackdropRepo        metadataItemBackdropRepo
 	itemAliasRepo           *catalog.ItemAliasRepository
 	seasonLocalizationRepo  metadataSeasonLocalizationRepo
 	episodeLocalizationRepo metadataEpisodeLocalizationRepo
@@ -453,6 +454,7 @@ type MetadataService struct {
 	scannedGroupRepo        metadataScannedGroupRepo
 	groupOverrideRepo       metadataGroupOverrideRepo
 	observedLocationRepo    metadataObservedLocationRepo
+	localSidecars           localSidecarStore
 	dbPool                  *pgxpool.Pool
 
 	dedupLocks      keyedDedupLocks
@@ -462,6 +464,7 @@ type MetadataService struct {
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
 	imageCacheJobs  ImageCacheJobEnqueuer
+	localArtwork    LocalArtworkCopier
 	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
 	imageResolver   interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
@@ -528,6 +531,7 @@ func NewMetadataService(
 	rootClaimRepo *catalog.RootClaimRepository,
 ) *MetadataService {
 	var itemLocalizationRepo *catalog.MediaItemLocalizationRepository
+	var itemBackdropRepo metadataItemBackdropRepo
 	var itemAliasRepo *catalog.ItemAliasRepository
 	var seasonLocalizationRepo metadataSeasonLocalizationRepo
 	var episodeLocalizationRepo metadataEpisodeLocalizationRepo
@@ -547,6 +551,7 @@ func NewMetadataService(
 		enrichmentState = newEnrichmentStateRepository(pool)
 		ratingSourceRepo = catalog.NewRatingSourceRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
+		itemBackdropRepo = catalog.NewItemBackdropRepository(pool)
 		itemAliasRepo = catalog.NewItemAliasRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
 		episodeLocalizationRepo = catalog.NewEpisodeLocalizationRepository(pool)
@@ -567,6 +572,7 @@ func NewMetadataService(
 		libraryRepo:             libraryRepo,
 		folderRepo:              folderRepo,
 		itemLocalizationRepo:    itemLocalizationRepo,
+		itemBackdropRepo:        itemBackdropRepo,
 		itemAliasRepo:           itemAliasRepo,
 		seasonLocalizationRepo:  seasonLocalizationRepo,
 		episodeLocalizationRepo: episodeLocalizationRepo,
@@ -607,7 +613,8 @@ func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueue
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
 // provider images into object storage. Explicit admin image applies still use
-// the configured image cacher when available. Safe for concurrent use.
+// the configured image cacher when available, and local sidecar artwork is
+// copied either way. Safe for concurrent use.
 func (s *MetadataService) SetAutoCacheImages(enabled bool) {
 	s.autoCacheImages.Store(enabled)
 }
@@ -1038,16 +1045,34 @@ func compactMetadataLanguages(values []string) []string {
 }
 
 func (s *MetadataService) localProviderContextForContent(ctx context.Context, contentID string, folderID int) localProviderContext {
+	localCtx, _ := s.buildLocalProviderContext(ctx, contentID, folderID, false)
+	return localCtx
+}
+
+// loadLocalProviderContext is localProviderContextForContent that also
+// reports a failure to read the item's files or their observed roots, which
+// would otherwise look like an item without local sidecars.
+func (s *MetadataService) loadLocalProviderContext(ctx context.Context, contentID string, folderID int) (localProviderContext, error) {
+	return s.buildLocalProviderContext(ctx, contentID, folderID, true)
+}
+
+// buildLocalProviderContext loads the local-provider context of an item's
+// files in a library. Strict, it fails when an observed root cannot be looked
+// up; otherwise such a root is only left out, as before.
+func (s *MetadataService) buildLocalProviderContext(ctx context.Context, contentID string, folderID int, strict bool) (localProviderContext, error) {
 	if s == nil || s.fileRepo == nil || contentID == "" {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
 	lister, ok := s.fileRepo.(metadataContentFileLister)
 	if !ok {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
 	files, err := lister.GetByContentID(ctx, contentID)
-	if err != nil || len(files) == 0 {
-		return localProviderContext{}
+	if err != nil {
+		return localProviderContext{}, fmt.Errorf("loading files of %s: %w", contentID, err)
+	}
+	if len(files) == 0 {
+		return localProviderContext{}, nil
 	}
 	if folderID > 0 {
 		filtered := files[:0]
@@ -1058,7 +1083,7 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		}
 		files = filtered
 		if len(files) == 0 {
-			return localProviderContext{}
+			return localProviderContext{}, nil
 		}
 	}
 
@@ -1077,17 +1102,26 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		groupFilePaths = append(groupFilePaths, file.FilePath)
 	}
 	if representativeFilePath == "" {
-		return localProviderContext{}
+		return localProviderContext{}, nil
 	}
-	if representativeFile != nil && representativeFile.ObservedRootPath != "" &&
-		s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			representativeFile.MediaFolderID,
-			representativeFile.ObservedRootPath,
-			representativeFile.GroupKeyVersion,
-			representativeFile.ContentGroupKey,
-		) {
-		observedRootPath = representativeFile.ObservedRootPath
+	usableRoot := func(file *models.MediaFile) (bool, error) {
+		if strict {
+			return s.observedRootUsableForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey)
+		}
+		return s.canUseObservedRootForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey), nil
+	}
+	if representativeFile != nil && representativeFile.ObservedRootPath != "" {
+		usable, err := usableRoot(representativeFile)
+		if err != nil {
+			return localProviderContext{}, fmt.Errorf("loading observed root of %s: %w", contentID, err)
+		}
+		if usable {
+			observedRootPath = representativeFile.ObservedRootPath
+		}
+	}
+	searchPaths, err := s.collectDirectorySidecarSearchPaths(files, usableRoot)
+	if err != nil {
+		return localProviderContext{}, fmt.Errorf("loading observed roots of %s: %w", contentID, err)
 	}
 
 	return localProviderContext{
@@ -1095,8 +1129,8 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 		representativeFilePath:    representativeFilePath,
 		observedRootPath:          observedRootPath,
 		allGroupFilePaths:         compactUniqueFilePaths(groupFilePaths),
-		primarySidecarSearchPaths: s.directorySidecarSearchPathsForFiles(ctx, files),
-	}
+		primarySidecarSearchPaths: searchPaths,
+	}, nil
 }
 
 // seriesChildLocalContext carries the local-sidecar context for season- and
@@ -1149,26 +1183,30 @@ func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context,
 }
 
 func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Context, files []*models.MediaFile) []string {
+	paths, _ := s.collectDirectorySidecarSearchPaths(files, func(file *models.MediaFile) (bool, error) {
+		return s.canUseObservedRootForDirectorySidecars(ctx, file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey), nil
+	})
+	return paths
+}
+
+func (s *MetadataService) collectDirectorySidecarSearchPaths(files []*models.MediaFile, usable func(*models.MediaFile) (bool, error)) ([]string, error) {
 	if len(files) == 0 {
-		return nil
+		return nil, nil
 	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file == nil || file.ObservedRootPath == "" {
 			continue
 		}
-		if !s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			file.MediaFolderID,
-			file.ObservedRootPath,
-			file.GroupKeyVersion,
-			file.ContentGroupKey,
-		) {
-			continue
+		ok, err := usable(file)
+		if err != nil {
+			return nil, err
 		}
-		paths = append(paths, file.ObservedRootPath)
+		if ok {
+			paths = append(paths, file.ObservedRootPath)
+		}
 	}
-	return compactUniqueFilePaths(paths)
+	return compactUniqueFilePaths(paths), nil
 }
 
 func (s *MetadataService) canUseObservedRootForDirectorySidecars(
@@ -1178,32 +1216,48 @@ func (s *MetadataService) canUseObservedRootForDirectorySidecars(
 	groupKeyVersion int,
 	contentGroupKey string,
 ) bool {
-	cleanRoot := filepath.Clean(strings.TrimSpace(observedRootPath))
-	if cleanRoot == "" || cleanRoot == "." {
-		return false
-	}
-	if s == nil || s.observedLocationRepo == nil || folderID <= 0 {
-		return true
-	}
-	location, err := s.observedLocationRepo.Get(ctx, folderID, cleanRoot)
+	usable, err := s.observedRootUsableForDirectorySidecars(ctx, folderID, observedRootPath, groupKeyVersion, contentGroupKey)
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: observed location lookup failed", "component", "metadata",
 			"folder_id", folderID,
-			"observed_root_path", cleanRoot,
+			"observed_root_path", filepath.Clean(strings.TrimSpace(observedRootPath)),
 			"error", err,
 		)
 		return false
 	}
+	return usable
+}
+
+// observedRootUsableForDirectorySidecars is canUseObservedRootForDirectorySidecars
+// that returns a failed lookup instead of reading it as an unusable root.
+func (s *MetadataService) observedRootUsableForDirectorySidecars(
+	ctx context.Context,
+	folderID int,
+	observedRootPath string,
+	groupKeyVersion int,
+	contentGroupKey string,
+) (bool, error) {
+	cleanRoot := filepath.Clean(strings.TrimSpace(observedRootPath))
+	if cleanRoot == "" || cleanRoot == "." {
+		return false, nil
+	}
+	if s == nil || s.observedLocationRepo == nil || folderID <= 0 {
+		return true, nil
+	}
+	location, err := s.observedLocationRepo.Get(ctx, folderID, cleanRoot)
+	if err != nil {
+		return false, err
+	}
 	if location == nil || location.ContentGroupCount > 1 {
-		return false
+		return false, nil
 	}
 	if groupKeyVersion != 0 && location.PrimaryGroupKeyVersion != 0 && location.PrimaryGroupKeyVersion != groupKeyVersion {
-		return false
+		return false, nil
 	}
 	if contentGroupKey != "" && location.PrimaryContentGroupKey != "" && location.PrimaryContentGroupKey != contentGroupKey {
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 func compactUniqueFilePaths(paths []string) []string {
@@ -1929,6 +1983,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	// enrichedBy lists the enrichment-only providers that answered, so the bulk
 	// enrichment pass does not look the item up with them again.
 	var enrichedBy []string
+	// localMetadataUnreadable marks the levels where a fill-empty pass went on
+	// without a local sidecar it could not read (withLocalMetadataUnreadable).
+	var localMetadataUnreadable localArtworkLevel
 	for _, p := range itemChain {
 		mp, ok := p.(MetadataProvider)
 		if !ok {
@@ -1956,6 +2013,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		})
 		if keepStoredValuesOnLocalReadError(req.Mode, err) {
 			return nil, fmt.Errorf("metadata: %s: %w", p.Slug(), err)
+		}
+		if isIdentityHinter && errors.Is(err, ErrLocalMetadataUnavailable) {
+			localMetadataUnreadable |= localArtworkItem
 		}
 		if err != nil {
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
@@ -2077,9 +2137,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		allImages = append(allImages, images...)
 	}
-	if !s.localArtworkUsable() {
-		allImages = withoutLocalImages(allImages)
-	}
+	allImages = withoutUnusableLocalImages(allImages, s.localSourceUsable)
 
 	// Phase 4a: Seasons — resolve with "season" content level.
 	var allSeasons []SeasonResult
@@ -2138,10 +2196,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					continue
 				}
 				// A fill-empty pass keeps the seasons the local provider could read.
+				localMetadataUnreadable |= localArtworkSeason
 			}
-			if !s.localArtworkUsable() {
-				dropLocalSeasonArtwork(seasons)
-			}
+			dropLocalSeasonArtwork(seasons, s.localSourceUsable)
 			if isIdentityHinter {
 				localArtworkSearched |= localArtworkSeason
 			}
@@ -2207,10 +2264,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 							continue
 						}
 						// A fill-empty pass keeps the episodes the local provider could read.
+						localMetadataUnreadable |= localArtworkEpisode
 					}
-					if !s.localArtworkUsable() {
-						dropLocalEpisodeArtwork(episodes)
-					}
+					dropLocalEpisodeArtwork(episodes, s.localSourceUsable)
 					if isIdentityHinter {
 						localArtworkSearched |= localArtworkEpisode
 					}
@@ -2243,6 +2299,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	if s.localArtworkUsable() {
 		ctx = withLocalArtworkSearched(ctx, localArtworkSearched)
+		ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
@@ -2565,6 +2622,9 @@ func (s *MetadataService) mergeAndPersist(
 	case ModeManualRefresh, ModeIdentify:
 		mergeMode = MergeReplaceUnlocked
 	}
+	if req.localReapply {
+		mergeMode = MergeReplaceUnlocked
+	}
 
 	isNew := req.ContentID == "" && req.Mode == ModeInitialMatch
 	contentID := req.ContentID
@@ -2610,10 +2670,10 @@ func (s *MetadataService) mergeAndPersist(
 			return nil, err
 		}
 	}
-	// An enrichment write only merges into an item that exists. It must not
-	// recreate one deleted since the pass selected it.
-	if req.enrichmentOnly && existingItem == nil {
-		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
+	// An enrichment or local re-apply write only merges into an item that
+	// exists. It must not recreate one deleted since the pass selected it.
+	if req.writesFieldsOnly() && existingItem == nil {
+		return nil, fmt.Errorf("metadata target %q no longer exists", contentID)
 	}
 	// Nor may an Identify: a concurrent Identify can move the item to its
 	// corrected id after this one loaded it, and writing on without the stored
@@ -2623,7 +2683,7 @@ func (s *MetadataService) mergeAndPersist(
 	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
-	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
+	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
 		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, err
@@ -2648,7 +2708,7 @@ func (s *MetadataService) mergeAndPersist(
 	// be claimed underneath us; movies and first-match series move a handful of
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
-	if !req.enrichmentOnly && !isNew && contentid.IsLocal(contentID) {
+	if !req.writesFieldsOnly() && !isNew && contentid.IsLocal(contentID) {
 		canonical, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
@@ -2734,6 +2794,9 @@ func (s *MetadataService) mergeAndPersist(
 		canonicalLanguage = "en"
 	}
 	isCanonicalWrite := existingItem == nil || strings.EqualFold(req.Language, canonicalLanguage)
+	// Whether the providers listed any people, before the merge below folds
+	// the stored item into the accumulator.
+	providersListPeople := len(accumulator.People) > 0
 
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
@@ -2783,12 +2846,13 @@ func (s *MetadataService) mergeAndPersist(
 	// Build the item for persistence.
 	now := time.Now()
 	item := metadataResultToItem(accumulator, contentType)
+	carryItemOnlyArtwork(item, existingItem)
 	item.DefaultMetadataLanguage = canonicalLanguage
 	item.MatchedAt = &now
 	item.LastRefreshed = &now
 	item.RefreshFailures = 0
 	item.Status = "matched"
-	if req.enrichmentOnly {
+	if req.writesFieldsOnly() {
 		// An enrichment write is not a refresh: the refresh bookkeeping stays as
 		// the last match or refresh left it. So does what no metadata result
 		// carries: the series episode state, which only a refresh that
@@ -2816,10 +2880,20 @@ func (s *MetadataService) mergeAndPersist(
 		keepStoredArtwork(item, existingItem)
 	}
 
-	// Apply best images.
+	// Apply best images. One retention serves the item level, so a library
+	// folder that does not answer is probed once per refresh.
+	var localArt *localArtworkRetention
 	if handleArtwork {
-		applyBestImages(item, images, mergeMode, req.Language)
-		keepUnconfirmedLocalItemArtwork(ctx, item, existingItem)
+		localArt = newLocalArtworkRetention(ctx, contentID, localArtworkItem)
+		localArt.usable = s.localMetadataURLUsable
+		imageMode := mergeMode
+		if req.localReapply {
+			// Local images always apply; fill-empty keeps the rest of the
+			// stored artwork, which no remote provider was asked about.
+			imageMode = MergeFillEmpty
+		}
+		applyBestImages(item, images, imageMode, req.Language)
+		keepUnconfirmedLocalItemArtwork(localArt, item, existingItem)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
 			existingImageThumbhash(existingItem, ImagePoster),
@@ -2836,6 +2910,8 @@ func (s *MetadataService) mergeAndPersist(
 
 	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem)
+		dropGoneItemOnlyArtwork(localArt, item, images)
+		applyLocalArtworkFallback(item, images, req.Language)
 	}
 
 	if isNew && contentID == "" {
@@ -2871,7 +2947,14 @@ func (s *MetadataService) mergeAndPersist(
 	unlockProviderDedup()
 	providerDedupReleased = true
 	if handleArtwork {
-		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
+		// The failure is logged; a local re-apply also fails on it, so its
+		// fingerprint does not advance past artwork that was never queued.
+		if err := s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images); err != nil && req.localReapply {
+			return nil, fmt.Errorf("queueing artwork: %w", err)
+		}
+		if err := s.syncItemExtraBackdrops(ctx, localArt, item, accumulator.ProviderIDs, images); err != nil && req.localReapply {
+			return nil, fmt.Errorf("storing backdrops: %w", err)
+		}
 	}
 
 	if !isCanonicalWrite && s.itemLocalizationRepo != nil {
@@ -2892,13 +2975,19 @@ func (s *MetadataService) mergeAndPersist(
 	// Persist people to the unified people table. The set is replaced
 	// wholesale from providers' people, and the stored cast is not merged in,
 	// so an enrichment write, which hears from one provider, leaves it alone.
-	if !req.enrichmentOnly && len(item.People) > 0 && s.personRepo != nil {
+	// A local re-apply whose files list no people (artwork only, or an NFO
+	// without credits) leaves the stored cast as it is.
+	if !req.enrichmentOnly && (!req.localReapply || providersListPeople) && len(item.People) > 0 && s.personRepo != nil {
 		persons := make([]models.Person, len(item.People))
 		for i := range item.People {
 			persons[i] = item.People[i].Person
 		}
 		personIDs, err := s.personRepo.BatchFindOrCreate(ctx, persons)
 		if err != nil {
+			if req.localReapply {
+				// A failed local re-apply is retried by the next check.
+				return nil, fmt.Errorf("finding people: %w", err)
+			}
 			slog.WarnContext(ctx, "metadata: batch find/create people failed", "component", "metadata", "error", err)
 		} else {
 			for i := range item.People {
@@ -2912,9 +3001,17 @@ func (s *MetadataService) mergeAndPersist(
 				valid = append(valid, p)
 			}
 		}
+		if req.localReapply && len(valid) != len(item.People) {
+			// A partial cast would replace the stored one.
+			return nil, fmt.Errorf("resolving people: %d of %d unresolved", len(item.People)-len(valid), len(item.People))
+		}
 		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
+			if req.localReapply {
+				return nil, fmt.Errorf("replacing people: %w", err)
+			}
 			slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
 		}
+		s.applyLocalPersonPhotos(ctx, contentID, valid)
 	}
 
 	// Persist remote videos (trailers etc.), filtered by the library's
@@ -2923,7 +3020,7 @@ func (s *MetadataService) mergeAndPersist(
 	// the next refresh; fill-empty refreshes only write when providers
 	// returned something, so a transient provider failure cannot wipe data.
 	// An enrichment write skips them for the same reason as people.
-	if !req.enrichmentOnly && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
+	if !req.writesFieldsOnly() && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
 		allowed := s.resolveAllowedVideoKinds(ctx, contentID, parseProcessFolderID(req.FolderID))
 		filtered := filterVideosByKinds(accumulator.Videos, allowed)
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
@@ -2983,7 +3080,7 @@ func (s *MetadataService) mergeAndPersist(
 	// covers any files the providers left unlinked (episodes with no NFO
 	// and no remote row); it is a no-op when every file is linked. An
 	// enrichment write carries no seasons or episodes and leaves them alone.
-	if contentType == "series" && !req.enrichmentOnly {
+	if contentType == "series" && !req.writesFieldsOnly() {
 		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		}
@@ -4420,9 +4517,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
-		if !s.localArtworkUsable() {
-			dropLocalSeasonArtwork(seasons)
-		}
+		dropLocalSeasonArtwork(seasons, s.localSourceUsable)
 		if _, local := p.(IdentityHintProvider); local {
 			searched |= localArtworkSeason
 		}
@@ -4472,9 +4567,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
-		if !s.localArtworkUsable() {
-			dropLocalEpisodeArtwork(episodes)
-		}
+		dropLocalEpisodeArtwork(episodes, s.localSourceUsable)
 		if _, local := p.(IdentityHintProvider); local {
 			searched |= localArtworkEpisode
 		}
@@ -4492,19 +4585,29 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 }
 
 func (s *MetadataService) enqueueSeriesChildImages(ctx context.Context, seriesID string, inputs []EnqueueImageCacheJobInput) {
-	s.enqueueImageCacheJobs(ctx, "series child", seriesID, inputs)
+	_ = s.enqueueImageCacheJobs(ctx, "series child", seriesID, inputs)
 }
 
-func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) {
-	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || len(inputs) == 0 {
-		return
+func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) error {
+	if s == nil || s.imageCacheJobs == nil || len(inputs) == 0 {
+		return nil
 	}
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+	inputs = s.copyLocalArtwork(enqueueCtx, targetKind, targetID, inputs)
+	if !s.autoCacheImages.Load() {
+		// Caching off stops remote downloads; local artwork is still queued.
+		inputs, _ = splitLocalImageCacheInputs(inputs)
+	}
+	if len(inputs) == 0 {
+		return nil
+	}
 	if _, err := s.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to enqueue image cache jobs", "component", "metadata",
 			"target_kind", targetKind, "target_id", targetID, "count", len(inputs), "error", err)
+		return err
 	}
+	return nil
 }
 
 // providerIDFromPluginURL extracts the plugin slug from a plugin-scheme URL
@@ -4554,53 +4657,79 @@ func isRemoteImageSourcePath(path string) bool {
 		!isNonProviderImageScheme(lower)
 }
 
-// isLocalImageSourcePath reports whether path is a local sidecar artwork
-// source (file:// scheme, produced by the NFO provider). Local sources route
-// into *_source_path like remote sources and are copied into the S3 image
-// cache by the processor; they are never served directly.
+// isLocalImageSourcePath reports whether path is an artwork source the
+// item's local metadata supplies (produced by the NFO provider): a sidecar
+// file (file://) or an image URL an NFO names (nfo+http(s)://, see
+// LocalMetadataURLSource). Local sources route into *_source_path like remote
+// sources and are copied into the S3 image cache by the processor; they are
+// never served directly, and they outrank remote providers' artwork.
 func isLocalImageSourcePath(path string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(path)), "file://")
+	lower := strings.ToLower(strings.TrimSpace(path))
+	return strings.HasPrefix(lower, "file://") || isLocalMetadataURLSource(lower)
 }
 
 // localArtworkUsable reports whether refreshes may select local sidecar
 // artwork. A file:// source is never served directly: only an image-cache job
-// copies it into artwork storage. With caching off (metadata.cache_images) or
-// unwired, a chosen local image would leave the slot empty instead of falling
-// back to provider artwork, so refreshes ignore local art altogether.
+// copies it into artwork storage. Without the queue (no artwork store wired), a
+// chosen local image would leave the slot empty instead of falling back to
+// provider artwork, so refreshes ignore local art altogether.
+// metadata.cache_images does not matter: it governs remote downloads, and
+// local art is copied either way.
 func (s *MetadataService) localArtworkUsable() bool {
-	return s != nil && s.autoCacheImages.Load() && s.imageCacheJobs != nil
+	return s != nil && s.imageCacheJobs != nil
+}
+
+// localSourceUsable reports whether a refresh may select a local artwork
+// source: a sidecar file whenever local artwork is usable, and an image URL an
+// NFO names only while metadata.cache_images is on. Such a URL is never served
+// directly, and the image cache's download is the only path that fetches it,
+// so with caching off it would leave the slot empty instead of falling back to
+// provider artwork.
+func (s *MetadataService) localSourceUsable(source string) bool {
+	return s.localArtworkUsable() && s.localMetadataURLUsable(source)
+}
+
+// localMetadataURLUsable reports whether source may be used when it is an
+// image URL an NFO names: only while metadata.cache_images is on. Any other
+// source passes.
+func (s *MetadataService) localMetadataURLUsable(source string) bool {
+	if _, nfoURL := localMetadataImageURL(source); nfoURL {
+		return s.autoCacheImages.Load()
+	}
+	return true
+}
+
+// withoutUnusableLocalImages returns images minus the local candidates usable
+// rejects. It returns images itself when it rejects none.
+func withoutUnusableLocalImages(images []RemoteImage, usable func(string) bool) []RemoteImage {
+	unusable := func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) && !usable(img.URL) }
+	if !slices.ContainsFunc(images, unusable) {
+		return images
+	}
+	return slices.DeleteFunc(slices.Clone(images), unusable)
 }
 
 // withoutLocalImages returns images minus local sidecar candidates. It returns
 // images itself when none are local.
 func withoutLocalImages(images []RemoteImage) []RemoteImage {
-	if !slices.ContainsFunc(images, func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) }) {
-		return images
-	}
-	remote := make([]RemoteImage, 0, len(images))
-	for _, img := range images {
-		if !isLocalImageSourcePath(img.URL) {
-			remote = append(remote, img)
-		}
-	}
-	return remote
+	return withoutUnusableLocalImages(images, func(string) bool { return false })
 }
 
-// dropLocalSeasonArtwork clears local sidecar posters so a later provider in
-// the chain can fill the slot.
-func dropLocalSeasonArtwork(seasons []SeasonResult) {
+// dropLocalSeasonArtwork clears the local posters usable rejects so a later
+// provider in the chain can fill the slot.
+func dropLocalSeasonArtwork(seasons []SeasonResult, usable func(string) bool) {
 	for i := range seasons {
-		if isLocalImageSourcePath(seasons[i].PosterPath) {
+		if isLocalImageSourcePath(seasons[i].PosterPath) && !usable(seasons[i].PosterPath) {
 			seasons[i].PosterPath = ""
 		}
 	}
 }
 
-// dropLocalEpisodeArtwork clears local sidecar stills so a later provider in
-// the chain can fill the slot.
-func dropLocalEpisodeArtwork(episodes []EpisodeResult) {
+// dropLocalEpisodeArtwork clears the local stills usable rejects so a later
+// provider in the chain can fill the slot.
+func dropLocalEpisodeArtwork(episodes []EpisodeResult, usable func(string) bool) {
 	for i := range episodes {
-		if isLocalImageSourcePath(episodes[i].StillPath) {
+		if isLocalImageSourcePath(episodes[i].StillPath) && !usable(episodes[i].StillPath) {
 			episodes[i].StillPath = ""
 		}
 	}
@@ -4615,6 +4744,7 @@ func isCacheableImageSourcePath(path string) bool {
 func isNonProviderImageScheme(lowerPath string) bool {
 	return strings.HasPrefix(lowerPath, "s3://") ||
 		strings.HasPrefix(lowerPath, "file://") ||
+		strings.HasPrefix(lowerPath, localMetadataURLPrefix) ||
 		strings.HasPrefix(lowerPath, "local://") ||
 		strings.HasPrefix(lowerPath, "upload://") ||
 		strings.HasPrefix(lowerPath, "generated://")
@@ -4643,16 +4773,20 @@ func splitProviderImagePath(path string) (servedPath, sourcePath string) {
 func preserveCachedArtwork(providerPath, providerThumbhash, existingCachedPath, existingSourcePath, existingThumbhash string) (string, string, string) {
 	// A local file:// source must never land in the served *_path column: it
 	// routes into *_source_path and, during the pre-cache window, the path
-	// keeps the prior cached key (or stays empty) until the job completes.
+	// keeps the prior cached key or remote stand-in (or stays empty) until the
+	// job completes.
+	keepExisting := isCachedImagePath(existingCachedPath) || isLocalArtworkStandIn(existingCachedPath, existingSourcePath)
 	if isLocalImageSourcePath(providerPath) {
 		providerPath = strings.TrimSpace(providerPath)
-		if isCachedImagePath(existingCachedPath) {
+		if keepExisting {
 			return existingCachedPath, existingThumbhash, providerPath
 		}
 		return "", "", providerPath
 	}
 	if !isRemoteImageSourcePath(providerPath) {
-		if strings.TrimSpace(providerPath) == "" && isCachedImagePath(existingCachedPath) {
+		// With nothing offered, a slot keeps what it has, including a local
+		// source whose copy is still pending.
+		if strings.TrimSpace(providerPath) == "" && (isCachedImagePath(existingCachedPath) || isLocalImageSourcePath(existingSourcePath)) {
 			return existingCachedPath, existingThumbhash, existingSourcePath
 		}
 		return providerPath, providerThumbhash, ""
@@ -4738,6 +4872,7 @@ func accumulateEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult, e
 			continue
 		}
 
+		recordEpisodeStillFallback(existing, episode)
 		preferLocalEpisodeStill(existing, &episode)
 		MergeEpisodeResult(&episode, existing, MergeFillEmpty)
 	}
@@ -4953,48 +5088,35 @@ func episodeResultFromModel(episode *models.Episode) EpisodeResult {
 	return result
 }
 
+// existingItemArtworkField finds the stored item's slot for imageType.
+func existingItemArtworkField(item *models.MediaItem, imageType ImageType) (itemArtworkField, bool) {
+	for _, field := range itemArtworkFields(item) {
+		if field.imageType == imageType {
+			return field, true
+		}
+	}
+	return itemArtworkField{}, false
+}
+
 func existingImagePath(item *models.MediaItem, imageType ImageType) string {
-	if item == nil {
-		return ""
+	if field, ok := existingItemArtworkField(item, imageType); ok {
+		return *field.path
 	}
-	switch imageType {
-	case ImagePoster:
-		return item.PosterPath
-	case ImageBackdrop:
-		return item.BackdropPath
-	default:
-		return item.LogoPath
-	}
+	return ""
 }
 
 func existingImageThumbhash(item *models.MediaItem, imageType ImageType) string {
-	if item == nil {
-		return ""
+	if field, ok := existingItemArtworkField(item, imageType); ok && field.thumbhash != nil {
+		return *field.thumbhash
 	}
-	switch imageType {
-	case ImagePoster:
-		return item.PosterThumbhash
-	case ImageBackdrop:
-		return item.BackdropThumbhash
-	default:
-		return ""
-	}
+	return ""
 }
 
 func existingImageSourcePath(item *models.MediaItem, imageType ImageType) string {
-	if item == nil {
-		return ""
+	if field, ok := existingItemArtworkField(item, imageType); ok {
+		return *field.source
 	}
-	switch imageType {
-	case ImagePoster:
-		return item.PosterSourcePath
-	case ImageBackdrop:
-		return item.BackdropSourcePath
-	case ImageLogo:
-		return item.LogoSourcePath
-	default:
-		return ""
-	}
+	return ""
 }
 
 func mergedImageThumbhash(previousPath, previousThumbhash, nextPath, nextThumbhash string) string {
@@ -5180,13 +5302,14 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	seasonArtwork := newLocalArtworkRetention(ctx, seriesID, localArtworkSeason)
+	seasonArtwork.usable = s.localMetadataURLUsable
 	episodeArtwork := seasonArtwork.atLevel(localArtworkEpisode)
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
 		// Local sidecar sources attribute to the synthetic "local" provider,
 		// keyed by the series' own content ID (mirrors item attribution).
 		if isLocalImageSourcePath(sourcePath) {
-			return imageCacheLocalProviderID, seriesID
+			return localSourceProviderID(sourcePath), seriesID
 		}
 		providerID := providerIDFromPluginURL(sourcePath)
 		if providerID == "" {
@@ -5334,7 +5457,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			// preserveCachedArtwork sees the raw provider path so a local
 			// file:// source still routes into *_source_path here.
 			nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-				seasonArtwork.providerPath(season.PosterPath, existingSeason.PosterPath, existingSeason.PosterSourcePath),
+				seasonArtwork.providerPath(ImagePoster, season.PosterPath, existingSeason.PosterSourcePath),
 				season.PosterThumbhash,
 				existingSeason.PosterPath,
 				existingSeason.PosterSourcePath,
@@ -5349,6 +5472,19 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 			mergedSeason.PosterThumbhash = nextThumbhash
 			mergedSeason.PosterSourcePath = nextSourcePath
 			providerSeason = mergedSeason
+		}
+		if !imagesLocked && providerSeason.PosterPath == "" {
+			// The stand-in is the remote poster local art displaced or, when
+			// retention kept a local source this refresh could not see, the
+			// remote poster the refresh chose.
+			fallback, fallbackThumbhash := season.remotePosterPath, season.remotePosterThumbhash
+			if fallback == "" {
+				fallback, fallbackThumbhash = season.PosterPath, season.PosterThumbhash
+			}
+			providerSeason.PosterPath = localArtworkFallbackPath("", providerSeason.PosterSourcePath, fallback)
+			if providerSeason.PosterPath != "" {
+				providerSeason.PosterThumbhash = fallbackThumbhash
+			}
 		}
 		dbSeason := &models.Season{
 			SeriesID:                seriesID,
@@ -5579,10 +5715,14 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				seasonModel.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				if isCanonicalWrite {
 					mergedSeason := seasonResultFromModel(existingSeason)
-					MergeSeasonResult(&SeasonResult{
-						SeasonNumber: ep.SeasonNumber,
-						Title:        title,
-					}, &mergedSeason, mergeMode)
+					// The fallback title only names a season that has none:
+					// a season referenced only by its episodes keeps its
+					// stored title, even in a replacing merge.
+					implicit := SeasonResult{SeasonNumber: ep.SeasonNumber}
+					if strings.TrimSpace(existingSeason.Title) == "" {
+						implicit.Title = title
+					}
+					MergeSeasonResult(&implicit, &mergedSeason, mergeMode)
 					mergedSeason.PosterThumbhash = mergedImageThumbhash(
 						existingSeason.PosterPath,
 						existingSeason.PosterThumbhash,
@@ -5729,7 +5869,7 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				// preserveCachedArtwork sees the raw provider path so a local
 				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					episodeArtwork.providerPath(ep.StillPath, existingEpisode.StillPath, existingEpisode.StillSourcePath),
+					episodeArtwork.providerPath(ImageStill, ep.StillPath, existingEpisode.StillSourcePath),
 					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,
@@ -5744,6 +5884,11 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 				mergedEpisode.StillThumbhash = nextThumbhash
 				mergedEpisode.StillSourcePath = nextSourcePath
 				providerEpisode = mergedEpisode
+			}
+			if !imagesLocked {
+				// As for season posters, ep.StillPath stands in when retention
+				// kept a local source.
+				providerEpisode.StillPath = localArtworkFallbackPath(providerEpisode.StillPath, providerEpisode.StillSourcePath, firstNonEmpty(ep.stillFallback, ep.StillPath))
 			}
 			dbEp := &models.Episode{
 				SeriesID:                seriesID,
@@ -5904,12 +6049,15 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 		} else {
 			writes := make([]preparedEpisodeWrite, 0, len(episodes))
 			modelsToPersist := make([]*models.Episode, 0, len(episodes))
+			freshEpisodeIDs := make([]map[string]string, 0, len(episodes))
 			for _, ep := range episodes {
 				if write, ok := prepareEpisode(ep, false); ok {
 					writes = append(writes, write)
 					modelsToPersist = append(modelsToPersist, write.model)
+					freshEpisodeIDs = append(freshEpisodeIDs, ep.ProviderIDs)
 				}
 			}
+			releaseInheritedEpisodeProviderIDs(ctx, seriesID, modelsToPersist, freshEpisodeIDs)
 			if len(modelsToPersist) > 0 {
 				successfulWrites := bulkUpsertWithFallback(writes,
 					func([]preparedEpisodeWrite) error {
@@ -5934,6 +6082,92 @@ func (s *MetadataService) persistSeasonAndEpisodeRows(
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
 	return true
+}
+
+// uniqueEpisodeProviderIDs are the episode provider ID columns that the
+// episodes table keeps unique.
+var uniqueEpisodeProviderIDs = []struct {
+	provider string
+	field    func(*models.Episode) *string
+}{
+	{"imdb", func(ep *models.Episode) *string { return &ep.ImdbID }},
+	{"tmdb", func(ep *models.Episode) *string { return &ep.TmdbID }},
+	{"tvdb", func(ep *models.Episode) *string { return &ep.TvdbID }},
+}
+
+// releaseInheritedEpisodeProviderIDs keeps each provider ID on one episode of
+// a write batch; freshIDs holds each episode's provider result IDs. The
+// canonical merge keeps an episode's stored IDs, so after a provider moves an
+// ID to another episode number, as when it renumbers specials, both episodes
+// carry it. The repository then rejects the whole bulk write, and the
+// single-row fallback that follows leaves the ID on whichever row it writes
+// last. An episode that only inherited the ID gives it up to the episode whose
+// provider result carries it, and takes its own provider result's ID instead
+// when no other episode in the batch holds that one. When several provider
+// results carry the ID, the first in batch order keeps it.
+func releaseInheritedEpisodeProviderIDs(ctx context.Context, seriesID string, episodes []*models.Episode, freshIDs []map[string]string) {
+	for _, column := range uniqueEpisodeProviderIDs {
+		holders := make(map[string][]int)
+		var ids []string
+		for i, ep := range episodes {
+			id := *column.field(ep)
+			if id == "" {
+				continue
+			}
+			if len(holders[id]) == 0 {
+				ids = append(ids, id)
+			}
+			holders[id] = append(holders[id], i)
+		}
+		for _, id := range ids {
+			indexes := holders[id]
+			if len(indexes) < 2 {
+				continue
+			}
+			keep := indexes[0]
+			for _, i := range indexes {
+				if freshIDs[i][column.provider] == id {
+					keep = i
+					break
+				}
+			}
+			kept := episodes[keep]
+			for _, i := range indexes {
+				if i == keep {
+					continue
+				}
+				released := episodes[i]
+				fresh := freshIDs[i][column.provider]
+				if fresh == id {
+					*column.field(released) = ""
+					slog.DebugContext(ctx, "metadata: provider gave one episode ID to several episodes", "component", "metadata",
+						"series_id", seriesID,
+						"provider", column.provider,
+						"provider_id", id,
+						"kept_season", kept.SeasonNumber,
+						"kept_episode", kept.EpisodeNumber,
+						"released_season", released.SeasonNumber,
+						"released_episode", released.EpisodeNumber)
+					continue
+				}
+				replacement := ""
+				if fresh != "" && len(holders[fresh]) == 0 {
+					replacement = fresh
+					holders[fresh] = []int{i}
+				}
+				*column.field(released) = replacement
+				slog.InfoContext(ctx, "metadata: moved an episode provider ID to the episode its provider now gives it", "component", "metadata",
+					"series_id", seriesID,
+					"provider", column.provider,
+					"provider_id", id,
+					"kept_season", kept.SeasonNumber,
+					"kept_episode", kept.EpisodeNumber,
+					"released_season", released.SeasonNumber,
+					"released_episode", released.EpisodeNumber,
+					"released_new_id", replacement)
+			}
+		}
+	}
 }
 
 // syncSeriesEpisodeState relinks a series' files to its episodes and re-syncs
@@ -8528,6 +8762,12 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		// are all language-tagged must not end up with no backdrop at all.
 		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{languageNeutral, hasLanguage}),
 		ImageLogo:     selectBest(ImageLogo, logoFilters),
+		// Banners, thumbs, clear art and disc art usually carry the title, so
+		// they follow the library language like logos.
+		ImageBanner:   selectBest(ImageBanner, logoFilters),
+		ImageThumb:    selectBest(ImageThumb, logoFilters),
+		ImageClearArt: selectBest(ImageClearArt, logoFilters),
+		ImageDisc:     selectBest(ImageDisc, logoFilters),
 	}
 
 	imagesLocked := artworkLocked(item)
@@ -8557,6 +8797,14 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		item.LogoSourcePath = ""
 	} else {
 		applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
+	}
+	for _, field := range itemOnlyArtworkFields(item) {
+		// These slots arrive carried over from the stored item, so under the
+		// lock a source still waiting for its cache job holds the slot too.
+		if imagesLocked && *field.source != "" {
+			continue
+		}
+		applyIfBetter(field.path, bestByType[field.imageType])
 	}
 }
 
@@ -8595,11 +8843,11 @@ func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
 	if item == nil {
 		return nil
 	}
-	return []itemArtworkField{
+	return append([]itemArtworkField{
 		{imageType: ImagePoster, path: &item.PosterPath, source: &item.PosterSourcePath, thumbhash: &item.PosterThumbhash},
 		{imageType: ImageBackdrop, path: &item.BackdropPath, source: &item.BackdropSourcePath, thumbhash: &item.BackdropThumbhash},
 		{imageType: ImageLogo, path: &item.LogoPath, source: &item.LogoSourcePath},
-	}
+	}, itemOnlyArtworkFields(item)...)
 }
 
 // keepStoredArtwork copies every artwork path, source path and thumbhash from
@@ -8627,6 +8875,13 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 		existingPath := existingImagePath(existing, field.imageType)
 		existingThumbhash := existingImageThumbhash(existing, field.imageType)
 		existingSource := existingImageSourcePath(existing, field.imageType)
+		// A banner, thumb, clear art or disc slot is carried over from the
+		// stored item; one still waiting for its cache job keeps its source
+		// so the queued job still matches it.
+		if isItemOnlyArtworkType(field.imageType) && *field.path == "" && existingPath == "" &&
+			*field.source != "" && *field.source == existingSource {
+			continue
+		}
 		currentThumbhash := ""
 		if field.thumbhash != nil {
 			currentThumbhash = *field.thumbhash
@@ -8653,9 +8908,9 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem) {
 	}
 }
 
-func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
-	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || item == nil || item.ContentID == "" {
-		return
+func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) error {
+	if s == nil || s.imageCacheJobs == nil || item == nil || item.ContentID == "" {
+		return nil
 	}
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
 	for _, field := range itemArtworkFields(item) {
@@ -8681,11 +8936,11 @@ func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.Me
 			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
-	s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
+	return s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
 }
 
 func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, item *models.MediaItem, loc *models.MediaItemLocalization, providerIDs map[string]string, images []RemoteImage) {
-	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || item == nil || loc == nil || loc.ContentID == "" || loc.Language == "" {
+	if s == nil || s.imageCacheJobs == nil || item == nil || loc == nil || loc.ContentID == "" || loc.Language == "" {
 		return
 	}
 	locItem := &models.MediaItem{
@@ -8720,7 +8975,7 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
-	s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)
+	_ = s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)
 }
 
 func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]string, images []RemoteImage, sourcePath string) (string, string) {
@@ -8732,7 +8987,7 @@ func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]st
 		if item != nil {
 			contentID = item.ContentID
 		}
-		return imageCacheLocalProviderID, contentID
+		return localSourceProviderID(sourcePath), contentID
 	}
 	providerID := providerIDFromPluginURL(sourcePath)
 	if providerID == "" {
@@ -9153,12 +9408,22 @@ func ImageTypeToString(t ImageType) string {
 		return "still"
 	case ImageProfile:
 		return "profile"
+	case ImageBanner:
+		return ImageCacheImageBanner
+	case ImageThumb:
+		return ImageCacheImageThumb
+	case ImageClearArt:
+		return ImageCacheImageClearArt
+	case ImageDisc:
+		return ImageCacheImageDisc
 	default:
 		return "poster"
 	}
 }
 
-// ImageTypeFromString converts a string to an ImageType.
+// ImageTypeFromString converts a string to an ImageType. It parses only the
+// types the admin image picker can apply; anything else stays a poster, as it
+// always has for that endpoint.
 func ImageTypeFromString(s string) ImageType {
 	switch s {
 	case "backdrop":

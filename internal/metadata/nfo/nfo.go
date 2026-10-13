@@ -5,9 +5,12 @@ import (
 	"encoding/xml"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -27,14 +30,22 @@ type nfoUniqueID struct {
 	Value   string `xml:",chardata"`
 }
 
-// nfoActor represents an <actor> element (Kodi/Jellyfin cast entry).
-// <thumb> URLs are intentionally ignored in v1. Numeric elements decode as
-// strings throughout and parse with parseNFOInt, so one bad value drops only
-// that field instead of failing the whole file.
+// nfoActor represents an <actor> element (Kodi/Jellyfin cast entry). Kodi
+// writes <order>, Jellyfin <sortorder>; Jellyfin's <type> names the credit
+// kind (GuestStar, Director, ...), and tinyMediaManager writes the person's
+// provider ids. Numeric elements decode as strings throughout and parse with
+// parseNFOInt, so one bad value drops only that field instead of failing the
+// whole file.
 type nfoActor struct {
-	Name  string `xml:"name"`
-	Role  string `xml:"role"`
-	Order string `xml:"order"`
+	Name      string `xml:"name"`
+	Role      string `xml:"role"`
+	Order     string `xml:"order"`
+	SortOrder string `xml:"sortorder"`
+	Type      string `xml:"type"`
+	Thumb     string `xml:"thumb"`
+	TmdbID    string `xml:"tmdbid"`
+	ImdbID    string `xml:"imdbid"`
+	TvdbID    string `xml:"tvdbid"`
 }
 
 // nfoNamedRating represents a <rating> entry inside a <ratings> block.
@@ -42,6 +53,7 @@ type nfoNamedRating struct {
 	Name  string `xml:"name,attr"`
 	Max   string `xml:"max,attr"`
 	Value string `xml:"value"`
+	Votes string `xml:"votes"`
 }
 
 // nfoRatingsBlock represents the modern multi-source <ratings> container.
@@ -54,26 +66,38 @@ type nfoRatingsBlock struct {
 //
 // <set><name> (movie collections) is deliberately not mapped: MetadataResult
 // has no collection field yet — see docs/architecture/local-nfo-metadata.md.
+// <language> is not read either: Jellyfin and Emby write the library's
+// metadata language there, not the title's original language.
 type nfoCommon struct {
-	Title         string          `xml:"title"`
-	OriginalTitle string          `xml:"originaltitle"`
-	Tagline       string          `xml:"tagline"`
-	Year          string          `xml:"year"`
-	Plot          string          `xml:"plot"`
-	Runtime       string          `xml:"runtime"`
-	Premiered     string          `xml:"premiered"`
-	MPAA          string          `xml:"mpaa"`
-	Genres        []string        `xml:"genre"`
-	Studios       []string        `xml:"studio"`
-	Countries     []string        `xml:"country"`
-	Tags          []string        `xml:"tag"`
-	LegacyRating  string          `xml:"rating"`
-	Ratings       nfoRatingsBlock `xml:"ratings"`
-	UserRating    string          `xml:"userrating"`
-	Actors        []nfoActor      `xml:"actor"`
-	Directors     []string        `xml:"director"`
-	Credits       []string        `xml:"credits"`
-	UniqueIDs     []nfoUniqueID   `xml:"uniqueid"`
+	Title            string          `xml:"title"`
+	OriginalTitle    string          `xml:"originaltitle"`
+	SortTitle        string          `xml:"sorttitle"`
+	Tagline          string          `xml:"tagline"`
+	Year             string          `xml:"year"`
+	Plot             string          `xml:"plot"`
+	Outline          string          `xml:"outline"`
+	Runtime          string          `xml:"runtime"`
+	Premiered        string          `xml:"premiered"`
+	MPAA             string          `xml:"mpaa"`
+	Certification    string          `xml:"certification"`
+	OriginalLanguage string          `xml:"originallanguage"`
+	Genres           []string        `xml:"genre"`
+	Studios          []string        `xml:"studio"`
+	Countries        []string        `xml:"country"`
+	Tags             []string        `xml:"tag"`
+	LegacyRating     string          `xml:"rating"`
+	LegacyVotes      string          `xml:"votes"`
+	CriticRating     string          `xml:"criticrating"`
+	Ratings          nfoRatingsBlock `xml:"ratings"`
+	UserRating       string          `xml:"userrating"`
+	Actors           []nfoActor      `xml:"actor"`
+	Directors        []string        `xml:"director"`
+	Credits          []string        `xml:"credits"`
+	Writers          []string        `xml:"writer"`
+	Trailers         []string        `xml:"trailer"`
+	Thumbs           []nfoThumb      `xml:"thumb"`
+	Fanart           nfoFanart       `xml:"fanart"`
+	UniqueIDs        []nfoUniqueID   `xml:"uniqueid"`
 	nfoIDElements
 }
 
@@ -88,8 +112,17 @@ type nfoMovie struct {
 type nfoTVShow struct {
 	XMLName xml.Name `xml:"tvshow"`
 	nfoCommon
-	Aired        string          `xml:"aired"`
-	EpisodeGuide nfoEpisodeGuide `xml:"episodeguide"`
+	Aired        string           `xml:"aired"`
+	Status       string           `xml:"status"`
+	NamedSeasons []nfoNamedSeason `xml:"namedseason"`
+	EpisodeGuide nfoEpisodeGuide  `xml:"episodeguide"`
+}
+
+// nfoNamedSeason is a tvshow <namedseason number="N">: the title Kodi shows
+// for season N.
+type nfoNamedSeason struct {
+	Number string `xml:"number,attr"`
+	Name   string `xml:",chardata"`
 }
 
 // nfoEpisode represents the <episodedetails> root element. An empty
@@ -102,40 +135,55 @@ type nfoEpisode struct {
 	Season       string          `xml:"season"`
 	Episode      string          `xml:"episode"`
 	Plot         string          `xml:"plot"`
+	Outline      string          `xml:"outline"`
 	Aired        string          `xml:"aired"`
+	Premiered    string          `xml:"premiered"`
+	ReleaseDate  string          `xml:"releasedate"`
 	Runtime      string          `xml:"runtime"`
 	LegacyRating string          `xml:"rating"`
+	LegacyVotes  string          `xml:"votes"`
+	CriticRating string          `xml:"criticrating"`
 	Ratings      nfoRatingsBlock `xml:"ratings"`
+	Thumbs       []nfoThumb      `xml:"thumb"`
 	UniqueIDs    []nfoUniqueID   `xml:"uniqueid"`
 }
 
 // nfoSeason represents the <season> root element (Kodi/Jellyfin season
 // sidecar). SeasonNumber is a string for the same absent-vs-zero reason as
-// nfoEpisode.
+// nfoEpisode. Some writers name the season in <seasonname> instead of
+// <title>.
 type nfoSeason struct {
 	XMLName      xml.Name `xml:"season"`
 	Title        string   `xml:"title"`
+	SeasonName   string   `xml:"seasonname"`
 	Plot         string   `xml:"plot"`
+	Outline      string   `xml:"outline"`
 	SeasonNumber string   `xml:"seasonnumber"`
+	Premiered    string   `xml:"premiered"`
+	Aired        string   `xml:"aired"`
 }
 
 // parsedNFO holds extracted data from an NFO file. Collections stay nil when
 // the NFO declares no entries so downstream MergeFillEmpty early-returns and
 // remote providers can fill them (no placeholder emissions).
 type parsedNFO struct {
-	Title         string
-	OriginalTitle string
-	Tagline       string
-	Year          int
-	Overview      string
-	Runtime       int    // minutes
-	ReleaseDate   string // movies: <premiered> then <releasedate>
-	FirstAirDate  string // series: <premiered> then <aired>
-	ContentRating string
-	Genres        []string
-	Studios       []string
-	Countries     []string
-	Keywords      []string
+	Title            string
+	OriginalTitle    string
+	SortTitle        string
+	Tagline          string
+	Year             int
+	Overview         string
+	Runtime          int    // minutes
+	ReleaseDate      string // movies: <premiered> then <releasedate>
+	FirstAirDate     string // series: <premiered> then <aired>; episodes: <aired>, <premiered>, <releasedate>; seasons: <premiered> then <aired>
+	ContentRating    string
+	OriginalLanguage string
+	ShowStatus       string // series only, normalized
+	Genres           []string
+	Studios          []string
+	Networks         []string // series only: Kodi treats a show's studio as its network
+	Countries        []string
+	Keywords         []string
 	// Ratings normalized to their MetadataResult scales: IMDB/TMDB out of
 	// 10, Rotten Tomatoes out of 100. <userrating> is parsed but never
 	// emitted — MetadataResult has no per-user rating slot.
@@ -143,11 +191,24 @@ type parsedNFO struct {
 	RatingTMDB       float64
 	RatingRTCritic   float64
 	RatingRTAudience float64
-	People           []models.ItemPerson
-	TmdbID           string
-	ImdbID           string
-	TvdbID           string
-	Type             string // movie, series, season, episode
+	// RatingSources are the named ratings the file carries on the 0-100
+	// scale, keyed by the rating source they map to. See ratings.go.
+	RatingSources map[string]metadata.RatingSource
+	// People carry the credit's provider ids. An actor's <thumb> rides in
+	// LocalPhotoSource unresolved; the provider resolves it against the
+	// NFO's folder (see art.go).
+	People []models.ItemPerson
+	Videos []metadata.RemoteVideo
+	TmdbID string
+	ImdbID string
+	TvdbID string
+	Type   string // movie, series, season, episode
+	// Art lists the artwork references the file names, in document order.
+	// They are unresolved: a local path is relative to the NFO's folder.
+	Art []nfoArtRef
+	// SeasonNames maps a season number to the title a tvshow <namedseason>
+	// gives it.
+	SeasonNames map[int]string
 	// Season/Episode carry the NFO's declared numbers when the matching Set
 	// flag is true. They are advisory only: naming owns structure, so the
 	// directory/filename-derived numbers win on conflict.
@@ -245,6 +306,10 @@ func parseTVShowNFO(data []byte) (*parsedNFO, error) {
 	p := parsedFromCommon(&s.nfoCommon, typeSeries)
 	p.FirstAirDate = firstDate(s.Premiered, s.Aired)
 	deriveYear(p, s.Premiered, s.Aired)
+	p.ShowStatus = metadata.NormalizeShowStatus(s.Status)
+	// Kodi has no network element: a show's <studio> is its network.
+	p.Networks = slices.Clone(p.Studios)
+	p.SeasonNames = namedSeasons(s.NamedSeasons)
 	applyEpisodeGuide(p, s.EpisodeGuide)
 	applyProviderLinks(p, scanProviderLinks(trailing), typeSeries)
 	return p, nil
@@ -256,9 +321,10 @@ func parseSeasonNFO(data []byte) (*parsedNFO, error) {
 		return nil, fmt.Errorf("nfo: failed to parse season: %w", err)
 	}
 	p := &parsedNFO{
-		Title:    strings.TrimSpace(s.Title),
-		Overview: strings.TrimSpace(s.Plot),
-		Type:     typeSeason,
+		Title:        firstNonBlank(s.Title, s.SeasonName),
+		Overview:     firstNonBlank(s.Plot, s.Outline),
+		FirstAirDate: firstDate(s.Premiered, s.Aired),
+		Type:         typeSeason,
 	}
 	p.Season, p.SeasonSet = parseNFOInt(s.SeasonNumber)
 	return p, nil
@@ -272,45 +338,48 @@ func parseEpisodeNFO(data []byte) (*parsedNFO, error) {
 	}
 	p := &parsedNFO{
 		Title:        strings.TrimSpace(e.Title),
-		Overview:     strings.TrimSpace(e.Plot),
-		FirstAirDate: firstDate(e.Aired),
+		Overview:     firstNonBlank(e.Plot, e.Outline),
+		FirstAirDate: firstDate(e.Aired, e.Premiered, e.ReleaseDate),
+		Runtime:      parseRuntimeMinutes(e.Runtime),
 		Type:         typeEpisode,
 		MultiEpisode: moreEpisodes,
 	}
 	p.Season, p.SeasonSet = parseNFOInt(e.Season)
 	p.Episode, p.EpisodeSet = parseNFOInt(e.Episode)
-	if minutes, err := strconv.Atoi(strings.TrimSpace(e.Runtime)); err == nil && minutes > 0 {
-		p.Runtime = minutes
-	}
-	applyRatingValues(p, e.Ratings, e.LegacyRating)
+	applyRatingValues(p, nfoRatingInput{block: e.Ratings, legacy: e.LegacyRating, legacyVotes: e.LegacyVotes, critic: e.CriticRating})
 	applyUniqueIDs(p, e.UniqueIDs)
+	p.Art = episodeArtRefs(e.Thumbs)
 	return p, nil
 }
 
-// parsedFromCommon maps the shared <movie>/<tvshow> field set.
+// parsedFromCommon maps the shared <movie>/<tvshow> field set. Kodi joins
+// several values in one element with " / ", so list elements are split on
+// it.
 func parsedFromCommon(c *nfoCommon, contentType string) *parsedNFO {
 	p := &parsedNFO{
-		Title:         strings.TrimSpace(c.Title),
-		OriginalTitle: strings.TrimSpace(c.OriginalTitle),
-		Tagline:       strings.TrimSpace(c.Tagline),
-		Overview:      strings.TrimSpace(c.Plot),
-		ContentRating: strings.TrimSpace(c.MPAA),
-		Genres:        cleanStrings(c.Genres),
-		Studios:       cleanStrings(c.Studios),
-		Countries:     cleanStrings(c.Countries),
-		Keywords:      cleanStrings(c.Tags),
-		Type:          contentType,
+		Title:            strings.TrimSpace(c.Title),
+		OriginalTitle:    strings.TrimSpace(c.OriginalTitle),
+		SortTitle:        strings.TrimSpace(c.SortTitle),
+		Tagline:          strings.TrimSpace(c.Tagline),
+		Overview:         firstNonBlank(c.Plot, c.Outline),
+		Runtime:          parseRuntimeMinutes(c.Runtime),
+		ContentRating:    firstNonBlank(c.MPAA, certificationRating(c.Certification)),
+		OriginalLanguage: originalLanguage(c.OriginalLanguage),
+		Genres:           splitNFOList(c.Genres),
+		Studios:          splitNFOList(c.Studios),
+		Countries:        splitNFOList(c.Countries),
+		Keywords:         cleanStrings(c.Tags),
+		Videos:           trailerVideos(c.Trailers),
+		Type:             contentType,
 	}
 	if year, ok := parseNFOInt(c.Year); ok && year > 0 {
 		p.Year = year
 	}
-	if minutes, err := strconv.Atoi(strings.TrimSpace(c.Runtime)); err == nil && minutes > 0 {
-		p.Runtime = minutes
-	}
-	applyRatings(p, c)
+	applyRatingValues(p, nfoRatingInput{block: c.Ratings, legacy: c.LegacyRating, legacyVotes: c.LegacyVotes, critic: c.CriticRating})
 	applyPeople(p, c)
 	applyUniqueIDs(p, c.UniqueIDs)
 	applyIDElements(p, &c.nfoIDElements)
+	p.Art = itemArtRefs(c.Thumbs, c.Fanart)
 	return p
 }
 
@@ -349,115 +418,99 @@ func deriveYear(p *parsedNFO, candidates ...string) {
 	}
 }
 
-// applyRatings maps the modern multi-source <ratings> block, with the legacy
-// bare <rating> as the IMDB slot when no <ratings> block exists (Kodi's legacy
-// field historically held the scraper's IMDB rating).
-func applyRatings(p *parsedNFO, c *nfoCommon) {
-	applyRatingValues(p, c.Ratings, c.LegacyRating)
+// runtimePattern matches the runtime spellings NFO writers use: "117",
+// "117 min", "117 minutes", and "1h 57m" (hours and minutes).
+var runtimePattern = regexp.MustCompile(`(?i)^(?:(\d+)\s*h(?:rs?|ours?)?\.?\s*)?(?:(\d+)\s*(?:m|mins?|minutes?)?\.?)?$`)
+
+// parseRuntimeMinutes reads a <runtime> in minutes. A value in any other
+// shape, or zero, gives 0, which leaves runtime to other providers.
+func parseRuntimeMinutes(raw string) int {
+	match := runtimePattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if match == nil {
+		return 0
+	}
+	hours, _ := strconv.Atoi(match[1])
+	minutes, _ := strconv.Atoi(match[2])
+	if hours > 100 || minutes > 100000 {
+		return 0
+	}
+	return hours*60 + minutes
 }
 
-// applyRatingValues is the shared ratings mapper for <movie>/<tvshow>
-// (via nfoCommon) and <episodedetails> roots.
-func applyRatingValues(p *parsedNFO, block nfoRatingsBlock, legacyRating string) {
-	for _, r := range block.Ratings {
-		value, ok := parseRatingValue(r.Value)
-		if !ok {
+// certificationPrefix matches the country code Kodi and tinyMediaManager put
+// before each rating in <certification> ("US:PG-13").
+var certificationPrefix = regexp.MustCompile(`^[A-Za-z]{2,3}:\s*`)
+
+// certificationRating reads a <certification>, which writers fill with
+// country-tagged ratings joined by Kodi's separator ("US:PG-13 / GB:12A"):
+// the first rating, without its country code, as <mpaa> would hold it.
+func certificationRating(raw string) string {
+	for _, part := range strings.Split(raw, kodiListSeparator) {
+		rating := certificationPrefix.ReplaceAllString(strings.TrimSpace(part), "")
+		if rating = strings.TrimSpace(rating); rating != "" {
+			return rating
+		}
+	}
+	return ""
+}
+
+// originalLanguage keeps an <originallanguage> that is a language code
+// ("en", "fra", "pt-BR"), stored as its ISO 639 base language like the
+// remote providers'. A display name ("English") names no code and is dropped.
+func originalLanguage(raw string) string {
+	if lang.CanonicalTag(raw) == "" {
+		return ""
+	}
+	return lang.Canonical(raw)
+}
+
+// namedSeasons maps tvshow <namedseason number="N"> entries to their titles.
+// The first entry for a number wins.
+func namedSeasons(entries []nfoNamedSeason) map[int]string {
+	var names map[int]string
+	for _, entry := range entries {
+		number, ok := parseNFOInt(entry.Number)
+		name := strings.TrimSpace(entry.Name)
+		if !ok || number < 0 || name == "" {
 			continue
 		}
-		name := strings.ToLower(strings.TrimSpace(r.Name))
-		// Default the source scale when <rating> omits max: Rotten Tomatoes
-		// sources are 0-100, everything else 0-10. A blanket default of 10 for a
-		// bare RT score (e.g. tomatometer 60) would scale ×10 and clamp to 100.
-		// An explicit max attribute always wins.
-		max := 10.0
-		if name == "tomatometerallcritics" || name == "tomatometerallaudience" || name == "rottentomatoes" {
-			max = 100.0
+		if names == nil {
+			names = make(map[int]string)
 		}
-		if parsed, parsedOK := parseRatingValue(r.Max); parsedOK {
-			max = parsed
-		}
-		switch name {
-		case "imdb":
-			p.RatingIMDB = scaleRating(value, max, 10)
-		case "tmdb", "themoviedb":
-			p.RatingTMDB = scaleRating(value, max, 10)
-		case "tomatometerallcritics", "rottentomatoes":
-			p.RatingRTCritic = scaleRating(value, max, 100)
-		case "tomatometerallaudience":
-			p.RatingRTAudience = scaleRating(value, max, 100)
+		if _, dup := names[number]; !dup {
+			names[number] = name
 		}
 	}
-	// The bare <rating> is an IMDB fallback only in an NFO without a <ratings>
-	// block. A writer that emits both, such as Radarr, copies its default
-	// source into the bare tag, and that source is TMDB until IMDb has a
-	// score. Reading it as IMDB would show TMDB's number under the IMDb label.
-	if len(block.Ratings) == 0 {
-		if value, ok := parseRatingValue(legacyRating); ok {
-			p.RatingIMDB = scaleRating(value, 10, 10)
-		}
-	}
-	// <userrating> is intentionally not emitted; see parsedNFO.
+	return names
 }
 
-func parseRatingValue(raw string) (float64, bool) {
-	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || value <= 0 {
-		return 0, false
-	}
-	return value, true
-}
+// kodiListSeparator joins several values in one Kodi list element
+// ("Action / Comedy").
+const kodiListSeparator = " / "
 
-func scaleRating(value, max, targetMax float64) float64 {
-	if max <= 0 {
-		max = targetMax
+// splitNFOList cleans a list element's values and splits each on Kodi's
+// " / " separator, dropping empties and repeats. It returns nil when nothing
+// remains.
+func splitNFOList(values []string) []string {
+	var parts []string
+	for _, v := range values {
+		parts = append(parts, strings.Split(v, kodiListSeparator)...)
 	}
-	scaled := value * targetMax / max
-	if scaled > targetMax {
-		return targetMax
+	out := cleanStrings(parts)
+	if out == nil {
+		return nil
 	}
-	return scaled
-}
-
-// applyPeople maps <actor> entries to cast and <director>/<credits> to crew.
-func applyPeople(p *parsedNFO, c *nfoCommon) {
-	people := make([]models.ItemPerson, 0, len(c.Actors)+len(c.Directors)+len(c.Credits))
-	for i, actor := range c.Actors {
-		name := strings.TrimSpace(actor.Name)
-		if name == "" {
+	seen := make(map[string]struct{}, len(out))
+	unique := out[:0]
+	for _, v := range out {
+		key := strings.ToLower(v)
+		if _, dup := seen[key]; dup {
 			continue
 		}
-		order := i
-		if declared, ok := parseNFOInt(actor.Order); ok {
-			order = declared
-		}
-		people = append(people, models.ItemPerson{
-			Person:    models.Person{Name: name},
-			Kind:      models.PersonKindActor,
-			Character: strings.TrimSpace(actor.Role),
-			SortOrder: order,
-		})
+		seen[key] = struct{}{}
+		unique = append(unique, v)
 	}
-	people = append(people, crewPeople(c.Directors, models.PersonKindDirector)...)
-	people = append(people, crewPeople(c.Credits, models.PersonKindWriter)...)
-	if len(people) > 0 {
-		p.People = people
-	}
-}
-
-func crewPeople(names []string, kind models.PersonKind) []models.ItemPerson {
-	people := make([]models.ItemPerson, 0, len(names))
-	for _, raw := range names {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
-		}
-		people = append(people, models.ItemPerson{
-			Person:    models.Person{Name: name},
-			Kind:      kind,
-			SortOrder: len(people),
-		})
-	}
-	return people
+	return unique
 }
 
 // cleanStrings trims entries and drops empties; returns nil (not an empty
@@ -473,4 +526,13 @@ func cleanStrings(values []string) []string {
 		return nil
 	}
 	return out
+}
+
+func firstNonBlank(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

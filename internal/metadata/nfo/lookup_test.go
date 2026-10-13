@@ -1386,11 +1386,11 @@ func TestParseSeasonSidecar_ChecksSharedFolderOnce(t *testing.T) {
 	show := t.TempDir()
 	episode := filepath.Join(show, "Show S01E01.mkv")
 	lookup := NewProvider().newLookup(context.Background())
-	if _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 1); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
+	if _, _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 1); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
 		t.Fatalf("parseSeasonSidecar(empty folder) error = %v, want ErrLocalMetadataUnavailable", err)
 	}
 	writeFile(t, episode, "video")
-	if _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 2); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
+	if _, _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 2); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
 		t.Fatalf("parseSeasonSidecar(second season, same call) error = %v; want the folder's first answer reused", err)
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
@@ -280,6 +282,24 @@ type HealthChecker struct {
 	// a fetch that outlives the sweep that started it is not started again by
 	// the next sweep. Node ids are unique across both pools (one table).
 	capabilityRefreshInFlight sync.Map
+
+	// ctx is the context Start ran with; the rechecks started between sweeps
+	// end with it. Guarded by mu.
+	ctx context.Context
+	// broadcastUnreachable tells other API servers about a transcode node this
+	// one could not connect to. Guarded by mu.
+	broadcastUnreachable func(payload string)
+	// origin identifies this process in its unreachable-node announcements.
+	origin string
+	// recheckInterval separates the rechecks of a node marked unreachable;
+	// tests shorten it.
+	recheckInterval time.Duration
+	// rechecks tracks the recheck goroutines so tests can wait for them, and
+	// recheckInFlight holds the URLs being rechecked so repeated reports about
+	// one node share a single recheck.
+	rechecks        sync.WaitGroup
+	recheckInFlight sync.Map
+
 	// nodeChecks holds one lock per node id; see lockNodeCheck.
 	nodeChecksMu sync.Mutex
 	nodeChecks   map[int]*sync.Mutex
@@ -288,10 +308,12 @@ type HealthChecker struct {
 // NewHealthChecker creates a health checker for the given pools.
 func NewHealthChecker(proxyPool *ProxyPool, transcodePool *TranscodePool, repo *Repository) *HealthChecker {
 	return &HealthChecker{
-		proxyPool:     proxyPool,
-		transcodePool: transcodePool,
-		repo:          repo,
-		interval:      30 * time.Second,
+		proxyPool:       proxyPool,
+		transcodePool:   transcodePool,
+		repo:            repo,
+		interval:        30 * time.Second,
+		recheckInterval: unreachableRecheckInterval,
+		origin:          uuid.NewString(),
 	}
 }
 
@@ -354,6 +376,9 @@ func (hc *HealthChecker) hooks() (CapabilityFetcher, func(nodeURL string)) {
 
 // Start runs health checks in a background goroutine. Stops when ctx is cancelled.
 func (hc *HealthChecker) Start(ctx context.Context) {
+	hc.mu.Lock()
+	hc.ctx = ctx
+	hc.mu.Unlock()
 	go func() {
 		hc.checkAll(ctx)
 		ticker := time.NewTicker(hc.interval)
@@ -411,7 +436,12 @@ func (hc *HealthChecker) checkOne(ctx context.Context, n *Node, applyHealth appl
 	// node began draining cannot overwrite the recheck its announcement caused.
 	unlock := hc.lockNodeCheck(n.ID)
 	defer unlock()
-	report := CheckNodeReport(ctx, n)
+	hc.publishHealth(ctx, n, CheckNodeReport(ctx, n), applyHealth, applyCapabilities)
+}
+
+// publishHealth publishes one health check's result for n to its pool and the
+// database. The caller holds n's check lock.
+func (hc *HealthChecker) publishHealth(ctx context.Context, n *Node, report HealthReport, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
 	healthy, capabilitiesHash := report.Healthy, report.CapabilitiesHash
 
 	// Publish the result through the pool lock so readers never see

@@ -201,6 +201,24 @@ Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 or to the series poster when the season has none; both are removed when the
 request disables Primary images.
 
+### Extended artwork
+
+Movies and series that have a banner, landscape thumb, clear art or disc art
+list it in `ImageTags` under Jellyfin's image types `Banner`, `Thumb`, `Art` and
+`Disc`, on lists and detail alike. `BackdropImageTags` lists every backdrop,
+the primary first, and is empty when the item has no primary backdrop.
+
+| Route | Serves |
+|---|---|
+| `GET /Items/{id}/Images/Banner` | The banner; 404 without one. |
+| `GET /Items/{id}/Images/Thumb` | The landscape thumb. Without one it serves the backdrop, then the poster, as before. |
+| `GET /Items/{id}/Images/Art` | The clear art; 404 without one. |
+| `GET /Items/{id}/Images/Disc` | The disc art; 404 without one. |
+| `GET /Items/{id}/Images/Backdrop/{index}` | Index 0 (or no index) is the primary backdrop; index `i` is the item's `i`-th backdrop after it, 404 past the last. Other image types ignore the index. |
+
+An episode's `ParentThumbImageTag` still names its series' backdrop; the series'
+`Thumb` route serves its landscape thumb when it has one.
+
 | Routes | Behavior |
 |---|---|
 | `GET /Items/{id}/Ancestors` | Visible episode/season/series/library ancestry. When an item belongs to multiple libraries, chooses its first visible library parent. |
@@ -444,6 +462,14 @@ sign in to Silo first: Jellyfin clients cannot run the password change it requir
 (see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
 state is unaffected, and signing in works again once the password is changed.
 
+Each sign-in, by password or Quick Connect, opens its own Silo login session, and the
+compat session lives only as long as it (see
+[login sessions](auth-api.md#login-sessions)). Every authenticated request, stream
+grant, and socket re-check looks the login session up, one indexed read, on whichever
+node answers. A revoked or expired login session ends the compat session with `401`; a
+lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
+session and are checked as keys instead.
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
@@ -524,11 +550,17 @@ claim remote-control command support.
 The listener uses the native API's rate limiter instance, so the admin
 rate-limit settings, their hot reloads, and the counters (in memory or Redis)
 are shared with the native API. Budgets key on the resolved client IP, after
-trusted-proxy resolution and ingress-token stripping, as on the native API.
+trusted-proxy resolution and ingress-token stripping, as on the native API. A
+sign-in whose client IP came from forwarding headers also spends the
+connection's shared budget, as described in
+[Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
-  against the same per-IP `login` counter.
+  against the same per-IP `login` counter. It reads at most 64 KiB of the
+  body: when decoding the JSON value needs more, it answers 413 with
+  `{"Error":"PayloadTooLarge",...}` before any credential check. Only the
+  first JSON value is decoded; data after it is ignored, not rejected.
 - The Quick Connect routes spend the native device sign-in budgets, as the
   native device operations do: Initiate spends `device_start`, Connect and
   `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize

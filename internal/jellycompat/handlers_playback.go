@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 
 	"github.com/go-chi/chi/v5"
 
@@ -609,8 +610,9 @@ func (h *PlaybackHandler) remoteToneMapCapabilities(ctx context.Context, nodeURL
 }
 
 func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, nodeURL string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, http.DefaultClient, nodeURL, h.JWTSecret)
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, h.JWTSecret)
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return playback.HWAccelInfo{}, err
 	}
 	if status != http.StatusOK {
@@ -1771,9 +1773,17 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-		resp, err := telemetry.DoTrustedNode(http.DefaultClient, httpReq, "transcode_start")
+		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
 		if err != nil {
-			return transcodenode.TranscodeStartResponse{}, 0, true, fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
+			nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
+			startErr := fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
+			if nodepool.IsConnectFailure(err) {
+				// Stopped in the background rather than by the caller, which
+				// would wait on the unreachable node before trying another.
+				h.tm.StopRemoteTranscodeAfterFailure(upstreamSessionID, transcodeNodeURL, err)
+				return transcodenode.TranscodeStartResponse{}, 0, false, startErr
+			}
+			return transcodenode.TranscodeStartResponse{}, 0, true, startErr
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusAccepted {

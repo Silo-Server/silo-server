@@ -2456,7 +2456,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a retained job. Administrators may read all jobs; item refresh owners may read their own safe result. */
+    /** Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result. */
     get: operations["getAdminJob"];
     put?: never;
     post?: never;
@@ -6618,6 +6618,23 @@ export interface paths {
     get: operations["listCatalogItemVersions"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/letters": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Count a title-ordered catalog query by initial letter, with each letter's list position, for an alphabetical jump bar. */
+    post: operations["queryCatalogLetters"];
     delete?: never;
     options?: never;
     head?: never;
@@ -20395,10 +20412,17 @@ export interface components {
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
+      /** @description Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none */
+      backdrop_urls?: string[];
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
+      banner_thumbhash?: string;
+      /** @description Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork */
+      banner_url?: string;
       /** @description Empty, never null */
       cast: components["schemas"]["CastCredit"][];
+      /** @description Presigned, short-lived. Transparent cut-out art. Movies and series only */
+      clearart_url?: string;
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -20410,6 +20434,8 @@ export interface components {
       credits?: components["schemas"]["Marker"];
       /** @description Empty, never null */
       crew: components["schemas"]["CrewCredit"][];
+      /** @description Presigned, short-lived. Transparent disc art. Movies only */
+      disc_url?: string;
       /** Format: double */
       duration_seconds?: number;
       ebook?: components["schemas"]["EbookDetailExtension"];
@@ -20538,6 +20564,9 @@ export interface components {
       subtitles: components["schemas"]["SubtitleInfo"][];
       tagline?: string;
       themes?: components["schemas"]["ThemeSongSet"];
+      thumb_thumbhash?: string;
+      /** @description Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only */
+      thumb_url?: string;
       /** @example Heat */
       title: string;
       tmdb_id?: string;
@@ -20637,6 +20666,74 @@ export interface components {
       is_favorite: boolean;
       /** @example false */
       played: boolean;
+    };
+    CatalogLetter: {
+      /**
+       * Format: int64
+       * @description Titles filed under the letter
+       * @example 42
+       */
+      count: number;
+      /**
+       * @description A to Z, or # for titles that start with a digit, a symbol, or a non-Latin letter. Titles file under their sort title, so "The Hobbit" sorted as "Hobbit, The" is under H, and accented Latin initials fold to their base letter
+       * @example H
+       */
+      letter: string;
+      /**
+       * Format: int64
+       * @description Zero-based list position of the letter's first title in the same query sorted by title in the same order; pass it as seek to queryCatalogItems
+       * @example 318
+       */
+      position: number;
+    };
+    CatalogLetterRun: {
+      /**
+       * @description The letter every title in the block files under
+       * @example H
+       */
+      letter: string;
+      /**
+       * Format: int64
+       * @description Zero-based list position of the block's first title; the block ends where the next one starts, or at total
+       * @example 318
+       */
+      position: number;
+    };
+    CatalogLetters: {
+      /** @description Letters with at least one title, in list order; empty, never null */
+      letters: components["schemas"]["CatalogLetter"][];
+      /** @description Blocks of consecutive titles under one letter, in list order, covering the whole result; empty, never null. A letter usually has one block, but the database's collation can sort some of its titles apart from the rest (under C, accented initials sort after Z; most collations put non-Latin scripts after the Latin letters), so use these, not letters, to tell which letter a list position is under */
+      runs: components["schemas"]["CatalogLetterRun"][];
+      /**
+       * Format: int64
+       * @description Titles in the whole result: the sum of the counts
+       * @example 1240
+       */
+      total: number;
+    };
+    CatalogLettersQuery: {
+      /** @description Rule groups, as on queryCatalogItems; empty matches everything */
+      groups?: components["schemas"]["CatalogQueryGroup"][];
+      /**
+       * @description Restrict to one library
+       * @example 1
+       */
+      library_id?: string;
+      /**
+       * @description How the groups combine; default all
+       * @enum {string}
+       */
+      match?: "all" | "any";
+      /**
+       * @description Title order the positions count in; default asc
+       * @enum {string}
+       */
+      order?: "asc" | "desc";
+      /**
+       * @description Media scope, as the listCatalogItems type parameter
+       * @example movie
+       */
+      type?: string;
     };
     CatalogQuery: {
       collection_id?: string;
@@ -20754,6 +20851,8 @@ export interface components {
       extended_query_rules?: boolean;
       /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
       facet_value_search?: boolean;
+      /** @description queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar */
+      letter_index?: boolean;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -21614,6 +21713,10 @@ export interface components {
       server_name: string;
     };
     ConnectionUpdate: {
+      /** @description Values for the provider's declared connection_settings, keyed by setting key: true or false for a boolean setting. Settings left out keep their current value. */
+      connection_settings?: {
+        [key: string]: unknown;
+      };
       export_favorites_enabled?: boolean;
       export_ratings_enabled?: boolean;
       export_unwatched_enabled?: boolean;
@@ -23805,6 +23908,8 @@ export interface components {
       delivery: "server" | "direct";
       /** @description Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown */
       episode_still_provenance: boolean;
+      /** @description Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc */
+      extended_item_artwork: boolean;
       /** Format: int64 */
       original_max_width_px: number;
       param: string;
@@ -31212,6 +31317,19 @@ export interface components {
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
     };
+    WatchProviderConnectionSetting: {
+      /** @description The value of a connection that has not changed the setting. */
+      default_value: unknown;
+      description?: string;
+      /** @description The setting's key in connection_settings. */
+      key: string;
+      label: string;
+      /**
+       * @description The value type. boolean is a switch whose value is true or false. A client skips a setting whose type it does not know; the server keeps its value.
+       * @enum {string}
+       */
+      type: "boolean";
+    };
     WatchProviderDeviceAuth: {
       /**
        * Format: date-time
@@ -31234,6 +31352,10 @@ export interface components {
       auth_session_id: string;
     };
     WatchProviderSettings: {
+      /** @description The value of every setting in the provider's connection_settings, keyed by setting key: true or false for a boolean setting. A setting the profile has not changed has its default. Empty when the provider declares none. */
+      connection_settings: {
+        [key: string]: unknown;
+      };
       export_favorites_enabled: boolean;
       /** @description Send the profile's star ratings to the provider (stars times two) and clear removed ones. */
       export_ratings_enabled: boolean;
@@ -31256,6 +31378,8 @@ export interface components {
     WatchProviderSummary: {
       capabilities: components["schemas"]["WatchProviderCapabilities"];
       connection_config_schema?: components["schemas"]["AdminPluginConfigSchema"][];
+      /** @description Settings a profile can change on its connection at any time, shown with the connection's other sync options. Their values are read and written through the connection's settings. Empty when the provider declares none. */
+      connection_settings: components["schemas"]["WatchProviderConnectionSetting"][];
       display_name: string;
       key: string;
     };
@@ -54642,7 +54766,12 @@ export interface operations {
   getAdminJob: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path: {
         id: string;
       };
@@ -54671,6 +54800,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -89893,6 +90031,143 @@ export interface operations {
       };
     };
   };
+  queryCatalogLetters: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CatalogLettersQuery"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CatalogLetters"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listPeople: {
     parameters: {
       query?: {
@@ -108420,6 +108695,10 @@ export interface operations {
         /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
         "If-Match"?: string;
         "If-None-Match"?: string;
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
       };
       path: {
         job_id: string;
@@ -108461,6 +108740,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

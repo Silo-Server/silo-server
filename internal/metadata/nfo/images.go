@@ -38,30 +38,62 @@ func itemArtworkNames(contentType string, imageType metadata.ImageType) (suffixe
 			names = append(names, "movie")
 		}
 	case metadata.ImageBackdrop:
-		// Silo stores one backdrop, so the first match by precedence wins.
+		// The first match is the primary backdrop; findBackdrops lists the
+		// rest after it.
 		suffixes = []string{"-fanart"}
 		names = []string{"fanart", "backdrop", "background", "art"}
 	case metadata.ImageLogo:
 		suffixes = []string{"-logo", "-clearlogo"}
 		names = []string{"logo", "clearlogo"}
+	case metadata.ImageBanner:
+		suffixes = []string{"-banner"}
+		names = []string{"banner"}
+	case metadata.ImageThumb:
+		suffixes = []string{"-landscape", "-thumb"}
+		names = []string{"landscape", "thumb"}
+	case metadata.ImageClearArt:
+		// art.jpg is a backdrop, not clear art.
+		suffixes = []string{"-clearart"}
+		names = []string{"clearart"}
+	case metadata.ImageDisc:
+		suffixes = []string{"-disc", "-cdart", "-discart"}
+		names = []string{"disc", "cdart", "discart"}
 	}
 	return suffixes, names
 }
 
+// itemImageTypes lists the sidecar image types an item can carry. Disc art
+// belongs to a movie's disc, so a series has none, as in Jellyfin.
+func itemImageTypes(contentType string) []metadata.ImageType {
+	types := []metadata.ImageType{
+		metadata.ImagePoster, metadata.ImageBackdrop, metadata.ImageLogo,
+		metadata.ImageBanner, metadata.ImageThumb, metadata.ImageClearArt,
+	}
+	if contentType != typeSeries {
+		types = append(types, metadata.ImageDisc)
+	}
+	return types
+}
+
 // GetImages implements metadata.ImageProvider by discovering sidecar artwork
-// (poster.jpg, fanart.jpg, clearlogo.png, <basename>-poster.jpg, ...) next to
-// the item's media files. Returned URLs are file:// sources with a size and
+// (poster.jpg, fanart.jpg, clearlogo.png, banner.jpg, landscape.jpg,
+// clearart.png, disc.png, <basename>-poster.jpg, ...) next to the item's media
+// files. It returns one image per type, except backdrops, which come in
+// display order (findBackdrops). Returned URLs are file:// sources with a size and
 // mtime fingerprint (metadata.LocalImageSourceURL); the image cache processor
 // copies them into artwork storage so library files are never served
-// directly. Local art applies even when no .nfo file is present.
+// directly. Local art applies even when no .nfo file is present. A slot with
+// no sidecar file takes the artwork the item's NFO names, if any (see
+// nfoItemArt).
 func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]metadata.RemoteImage, error) {
 	searchDirs := compactNFOPaths(req.PrimarySidecarSearchPaths)
 	// A series has no media file of its own: its request lists every episode
 	// file, so basename art such as "S01E01-poster.jpg" belongs to an episode
 	// and never becomes series art.
+	groupFiles := compactNFOPaths(append([]string{req.RepresentativeFilePath}, req.AllGroupFilePaths...))
 	var mediaFiles []string
 	if req.ContentType != typeSeries {
-		mediaFiles = compactNFOPaths(append([]string{req.RepresentativeFilePath}, req.AllGroupFilePaths...))
+		mediaFiles = groupFiles
 	}
 	if len(searchDirs) == 0 && len(mediaFiles) == 0 {
 		return nil, nil
@@ -69,9 +101,17 @@ func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]
 
 	finder := newSidecarFinder(ctx)
 	var images []metadata.RemoteImage
-	for _, imageType := range []metadata.ImageType{metadata.ImagePoster, metadata.ImageBackdrop, metadata.ImageLogo} {
-		suffixes, names := itemArtworkNames(req.ContentType, imageType)
-		if source := finder.findItemArtwork(suffixes, names, searchDirs, mediaFiles); source != "" {
+	for _, imageType := range itemImageTypes(req.ContentType) {
+		var sources []string
+		if imageType == metadata.ImageBackdrop {
+			sources = finder.findBackdrops(req.ContentType, searchDirs, mediaFiles)
+		} else {
+			suffixes, names := itemArtworkNames(req.ContentType, imageType)
+			if source := finder.findItemArtwork(suffixes, names, searchDirs, mediaFiles); source != "" {
+				sources = []string{source}
+			}
+		}
+		for _, source := range sources {
 			images = append(images, metadata.RemoteImage{
 				ProviderID: p.Slug(),
 				URL:        source,
@@ -80,7 +120,7 @@ func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]
 			})
 		}
 	}
-	return images, nil
+	return append(images, p.nfoItemArt(ctx, req, finder, groupFiles, searchDirs, images)...), nil
 }
 
 // findItemArtwork returns the source of the first usable sidecar: basename
@@ -118,6 +158,9 @@ type sidecarFinder struct {
 	// name can map to several entries that differ only in case. A directory
 	// that exists but cannot be listed maps to nil.
 	listings map[string]map[string][]string
+	// realDirs maps a folder to its path with symlinks resolved, or "" when
+	// it cannot be resolved (see realDir).
+	realDirs map[string]string
 }
 
 func newSidecarFinder(ctx context.Context) *sidecarFinder {

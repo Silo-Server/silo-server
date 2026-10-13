@@ -178,6 +178,14 @@
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
 
+# Artwork reference check (revision GC and storage sweep): every sweep surface
+# whose path column has an index uses it under a generic plan.
+./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
+
+# The local-only image-cache claim, run while metadata.cache_images is off, uses
+# its partial index instead of reading the remote jobs left queued.
+./internal/metadata TestLocalImageCacheClaimUsesLocalDueIndexDB
+
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
 ./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
@@ -248,3 +256,8 @@
 ./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
 ./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
+
+# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
+# the frozen legacy bridge alike.
+./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
+./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB

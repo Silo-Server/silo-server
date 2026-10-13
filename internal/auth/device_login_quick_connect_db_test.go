@@ -133,6 +133,10 @@ func TestQuickConnectApproveAndCollectDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Jellyfin-compatible session lives as long as the pair's login session.
+	if result.TokenPair.SessionID != claims.SessionID {
+		t.Fatalf("pair session = %q, want the tokens' %q", result.TokenPair.SessionID, claims.SessionID)
+	}
 	var active bool
 	if err := pool.QueryRow(ctx, `SELECT revoked_at IS NULL AND expires_at > NOW() FROM auth_sessions WHERE id = $1 AND user_id = $2`,
 		claims.SessionID, userID).Scan(&active); err != nil || !active {

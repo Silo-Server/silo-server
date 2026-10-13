@@ -69,6 +69,12 @@ const (
 	EventPluginsChanged = "plugins_changed"
 )
 
+// EventNodeUnreachable is published on ChannelAdmin when an API server could
+// not connect to a transcode node, so the other API servers stop selecting it
+// before their next health sweep. The payload is JSON naming the node URL and
+// the announcing process.
+const EventNodeUnreachable = "node_unreachable"
+
 // EventAuthProvidersChanged is published on ChannelAdmin after an auth
 // binding write, so every API replica rebuilds its sign-in providers without
 // a restart. Plugin install, config and removal changes arrive as

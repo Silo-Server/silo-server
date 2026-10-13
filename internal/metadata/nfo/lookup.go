@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -197,7 +198,12 @@ func (p *parsedNFO) clone() *parsedNFO {
 	c.Studios = slices.Clone(p.Studios)
 	c.Countries = slices.Clone(p.Countries)
 	c.Keywords = slices.Clone(p.Keywords)
+	c.Networks = slices.Clone(p.Networks)
 	c.People = slices.Clone(p.People)
+	c.Videos = slices.Clone(p.Videos)
+	c.Art = slices.Clone(p.Art)
+	c.RatingSources = maps.Clone(p.RatingSources)
+	c.SeasonNames = maps.Clone(p.SeasonNames)
 	return &c
 }
 

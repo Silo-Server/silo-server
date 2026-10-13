@@ -186,8 +186,20 @@ func TestGetMetadata_FullMovieFieldSet(t *testing.T) {
 	if result.Ratings.IMDB != 8.1 || result.Ratings.TMDB != 7.9 || result.Ratings.RTCritic != 89 || result.Ratings.RTAudience != 91 {
 		t.Errorf("Ratings = %#v", result.Ratings)
 	}
+	// IMDb and TMDB fill the rating columns above; their rows, which hold the
+	// vote counts discovery ranks by, stay the remote providers'.
+	wantSources := map[string]metadata.RatingSource{
+		models.RatingSourceRTCritic:   {Score: 89, Provider: "nfo"},
+		models.RatingSourceRTAudience: {Score: 91, Provider: "nfo"},
+	}
+	if !reflect.DeepEqual(result.RatingSources, wantSources) {
+		t.Errorf("RatingSources = %#v, want %#v", result.RatingSources, wantSources)
+	}
+	if result.SortTitle != "Blade Runner 1" {
+		t.Errorf("SortTitle = %q, want Blade Runner 1", result.SortTitle)
+	}
 	wantPeople := []models.ItemPerson{
-		{Person: models.Person{Name: "Harrison Ford"}, Kind: models.PersonKindActor, Character: "Rick Deckard", SortOrder: 0},
+		{Person: models.Person{Name: "Harrison Ford"}, Kind: models.PersonKindActor, Character: "Rick Deckard", SortOrder: 0, LocalPhotoSource: "nfo+https://example.com/ford.jpg"},
 		{Person: models.Person{Name: "Rutger Hauer"}, Kind: models.PersonKindActor, Character: "Roy Batty", SortOrder: 1},
 		{Person: models.Person{Name: "Ridley Scott"}, Kind: models.PersonKindDirector, SortOrder: 0},
 		{Person: models.Person{Name: "Hampton Fancher"}, Kind: models.PersonKindWriter, SortOrder: 0},

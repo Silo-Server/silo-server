@@ -129,9 +129,12 @@ export default function DetailHero({
       data-viewport-bounded={isViewportBounded || undefined}
     >
       {topNav}
+      {/* The artwork stops 1px short of the bottom edge, which the fade below
+          covers solidly anyway. At a fractional hero height the edge pixel is
+          only partly covered by the fade, and the artwork bled through as a line. */}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-x-0 top-0 bottom-px"
           style={{
             ...(backdropPlaceholder
               ? {

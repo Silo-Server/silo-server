@@ -2109,6 +2109,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return

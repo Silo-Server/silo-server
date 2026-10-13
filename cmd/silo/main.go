@@ -1427,9 +1427,22 @@ func main() {
 
 		deps.ProxyPool = proxyPool
 		deps.TranscodePool = transcodePool
-		deps.NodePlanner = nodepool.NewPlanner(proxyPool, transcodePool)
+		planner := nodepool.NewPlanner(proxyPool, transcodePool)
+		deps.NodePlanner = planner
 
 		healthChecker := nodepool.NewHealthChecker(proxyPool, transcodePool, nodeRepo)
+		planner.SetUnreachableHandler(healthChecker.ReportUnreachable)
+		healthChecker.SetUnreachableBroadcast(func(payload string) {
+			// Off the request path: the caller is a playback request that has
+			// already lost time to the dead node.
+			go func() {
+				publishCtx, cancel := context.WithTimeout(appCtx, 5*time.Second)
+				defer cancel()
+				if err := eventBus.Publish(publishCtx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodeUnreachable, Payload: payload}); err != nil {
+					slog.Warn("publish unreachable stream node", "error", err)
+				}
+			}()
+		})
 		capabilityBudget := nodeCapabilityProbeBudget(configWatcher.Config)
 		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(cfg.Auth.JWTSecret, capabilityBudget))
 		// The sweep's backstop is derived from the same budget, so it can never
@@ -1466,6 +1479,10 @@ func main() {
 
 		// Subscribe to node pool change events for multi-instance reload.
 		_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type == cache.EventNodeUnreachable {
+				healthChecker.ApplyUnreachableAnnouncement(event.Payload)
+				return
+			}
 			if event.Type == cache.EventNodePoolChanged {
 				pNodes, pErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
 				tNodes, tErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
@@ -2078,6 +2095,9 @@ func main() {
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
 		metadataService.SetImageResolver(imageResolver)
+		// Scans and the scheduled refresh re-apply local NFO and artwork
+		// metadata whose sidecar files changed.
+		metadataService.SetLocalSidecarStore(metadata.NewLocalSidecarRepository(deps.DB))
 
 		// Wire the image cacher whenever object storage is available so explicit
 		// admin image applies can succeed even if automatic metadata caching is off.
@@ -2094,6 +2114,7 @@ func main() {
 				imageResolver,
 				metadata.ImageCacheProcessorTargets{
 					Items:               itemRepo,
+					ItemBackdrops:       catalog.NewItemBackdropRepository(deps.DB),
 					Seasons:             seasonRepo,
 					Episodes:            episodeRepo,
 					ItemLocalizations:   catalog.NewMediaItemLocalizationRepository(deps.DB),
@@ -2103,9 +2124,11 @@ func main() {
 			)
 			// Local file:// artwork (NFO sidecars): confine reads to the owning
 			// library's roots and sweep stale hashed local/ prefixes on re-cache.
-			// The processor host must mount the libraries, like the metadata worker.
+			// The process whose refresh discovers a sidecar copies it, so a
+			// server without the library mount never has to.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
 			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
+			metadataService.SetLocalArtworkCopier(metadataImageCacheProcessor)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
 			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {
@@ -2234,6 +2257,9 @@ func main() {
 			deps.RealtimeHub,
 		)
 		deps.LibraryIngester = libraryIngestExecutor
+		if metadataService != nil {
+			libraryIngestExecutor.SetLocalSidecarChecker(metadataService)
+		}
 		if deps.DB != nil {
 			libraryScanQueue = scanqueue.NewService(
 				scanqueue.NewRepository(deps.DB),
@@ -3125,8 +3151,10 @@ func main() {
 		}
 		if metadataImageCacheProcessor != nil {
 			tasks.SetImageWorkers(cfg.Metadata.ImageWorkers)
+			metadataImageCacheProcessor.SetWorkerBudget(tasks.ImageWorkerBudget())
 			configWatcher.OnChange(func(_, updated *config.Config) {
 				tasks.SetImageWorkers(updated.Metadata.ImageWorkers)
+				metadataImageCacheProcessor.SetWorkerBudget(tasks.ImageWorkerBudget())
 			})
 			cacheImagesTask := tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor)
 			// Artwork cached under an older variant ladder is missing the rungs
@@ -3344,8 +3372,10 @@ func main() {
 			Files:    deps.FileRepo,
 			Settings: settingsRepo,
 			Auth: &audiobooks.SiloCredValidator{
-				Auth: absAuthSvc,
-				Pool: deps.DB,
+				Auth:        absAuthSvc,
+				Pool:        deps.DB,
+				Stores:      userStoreProvider,
+				PINAttempts: deps.ProfilePINAttempts,
 			},
 			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore),
 			Recs:           recommendations.NewRepo(deps.DB),

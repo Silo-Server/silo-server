@@ -10,6 +10,7 @@ package metadata_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/nfo"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func writeFixtureFile(t *testing.T, path, contents string) {
@@ -496,33 +498,25 @@ func TestSeriesWithoutSeasonOrEpisodeNFOs_UnchangedFallback(t *testing.T) {
 	}
 }
 
-// Local sidecar art is served only after an image-cache job copies it into
-// artwork storage. With metadata.cache_images off no job runs, so a refresh
-// must ignore local art and keep the remote provider's artwork instead of
-// leaving the item, season, and episode slots empty.
-func TestLocalArtworkRequiresImageCaching(t *testing.T) {
+// Local sidecar art is copied into artwork storage whatever
+// metadata.cache_images says: the setting governs downloading remote artwork,
+// and without a copy local art cannot be served at all. A refresh hands every
+// local slot (item, season, episode) to the discovering process's copier and
+// queues nothing else for it. Until a copy lands, a slot with nothing cached
+// serves the best remote image; once it lands, local wins again.
+func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
 	const (
 		remotePoster = "https://img.example/series-poster.jpg"
 		remoteSeason = "https://img.example/season-1.jpg"
 		remoteStill  = "https://img.example/s01e01.jpg"
 	)
-	for _, tc := range []struct {
-		name         string
-		cacheImages  bool
-		wantPoster   string
-		wantSeason   string
-		wantStill    string
-		wantAnyLocal bool
-	}{
-		{name: "caching off uses remote art", cacheImages: false,
-			wantPoster: remotePoster, wantSeason: remoteSeason, wantStill: remoteStill},
-		{name: "caching on prefers local art", cacheImages: true, wantAnyLocal: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, cacheImages := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cache_images=%v", cacheImages), func(t *testing.T) {
 			root, episodeFiles := buildFitnessFixture(t)
 
 			x := metadata.NewNFOSeriesHarness()
-			x.Service().SetAutoCacheImages(tc.cacheImages)
+			x.Service().SetAutoCacheImages(cacheImages)
+			x.RecordLocalArtworkCopies()
 			ctx := context.Background()
 			const seriesID = "series:tvdb:4242"
 			if err := x.SeedSeriesSkeleton(seriesID, "P90X"); err != nil {
@@ -539,64 +533,100 @@ func TestLocalArtworkRequiresImageCaching(t *testing.T) {
 					{ProviderID: "tvdb", URL: remotePoster, Type: metadata.ImagePoster, Language: "en", Rating: 8},
 				},
 			}
-
-			// NFO first in the chain, so its local art wins whenever it is usable.
-			if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-				ContentID: seriesID,
-				Hints: &metadata.MatchHints{
-					Title:                     "P90X",
-					Type:                      "series",
-					FilePath:                  episodeFiles[0],
-					RepresentativeFilePath:    episodeFiles[0],
-					AllGroupFilePaths:         episodeFiles,
-					PrimarySidecarSearchPaths: []string{root},
-				},
-				Language: "en",
-				Mode:     metadata.ModeInitialMatch,
-			}, []metadata.Provider{nfo.NewProvider(), remote}); err != nil {
-				t.Fatalf("ProcessWithProviders: %v", err)
-			}
-
-			item, err := x.Item(seriesID)
-			if err != nil {
-				t.Fatalf("item: %v", err)
-			}
-			seasons := x.Seasons(seriesID)
-			if len(seasons) == 0 || seasons[0].SeasonNumber != 1 {
-				t.Fatalf("seasons = %#v, want season 1 first", seasons)
-			}
-			episodes := x.Episodes(seriesID)
-			if len(episodes) == 0 || episodes[0].SeasonNumber != 1 || episodes[0].EpisodeNumber != 1 {
-				t.Fatalf("episodes = %#v, want S01E01 first", episodes)
-			}
-
-			sources := []string{
-				item.PosterSourcePath, item.BackdropSourcePath,
-				seasons[0].PosterSourcePath, episodes[0].StillSourcePath,
-			}
-			anyLocal := false
-			for _, source := range sources {
-				if strings.HasPrefix(source, "file://") {
-					anyLocal = true
+			refresh := func(mode metadata.RefreshMode) {
+				t.Helper()
+				// NFO first in the chain; local art outranks remote art anyway.
+				if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
+					ContentID: seriesID,
+					Hints: &metadata.MatchHints{
+						Title:                     "P90X",
+						Type:                      "series",
+						FilePath:                  episodeFiles[0],
+						RepresentativeFilePath:    episodeFiles[0],
+						AllGroupFilePaths:         episodeFiles,
+						PrimarySidecarSearchPaths: []string{root},
+					},
+					Language: "en",
+					Mode:     mode,
+				}, []metadata.Provider{nfo.NewProvider(), remote}); err != nil {
+					t.Fatalf("ProcessWithProviders: %v", err)
 				}
 			}
-			if anyLocal != tc.wantAnyLocal {
-				t.Errorf("local sources present = %v, want %v (sources %q)", anyLocal, tc.wantAnyLocal, sources)
+			slots := func() (*models.MediaItem, *models.Season, *models.Episode) {
+				t.Helper()
+				item, err := x.Item(seriesID)
+				if err != nil {
+					t.Fatalf("item: %v", err)
+				}
+				seasons := x.Seasons(seriesID)
+				if len(seasons) == 0 || seasons[0].SeasonNumber != 1 {
+					t.Fatalf("seasons = %#v, want season 1 first", seasons)
+				}
+				episodes := x.Episodes(seriesID)
+				if len(episodes) == 0 || episodes[0].SeasonNumber != 1 || episodes[0].EpisodeNumber != 1 {
+					t.Fatalf("episodes = %#v, want S01E01 first", episodes)
+				}
+				return item, seasons[0], episodes[0]
 			}
-			if tc.wantAnyLocal {
-				return
+
+			refresh(metadata.ModeInitialMatch)
+			item, season, episode := slots()
+			for name, source := range map[string]string{
+				"item poster":   item.PosterSourcePath,
+				"item backdrop": item.BackdropSourcePath,
+				"season poster": season.PosterSourcePath,
+				"episode still": episode.StillSourcePath,
+			} {
+				if !strings.HasPrefix(source, "file://") {
+					t.Errorf("%s source = %q, want the local sidecar", name, source)
+				}
 			}
-			if item.PosterPath != tc.wantPoster {
-				t.Errorf("item PosterPath = %q, want %q", item.PosterPath, tc.wantPoster)
+			// Nothing is cached yet: each slot serves the remote stand-in, and
+			// the backdrop, which has none, stays empty.
+			if item.PosterPath != remotePoster || item.BackdropPath != "" {
+				t.Errorf("item poster/backdrop path = %q/%q, want %q/empty until the copy lands", item.PosterPath, item.BackdropPath, remotePoster)
 			}
-			if seasons[0].PosterPath != tc.wantSeason {
-				t.Errorf("season PosterPath = %q, want %q", seasons[0].PosterPath, tc.wantSeason)
+			if season.PosterPath != remoteSeason {
+				t.Errorf("season PosterPath = %q, want %q until the copy lands", season.PosterPath, remoteSeason)
 			}
-			if episodes[0].StillPath != tc.wantStill {
-				t.Errorf("episode StillPath = %q, want %q", episodes[0].StillPath, tc.wantStill)
+			if episode.StillPath != remoteStill {
+				t.Errorf("episode StillPath = %q, want %q until the copy lands", episode.StillPath, remoteStill)
+			}
+
+			copies := map[string]int{}
+			for _, in := range x.LocalArtworkCopies() {
+				if !strings.HasPrefix(in.SourcePath, "file://") {
+					t.Errorf("copier got non-local input %#v", in)
+				}
+				copies[in.TargetType]++
+			}
+			want := map[string]int{
+				metadata.ImageCacheTargetItem:    2, // poster, backdrop
+				metadata.ImageCacheTargetSeason:  2,
+				metadata.ImageCacheTargetEpisode: 2,
+			}
+			if fmt.Sprint(copies) != fmt.Sprint(want) {
+				t.Errorf("local copies by target = %v, want %v", copies, want)
 			}
 			if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
-				t.Errorf("caching off enqueued %d image jobs: %#v", len(jobs), jobs)
+				t.Errorf("queued %d image jobs outside the copier: %#v", len(jobs), jobs)
+			}
+
+			// Once the copies land, a refresh keeps the local copies.
+			if err := x.LandLocalArtworkCopies(seriesID); err != nil {
+				t.Fatalf("land copies: %v", err)
+			}
+			refresh(metadata.ModeManualRefresh)
+			item, season, episode = slots()
+			for name, path := range map[string]string{
+				"item poster":   item.PosterPath,
+				"item backdrop": item.BackdropPath,
+				"season poster": season.PosterPath,
+				"episode still": episode.StillPath,
+			} {
+				if !strings.HasPrefix(path, "local/") {
+					t.Errorf("%s path after the copy = %q, want the cached local copy", name, path)
+				}
 			}
 		})
 	}

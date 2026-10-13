@@ -16,9 +16,15 @@ const OriginalVariant = "original"
 // metadata provider.
 const LocalPrefix = "local/"
 
-// IsLocal reports whether objectPath is a cached copy of library artwork.
+// NFOPrefix starts the key of a cached copy of an image URL a library's NFO
+// file names. The NFO provider's copies are keyed like a provider's, under its
+// slug, but the library chose them, so they count as library artwork.
+const NFOPrefix = "nfo/"
+
+// IsLocal reports whether objectPath is a cached copy of library artwork: a
+// file Silo read from the library or an image URL a library NFO names.
 func IsLocal(objectPath string) bool {
-	return strings.HasPrefix(objectPath, LocalPrefix)
+	return strings.HasPrefix(objectPath, LocalPrefix) || strings.HasPrefix(objectPath, NFOPrefix)
 }
 
 // Image types the variant ladder is keyed by. These name the directory segment
@@ -31,12 +37,16 @@ const (
 	ImageStill    = "still"
 	ImageLogo     = "logo"
 	ImageProfile  = "profile"
+	ImageBanner   = "banner"
+	ImageThumb    = "thumb"
+	ImageClearArt = "clearart"
+	ImageDisc     = "disc"
 )
 
 // LadderVersion identifies the current shape of the variant ladder returned by
-// VariantWidths. It MUST be bumped whenever VariantWidths changes so the
-// one-shot ladder backfill re-enqueues already-cached artwork and generates the
-// newly-added rungs. Existing deployments compare their recorded
+// VariantWidths. It MUST be bumped whenever an existing type's widths change so
+// the one-shot ladder backfill re-enqueues already-cached artwork and generates
+// the newly-added rungs. Adding a type does not need a bump. Existing deployments compare their recorded
 // backfilled_version against this value; leaving it stale means clients asking
 // for a new rung keep falling back to the next lower one forever.
 const LadderVersion = 2
@@ -130,13 +140,22 @@ func OriginalOf(objectPath string) string {
 // ladder: image generation, object-key expansion, garbage collection, and the
 // client-selectable image sizes in internal/imagesize all derive from it.
 //
-// Bump LadderVersion whenever this function changes.
+// Bump LadderVersion whenever an existing type's widths change. A new type
+// needs no bump: nothing cached under it predates its ladder.
 func VariantWidths(imageType string) []int {
 	switch strings.ToLower(strings.TrimSpace(imageType)) {
 	case ImageBackdrop:
 		return []int{1920, 1280, 300}
+	case ImageThumb:
+		// Landscape thumbs are 16:9 cards, shown smaller than backdrops.
+		return []int{1280, 500, 300}
 	case ImageLogo:
 		return []int{1280, 500}
+	case ImageBanner, ImageClearArt:
+		// Kodi banners (1000x185) and clear art (1000x562) top out at 1000.
+		return []int{1000, 500}
+	case ImageDisc:
+		return []int{1000, 500, 300}
 	case ImageProfile:
 		// Cast/crew headshots are only ever rendered at card size; they do not
 		// get the wide rung posters and stills carry.
