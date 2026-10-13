@@ -11,14 +11,14 @@ import (
 
 type ChromaprintExtractor struct {
 	config Config
-	// hardware is where tail passes decode keyframes (see hwdecode.go).
-	hardware *hardwareDecoder
+	// hardware resolves where tail passes decode keyframes (see hwdecode.go).
+	hardware *mediasample.HardwareResolver
 	logger   *slog.Logger
 }
 
 func NewChromaprintExtractor(config Config) *ChromaprintExtractor {
 	config = config.normalized()
-	return &ChromaprintExtractor{config: config, hardware: newHardwareDecoder(config.HWAccel, config.HWDevice), logger: slog.Default()}
+	return &ChromaprintExtractor{config: config, hardware: mediasample.NewHardwareResolver(config.HWAccel, config.HWDevice), logger: slog.Default()}
 }
 
 // fingerprintRequest is the sampling request for the audio in a window of a

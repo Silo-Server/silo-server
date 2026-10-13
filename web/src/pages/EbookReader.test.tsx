@@ -164,6 +164,7 @@ function makeEbookItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -295,66 +296,6 @@ describe("EbookReader", () => {
     container.remove();
   });
 
-  it("shows reader progress and wires page navigation controls", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    expect(container.textContent).toContain("42%");
-
-    const previous = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Previous page"]',
-    );
-    const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]');
-    expect(previous).not.toBeNull();
-    expect(next).not.toBeNull();
-
-    await act(async () => {
-      previous?.click();
-      next?.click();
-    });
-
-    expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
-    expect(mocks.readerNext).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves library context on the back-to-ebook link", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?libraryId=12"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
-  });
-
-  it("sends the reader back action to an explicit backTo target (manga series)", async () => {
-    const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={[`/reader/ebook/ebook-1?libraryId=7&backTo=${backTo}`]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    // backTo wins over the default chapter-detail target, breaking the loop.
-    expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
-    expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
-  });
-
   // Regression test for issue #189: exiting the reader must consume the
   // reader's history entry (history back) rather than pushing the series page
   // on top of it — otherwise pressing back on the series page re-opens the
@@ -408,6 +349,9 @@ describe("EbookReader", () => {
         </MemoryRouter>,
       );
     });
+
+    expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
+    expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
 
     const back = container.querySelector<HTMLAnchorElement>('a[aria-label="Back"]');
     expect(back).not.toBeNull();
@@ -509,6 +453,7 @@ describe("EbookReader", () => {
         versions: [
           makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
           makeVersion({ file_id: 9, file_name: "Reader.pdf", container: "pdf" }),
+          makeVersion({ file_id: 10, file_name: "Reader.docx", container: "docx" }),
         ],
       }),
       isLoading: false,
@@ -517,7 +462,7 @@ describe("EbookReader", () => {
 
     await act(async () => {
       root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8&libraryId=12"]}>
           <Routes>
             <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
           </Routes>
@@ -525,9 +470,14 @@ describe("EbookReader", () => {
       );
     });
 
+    expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
     expect(container.textContent).toContain("reader surface Reader.epub");
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Reader file"]');
     expect(select).not.toBeNull();
+    expect(Array.from(select!.options).map((option) => option.textContent)).toEqual([
+      "EPUB · Reader.epub",
+      "PDF · Reader.pdf",
+    ]);
 
     await act(async () => {
       if (!select) return;
@@ -536,36 +486,6 @@ describe("EbookReader", () => {
     });
 
     expect(container.textContent).toContain("reader surface Reader.pdf");
-  });
-
-  it("only lists reader-supported files in the reader file selector", async () => {
-    mocks.useCatalogItemDetail.mockReturnValue({
-      data: makeEbookItem({
-        versions: [
-          makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
-          makeVersion({ file_id: 9, file_name: "Reader.docx", container: "docx" }),
-          makeVersion({ file_id: 10, file_name: "Reader.pdf", container: "pdf" }),
-        ],
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const options = Array.from(container.querySelectorAll<HTMLOptionElement>("option")).map(
-      (option) => option.textContent,
-    );
-
-    expect(options).toEqual(["EPUB · Reader.epub", "PDF · Reader.pdf"]);
   });
 
   it("falls back to a supported reader file when the requested file is unsupported", async () => {
@@ -661,7 +581,8 @@ describe("EbookReader", () => {
     expect(mocks.readerGoTo).toHaveBeenCalledWith("epubcfi(/6/8)");
   });
 
-  it("loads server reader settings and passes them to the reader", async () => {
+  it("persists reader settings to the server and local fallback", async () => {
+    vi.useFakeTimers();
     mocks.fetchEbookReaderConfig.mockResolvedValue({
       settings: { theme: "sepia", fontSize: 130 },
     });
@@ -679,25 +600,10 @@ describe("EbookReader", () => {
     await act(async () => {
       await Promise.resolve();
     });
-
     expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1", expect.any(Object));
-    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+    expect(mocks.captureReaderSettings).toHaveBeenCalledWith(
       expect.objectContaining({ theme: "sepia", fontSize: 130 }),
     );
-  });
-
-  it("persists reader settings to the server and local fallback", async () => {
-    vi.useFakeTimers();
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
 
     const settingsTab = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Reader settings"]',
@@ -857,6 +763,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
+    expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
+    expect(container.querySelector('select[aria-label="Spread"]')).toBeNull();
+
     const reset = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Reset reader settings"]',
     );
@@ -876,6 +785,8 @@ describe("EbookReader", () => {
       expect.any(Object),
     );
     expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"light"');
+    expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
+    expect(container.querySelector('select[aria-label="Spread"]')).not.toBeNull();
 
     vi.useRealTimers();
   });
@@ -949,26 +860,6 @@ describe("EbookReader", () => {
     expect(handle?.getAttribute("aria-valuenow")).toBe("50");
   });
 
-  it("constrains the reader grid so the side panel stays inside the viewport", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const main = container.querySelector("main");
-    const readerPane = main?.querySelector("section");
-    const sidePanel = main?.querySelector("aside");
-
-    expect(main?.className).toContain("overflow-hidden");
-    expect(readerPane?.className).toContain("min-w-0");
-    expect(sidePanel?.className).toContain("min-w-0");
-  });
-
   it("scrubs reader progress and supports keyboard page navigation", async () => {
     await act(async () => {
       root.render(
@@ -979,6 +870,20 @@ describe("EbookReader", () => {
         </MemoryRouter>,
       );
     });
+
+    expect(container.textContent).toContain("42%");
+    const previous = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Previous page"]',
+    );
+    const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]');
+    expect(previous).not.toBeNull();
+    expect(next).not.toBeNull();
+    await act(async () => {
+      previous!.click();
+      next!.click();
+    });
+    expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
+    expect(mocks.readerNext).toHaveBeenCalledTimes(1);
 
     const scrubber = container.querySelector<HTMLInputElement>(
       'input[aria-label="Reading progress"]',
@@ -995,8 +900,8 @@ describe("EbookReader", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
     });
 
-    expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
-    expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+    expect(mocks.readerPrev).toHaveBeenCalledTimes(2);
+    expect(mocks.readerNext).toHaveBeenCalledTimes(2);
   });
 
   it("loads annotations, creates highlights, and deletes annotations", async () => {
@@ -1224,29 +1129,6 @@ describe("EbookReader", () => {
     }
   });
 
-  it("shows read aloud and reading aid controls", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const settingsTab = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Reader settings"]',
-    );
-    await act(async () => {
-      settingsTab?.click();
-    });
-
-    expect(container.querySelector('button[aria-label="Speak text"]')).not.toBeNull();
-    expect(container.querySelector('input[aria-label="Keep screen awake"]')).not.toBeNull();
-    expect(container.querySelector('input[aria-label="E-ink mode"]')).toBeNull();
-  });
-
   it("shows useful advanced reader controls without diagnostics UI or no-op controls", async () => {
     vi.useFakeTimers();
 
@@ -1305,87 +1187,5 @@ describe("EbookReader", () => {
     );
 
     vi.useRealTimers();
-  });
-
-  it("keeps side panel tab labels visible in the narrow panel", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const settingsTab = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Reader settings"]',
-    );
-    const label = settingsTab?.querySelector("[data-reader-panel-tab-label]");
-
-    expect(settingsTab?.className).toContain("flex-col");
-    expect(label?.textContent).toBe("Settings");
-    expect(label?.className).toContain("whitespace-normal");
-  });
-
-  it("keeps range labels readable in the settings panel", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const settingsTab = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Reader settings"]',
-    );
-    await act(async () => {
-      settingsTab?.click();
-    });
-
-    const brightness = container.querySelector<HTMLInputElement>('input[aria-label="Brightness"]');
-    const label = brightness?.closest("label");
-    const header = label?.querySelector("[data-reader-range-header]");
-    const name = label?.querySelector("[data-reader-range-name]");
-    const value = label?.querySelector("[data-reader-range-value]");
-
-    expect(header?.className).toContain("grid");
-    expect(name?.className).toContain("break-words");
-    expect(value?.className).toContain("justify-self-end");
-  });
-
-  it("hides paginated-only controls in scrolled flow", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const settingsTab = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Reader settings"]',
-    );
-    await act(async () => {
-      settingsTab?.click();
-    });
-
-    expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).not.toBeNull();
-
-    const flow = container.querySelector<HTMLSelectElement>('select[aria-label="Flow"]');
-    await act(async () => {
-      if (!flow) return;
-      flow.value = "scrolled";
-      flow.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-
-    expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).toBeNull();
   });
 });

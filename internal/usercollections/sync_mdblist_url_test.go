@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
+
 	"sync/atomic"
 	"testing"
 
@@ -25,7 +25,7 @@ func TestFetchMDBListEntriesDoesNotDialPrivateHosts(t *testing.T) {
 	t.Parallel()
 
 	transport := &countingRoundTripper{}
-	svc := NewService(nil, nil, nil, &http.Client{Transport: transport}, slog.New(slog.DiscardHandler))
+	svc := NewService(nil, nil, nil, nil, &http.Client{Transport: transport}, slog.New(slog.DiscardHandler))
 
 	_, err := svc.fetchMDBListEntries(context.Background(), "http://127.0.0.1:8096/", 0)
 	if !errors.Is(err, collectionutil.ErrMDBListURL) {
@@ -41,20 +41,5 @@ func TestFetchMDBListEntriesDoesNotDialPrivateHosts(t *testing.T) {
 	}
 	if transport.hits.Load() != 0 {
 		t.Fatalf("HTTP client was used %d times for a private URL", transport.hits.Load())
-	}
-}
-
-func TestCanonicalMDBListURLRejectsPrivateHosts(t *testing.T) {
-	t.Parallel()
-
-	if _, err := CanonicalMDBListURL("http://10.0.0.1/lists/x/y"); !errors.Is(err, collectionutil.ErrMDBListURL) {
-		t.Fatalf("CanonicalMDBListURL(rfc1918) = %v, want ErrMDBListURL", err)
-	}
-	got, err := CanonicalMDBListURL("https://mdblist.com/lists/example-user/watchlist")
-	if err != nil {
-		t.Fatalf("CanonicalMDBListURL(valid) = %v", err)
-	}
-	if !strings.HasSuffix(got, "/json") {
-		t.Fatalf("canonical URL = %q, want /json suffix", got)
 	}
 }

@@ -21,6 +21,10 @@ type fakeAdminRequests struct {
 	stale                     bool
 	filter                    mediarequests.ListFilter
 	action, reason, requestID string
+	probedBaseURL             string
+	// failed gives every returned request the errors a failed submission
+	// leaves (withSubmissionErrors).
+	failed bool
 }
 
 func fixtureAdminRequests() *fakeAdminRequests {
@@ -101,11 +105,12 @@ func (f *fakeAdminRequests) DeleteIntegrationConditional(_ context.Context, v me
 }
 func (f *fakeAdminRequests) LoadIntegrationOptions(_ context.Context, v mediarequests.Viewer, r mediarequests.Integration) (map[string][]mediarequests.RouterOption, error) {
 	f.viewer = v
+	f.probedBaseURL = r.BaseURL
 	if r.APIKeyRef == "bad" {
 		return nil, &mediarequests.ValidationError{FieldErrors: map[string]string{"api_key_ref": "invalid key"}}
 	}
 	if r.APIKeyRef == "unreachable" {
-		return nil, fmt.Errorf("%w: dial tcp: connect: connection refused", mediarequests.ErrIntegrationUnreachable)
+		return nil, &mediarequests.IntegrationUnreachableError{Detail: "Nothing answered at that address. Check the host and port.", Err: fmt.Errorf("dial tcp: connect: connection refused")}
 	}
 	return map[string][]mediarequests.RouterOption{}, nil
 }
@@ -116,14 +121,19 @@ func TestAdminRequestOptionsUnreachableIntegration(t *testing.T) {
 	h := adminRequestsHandler(fixtureAdminRequests())
 	rec := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations/new/options", `{"api_key_ref":"unreachable"}`, actingRequestAdmin)
 	requireProblem(t, rec, TypeDependencyUnavailable)
-	if strings.Contains(rec.Body.String(), "connection refused") {
-		t.Fatal("upstream failure detail leaked")
+	if !strings.Contains(rec.Body.String(), "Nothing answered at that address. Check the host and port.") {
+		t.Fatalf("body = %s, want the classified detail", rec.Body.String())
+	}
+	for _, leaked := range []string{"connection refused", "dial tcp"} {
+		if strings.Contains(rec.Body.String(), leaked) {
+			t.Fatalf("upstream failure detail %q leaked: %s", leaked, rec.Body.String())
+		}
 	}
 }
 func (f *fakeAdminRequests) ListAdmin(_ context.Context, v mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error) {
 	f.viewer = v
 	f.filter = filter
-	rows := []*mediarequests.Request{fixtureMediaRequest("r-3", 3), fixtureMediaRequest("r-2", 2), fixtureMediaRequest("r-1", 1)}
+	rows := []*mediarequests.Request{f.request("r-3", 3), f.request("r-2", 2), f.request("r-1", 1)}
 	out := []*mediarequests.Request{}
 	for _, r := range rows {
 		if filter.Before != nil && r.ID >= filter.Before.ID {
@@ -140,7 +150,14 @@ func (f *fakeAdminRequests) moderate(v mediarequests.Viewer, action, id, reason 
 	f.viewer = v
 	f.action, f.requestID, f.reason = action, id, reason
 	f.writes++
-	return fixtureMediaRequest(id, 1), nil
+	return f.request(id, 1), nil
+}
+func (f *fakeAdminRequests) request(id string, tmdbID int) *mediarequests.Request {
+	r := fixtureMediaRequest(id, tmdbID)
+	if f.failed {
+		withSubmissionErrors(r)
+	}
+	return r
 }
 func (f *fakeAdminRequests) Approve(_ context.Context, v mediarequests.Viewer, id string) (*mediarequests.Request, error) {
 	return f.moderate(v, "approve", id, "")
@@ -238,6 +255,47 @@ func TestAdminRequestIntegrationSecretsAndGuard(t *testing.T) {
 		t.Fatal(created.Code, created.Body.String())
 	}
 }
+
+// The v2 probe sends a scheme-less address with http:// in front and refuses
+// one it could never reach as a field error, without asking the plugin.
+func TestAdminRequestOptionsNormalizesBaseURL(t *testing.T) {
+	f := fixtureAdminRequests()
+	h := adminRequestsHandler(f)
+	path := Prefix + "/admin/request-integrations/new/options"
+	if rec := do(t, h, http.MethodPost, path, `{"base_url":"10.0.0.5:8989/","api_key_ref":"k"}`, actingRequestAdmin); rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if f.probedBaseURL != "http://10.0.0.5:8989" {
+		t.Fatalf("probed base URL = %q", f.probedBaseURL)
+	}
+	f.probedBaseURL = "unset"
+	rec := do(t, h, http.MethodPost, path, `{"base_url":"ftp://10.0.0.5","api_key_ref":"k"}`, actingRequestAdmin)
+	requireProblem(t, rec, TypeValidationFailed)
+	if !strings.Contains(rec.Body.String(), `"body.base_url"`) || f.probedBaseURL != "unset" {
+		t.Fatal(rec.Body.String(), f.probedBaseURL)
+	}
+}
+
+// A v2 save stores the address the options probe used, and refuses one it
+// could never probe as a field error.
+func TestAdminRequestIntegrationSaveNormalizesBaseURL(t *testing.T) {
+	f := fixtureAdminRequests()
+	h := adminRequestsHandler(f)
+	body := strings.Replace(requestIntegrationBody, `"https://router.example.test"`, `"10.0.0.5:8989/"`, 1)
+	created := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations", body, actingRequestAdmin)
+	if created.Code != 201 || !strings.Contains(created.Body.String(), `"base_url":"http://10.0.0.5:8989"`) {
+		t.Fatal(created.Code, created.Body.String())
+	}
+	bad := strings.Replace(requestIntegrationBody, `"https://router.example.test"`, `"ftp://10.0.0.5"`, 1)
+	refused := do(t, h, http.MethodPost, Prefix+"/admin/request-integrations", bad, actingRequestAdmin)
+	requireProblem(t, refused, TypeValidationFailed)
+	if !strings.Contains(refused.Body.String(), `"body.base_url"`) {
+		t.Fatal(refused.Body.String())
+	}
+	if f.writes != 1 {
+		t.Fatalf("writes = %d, want only the valid create", f.writes)
+	}
+}
 func TestAdminRequestLimitsModerationAndOptions(t *testing.T) {
 	f := fixtureAdminRequests()
 	h := adminRequestsHandler(f)
@@ -269,6 +327,31 @@ func TestAdminRequestLimitsModerationAndOptions(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/request-integrations/new/options", `{"api_key_ref":"bad"}`, actingRequestAdmin), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.api_key_ref" {
 		t.Fatalf("validation %+v", p)
+	}
+}
+
+// The admin request operations carry every download server detail.
+func TestAdminRequestsCarryDownloadServerDetails(t *testing.T) {
+	f := fixtureAdminRequests()
+	f.failed = true
+	h := adminRequestsHandler(f)
+	rec := do(t, h, http.MethodGet, Prefix+"/admin/requests", "", actingRequestAdmin)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	decodeBody(t, rec.Body, &page)
+	if rec.Code != http.StatusOK || len(page.Items) != 3 {
+		t.Fatalf("listAdminRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, item := range page.Items {
+		if targets, _ := item["targets"].([]any); len(targets) == 0 {
+			t.Fatalf("listAdminRequests: no targets in %v", item)
+		}
+		requireAdminMembers(t, "listAdminRequests", item, adminRequestMembers, adminTargetMembers)
+	}
+	for _, action := range []string{"approve", "decline", "cancel", "retry"} {
+		got := requireTargets(t, action, do(t, h, http.MethodPost, Prefix+"/admin/requests/r-1/"+action, `{}`, actingRequestAdmin))
+		requireAdminMembers(t, action, got, adminRequestMembers, adminTargetMembers)
 	}
 }
 func TestAdminRequestCursorBoundaries(t *testing.T) {

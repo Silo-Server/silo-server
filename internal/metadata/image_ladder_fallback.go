@@ -16,6 +16,9 @@ import (
 // ArtworkAvailability is durable knowledge about one immutable revision.
 // Verified distinguishes a completed delivery check (including no usable keys)
 // from publication that has not yet been checked through external delivery.
+// Deliverable holds the latest verdict for the current delivery scope; while
+// Verified is false it predates the current publication, so it proves which
+// variants delivered but not which are missing.
 type ArtworkAvailability struct {
 	Published   []string
 	Deliverable []string
@@ -99,8 +102,10 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 		return key
 	}
 	if !known || (state.External && !state.Verified) {
-		// An unverified external path is not proof the newly added size works.
-		if ladderTypesWithAddedRung[imageType] && keyVariant(key) == imagesize.Variant(imageType, imagesize.Large) {
+		// An unverified external path is not proof the newly added size works,
+		// unless an earlier verdict in this scope already delivered it.
+		if ladderTypesWithAddedRung[imageType] && keyVariant(key) == imagesize.Variant(imageType, imagesize.Large) &&
+			!slices.Contains(state.Deliverable, key) {
 			if lower, ok := imagesize.NextLower(imageType, keyVariant(key)); ok {
 				key = variantKey(key, lower)
 			}

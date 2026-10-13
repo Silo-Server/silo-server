@@ -22,15 +22,6 @@ func TestByteStoreDeleteReportsAShortCountAsFailure(t *testing.T) {
 	}
 }
 
-// An absent key still counts as deleted, so cleanup after a failed publish and
-// a repeated deletion are both quiet.
-func TestByteStoreDeleteAcceptsAnAbsentKey(t *testing.T) {
-	store := NewByteStore(&shortDeleteStore{count: 1})
-	if err := store.Delete(context.Background(), "subtitles/1/a.srt"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestByteStoreRoundTripsThroughTheFilesystem(t *testing.T) {
 	fs, err := NewFilesystem(t.TempDir())
 	if err != nil {
@@ -52,6 +43,9 @@ func TestByteStoreRoundTripsThroughTheFilesystem(t *testing.T) {
 	}
 	if _, err := store.Get(ctx, key); err == nil {
 		t.Fatal("object survived deletion")
+	}
+	if err := store.Delete(ctx, key); err != nil {
+		t.Fatalf("repeated deletion of an absent key: %v", err)
 	}
 	if NewByteStore(nil) != nil {
 		t.Fatal("nil store produced a non-nil ByteStore")

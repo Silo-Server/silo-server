@@ -57,13 +57,15 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
+	oldRepository := 7
 	result, err := installer.replaceBinary(ctx, &Installation{
-		ID:          15,
-		PluginID:    "silo.metadb",
-		Version:     "0.0.18",
-		InstallPath: oldPath,
-		Enabled:     true,
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest)
+		ID:           15,
+		RepositoryID: &oldRepository,
+		PluginID:     "silo.metadb",
+		Version:      "0.0.18",
+		InstallPath:  oldPath,
+		Enabled:      true,
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil)
 	if err != nil {
 		t.Fatalf("replaceBinary() returned error: %v", err)
 	}
@@ -101,6 +103,11 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	}
 
 	update := store.updateInputs[0]
+	// An uploaded replacement no longer comes from the catalog repository the
+	// row named, so the row must stop claiming it.
+	if !update.SetRepository || update.RepositoryID != nil || result.Installation.RepositoryID != nil {
+		t.Fatalf("update repository = %t/%v, result repository = %v; want cleared", update.SetRepository, update.RepositoryID, result.Installation.RepositoryID)
+	}
 	if update.Version == nil || *update.Version != "0.0.19" {
 		t.Fatalf("update version = %v, want 0.0.19", update.Version)
 	}

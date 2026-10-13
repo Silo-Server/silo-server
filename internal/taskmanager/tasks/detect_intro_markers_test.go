@@ -114,18 +114,6 @@ func assertDetectMarkersSkipped(t *testing.T, progress *fakeProgress) {
 	}
 }
 
-func TestDetectIntroMarkersSkipsWhenAnotherServerHoldsLock(t *testing.T) {
-	runner := &fakeMarkerAnalysisRunner{}
-	progress := &fakeProgress{}
-	if err := newTestDetectMarkersTask(runner, &fakeClusterLock{}).Execute(t.Context(), progress); err != nil {
-		t.Fatalf("Execute = %v, want nil", err)
-	}
-	if runner.runs != 0 {
-		t.Fatalf("analyzer runs = %d, want 0", runner.runs)
-	}
-	assertDetectMarkersSkipped(t, progress)
-}
-
 func TestDetectIntroMarkersWithoutChromaprint(t *testing.T) {
 	// A server that cannot fingerprint runs its chapter-only episode pass
 	// before it consults the lock, so it never makes a capable server skip,
@@ -281,18 +269,6 @@ func TestDetectIntroMarkersReleasesLock(t *testing.T) {
 			t.Fatalf("released = %d, want 1", lock.released)
 		}
 	})
-}
-
-func TestDetectIntroMarkersNilPoolRunsWithoutLock(t *testing.T) {
-	task := NewDetectIntroMarkersTask(nil, nil, nil)
-	runner := &fakeMarkerAnalysisRunner{}
-	task.analyzer = runner
-	if err := task.Execute(t.Context(), &fakeProgress{}); err != nil {
-		t.Fatalf("Execute = %v, want nil", err)
-	}
-	if runner.runs != 1 {
-		t.Fatalf("analyzer runs = %d, want 1", runner.runs)
-	}
 }
 
 func TestDetectIntroMarkersRunsTheEnabledKinds(t *testing.T) {

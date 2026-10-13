@@ -104,3 +104,72 @@ func TestSequentialRangedTransportsSurviveIdleAndPausedGrace(t *testing.T) {
 	}
 	assertPresent("completed ranged transport sequence")
 }
+
+// TestStopReportedPausedSessionKeepsPausedGrace is the #1454 review
+// regression: a stale ID-less stop marks a paused session, and with no later
+// heartbeat that session must still get the paused grace, not the active one,
+// so idle cleanup can't tear down a really-paused play.
+func TestStopReportedPausedSessionKeepsPausedGrace(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	session, err := m.StartSession(1, "profile-1", 100, PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := m.UpdateProgress(session.ID, 42, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+	if err := m.MarkStopReported(session.ID); err != nil {
+		t.Fatalf("MarkStopReported: %v", err)
+	}
+
+	m.mu.Lock()
+	s := m.sessions[session.ID]
+	s.LastActivityAt = time.Now().Add(-46 * time.Second)
+	s.UpdatedAt = s.LastActivityAt
+	m.mu.Unlock()
+	m.CleanStale()
+
+	got, err := m.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("stop-reported paused session reaped after 46s idle; it must keep the paused grace (err: %v)", err)
+	}
+	if !got.IsPaused || !got.StopReported {
+		t.Fatalf("IsPaused=%v StopReported=%v, want both true", got.IsPaused, got.StopReported)
+	}
+	if err := m.UpdateProgress(session.ID, 43, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetSession(session.ID); got.StopReported {
+		t.Fatal("a progress report must clear the stop mark")
+	}
+}
+
+// A replacement stream (and its rollback) is an active play, so it clears a
+// stop mark rather than leaving the play hidden from the admin view.
+func TestReplacementClearsStopReported(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	session, err := m.StartSession(1, "profile-1", 100, PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := m.MarkStopReported(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := m.ApplyReplacement(session.ID, SessionReplacement{EffectiveMediaFileID: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetSession(session.ID); got.StopReported {
+		t.Fatal("ApplyReplacement kept the stop mark")
+	}
+
+	if err := m.MarkStopReported(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RollbackReplacement(session.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetSession(session.ID); got.StopReported {
+		t.Fatal("RollbackReplacement kept the stop mark")
+	}
+}

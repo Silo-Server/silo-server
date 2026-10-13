@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryRecommended from "./LibraryRecommended";
@@ -19,6 +20,23 @@ const mockUseLibraryLayout = vi.fn();
 const mockFetchLibrarySectionItems = vi.fn();
 const mockUseSidebarPins = vi.fn();
 const mockUseLibraryCollectionItems = vi.fn();
+const mockUseLibraryHasItems = vi.fn();
+const mockUseIsActingAdmin = vi.fn();
+
+vi.mock("@/hooks/useIsActingAdmin", () => ({
+  useIsActingAdmin: () => mockUseIsActingAdmin(),
+}));
+
+vi.mock("@/hooks/queries/catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/catalog")>()),
+  useLibraryHasItems: (...args: unknown[]) => mockUseLibraryHasItems(...args),
+}));
+
+vi.mock("@/components/LibraryEmptyState", () => ({
+  default: ({ libraryId }: { libraryId: number }) => (
+    <div data-kind="library-empty">Library {libraryId} is empty</div>
+  ),
+}));
 
 vi.mock("@/hooks/queries/sections", () => ({
   useLibraryLayout: (...args: unknown[]) => mockUseLibraryLayout(...args),
@@ -188,6 +206,9 @@ describe("LibraryRecommended", () => {
     );
     mockUseSidebarPins.mockReturnValue({ pins: {} });
     mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
+    mockUseLibraryHasItems.mockReset();
+    mockUseLibraryHasItems.mockReturnValue({ data: undefined });
+    mockUseIsActingAdmin.mockReturnValue(false);
   });
 
   afterEach(async () => {
@@ -200,21 +221,16 @@ describe("LibraryRecommended", () => {
   async function render(ui: ReactNode) {
     const queryClient = new QueryClient();
     await act(async () => {
-      root.render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>{ui}</MemoryRouter>
+        </QueryClientProvider>,
+      );
       await Promise.resolve();
       await Promise.resolve();
     });
     return queryClient;
   }
-
-  it("renders sections from the layout and item APIs", async () => {
-    await render(<LibraryRecommended libraryId={42} />);
-
-    expect(container.textContent).toContain("Continue Watching");
-    expect(container.textContent).toContain("Recently Added");
-    expect(mockFetchLibrarySectionItems).toHaveBeenCalledWith(42, "cw", expect.any(Object));
-    expect(mockFetchLibrarySectionItems).toHaveBeenCalledWith(42, "recent", expect.any(Object));
-  });
 
   it("does not invalidate cached library sections on mount", async () => {
     const invalidateQueries = vi.spyOn(QueryClient.prototype, "invalidateQueries");
@@ -351,16 +367,6 @@ describe("LibraryRecommended", () => {
     expect(container.textContent).toContain("Recently Added");
   });
 
-  it("renders nothing while loading with no data", async () => {
-    mockUseLibraryLayout.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    });
-
-    await render(<LibraryRecommended libraryId={42} />);
-    expect(container.innerHTML).toBe("");
-  });
-
   it("renders pinned collection rows from sidebar_pins for the current library", async () => {
     mockUseSidebarPins.mockReturnValue({
       pins: {
@@ -388,14 +394,107 @@ describe("LibraryRecommended", () => {
     expect(mockUseLibraryCollectionItems).toHaveBeenCalledWith(42, "col-1");
   });
 
-  it("renders nothing for a pinned collection with no visible items", async () => {
-    mockUseSidebarPins.mockReturnValue({
-      pins: { "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }] },
-    });
-    mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
+  describe("empty library", () => {
+    function emptySection(id: string, title: string, sectionType: string) {
+      return {
+        ...makeSection({ id, title, section_type: sectionType }),
+        total_count: 0,
+        items: [],
+      };
+    }
 
+    beforeEach(() => {
+      mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) =>
+        Promise.resolve({
+          section:
+            sectionId === "cw"
+              ? emptySection("cw", "Continue Watching", "continue_watching")
+              : emptySection("recent", "Recently Added", "recently_added"),
+        }),
+      );
+    });
+
+    it("shows the empty-library state once every section resolves empty", async () => {
+      mockUseLibraryHasItems.mockImplementation(
+        (_libraryId: number, options: { enabled: boolean }) => ({
+          data: options.enabled ? false : undefined,
+        }),
+      );
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      await waitFor(() => {
+        expect(container.querySelector('[data-kind="library-empty"]')).not.toBeNull();
+      });
+      expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
+      expect(container.textContent).not.toContain("Recently Added");
+    });
+
+    it("does not claim the library is empty while it still holds items", async () => {
+      mockUseLibraryHasItems.mockReturnValue({ data: true });
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      await waitFor(() => {
+        expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
+      });
+      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
+    });
+  });
+
+  describe("library with media but no sections", () => {
+    beforeEach(() => {
+      mockUseLibraryLayout.mockReturnValue({ data: { sections: [] }, isLoading: false });
+      mockUseLibraryHasItems.mockReturnValue({ data: true });
+    });
+
+    function linkHrefs() {
+      return Array.from(container.querySelectorAll("a")).map((link) => link.getAttribute("href"));
+    }
+
+    it("points viewers at Home Screen settings", async () => {
+      await render(<LibraryRecommended libraryId={42} />);
+
+      expect(container.textContent).toContain("No sections yet");
+      expect(linkHrefs()).toEqual(["/settings/home-screen"]);
+      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
+    });
+
+    it("also points admins at Admin Sections", async () => {
+      mockUseIsActingAdmin.mockReturnValue(true);
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      expect(container.textContent).toContain("No sections yet");
+      expect(linkHrefs()).toEqual(["/admin/sections", "/settings/home-screen"]);
+    });
+
+    it("waits for the library check before choosing an empty state", async () => {
+      mockUseLibraryHasItems.mockReturnValue({ data: undefined });
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      expect(container.textContent).not.toContain("No sections yet");
+      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
+    });
+
+    it("shows the empty-library state when the library holds nothing", async () => {
+      mockUseLibraryHasItems.mockReturnValue({ data: false });
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      expect(container.querySelector('[data-kind="library-empty"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("No sections yet");
+    });
+  });
+
+  it("does not check library emptiness while sections have items", async () => {
     await render(<LibraryRecommended libraryId={42} />);
 
-    expect(container.textContent).not.toContain("Pinned Horror");
+    await waitFor(() => {
+      expect(container.textContent).toContain("Recently Added");
+    });
+    expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: false });
+    expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
   });
 });

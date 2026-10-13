@@ -64,7 +64,7 @@ import { emailReady } from "@/lib/emailReadiness";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { SettingField } from "./SettingField";
 import ServerNotificationChannels from "./ServerNotificationChannels";
 

@@ -29,6 +29,11 @@ type AdminPlaybackHistoryEntry struct {
 
 // PlaybackAdminStore persists finalized playback history and manages the
 // shared active-session sync rows used by admin monitoring.
+//
+// RecordHistory keeps one row per session. A session finalized again (copies
+// on several replicas, or one resumed after expiry) updates its row only when
+// it reached further, so the row holds the furthest position whichever
+// finalization lands first.
 type PlaybackAdminStore interface {
 	RecordHistory(ctx context.Context, entry AdminPlaybackHistoryEntry) error
 	DeleteSession(ctx context.Context, sessionID string) error
@@ -60,7 +65,12 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			(session_id, user_id, profile_id, profile_name, media_item_id, media_file_id,
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet)
-		ON CONFLICT (session_id) DO NOTHING
+		ON CONFLICT (session_id) DO UPDATE SET
+			watched_seconds = EXCLUDED.watched_seconds,
+			duration_seconds = COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds),
+			completed = admin_playback_history.completed OR EXCLUDED.completed,
+			ended_at = GREATEST(admin_playback_history.ended_at, EXCLUDED.ended_at)
+		WHERE EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 	`,
 		entry.SessionID,
 		entry.UserID,

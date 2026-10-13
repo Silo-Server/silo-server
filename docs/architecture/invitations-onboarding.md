@@ -1,15 +1,17 @@
 # Invitations and server-driven onboarding
 
 Two complementary entry paths coexist: shareable multi-use `invite_codes`
-("drop a code in Discord") and personal, emailed invitations — a single-use
-capability token bound to one email address, carrying the access decisions the
-admin made at send time. Invitations live in `internal/invitations`; the
+("drop a code in Discord") and personal invitations — a single-use capability
+token carrying the access decisions the admin made at send time. An emailed
+invitation is bound to one email address; a link invitation, which the admin
+shares themselves, has no address until the invitee enters one at accept. Invitations live in `internal/invitations`; the
 first-run tour lives in `internal/onboarding`.
 
 ## Invitation model
 
-One row per invitation in the `invitations` table. The invitee chooses only a
-password; the invitation's email address becomes their `username` (both
+One row per invitation in the `invitations` table. For an emailed invitation
+the invitee chooses only a password; for a link invitation they also enter
+their email address. Either way the address becomes their `username` (both
 `users.username` and `users.email` are `citext` and globally unique, so the
 address is a legal, unambiguous username). To make that natural on the apps,
 `LocalProvider.Authenticate` falls back to `GetByEmail` when the username
@@ -54,6 +56,22 @@ dump yields no usable links.
 
 ## Lifecycle invariants
 
+- **Link invitations.** A link invitation stores `email` NULL and
+  `delivery='link'` (a check constraint allows NULL only then), so any number
+  can be pending and none supersedes another. Accept validates the entered
+  address, provisions the account with it, and writes it to the row in the same
+  transaction. An address that already has an account fails the insert,
+  rolls back, and leaves the token claimable for another address. Resending a
+  link invitation mints a new link and sends nothing.
+- **Replacing a link never changes the address.** Resend with
+  `delivery=link` mints a new link for an emailed invitation without emailing
+  it: the row keeps its address and is stored as `delivery='link'`, so the
+  emailed link stops working and the account still takes the bound address.
+- **Delivery is recorded.** `delivery` is `link`, `email_sent`, or
+  `email_unconfirmed`, NULL for rows that predate it. An emailed invitation is
+  stored as `email_unconfirmed` and moved to `email_sent` only after the sender
+  returns success, so a crash or failed send never reads as delivered. An
+  explicit email request with no mail sender configured creates nothing.
 - **One live invitation per address.** A partial unique index
   (`invitations_one_pending_idx`, on `email` where neither accepted nor
   revoked) enforces it; `Repository.Create` revokes any live invitation for

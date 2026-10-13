@@ -3,10 +3,10 @@
 // library_collections subsystem).
 //
 // User collections live in user_personal_collections and use external sources
-// (TMDB / Trakt / MDBList) the same way admin collections do, but resolved
-// against the entire catalog. Per-user library access is enforced at read
-// time by the catalog resolver, so the sync service does not have to scope
-// item resolution to a particular set of libraries.
+// (TMDB / Trakt / MDBList) the same way admin collections do. A sync keeps
+// only titles the collection's owner profile can access (its libraries and
+// rating limit), so an item limit fills with titles the owner can see. Catalog
+// reads still limit what each viewer sees to that viewer's own access.
 package usercollections
 
 import (
@@ -16,14 +16,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
-
-// NormalizeMDBListURL accepts either a list page URL
-// (https://mdblist.com/lists/user/slug) or its JSON variant and returns the
-// canonical JSON URL. Trailing slashes are tolerated. Empty input is
-// returned unchanged so callers can keep their own validation.
-func NormalizeMDBListURL(url string) string {
-	return collectionutil.NormalizeMDBListURL(url)
-}
 
 // CanonicalMDBListURL normalizes a list URL and rejects anything that is not
 // an MDBList list page. Sync fetches that URL, so callers must use this
@@ -58,7 +50,7 @@ type SourceConfig struct {
 	ProfileID  string     `json:"profile_id,omitempty"`
 	Limit      *int       `json:"limit,omitempty"`
 	// LibraryIDs narrows sync resolution to these libraries. Empty/nil means
-	// resolve against every library the requesting user can access.
+	// resolve against every library the collection's owner can access.
 	LibraryIDs []int `json:"library_ids,omitempty"`
 }
 

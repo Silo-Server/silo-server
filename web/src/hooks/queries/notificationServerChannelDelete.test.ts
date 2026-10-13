@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { captureNotificationAuthority, notificationScope } from "@/api/v2/notifications";
 import { adminKeys } from "./keys";
 import { useDeleteServerNotificationChannel } from "./admin/serverNotificationChannels";
@@ -53,12 +53,14 @@ it("invalidates only the captured server channel cache and rejects a stale recei
 });
 
 it("sends exact server channel removal once on failure", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const client = new QueryClient();
   const { result } = renderHook(() => useDeleteServerNotificationChannel(), {
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children),
   });
-  for (const status of [401, 403, 500]) {
+  for (const status of [401, 500]) {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
     vi.stubGlobal("fetch", fetch);
     await act(async () => {

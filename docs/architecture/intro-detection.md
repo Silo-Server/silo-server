@@ -257,7 +257,7 @@ are contributed only on request.
 Credits versions and caches:
 
 - Tail fingerprints are `credits_fingerprint` rows in the artifact table.
-  Their `config_hash` is `ArtifactConfigHash` of the kind and the tail window
+  Their `config_hash` is `mediaartifact.ConfigHash` of the kind and the tail window
   parameters, so they never share a key with intro fingerprints. A tail with
   no audio is stored `unusable`, and a failed extraction `failed` with
   backoff.

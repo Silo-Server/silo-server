@@ -96,3 +96,30 @@ export function adminFormForConfigSchema(schema: PluginConfigSchema): PluginAdmi
     return explicitFields.length > 0 ? schema.admin_form! : null;
   }
 }
+
+function defaultValueForField(field: PluginAdminFormField): string | boolean {
+  if (typeof field.default_value === "boolean" || typeof field.default_value === "string") {
+    return field.default_value;
+  }
+  if (typeof field.default_value === "number") return String(field.default_value);
+  return field.control === "SWITCH" ? false : "";
+}
+
+/** A form field's value from a saved config entry: numbers as text, else its default. */
+export function formValueForField(
+  field: PluginAdminFormField,
+  saved?: Record<string, unknown>,
+): string | boolean {
+  const raw = saved?.[field.key];
+  if (typeof raw === "boolean" || typeof raw === "string") return raw;
+  if (typeof raw === "number") return String(raw);
+  return defaultValueForField(field);
+}
+
+/** Form values for every field of a config entry, as the admin forms edit them. */
+export function formValuesFromConfig(
+  fields: readonly PluginAdminFormField[],
+  saved?: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(fields.map((field) => [field.key, formValueForField(field, saved)]));
+}

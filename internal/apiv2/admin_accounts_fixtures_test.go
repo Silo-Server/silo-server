@@ -34,11 +34,24 @@ func (f *fakeAdminAccountSettings) DeleteAdminAccountSetting(_ context.Context, 
 	return nil
 }
 
-type fakeAdminAccountActivity struct{ positions []activitylog.IPPagePosition }
+type fakeAdminAccountActivity struct {
+	positions []activitylog.IPPagePosition
+	// ips overrides the synthetic addresses UserIPsPage returns.
+	ips []string
+}
 
 func (f *fakeAdminAccountActivity) UserIPsPage(_ context.Context, _ int, _ int, _ int, pos activitylog.IPPagePosition) ([]activitylog.UserIPEntry, bool, error) {
 	f.positions = append(f.positions, pos)
-	return []activitylog.UserIPEntry{{ClientIP: "127.0.0.1", FirstSeen: fixedTime(), LastSeen: fixedTime(), RequestCount: 3}}, false, nil
+	ips := f.ips
+	if ips == nil {
+		// Committed fixtures may carry loopback addresses only.
+		ips = []string{"127.0.0.1"}
+	}
+	rows := make([]activitylog.UserIPEntry, 0, len(ips))
+	for _, ip := range ips {
+		rows = append(rows, activitylog.UserIPEntry{ClientIP: ip, FirstSeen: fixedTime(), LastSeen: fixedTime(), RequestCount: 3})
+	}
+	return rows, false, nil
 }
 func (f *fakeAdminAccountActivity) IPUsersPage(_ context.Context, _ string, _ int, _ int, pos activitylog.IPPagePosition) ([]activitylog.IPUserEntry, bool, error) {
 	f.positions = append(f.positions, pos)
@@ -54,6 +67,7 @@ func (f *fakeAdminAPIKeys) ListAdminUserAPIKeysPage(ctx context.Context, user in
 func adminAccountFixtureCases() []fixtureCase {
 	cases := []fixtureCase{
 		{name: "admin_account_capabilities", operationID: "getAdminAccountCapabilities", method: "GET", path: "/api/v2/admin/users/capabilities", status: 200, schema: "AdminAccountCapabilitiesOutputBody"},
+		{name: "admin_user_policy_defaults", operationID: "getAdminUserPolicyDefaults", method: "GET", path: "/api/v2/admin/users/policy-defaults", status: 200, schema: "AdminUserPolicyDefaults"},
 		{name: "admin_account_get", operationID: "getAdminUser", method: "GET", path: "/api/v2/admin/users/7", status: 200, schema: "AdminUser"},
 		{name: "admin_account_create", operationID: "createAdminUser", method: "POST", path: "/api/v2/admin/users", body: `{"username":"sample","email":"sample@example.test","password":"synthetic-password","role":"user","create_default_profile":false}`, status: 201, schema: "AdminAccountCreatedBody"},
 		{name: "admin_account_update", operationID: "updateAdminUser", method: "PUT", path: "/api/v2/admin/users/7", body: `{"enabled":false}`, status: 204},
@@ -67,6 +81,11 @@ func adminAccountFixtureCases() []fixtureCase {
 		{name: "admin_account_settings", operationID: "listAdminUserSettingValues", method: "GET", path: "/api/v2/admin/users/7/settings/values?limit=1", status: 200, schema: "AdminAccountSettingsOutputBody"},
 		{name: "admin_account_setting_put", operationID: "setAdminUserSettingValue", method: "PUT", path: "/api/v2/admin/users/7/settings/values/playback.audio_language?scope=profile&profile_id=p-owner", body: `{"value":"en"}`, status: 200, schema: "SettingValue"},
 		{name: "admin_account_setting_delete", operationID: "deleteAdminUserSettingValue", method: "DELETE", path: "/api/v2/admin/users/7/settings/values/playback.audio_language?scope=profile&profile_id=p-owner", status: 204},
+		{name: "admin_account_profile_sections", operationID: "listAdminUserProfileSectionOverrides", method: "GET", path: "/api/v2/admin/users/7/profiles/p-owner/sections", status: 200, schema: "SectionOverrideCollection"},
+		{name: "admin_account_profile_section_settings", operationID: "getAdminUserProfileSectionSettings", method: "GET", path: "/api/v2/admin/users/7/profiles/p-owner/sections/settings", status: 200, schema: "ProfileSectionSettingCollection"},
+		{name: "admin_account_profile_sections_not_found", operationID: "listAdminUserProfileSectionOverrides", method: "GET", path: "/api/v2/admin/users/7/profiles/p-elsewhere/sections", status: 404, schema: "Problem"},
+		{name: "admin_account_profile_sections_replace", operationID: "replaceAdminUserProfileSectionOverrides", method: "PUT", path: "/api/v2/admin/users/7/profiles/p-kid/sections", body: `{"overrides":[{"id":"o-kid","section_id":"s-continue","position":0,"hidden":true}]}`, status: 204},
+		{name: "admin_account_profile_sections_reset", operationID: "resetAdminUserProfileSectionOverrides", method: "DELETE", path: "/api/v2/admin/users/7/profiles/p-kid/sections", status: 204},
 		{name: "admin_access_group_list", operationID: "listAdminAccessGroups", method: "GET", path: "/api/v2/admin/access-groups?limit=1", status: 200, schema: "CollectionAdminAccessGroupListItem"},
 		{name: "admin_access_group_get", operationID: "getAdminAccessGroup", method: "GET", path: "/api/v2/admin/access-groups/7", status: 200, schema: "AdminAccessGroup"},
 		{name: "admin_access_group_create", operationID: "createAdminAccessGroup", method: "POST", path: "/api/v2/admin/access-groups", body: `{"name":"Group"}`, status: 201, schema: "AdminAccessGroup"},

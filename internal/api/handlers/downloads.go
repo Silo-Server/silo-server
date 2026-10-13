@@ -57,6 +57,7 @@ type DownloadHandler struct {
 	nodePlanner     nodepool.DownloadPlanner
 	jwtSecret       func() string
 	proxyHTTPClient *http.Client
+	linkIssuer      DirectDownloadLinkIssuer
 	preflightMu     sync.Mutex
 	preflightCache  map[string]proxyPreflightResult
 }
@@ -86,6 +87,49 @@ func NewDownloadHandler(svc DownloadService) *DownloadHandler {
 func (h *DownloadHandler) SetProxyDelivery(planner nodepool.DownloadPlanner, jwtSecret func() string) {
 	h.nodePlanner = planner
 	h.jwtSecret = jwtSecret
+}
+
+// DirectDownloadLinkIssuer signs direct-download link tokens;
+// auth.JWTService implements it.
+type DirectDownloadLinkIssuer interface {
+	GenerateDirectDownloadLinkToken(userID int, role, sessionID, profileID string, impersonatorUserID *int, fileID int) (string, time.Time, error)
+}
+
+// ErrDirectDownloadLinksUnavailable reports that link minting is not wired:
+// no issuer, or a download service that cannot authorize without serving.
+var ErrDirectDownloadLinksUnavailable = errors.New("direct download links are not configured")
+
+// ErrDirectDownloadLinkSession reports a caller without a login session (an
+// API key). A link is bound to a session so revoking it revokes the link.
+var ErrDirectDownloadLinkSession = errors.New("direct download links require a login session")
+
+// SetDirectDownloadLinks enables CreateDirectDownloadLink.
+func (h *DownloadHandler) SetDirectDownloadLinks(issuer DirectDownloadLinkIssuer) {
+	h.linkIssuer = issuer
+}
+
+// CreateDirectDownloadLink authorizes fileID for the request's verified
+// profile exactly as a direct download would (download policy, catalog and
+// file access under the profile's scope), then mints a short-lived link token
+// carrying the session, profile and file. Nothing is served or recorded. The
+// direct-download routes authorize the request again when the link is used.
+func (h *DownloadHandler) CreateDirectDownloadLink(ctx context.Context, fileID int) (string, time.Time, error) {
+	resolver, ok := h.svc.(downloadFileResolver)
+	if !ok || h.linkIssuer == nil {
+		return "", time.Time{}, ErrDirectDownloadLinksUnavailable
+	}
+	claims := apimw.GetClaims(ctx)
+	profileID := apimw.GetProfileID(ctx)
+	if claims == nil || profileID == "" {
+		return "", time.Time{}, downloads.ErrProfileRequired
+	}
+	if claims.SessionID == "" {
+		return "", time.Time{}, ErrDirectDownloadLinkSession
+	}
+	if _, err := resolver.ResolveDirectFile(ctx, claims.UserID, fileID, "", AccessFilterFromContext(ctx, "")); err != nil {
+		return "", time.Time{}, err
+	}
+	return h.linkIssuer.GenerateDirectDownloadLinkToken(claims.UserID, claims.Role, claims.SessionID, profileID, claims.ImpersonatorUserID, fileID)
 }
 
 type downloadFileResolver interface {
@@ -515,8 +559,19 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 	// instead of truncating the body at 120 s.
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+		if errors.Is(err, downloads.ErrResponseCommitted) {
+			// Headers and part of the file already went out, so an error body
+			// would corrupt the media response. Abort it instead, as the v2
+			// stream writer requires. A client that left has canceled the
+			// request; any other failure, such as a short read from storage,
+			// is the server's.
+			if r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "direct download failed after the response started",
+					"component", "downloads", "file_id", fileID, "error", err)
+			}
+			panic(http.ErrAbortHandler)
+		}
 		h.writeDownloadError(w, err)
-		return
 	}
 }
 
@@ -790,6 +845,12 @@ func (h *DownloadHandler) HandleArtwork(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind := chi.URLParam(r, "kind")
+	if kind == "series_poster" {
+		// A v2-only kind; the frozen v1 route answers 404 for it before
+		// checking the download, so an inactive download still gets 404 here.
+		h.writeAssetError(w, "artwork", id, downloads.ErrAssetNotFound)
+		return
+	}
 	if err := h.svc.ServeArtwork(r.Context(), w, r, userID, profileID, deviceID, id, kind, requestAccessFilter(r)); err != nil {
 		h.writeAssetError(w, "artwork", id, err)
 		return
@@ -821,6 +882,10 @@ func (h *DownloadHandler) writeAssetError(w http.ResponseWriter, asset, id strin
 		errors.Is(err, downloads.ErrAssetNotFound),
 		errors.Is(err, catalog.ErrItemNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Not found")
+	case errors.Is(err, downloads.ErrAssetUnavailable):
+		// The service already logged the store failure; the frozen v1
+		// answer stays the 500 it has always been.
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve download asset")
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		writeError(w, http.StatusBadRequest, "invalid_subtitle_ref", "Invalid subtitle reference")
 	case errors.Is(err, downloads.ErrDownloadNotActive):

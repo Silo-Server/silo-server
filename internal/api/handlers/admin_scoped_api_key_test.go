@@ -30,6 +30,8 @@ type scopedKeyUserRepo struct {
 	promoteBeforeMutate bool
 	// updateErr, when set, is what Update returns.
 	updateErr error
+	// revoked records whether the last mutation asked to sign the account out.
+	revoked bool
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -65,9 +67,11 @@ func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ in
 	if r.promoteBeforeMutate {
 		current.Role = models.RoleAdmin
 	}
-	if _, err := validate(current, nil); err != nil {
+	revoke, err := validate(current, nil)
+	if err != nil {
 		return auth.AdminUserSnapshot{User: current}, err
 	}
+	r.revoked = revoke
 	if input == nil {
 		r.deleted = true
 		return auth.AdminUserSnapshot{User: current}, nil
@@ -216,6 +220,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 		name       string
 		claims     *auth.Claims
 		targetRole string
+		self       bool
 		body       string
 		wantStatus int
 		wantUpdate bool
@@ -242,6 +247,36 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			name:       "scoped key cannot redirect its admin owner's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			self:       true,
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot redirect another admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot clear an admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":""}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key may edit an ordinary recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "user",
+			body:       `{"email":"new@example.test"}`,
+			wantStatus: http.StatusOK,
+			wantUpdate: true,
+		},
+		{
 			name:       "scoped key may reset an ordinary password",
 			claims:     scopedKeyClaims(),
 			targetRole: "user",
@@ -261,7 +296,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "unscoped key keeps full access",
 			claims:     unscopedKeyClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -269,7 +304,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "jwt admin keeps full access",
 			claims:     jwtAdminClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -278,6 +313,9 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newScopedKeyAdminHandler(tt.targetRole)
+			if tt.self {
+				tt.claims.UserID = repo.user.ID
+			}
 			rec := updateUserRequestFor(t, h, tt.claims, tt.body)
 
 			if rec.Code != tt.wantStatus {
@@ -427,15 +465,14 @@ func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, bo
 }
 
 func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler(models.RoleUser)
-	repo.promoteBeforeMutate = true
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(`{"password":"new-password"}`))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "42")
-	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), scopedKeyClaims()))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateUser(rec, req)
-	if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
-		t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+	for _, body := range []string{`{"password":"new-password"}`, `{"email":"attacker@example.test"}`} {
+		t.Run(body, func(t *testing.T) {
+			h, repo := newScopedKeyAdminHandler(models.RoleUser)
+			repo.promoteBeforeMutate = true
+			rec := updateUserRequestFor(t, h, scopedKeyClaims(), body)
+			if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
+				t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+			}
+		})
 	}
 }

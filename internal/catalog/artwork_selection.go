@@ -71,6 +71,9 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
 	notBefore := time.Now().Add(t.gracePeriod)
 	// deleted_at is cleared because this upsert precedes a re-upload of the
 	// exact manifest: the objects exist again once the cacher finishes.
+	// Exact keys arrive only after every upload succeeded, so they make the
+	// previous delivery verdict stale. It loses its authority but keeps its
+	// keys, which still prove which variants delivered before.
 	_, err := t.pool.Exec(ctx, `
 		INSERT INTO artwork_revision_gc_candidates (
 			original_path, image_type, object_keys, published_keys, not_before, next_attempt_at
@@ -86,7 +89,11 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
             delivery_keys = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
                 THEN '{}'::text[] ELSE artwork_revision_gc_candidates.delivery_keys END,
             delivery_checked_at = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
+                    OR cardinality(EXCLUDED.object_keys) > 0
                 THEN NULL ELSE artwork_revision_gc_candidates.delivery_checked_at END,
+            delivery_failures = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
+                    OR cardinality(EXCLUDED.object_keys) > 0
+                THEN 0 ELSE artwork_revision_gc_candidates.delivery_failures END,
 			image_type = CASE
 				WHEN artwork_revision_gc_candidates.image_type = '' THEN EXCLUDED.image_type
 				ELSE artwork_revision_gc_candidates.image_type

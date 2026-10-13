@@ -9,25 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
-// recordingRepo is a JobRepository that records ResetStaleJobs calls and
-// insert/quota-count activity and no-ops everything else, so service behavior
-// can be tested in isolation.
+// recordingRepo records job activity and quota handoff for service tests.
 type recordingRepo struct {
-	mu         sync.Mutex
-	resets     int
-	lastBefore time.Time
-	inserts    int
-	quotaUsed  int // returned by CountTranscribeJobsByUserSince
-	lastJob    Job
-	completed  []int
-	failures   []recordedFailure
-	progress   []recordedProgress
+	mu        sync.Mutex
+	inserts   int
+	quotaUsed int // returned by CountTranscribeJobsByUserSince
+	lastJob   Job
+	completed []int
+	failures  []recordedFailure
+	progress  []recordedProgress
 }
 
 type recordedFailure struct {
@@ -85,18 +80,8 @@ func (r *recordingRepo) FailJob(_ context.Context, id int64, status JobStatus, m
 }
 func (r *recordingRepo) Heartbeat(context.Context, int64) error { return nil }
 
-func (r *recordingRepo) ResetStaleJobs(_ context.Context, before time.Time, _ string) (int64, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.resets++
-	r.lastBefore = before
+func (r *recordingRepo) ResetStaleJobs(context.Context, time.Time, string) (int64, error) {
 	return 0, nil
-}
-
-func (r *recordingRepo) snapshot() (int, time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.resets, r.lastBefore
 }
 
 // stubTranscriber satisfies Transcriber so TranscribeEnabled() is true in
@@ -228,28 +213,6 @@ func TestTranscribeQuotaStatus(t *testing.T) {
 	}
 	if exempt.Limited {
 		t.Errorf("exempt quota = %+v, want unlimited", exempt)
-	}
-}
-
-// Recover reaps immediately using a heartbeat cutoff of now-staleJobThreshold,
-// not "every active job", so a live worker's jobs survive a peer's startup.
-func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
-	repo := &recordingRepo{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // stops the reaper goroutine started by Recover
-
-	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, nil, "", nil, nil)
-
-	approxNow := time.Now()
-	svc.Recover()
-
-	resets, before := repo.snapshot()
-	if resets < 1 {
-		t.Fatalf("Recover did not reap immediately: resets=%d", resets)
-	}
-	want := approxNow.Add(-jobrunner.StaleJobThreshold)
-	if diff := before.Sub(want); diff > 2*time.Second || diff < -2*time.Second {
-		t.Errorf("stale cutoff = %v, want ~%v (now-staleJobThreshold)", before, want)
 	}
 }
 
@@ -655,4 +618,46 @@ func countNotifierKind(events []notifierEvent, kind string) int {
 		}
 	}
 	return count
+}
+
+type timedSourceStore struct {
+	recordingSubtitleStore
+	sub  subtitles.DownloadedSubtitle
+	data []byte
+}
+
+func (s *timedSourceStore) GetSubtitleContent(context.Context, int) (*subtitles.DownloadedSubtitle, []byte, error) {
+	sub := s.sub
+	return &sub, append([]byte(nil), s.data...), nil
+}
+
+type timedSourceLister []subtitles.DownloadedSubtitle
+
+func (l timedSourceLister) ListDownloadedSubtitles(context.Context, int) ([]subtitles.DownloadedSubtitle, error) {
+	return l, nil
+}
+
+type singleFileResolver struct{ file *models.MediaFile }
+
+func (r singleFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	return r.file, nil
+}
+
+// A downloaded source subtitle is translated with its stored timing
+// correction, so the translation inherits the corrected timing.
+func TestLoadSourceAppliesDownloadedSubtitleTiming(t *testing.T) {
+	row := subtitles.DownloadedSubtitle{ID: 5, MediaFileID: 1, Language: "en", Format: subtitles.FormatSRT,
+		Timing: subtitles.Timing{OffsetMS: 1500, Scale: 1}}
+	svc := &Service{
+		files:  singleFileResolver{file: &models.MediaFile{ID: 1}},
+		lister: timedSourceLister{{ID: 5, MediaFileID: 1, Language: "en", Format: subtitles.FormatSRT}},
+		store:  &timedSourceStore{sub: row, data: []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")},
+	}
+	cues, language, err := svc.loadSource(context.Background(), &Job{MediaFileID: 1, SourceIndex: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if language != "en" || len(cues) != 1 || cues[0].Start != 2500*time.Millisecond || cues[0].End != 3500*time.Millisecond {
+		t.Fatalf("cues = %+v language = %q", cues, language)
+	}
 }

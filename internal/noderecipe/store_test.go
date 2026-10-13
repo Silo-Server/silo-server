@@ -157,21 +157,6 @@ func TestDefaultTTLMatchesTokenLifetime(t *testing.T) {
 	}
 }
 
-func TestNodeAuthorityKeepsPreviousRecipeWireFormat(t *testing.T) {
-	card := playback.RecipeCard{
-		SessionID: "sid", TranscodeNodeURL: "http://node:8070", PlayMethod: playback.PlayTranscode,
-		TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
-	}
-	data, err := marshalCard(card)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, ok := unmarshalCard(data)
-	if !ok || decoded != card {
-		t.Fatalf("previous node decode = (%+v, %v), want (%+v, true)", decoded, ok, card)
-	}
-}
-
 func TestNodeAuthorityGenerationRevokesDormantRecipes(t *testing.T) {
 	rawURL := os.Getenv("SILO_TEST_REDIS_URL")
 	if rawURL == "" {

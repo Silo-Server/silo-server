@@ -48,14 +48,3 @@ func TestPlaylistEnvelope_OmitsCoverPathWhenEmpty(t *testing.T) {
 		t.Errorf("coverPath emitted when empty: %v", out)
 	}
 }
-
-// TestPlaylistListShape_OmitsItems asserts nil items produces no items key.
-func TestPlaylistListShape_OmitsItems(t *testing.T) {
-	out := playlistToABS(Playlist{
-		ID: "01HPL", UserID: "1", Name: "x",
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	}, nil)
-	if _, has := out["items"]; has {
-		t.Errorf("list-shape includes items key (should be detail-only): %v", out)
-	}
-}

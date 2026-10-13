@@ -38,20 +38,13 @@ describe("RecentErrorsWidget", () => {
     mocks.useOperationalLogs.mockReset();
   });
 
-  it("asks for both levels in one request", () => {
-    mocks.useOperationalLogs.mockReturnValue({ data: undefined, isLoading: true, error: null });
-
-    renderWidget();
-
-    expect(mocks.useOperationalLogs).toHaveBeenCalledWith({ level: "error,warn", limit: 8 });
-  });
-
   it("labels each level with a word, not only a color", () => {
     mocks.useOperationalLogs.mockReturnValue({
       data: {
         entries: [
           entry(),
           entry({ id: 2, level: "warn", component: "scanner", message: "path is unreadable" }),
+          entry({ id: 3, level: "debug", component: "diagnostics", message: "details available" }),
         ],
       },
       isLoading: false,
@@ -60,23 +53,13 @@ describe("RecentErrorsWidget", () => {
 
     renderWidget();
 
+    expect(mocks.useOperationalLogs).toHaveBeenCalledWith({ level: "error,warn", limit: 8 });
+    expect(screen.getByText("debug")).toBeTruthy();
     expect(screen.getByText("Error")).toBeTruthy();
     expect(screen.getByText("Warn")).toBeTruthy();
     expect(screen.getByText("transcode session failed to start")).toBeTruthy();
     expect(screen.getByText(/playback · 5m ago/)).toBeTruthy();
     expect(screen.getByText(/scanner/)).toBeTruthy();
-  });
-
-  it("falls back to a readable label for an unexpected level", () => {
-    mocks.useOperationalLogs.mockReturnValue({
-      data: { entries: [entry({ level: "debug" })] },
-      isLoading: false,
-      error: null,
-    });
-
-    renderWidget();
-
-    expect(screen.getByText("debug")).toBeTruthy();
   });
 
   it("says the log is quiet rather than rendering an empty list", () => {

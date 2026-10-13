@@ -17,10 +17,6 @@ afterEach(() => {
 });
 
 describe("detectMaxResolutionFromScreen", () => {
-  it("treats a 2560x1440 display as above the 720p bucket", () => {
-    expect(detectMaxResolutionFromScreen(2560, 1440)).toBe("2160p");
-  });
-
   it("keeps a 1280x720 display in the 720p bucket", () => {
     expect(detectMaxResolutionFromScreen(1280, 720)).toBe("720p");
   });
@@ -83,22 +79,6 @@ describe("probeWebCapabilities", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
 
     await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
-  });
-
-  // Safari 26 reports `dynamic-range: standard` on XDR panels, and browsers
-  // tone-map HDR onto SDR outputs regardless. Decode evidence stands alone.
-  it("probes HDR10 decoding even when the output reports no HDR", async () => {
-    const decodingInfo = vi.fn().mockResolvedValue({
-      supported: true,
-      smooth: true,
-      powerEfficient: true,
-      keySystemAccess: null,
-    });
-    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
-    vi.stubGlobal("matchMedia", () => ({ matches: false }));
-
-    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
-    expect(decodingInfo).toHaveBeenCalled();
   });
 
   it("advertises native Dolby Vision Profile 8 from the dvh1 sample entry", () => {

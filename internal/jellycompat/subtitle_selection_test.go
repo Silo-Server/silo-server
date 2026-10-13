@@ -92,27 +92,6 @@ func TestIsValidCompatSubtitleStreamIndex(t *testing.T) {
 	}
 }
 
-func TestIsValidCompatSubtitleStreamIndex_IncludesBitmapSubtitle(t *testing.T) {
-	// A version whose only subtitle is bitmap (needs burn-in). Its computed
-	// stream index remains selectable for original-file native decoders.
-	version := catalog.FileVersion{
-		FileID: 7,
-		VideoTracks: []models.VideoTrack{
-			{Codec: "h264"},
-		},
-		AudioTracks: []models.AudioTrack{
-			{Codec: "aac"},
-		},
-		SubtitleTracks: []catalog.VersionSubtitleTrack{
-			{Codec: "dvd_subtitle", Language: "eng"},
-		},
-	}
-	// Bitmap track would otherwise compute to stream index 2.
-	if !isValidCompatSubtitleStreamIndex(version, 0, 2) {
-		t.Fatal("bitmap subtitle stream index should remain selectable")
-	}
-}
-
 func TestExternalSubtitleRouteIndexSkipsEmbeddedStreamIndexGaps(t *testing.T) {
 	file := &models.MediaFile{
 		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
@@ -172,46 +151,6 @@ func TestResolveSelectedSubtitleStreamIndex(t *testing.T) {
 			}
 			if got != nil && *got != *tc.want {
 				t.Fatalf("resolveSelectedSubtitleStreamIndex = %d, want %d", *got, *tc.want)
-			}
-		})
-	}
-}
-
-func TestEffectiveCompatSubtitleStreamIndex(t *testing.T) {
-	cases := []struct {
-		name   string
-		source PlaybackMediaSource
-		want   *int
-	}{
-		{
-			name:   "selected overrides default",
-			source: PlaybackMediaSource{SelectedSubtitleStreamIndex: intPtr(3), DefaultSubtitleStreamIndex: intPtr(2)},
-			want:   intPtr(3),
-		},
-		{
-			name:   "off yields none",
-			source: PlaybackMediaSource{SelectedSubtitleStreamIndex: intPtr(-1), DefaultSubtitleStreamIndex: intPtr(2)},
-			want:   nil,
-		},
-		{
-			name:   "no selection falls back to default",
-			source: PlaybackMediaSource{DefaultSubtitleStreamIndex: intPtr(2)},
-			want:   intPtr(2),
-		},
-		{
-			name:   "no selection no default",
-			source: PlaybackMediaSource{},
-			want:   nil,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := effectiveCompatSubtitleStreamIndex(tc.source)
-			if (got == nil) != (tc.want == nil) {
-				t.Fatalf("effectiveCompatSubtitleStreamIndex = %v, want %v", ptrString(got), ptrString(tc.want))
-			}
-			if got != nil && *got != *tc.want {
-				t.Fatalf("effectiveCompatSubtitleStreamIndex = %d, want %d", *got, *tc.want)
 			}
 		})
 	}
@@ -285,21 +224,30 @@ func defaultSubtitleStreamFromResponse(t *testing.T, resp playbackInfoResponseDT
 	return index, found
 }
 
-// A viewer with no subtitle mode gets Jellyfin's Default mode, which prefers
-// an external subtitle file over the embedded default track.
-func TestHandlePlaybackInfo_DefaultModePrefersExternalSubtitle(t *testing.T) {
+// A viewer with no subtitle mode gets Jellyfin's Default mode, which Silo
+// resolves to the embedded default track ahead of an external subtitle file.
+func TestHandlePlaybackInfo_DefaultModePrefersEmbeddedDefaultSubtitle(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	resp := postPlaybackInfo(t, handler, routeID, `{}`)
 
-	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
-		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
-	}
-	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %d, want the external Spanish track 3", got)
+	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 2 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %v, want the embedded default English track 2", got)
 	}
 	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 3 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
+	if !found || index != 2 {
+		t.Fatalf("default subtitle stream = (%d, %v), want (2, true)", index, found)
+	}
+}
+
+// With no embedded track flagged default, Default mode still shows the
+// external file, as Jellyfin does.
+func TestHandlePlaybackInfo_DefaultModeUsesExternalWithoutEmbeddedDefault(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	detail := handler.content.(*stubContentService).detail
+	detail.Versions[0].SubtitleTracks[0].Default = false
+	resp := postPlaybackInfo(t, handler, routeID, `{}`)
+	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 3 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %v, want the external Spanish track 3", got)
 	}
 }
 
@@ -425,6 +373,12 @@ func TestHandlePlaybackInfo_DeliversDownloadedSRTAsProfileRequestedVTT(t *testin
 			]
 		}
 	}`)
+	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 5 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %v, want 5", got)
+	}
+	if index, found := defaultSubtitleStreamFromResponse(t, resp); !found || index != 5 {
+		t.Fatalf("default subtitle stream = (%d, %v), want (5, true)", index, found)
+	}
 
 	for _, stream := range resp.MediaSources[0].MediaStreams {
 		if stream.Type != "Subtitle" || stream.Index != 5 {
@@ -436,39 +390,6 @@ func TestHandlePlaybackInfo_DeliversDownloadedSRTAsProfileRequestedVTT(t *testin
 		return
 	}
 	t.Fatal("downloaded subtitle stream 5 not found")
-}
-
-func TestHandlePlaybackInfo_HonorsSelectedExternalSubtitle(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":3}`)
-
-	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
-		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
-	}
-	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %d, want 3", got)
-	}
-	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 3 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
-	}
-}
-
-func TestHandlePlaybackInfo_HonorsSelectedDownloadedSubtitle(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	// The downloaded subtitle lands at stream index 5 (after the bitmap track at 4).
-	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":5}`)
-
-	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
-		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
-	}
-	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 5 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %d, want 5", got)
-	}
-	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 5 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (5, true)", index, found)
-	}
 }
 
 // erroringSubtitleRepository simulates a transient failure of the downloaded

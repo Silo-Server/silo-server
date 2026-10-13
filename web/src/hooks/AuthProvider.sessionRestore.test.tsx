@@ -206,4 +206,102 @@ describe("AuthProvider session restore", () => {
     expect(getAccessToken()).toBe("access-sam");
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-sam");
   });
+
+  it("keeps the stored session when the boot refresh meets a provider outage, and retries", async () => {
+    function OutageProbe() {
+      const {
+        user,
+        loading,
+        sessionRestoreUnavailable,
+        sessionRestoreProviderUnavailable,
+        retrySessionRestore,
+      } = useAuth();
+      return (
+        <>
+          <div data-testid="auth">{`${loading ? "restoring" : "restored"}:${user?.username ?? "none"}`}</div>
+          <div data-testid="outage">{String(sessionRestoreUnavailable)}</div>
+          <div data-testid="provider-outage">{String(sessionRestoreProviderUnavailable)}</div>
+          <button type="button" onClick={retrySessionRestore}>
+            retry
+          </button>
+        </>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <OutageProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 503, {
+      type: "https://siloserver.org/problems/provider_unavailable",
+      title: "Provider unavailable",
+      status: 503,
+      detail: "The sign-in provider could not be reached; the session stays valid.",
+    });
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:none"));
+    expect(screen.getByTestId("outage")).toHaveTextContent("true");
+    expect(screen.getByTestId("provider-outage")).toHaveTextContent("true");
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-laura");
+
+    // Once the provider is back, a retry restores the same session.
+    await act(async () => {
+      screen.getByRole("button", { name: "retry" }).click();
+    });
+    const retry = await server.held("POST /api/v2/auth/refresh");
+    expect(retry.body).toEqual({ refresh_token: "refresh-laura" });
+    await server.answer(retry, 200, {
+      access_token: "access-laura",
+      refresh_token: "refresh-laura-2",
+      expires_in: 3600,
+    });
+    await server.answer(
+      await server.held("GET /api/v2/account/me", "Bearer access-laura"),
+      200,
+      laura,
+    );
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:laura"));
+    expect(screen.getByTestId("outage")).toHaveTextContent("false");
+  });
+
+  it("keeps the stored session through a server outage without blaming the provider", async () => {
+    function OutageProbe() {
+      const { loading, sessionRestoreUnavailable, sessionRestoreProviderUnavailable } = useAuth();
+      return (
+        <div data-testid="outage">
+          {`${loading ? "restoring" : "restored"}:${String(sessionRestoreUnavailable)}:${String(sessionRestoreProviderUnavailable)}`}
+        </div>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <OutageProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 503, {
+      type: "https://siloserver.org/problems/dependency_unavailable",
+      title: "Dependency unavailable",
+      status: 503,
+      detail: "The session store is unavailable.",
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("outage")).toHaveTextContent("restored:true:false"),
+    );
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-laura");
+  });
+
+  it("discards the stored session when the boot refresh is refused", async () => {
+    render(<Harness oauthPage={false} />);
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 401, {
+      type: "https://siloserver.org/problems/session_expired",
+      title: "Session expired",
+      status: 401,
+      detail: "The session has ended.",
+    });
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:none"));
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+  });
 });

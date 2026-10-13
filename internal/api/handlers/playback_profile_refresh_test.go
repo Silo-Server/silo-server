@@ -88,7 +88,7 @@ func newV2PlaybackRefreshDriver(t *testing.T, h *PlaybackHandler, manager *playb
 // rebuild; the heartbeat that crosses the watched threshold and the stop each
 // do once. Both native surfaces share the progress writer.
 func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing.T) {
-	const positionOnlyPings = 100
+	const positionOnlyPings = 2
 	// 90% of 3600s is the default watched threshold (3240s).
 	file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
 

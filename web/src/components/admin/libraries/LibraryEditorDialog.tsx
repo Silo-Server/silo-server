@@ -15,7 +15,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-import { AdvancedFields, FolderFields, GeneralFields, MetadataFields } from "./LibraryFormSections";
+import {
+  AdvancedFields,
+  FolderFields,
+  GeneralFields,
+  MetadataFields,
+  RealtimeMonitoringFields,
+} from "./LibraryFormSections";
 import { libraryTypeMeta } from "./libraryTypes";
 import { LibraryPosterSection } from "./LibraryPosterSection";
 import { useLibraryForm } from "./useLibraryForm";
@@ -71,6 +77,8 @@ export interface LibraryEditorDialogProps {
   onOpenChange: (open: boolean) => void;
   library: Library | null;
   chapterThumbnailsSupported: boolean;
+  /** Undefined when the server does not offer seek previews. */
+  trickplaySupported?: boolean;
 }
 
 export function LibraryEditorDialog({
@@ -78,6 +86,7 @@ export function LibraryEditorDialog({
   onOpenChange,
   library,
   chapterThumbnailsSupported,
+  trickplaySupported,
 }: LibraryEditorDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -86,6 +95,7 @@ export function LibraryEditorDialog({
           key={library?.id ?? "new"}
           library={library}
           chapterThumbnailsSupported={chapterThumbnailsSupported}
+          trickplaySupported={trickplaySupported}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -96,10 +106,12 @@ export function LibraryEditorDialog({
 function LibraryEditorBody({
   library,
   chapterThumbnailsSupported,
+  trickplaySupported,
   onClose,
 }: {
   library: Library | null;
   chapterThumbnailsSupported: boolean;
+  trickplaySupported?: boolean;
   onClose: () => void;
 }) {
   const [section, setSection] = useState<SectionId>("general");
@@ -195,12 +207,18 @@ function LibraryEditorBody({
                   posterSlot={library ? <LibraryPosterSection library={library} /> : null}
                 />
               )}
-              {id === "folders" && <FolderFields form={form} />}
+              {id === "folders" && (
+                <div className="space-y-5">
+                  <FolderFields form={form} />
+                  <RealtimeMonitoringFields form={form} />
+                </div>
+              )}
               {id === "metadata" && <MetadataFields form={form} />}
               {id === "advanced" && (
                 <AdvancedFields
                   form={form}
                   chapterThumbnailsSupported={chapterThumbnailsSupported}
+                  trickplaySupported={trickplaySupported}
                 />
               )}
             </TabsContent>

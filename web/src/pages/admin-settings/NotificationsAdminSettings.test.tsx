@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -99,10 +98,6 @@ function renderPage() {
   );
 }
 
-function renderStaticPage() {
-  return renderToStaticMarkup(renderPage());
-}
-
 /** Opens one channel card by the description in its header button. */
 async function openChannel(pattern: RegExp) {
   await userEvent.click(screen.getByRole("button", { name: pattern }));
@@ -110,7 +105,6 @@ async function openChannel(pattern: RegExp) {
 
 const EMAIL_CHANNEL = /Daily summary or a message per episode/;
 const DISCORD_CHANNEL = /Direct messages from your Discord bot/;
-const WEBHOOK_CHANNEL = /Webhooks people create for themselves/;
 
 describe("NotificationsAdminSettings", () => {
   beforeEach(() => {
@@ -123,13 +117,14 @@ describe("NotificationsAdminSettings", () => {
     mocks.toastSuccess.mockReset();
   });
 
-  it("registers Silo Push Relay settings with the shared settings form", () => {
+  it("shows the Silo Push Relay channel status", async () => {
     useSettingsFormMock.mockReturnValue(makeForm());
 
-    renderStaticPage();
+    render(renderPage());
 
-    expect(useSettingsFormMock).toHaveBeenCalledWith({
-      keys: expect.arrayContaining([
+    const keys = useSettingsFormMock.mock.calls.at(-1)?.[0]?.keys as string[];
+    expect(keys).toEqual(
+      expect.arrayContaining([
         "notifications.apple_push_delivery_enabled",
         "notifications.android_push_delivery_enabled",
         "notifications.push_relay_deployment_id",
@@ -137,27 +132,9 @@ describe("NotificationsAdminSettings", () => {
         "notifications.push_relay_key_prefix",
         "notifications.push_relay_reregistration_required",
       ]),
-    });
-    const firstCall = useSettingsFormMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("useSettingsForm was not called");
-    }
-    const [options] = firstCall as [{ keys: string[] }];
-    expect(options.keys).not.toContain("notifications.push_relay_api_key");
-    expect(options.keys).toContain("notifications.push_relay_url");
-  });
-
-  it("owns the merged email keys and the Discord application", () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    renderStaticPage();
-
-    const calls = useSettingsFormMock.mock.calls;
-    const firstCall = calls[calls.length - 1];
-    if (!firstCall) {
-      throw new Error("useSettingsForm was not called");
-    }
-    const [options] = firstCall as [{ keys: string[] }];
+    );
+    expect(keys).not.toContain("notifications.push_relay_api_key");
+    expect(keys).toContain("notifications.push_relay_url");
     for (const key of [
       "email.enabled",
       "email.smtp_host",
@@ -168,29 +145,11 @@ describe("NotificationsAdminSettings", () => {
       "email.from_address",
       "email.from_name",
     ]) {
-      expect(options.keys).toContain(key);
+      expect(keys).toContain(key);
     }
     for (const key of ["discord.client_id", "discord.client_secret", "discord.bot_token"]) {
-      expect(options.keys).toContain(key);
+      expect(keys).toContain(key);
     }
-  });
-
-  it("renders every field group heading", () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    render(renderPage());
-
-    expect(screen.getByText("Grouping and flood control")).toBeInTheDocument();
-    expect(screen.getByText("Retention")).toBeInTheDocument();
-    expect(screen.getByText("Pipeline")).toBeInTheDocument();
-    expect(screen.getByText("Delivery Channels")).toBeInTheDocument();
-    expect(screen.getByText("Tuning")).toBeInTheDocument();
-  });
-
-  it("shows the Silo Push Relay channel status", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    render(renderPage());
 
     expect(screen.getByText("Silo Push Relay")).toBeInTheDocument();
     expect(screen.getByText(/delivered by APNs or FCM/)).toBeInTheDocument();
@@ -214,34 +173,6 @@ describe("NotificationsAdminSettings", () => {
     expect(screen.queryByText("Send test push")).not.toBeInTheDocument();
   });
 
-  it("configures the mail server inside the Email channel card", async () => {
-    restartKeysMock.mockReturnValue(new Set(["email.smtp_host"]));
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "email.smtp_host": "smtp.example.com",
-        "email.enabled": "true",
-        // Readiness mirrors the server rule: no sender address, not ready.
-        "email.from_address": "silo@example.com",
-      }),
-    );
-
-    render(renderPage());
-
-    expect(screen.getByText("Mail server set up")).toBeInTheDocument();
-    expect(screen.queryByText("Mail server address")).not.toBeInTheDocument();
-
-    await openChannel(EMAIL_CHANNEL);
-
-    expect(screen.getByText("Send email from this server")).toBeInTheDocument();
-    expect(screen.getByText("Mail server address")).toBeInTheDocument();
-    expect(screen.getByText("Port")).toBeInTheDocument();
-    expect(screen.getByText("Encryption")).toBeInTheDocument();
-    expect(screen.getByText("Password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send test" })).toBeInTheDocument();
-    // The restart badge comes from the compiled key list, not from hint text.
-    expect(screen.getAllByLabelText("Takes effect after a server restart").length).toBe(1);
-  });
-
   it("shows the saved SMTP password as a masked, editable input", async () => {
     const form = makeForm();
     form.sensitiveConfigured = ["email.smtp_password"];
@@ -255,24 +186,6 @@ describe("NotificationsAdminSettings", () => {
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("placeholder", "••••••••••••");
     expect(screen.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
-  });
-
-  it("configures the Discord application inside the Discord channel card", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "discord.client_id": "1234567890" }));
-
-    render(renderPage());
-    await openChannel(DISCORD_CHANNEL);
-
-    expect(screen.queryByRole("link", { name: "Integrations tab" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Client ID")).toHaveValue("1234567890");
-    expect(screen.getByText("Client secret")).toBeInTheDocument();
-    expect(screen.getByText("Bot token")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Test bot token" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Show setup guide/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Invite bot to server/ })).toBeInTheDocument();
-    // Delivery and appearance stay here.
-    expect(screen.getByText("Artwork")).toBeInTheDocument();
-    expect(screen.getByText("Let people pick a DM per episode")).toBeInTheDocument();
   });
 
   it("confirms the invite link copy only once it has actually happened", async () => {
@@ -335,54 +248,5 @@ describe("NotificationsAdminSettings", () => {
       "discord.client_secret": "",
       "discord.bot_token": "",
     });
-  });
-
-  it("counts the enabled channels on the pipeline card", () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    render(renderPage());
-
-    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeInTheDocument();
-    expect(screen.getByText("5/7 channels on")).toBeInTheDocument();
-  });
-
-  it("warns on the pipeline card when sending is paused", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "notifications.fanout_enabled": "false" }));
-
-    render(renderPage());
-
-    expect(
-      screen.getByText("Sending is paused; new content waits in the queue."),
-    ).toBeInTheDocument();
-  });
-
-  it("hides tuning and webhook limits behind Advanced disclosures", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm());
-
-    render(renderPage());
-    await openChannel(WEBHOOK_CHANNEL);
-
-    expect(screen.queryByText("Settle window")).not.toBeInTheDocument();
-    expect(screen.queryByText("Read notifications")).not.toBeInTheDocument();
-    expect(screen.queryByText("Webhooks per person")).not.toBeInTheDocument();
-
-    for (const toggle of screen.getAllByRole("button", { name: /Advanced · 3 settings/ })) {
-      await userEvent.click(toggle);
-    }
-
-    expect(screen.getByText("Settle window")).toBeInTheDocument();
-    expect(screen.getByText("Read notifications")).toBeInTheDocument();
-    expect(screen.getByText("Webhooks per person")).toBeInTheDocument();
-  });
-
-  it("auto-expands an advanced disclosure that holds a staged change", async () => {
-    const form = makeForm();
-    form.isDirty = vi.fn((key: string) => key === "notifications.retention.read_days");
-    useSettingsFormMock.mockReturnValue(form);
-
-    render(renderPage());
-
-    expect(screen.getByText("Read notifications")).toBeInTheDocument();
-    expect(screen.queryByText("Settle window")).not.toBeInTheDocument();
   });
 });

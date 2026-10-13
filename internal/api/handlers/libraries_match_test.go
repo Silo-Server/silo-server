@@ -141,37 +141,6 @@ func TestLibraryMatchStaleIDs_ResponseShape(t *testing.T) {
 	}
 }
 
-// TestLibraryMatchRematch_DeprecatedStillRoutes verifies that the deprecated
-// HandleRematchStaleID handler method still exists and can be registered as a
-// route alongside the new match endpoints. This is a compile-time routing test.
-func TestLibraryMatchRematch_DeprecatedStillRoutes(t *testing.T) {
-	h := &LibraryHandler{}
-
-	r := chi.NewRouter()
-	// Register both old and new endpoints to prove they coexist.
-	r.Post("/libraries/stale-ids/{contentID}/rematch", h.HandleRematchStaleID)
-	r.Get("/libraries/unmatched-items", h.HandleListUnmatchedItems)
-	r.Get("/libraries/stale-ids", h.HandleListStaleIDs)
-
-	// Verify the routes are registered by checking that a walk finds them.
-	found := map[string]bool{}
-	chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		found[method+" "+route] = true
-		return nil
-	})
-
-	expectedRoutes := []string{
-		"POST /libraries/stale-ids/{contentID}/rematch",
-		"GET /libraries/unmatched-items",
-		"GET /libraries/stale-ids",
-	}
-	for _, route := range expectedRoutes {
-		if !found[route] {
-			t.Errorf("expected route %q to be registered, registered routes: %v", route, found)
-		}
-	}
-}
-
 func TestLibraryMetadataMatchQueueHandlers_NilFolderRepo(t *testing.T) {
 	h := &LibraryHandler{MovieMatchQueueRepo: noopMovieMatchQueue{}}
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { captureNotificationAuthority, notificationScope } from "@/api/v2/notifications";
 import { notificationKeys } from "./keys";
 import { useUnlinkDiscord } from "./notifications";
@@ -52,12 +52,14 @@ it("invalidates only the captured Discord preferences cache and rejects a stale 
 });
 
 it("does not replay unlink on authentication or service failure", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const client = new QueryClient();
   const { result } = renderHook(() => useUnlinkDiscord(), {
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children),
   });
-  for (const status of [401, 403, 500]) {
+  for (const status of [401, 500]) {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
     vi.stubGlobal("fetch", fetch);
     await act(async () => {

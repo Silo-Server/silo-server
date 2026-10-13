@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -225,7 +226,7 @@ func TestAnalyzeMovieWithRealFFmpeg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzeMovieFile: %v", err)
 	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete || artifact.ItemCount != 105 {
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete || artifact.ItemCount != 105 {
 		t.Fatalf("movie tail artifact %+v, want 105 sampled keyframes", artifact)
 	}
 	credits := creditsPatches(repo)

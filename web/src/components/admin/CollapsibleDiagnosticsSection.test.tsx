@@ -5,26 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { CollapsibleDiagnosticsSection } from "./CollapsibleDiagnosticsSection";
 
 describe("CollapsibleDiagnosticsSection", () => {
-  it("renders collapsed with title, description, and count", () => {
-    render(
-      <CollapsibleDiagnosticsSection
-        title="Test Diagnostics"
-        description="A test section description"
-        count={5}
-        icon={<span>Icon</span>}
-        open={false}
-        onOpenChange={vi.fn()}
-      >
-        <div>Child content</div>
-      </CollapsibleDiagnosticsSection>,
-    );
-
-    expect(screen.getByText("Test Diagnostics")).toBeInTheDocument();
-    expect(screen.getByText("A test section description")).toBeInTheDocument();
-    expect(screen.getByText("5")).toBeInTheDocument();
-    expect(screen.queryByText("Child content")).not.toBeInTheDocument();
-  });
-
   it("renders an accessible placeholder when count is undefined in both states", () => {
     const { rerender } = render(
       <CollapsibleDiagnosticsSection
@@ -119,7 +99,7 @@ describe("CollapsibleDiagnosticsSection", () => {
       <CollapsibleDiagnosticsSection
         title="Test Diagnostics"
         description="A test section description"
-        count={3}
+        count={5}
         icon={<span>Icon</span>}
         open={false}
         onOpenChange={onOpenChange}
@@ -128,6 +108,11 @@ describe("CollapsibleDiagnosticsSection", () => {
       </CollapsibleDiagnosticsSection>,
     );
 
+    expect(screen.getByText("Test Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("A test section description")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.queryByText("Child content")).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByRole("button"));
     expect(onOpenChange).toHaveBeenCalledWith(true);
 
@@ -135,7 +120,7 @@ describe("CollapsibleDiagnosticsSection", () => {
       <CollapsibleDiagnosticsSection
         title="Test Diagnostics"
         description="A test section description"
-        count={3}
+        count={5}
         icon={<span>Icon</span>}
         open={true}
         onOpenChange={onOpenChange}

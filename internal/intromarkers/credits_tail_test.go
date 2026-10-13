@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -49,7 +50,7 @@ func TestCreditsTailKeyIsNamespaced(t *testing.T) {
 	if tail.Kind != ArtifactKindCreditsTail || tail.ConfigHash == fingerprint.ConfigHash {
 		t.Fatalf("tail key %+v must not share the fingerprint key %+v", tail, fingerprint)
 	}
-	if tail.ConfigHash != ArtifactConfigHash(ArtifactKindCreditsTail, creditsTailParams) {
+	if tail.ConfigHash != mediaartifact.ConfigHash(ArtifactKindCreditsTail, creditsTailParams) {
 		t.Fatalf("tail key %+v is not derived from its kind and parameters", tail)
 	}
 	want := "tail=450:0.40;crop=0.90x0.80;width=480;black=20,26,32;silence=-50:0.50;keyframes;format=credits-tail:v1"

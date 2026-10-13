@@ -326,16 +326,16 @@ func TestComputeCapabilityDriftReportsUnparseablePayloads(t *testing.T) {
 // The note is echoed to every admin listing nodes, and its inputs come from a
 // worker that may run on remote hardware.
 func TestCapabilityDriftNoteIsBounded(t *testing.T) {
-	drift := capabilityDrift{}
+	baseline := driftBaseline{}
 	for range 400 {
-		drift.lostDevices = append(drift.lostDevices, "/dev/dri/renderD128")
+		baseline.Devices = append(baseline.Devices, driftBaselineDevice{Aliases: []string{"/dev/dri/renderD128"}})
 	}
-	note := drift.persistedNote()
-	if note == nil {
+	note := baseline.note(capabilityDrift{})
+	if note == "" {
 		t.Fatal("a regression produced no note")
 	}
-	if len(*note) > maxCapabilityDriftNoteBytes+3 {
-		t.Fatalf("note is %d bytes, want it bounded at %d", len(*note), maxCapabilityDriftNoteBytes)
+	if len(note) > maxCapabilityDriftNoteBytes+3 {
+		t.Fatalf("note is %d bytes, want it bounded at %d", len(note), maxCapabilityDriftNoteBytes)
 	}
 }
 
@@ -347,20 +347,20 @@ func TestCapabilityDriftNoteIsBounded(t *testing.T) {
 // ones.
 func TestCapabilityDriftNoteStaysValidUTF8AtEveryTruncationOffset(t *testing.T) {
 	for pad := range 8 {
-		drift := capabilityDrift{}
+		baseline := driftBaseline{}
 		for range 40 {
-			drift.lostDevices = append(drift.lostDevices,
-				"/dev/dri/"+strings.Repeat("x", pad)+strings.Repeat("é", 12))
+			baseline.Devices = append(baseline.Devices, driftBaselineDevice{Aliases: []string{
+				"/dev/dri/" + strings.Repeat("x", pad) + strings.Repeat("é", 12)}})
 		}
-		note := drift.persistedNote()
-		if note == nil {
+		note := baseline.note(capabilityDrift{})
+		if note == "" {
 			t.Fatalf("pad %d: a regression produced no note", pad)
 		}
-		if len(*note) <= maxCapabilityDriftNoteBytes {
-			t.Fatalf("pad %d: note is %d bytes, the fixture must exceed the bound", pad, len(*note))
+		if len(note) <= maxCapabilityDriftNoteBytes {
+			t.Fatalf("pad %d: note is %d bytes, the fixture must exceed the bound", pad, len(note))
 		}
-		if !utf8.ValidString(*note) {
-			t.Fatalf("pad %d: truncated note is not valid UTF-8: %q", pad, *note)
+		if !utf8.ValidString(note) {
+			t.Fatalf("pad %d: truncated note is not valid UTF-8: %q", pad, note)
 		}
 	}
 }
@@ -471,23 +471,6 @@ func TestComputeCapabilityDriftMatchesAMovedCardByUUID(t *testing.T) {
 	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
 	if !parsed || drift.regressed() {
 		t.Fatalf("drift = %+v (parsed=%v), want the same uuid to be the same card", drift, parsed)
-	}
-}
-
-// A node that predates render_device_details reports paths only, and must still
-// be comparable.
-func TestComputeCapabilityDriftFallsBackToPathsWithoutDetails(t *testing.T) {
-	const before = `{"resolved":"qsv","render_devices":["/dev/dri/renderD128"],` +
-		`"detected_backends":[{"backend":"qsv","verified":true}]}`
-	const after = `{"resolved":"none","render_devices":[],` +
-		`"detected_backends":[{"backend":"qsv","verified":false}]}`
-
-	drift, parsed := computeCapabilityDrift([]byte(before), []byte(after))
-	if !parsed {
-		t.Fatal("both reports should parse")
-	}
-	if len(drift.lostDevices) != 1 || drift.lostDevices[0] != "/dev/dri/renderD128" {
-		t.Fatalf("lostDevices = %v, want the path-only device reported gone", drift.lostDevices)
 	}
 }
 
@@ -625,24 +608,6 @@ func TestComputeCapabilityDriftIgnoresABackendThePolicyStoppedProbing(t *testing
 	}
 	if drift.regressed() {
 		t.Fatalf("drift = %+v, want a policy change not recorded as hardware loss", drift)
-	}
-}
-
-// A note written before the baseline column existed has nothing recorded to wait
-// for. Holding it forever would strand it on an upgraded deployment, so a clean
-// report clears it — the best evidence available for a note whose subject was
-// never captured.
-func TestResolveDriftNoteClearsALegacyNoteWithNoBaseline(t *testing.T) {
-	const clean = `{"resolved":"vaapi","render_devices":["/dev/dri/renderD128"],` +
-		`"render_device_details":[{"path":"/dev/dri/renderD128","pci_address":"0000:03:00.0"}],` +
-		`"detected_backends":[{"backend":"vaapi","verified":true}]}`
-
-	standing := "verified hardware backends lost: vaapi"
-	payload := []byte(clean)
-	drift, parsed := computeCapabilityDrift(payload, payload)
-
-	if got, _ := resolveDriftNote(&standing, nil, drift, parsed, payload); got != nil {
-		t.Fatalf("capability_drift = %q, want a baseline-less note cleared by a clean report", *got)
 	}
 }
 

@@ -43,21 +43,6 @@ function renderLogin(client = new QueryClient({ defaultOptions: { queries: { ret
   return client;
 }
 
-it("links to sign up when the server reports public signups enabled", async () => {
-  request.mockResolvedValue({ enabled: true });
-  renderLogin();
-  expect(await screen.findByRole("link", { name: "Sign up" })).toBeTruthy();
-  expect(request).toHaveBeenCalledWith("GET /api/v2/auth/signup");
-});
-
-it("hides the sign up link once the server reports signups disabled", async () => {
-  request.mockResolvedValue({ enabled: false });
-  const client = renderLogin();
-  await waitFor(() => expect(client.getQueryState(SIGNUP_STATUS)?.status).toBe("success"));
-  expect(client.getQueryData(SIGNUP_STATUS)).toEqual({ enabled: false });
-  expect(screen.queryByRole("link", { name: "Sign up" })).toBeNull();
-});
-
 it("hides the sign up link until the signup status loads", () => {
   request.mockReturnValue(new Promise(() => {}));
   renderLogin();
@@ -85,6 +70,7 @@ it("hides the sign up link when a refetch fails", async () => {
   request.mockResolvedValueOnce({ enabled: true });
   const client = renderLogin();
   await screen.findByRole("link", { name: "Sign up" });
+  expect(request).toHaveBeenCalledWith("GET /api/v2/auth/signup");
 
   request.mockRejectedValueOnce(new Error("offline"));
   await client.refetchQueries({ queryKey: SIGNUP_STATUS });

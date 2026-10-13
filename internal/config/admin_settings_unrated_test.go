@@ -80,7 +80,7 @@ func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
 	reader := &countingSettingReader{value: "allow"}
 	policy := NewUnratedContentPolicy(reader)
 	now := time.Unix(1000, 0)
-	policy.now = func() time.Time { return now }
+	policy.setting.now = func() time.Time { return now }
 
 	for range 2 {
 		if !policy.AllowUnratedContent(ctx) {
@@ -120,7 +120,7 @@ func TestUnratedContentPolicyKeepsLastValueOnReadFailure(t *testing.T) {
 	reader := &countingSettingReader{value: "allow"}
 	policy := NewUnratedContentPolicy(reader)
 	now := time.Unix(1000, 0)
-	policy.now = func() time.Time { return now }
+	policy.setting.now = func() time.Time { return now }
 
 	if !policy.AllowUnratedContent(ctx) {
 		t.Fatal("want allow from the first read")

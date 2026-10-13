@@ -71,14 +71,21 @@ var (
 	ErrPeriodLimitReached     = errors.New("download period limit reached")
 	ErrDownloadNotActive      = errors.New("download is not in an active state")
 	ErrStatusConflict         = errors.New("download status transition conflict")
-	ErrTranscodeDisabled      = errors.New("download transcode is disabled")
-	ErrInvalidQuality         = errors.New("invalid download quality")
-	ErrProfileRequired        = errors.New("managed download requires a profile")
-	ErrInvalidStatus          = errors.New("invalid download status transition")
-	ErrManifestUnavailable    = errors.New("offline manifest is not available")
-	ErrInvalidSubtitleRef     = errors.New("invalid subtitle reference")
-	ErrAssetNotFound          = errors.New("download asset not found")
-	ErrFormatUnavailable      = errors.New("requested download format is not available")
+	// ErrPreparedFileExpired means a finished download's prepared file was
+	// cleaned up from the server. The device keeps its copy; fetching the
+	// file again needs PrepareAgain first.
+	ErrPreparedFileExpired = errors.New("prepared file expired")
+	ErrTranscodeDisabled   = errors.New("download transcode is disabled")
+	ErrInvalidQuality      = errors.New("invalid download quality")
+	ErrProfileRequired     = errors.New("managed download requires a profile")
+	ErrInvalidStatus       = errors.New("invalid download status transition")
+	ErrManifestUnavailable = errors.New("offline manifest is not available")
+	ErrInvalidSubtitleRef  = errors.New("invalid subtitle reference")
+	ErrAssetNotFound       = errors.New("download asset not found")
+	// ErrAssetUnavailable means the store behind an offline asset failed or
+	// could not be reached. The asset may exist; the client should retry.
+	ErrAssetUnavailable  = errors.New("download asset is temporarily unavailable")
+	ErrFormatUnavailable = errors.New("requested download format is not available")
 	// ErrResponseCommitted reports a transfer failure after response headers
 	// were written. Handlers must not append an API error body, while service
 	// lifecycle code must still treat the transfer as incomplete.
@@ -139,6 +146,9 @@ type Download struct {
 	UpdatedAt         time.Time
 	CompletedAt       *time.Time
 	StatusEventAt     *time.Time // timestamp of the last accepted client status event
+	// Preparation is set only on preparing rows read through ListPage; it is
+	// not stored on the row.
+	Preparation *PreparationStatus
 }
 
 // SkippedDownload explains why a bulk series/season request did not create a

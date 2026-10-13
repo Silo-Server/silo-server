@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -51,8 +53,8 @@ type PlayableTargetInput struct {
 
 // Key identifies this card in the map Resolve returns. It includes the anchor
 // hint because two cards can legitimately display the SAME item and still want
-// different targets — recently-added TV keeps one card per scan-run event, so a
-// series hit by two multi-episode runs appears twice with different anchors.
+// different targets — recently-added TV keeps one card per arrival event, so a
+// series with two multi-episode arrivals appears twice with different anchors.
 // Callers look a response row up with the key built from the same three fields.
 func (in PlayableTargetInput) Key() string {
 	return strings.ToLower(strings.TrimSpace(in.Type)) + "\x00" +
@@ -76,6 +78,15 @@ type PlayableTargetQuery struct {
 // PostgreSQL user tables.
 type PlayableTargetProgressStore interface {
 	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error)
+}
+
+// PlayableTarget is the leaf a card plays.
+type PlayableTarget struct {
+	ContentID string
+	// SeasonNumber is the target episode's season; nil when the target is
+	// not an episode. It comes from the row that chose the target, so a
+	// caller that opens the target's season needs no second lookup.
+	SeasonNumber *int
 }
 
 // PlayableTargetResolver resolves card-level playback targets in one query.
@@ -109,7 +120,25 @@ func NewPlayableTargetResolverForItems(repo *ItemRepository) *PlayableTargetReso
 // access filters, and episodes inherit the parent series rating. File-library
 // access is still enforced here before any target is returned.
 func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQuery) (map[string]string, error) {
-	result := make(map[string]string)
+	targets, err := r.ResolveTargets(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return PlayableTargetIDs(targets), nil
+}
+
+// PlayableTargetIDs drops the seasons from ResolveTargets' answer.
+func PlayableTargetIDs(targets map[string]PlayableTarget) map[string]string {
+	ids := make(map[string]string, len(targets))
+	for key, target := range targets {
+		ids[key] = target.ContentID
+	}
+	return ids
+}
+
+// ResolveTargets is Resolve with each target's season attached.
+func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableTargetQuery) (map[string]PlayableTarget, error) {
+	result := make(map[string]PlayableTarget)
 	if r == nil || r.pool == nil || q.UserID <= 0 || strings.TrimSpace(q.ProfileID) == "" {
 		return result, nil
 	}
@@ -167,26 +196,25 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
 			WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, maxRank))
 	}
-	effectiveLibraries := uniquePositiveInts(q.LibraryIDs)
-	if len(effectiveLibraries) > 0 {
-		if q.Access.AllowedLibraryIDs != nil {
-			effectiveLibraries = intersectOptionalInts(effectiveLibraries, q.Access.AllowedLibraryIDs)
-		}
-		effectiveLibraries = subtractInts(effectiveLibraries, q.Access.DisabledLibraryIDs)
-		if len(effectiveLibraries) == 0 {
-			return result, nil
-		}
+	effectiveLibraries, none := q.Access.LibraryScope(uniquePositiveInts(q.LibraryIDs))
+	switch {
+	case none:
+		return result, nil
+	case effectiveLibraries != nil:
 		fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
 		args = append(args, effectiveLibraries)
-	} else {
-		if q.Access.AllowedLibraryIDs != nil {
-			fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
-			args = append(args, q.Access.AllowedLibraryIDs)
-			argIdx++
-		}
-		if len(q.Access.DisabledLibraryIDs) > 0 {
-			fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
-			args = append(args, q.Access.DisabledLibraryIDs)
+	case len(q.Access.DisabledLibraryIDs) > 0:
+		fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
+		args = append(args, q.Access.DisabledLibraryIDs)
+	}
+
+	// PostgreSQL progress lives beside the catalog, so the database can choose
+	// winners without returning every episode or issuing progress batches.
+	// Other stores retain the backend-neutral candidate path below.
+	if store, ok := q.ProgressStore.(userstore.CatalogProgressRelationStore); ok &&
+		(slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) {
+		if progress, progressArgs, ok := store.CatalogProgressRelation(r.pool, q.UserID, q.ProfileID, len(args)+1); ok {
+			return r.resolvePostgresTargets(ctx, append(args, progressArgs...), fileConditions, keysByOrd, progress)
 		}
 	}
 
@@ -201,8 +229,12 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			-- rather than one CASE expression: a CASE over both columns keeps
 			-- PostgreSQL from using either media_files index and forces a scan
 			-- of the whole table per requested card.
-			SELECT requested.ord, requested.content_id, requested.content_id AS play_content_id
+			SELECT requested.ord, requested.content_id, requested.content_id AS play_content_id,
+			       leaf_episode.season_number AS target_season
 			FROM requested
+			LEFT JOIN episodes leaf_episode
+			  ON requested.media_type = 'episode'
+			 AND leaf_episode.content_id = requested.content_id
 			WHERE (
 				requested.media_type = 'movie'
 				AND EXISTS (
@@ -272,26 +304,26 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			-- card's own available leaves, so it passes exactly the same file
 			-- conditions (library, enabled folder, quality rank) as any other
 			-- candidate and can never point outside the displayed item.
-			SELECT candidate.ord, candidate.content_id, candidate.play_content_id
+			SELECT candidate.ord, candidate.content_id, candidate.play_content_id, candidate.season_number AS target_season
 			FROM available_candidates candidate
 			JOIN requested
 			  ON requested.ord = candidate.ord
 			 AND requested.preferred_content_id = candidate.play_content_id
 			UNION ALL
-			SELECT leaf.ord, leaf.content_id, leaf.play_content_id
+			SELECT leaf.ord, leaf.content_id, leaf.play_content_id, leaf.target_season
 			FROM leaf_targets leaf
 			JOIN requested
 			  ON requested.ord = leaf.ord
 			 AND requested.preferred_content_id = leaf.play_content_id
 		),
 		resolved AS (
-			SELECT ord, play_content_id, TRUE AS is_hint, -1 AS season_number, -1 AS episode_number FROM hint_targets
+			SELECT ord, play_content_id, TRUE AS is_hint, -1 AS season_number, -1 AS episode_number, target_season FROM hint_targets
 			UNION ALL
-			SELECT ord, play_content_id, FALSE, -1, -1 FROM leaf_targets
+			SELECT ord, play_content_id, FALSE, -1, -1, target_season FROM leaf_targets
 			UNION ALL
-			SELECT ord, play_content_id, FALSE, season_number, episode_number FROM available_candidates
+			SELECT ord, play_content_id, FALSE, season_number, episode_number, season_number FROM available_candidates
 		)
-		SELECT ord, play_content_id, is_hint
+		SELECT ord, play_content_id, is_hint, target_season
 		FROM resolved
 		ORDER BY ord,
 		         is_hint DESC,
@@ -301,35 +333,37 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 		         play_content_id
 	`, strings.Join(fileConditions, " AND "), strings.Join(fileConditions, " AND "), strings.Join(fileConditions, " AND "))
 
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolving playable poster targets: %w", err)
-	}
-	defer rows.Close()
 	candidates := make(map[string][]string, len(ids))
 	hints := make(map[string]string, len(ids))
-	for rows.Next() {
+	// An episode has one season, so one map serves every card.
+	seasons := make(map[string]*int)
+	err := r.queryPlayableTargets(ctx, query, args, func(rows pgx.Rows) error {
 		var ord int64
 		var playContentID string
 		var isHint bool
-		if err := rows.Scan(&ord, &playContentID, &isHint); err != nil {
-			return nil, fmt.Errorf("scanning playable poster target: %w", err)
+		var season *int
+		if err := rows.Scan(&ord, &playContentID, &isHint, &season); err != nil {
+			return fmt.Errorf("scanning playable poster target: %w", err)
 		}
 		if ord < 1 || ord > int64(len(keysByOrd)) {
-			return nil, fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
+			return fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
 		}
 		key := keysByOrd[ord-1]
+		if season != nil {
+			seasons[playContentID] = season
+		}
 		if isHint {
 			// Hints are ordered first within a card; the first one wins.
 			if _, ok := hints[key]; !ok {
 				hints[key] = playContentID
 			}
-			continue
+			return nil
 		}
 		candidates[key] = append(candidates[key], playContentID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating playable poster targets: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolving playable poster targets: %w", err)
 	}
 	progress := map[string]userstore.WatchProgress{}
 	if q.ProgressStore != nil {
@@ -341,13 +375,14 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	}
 	for key, targetCandidates := range candidates {
 		if len(targetCandidates) > 0 {
-			result[key] = preferredPlayableTarget(targetCandidates, progress)
+			id := preferredPlayableTarget(targetCandidates, progress)
+			result[key] = PlayableTarget{ContentID: id, SeasonNumber: seasons[id]}
 		}
 	}
 	// A validated hint is the surface's own anchor (for example the episode a
 	// recently-added event is about), so it outranks progress-based ranking.
 	for key, hint := range hints {
-		result[key] = hint
+		result[key] = PlayableTarget{ContentID: hint, SeasonNumber: seasons[hint]}
 	}
 	return result, nil
 }
@@ -422,4 +457,30 @@ func progressUpdatedAfter(candidate, current string) bool {
 		return candidateTime.After(currentTime)
 	}
 	return candidate > current
+}
+
+// queryPlayableTargets runs a target statement with JIT disabled and scans each
+// row. The planner prices the per-card candidate subqueries far above their
+// real cost, which crosses jit_above_cost for a page of cards; compiling then
+// takes about twice as long as running the query.
+func (r *PlayableTargetResolver) queryPlayableTargets(ctx context.Context, query string, args []any, scan func(pgx.Rows) error) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
+		return fmt.Errorf("disabling JIT: %w", err)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := scan(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }

@@ -2,13 +2,15 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/models"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	"github.com/jackc/pgx/v5"
@@ -37,6 +39,26 @@ type FeatureStatus struct {
 	Capability
 	RequestsEnabled            bool `json:"requests_enabled"`
 	RatingRestrictionsEnforced bool `json:"rating_restrictions_enforced"`
+	// FollowSupported advertises PUT/DELETE /requests/follows/{media_type}/{tmdb_id}
+	// and the following flag on request state.
+	FollowSupported bool `json:"follow_supported"`
+	// SeasonRequestsSupported advertises seasons on createRequest, the season
+	// list on series detail, and season progress on requests.
+	SeasonRequestsSupported bool `json:"season_requests_supported"`
+	// MissingSeasonsRequestable reports whether a series already in the
+	// library can be requested for its missing seasons.
+	MissingSeasonsRequestable bool `json:"missing_seasons_requestable" doc:"Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available."`
+	// DownloadProgressSupported advertises download on requests, their
+	// targets, and the title detail's request state.
+	DownloadProgressSupported bool `json:"download_progress_supported" doc:"Whether the server reports download progress (download on requests, their targets, the title detail's request state, and watchlist titles). Whether a given request has any depends on its download server's request plugin."`
+	// WatchlistTitlesSupported advertises the /watchlist/titles operations
+	// and in_watchlist on discovery results and title detail. It follows
+	// RequestsEnabled because the operations answer 409 capability_disabled
+	// while requests are off.
+	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept."`
+	// WatchlistRequests is the effective watchlist-requests setting for the
+	// viewer.
+	WatchlistRequests bool `json:"watchlist_requests" doc:"Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request."`
 }
 type RequestFeatureStatusOutput struct {
 	Status       int
@@ -81,25 +103,28 @@ type WatchProviderSettingsOutput struct {
 	Body WatchProviderSettings
 }
 
-// WatchProviderSettings contains only persisted connection preferences.
-// Provider metadata and runtime capability/configuration state have no place
-// in this representation: its strong validator is the connection row version.
+// WatchProviderSettings contains only connection preferences. Provider
+// metadata and runtime capability/configuration state have no place in this
+// representation. Its strong validator is the connection row version plus the
+// resolved connection_settings, which also depend on the provider's declared
+// settings and defaults (see watchConnectionTag).
 type WatchProviderSettings struct {
-	ImportWatchedEnabled         bool `json:"import_watched_enabled"`
-	ImportProgressEnabled        bool `json:"import_progress_enabled"`
-	ExportWatchedEnabled         bool `json:"export_watched_enabled"`
-	ExportUnwatchedEnabled       bool `json:"export_unwatched_enabled"`
-	ImportFavoritesEnabled       bool `json:"import_favorites_enabled"`
-	ExportFavoritesEnabled       bool `json:"export_favorites_enabled"`
-	SyncFavoriteRemovalsEnabled  bool `json:"sync_favorite_removals_enabled"`
-	ImportWatchlistEnabled       bool `json:"import_watchlist_enabled"`
-	ExportWatchlistEnabled       bool `json:"export_watchlist_enabled"`
-	SyncWatchlistRemovalsEnabled bool `json:"sync_watchlist_removals_enabled"`
-	SyncWatchlistOrderEnabled    bool `json:"sync_watchlist_order_enabled"`
-	ScrobbleEnabled              bool `json:"scrobble_enabled"`
-	ImportRatingsEnabled         bool `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
-	ExportRatingsEnabled         bool `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
-	SyncDroppedEnabled           bool `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
+	ImportWatchedEnabled         bool           `json:"import_watched_enabled"`
+	ImportProgressEnabled        bool           `json:"import_progress_enabled"`
+	ExportWatchedEnabled         bool           `json:"export_watched_enabled"`
+	ExportUnwatchedEnabled       bool           `json:"export_unwatched_enabled"`
+	ImportFavoritesEnabled       bool           `json:"import_favorites_enabled"`
+	ExportFavoritesEnabled       bool           `json:"export_favorites_enabled"`
+	SyncFavoriteRemovalsEnabled  bool           `json:"sync_favorite_removals_enabled"`
+	ImportWatchlistEnabled       bool           `json:"import_watchlist_enabled"`
+	ExportWatchlistEnabled       bool           `json:"export_watchlist_enabled"`
+	SyncWatchlistRemovalsEnabled bool           `json:"sync_watchlist_removals_enabled"`
+	SyncWatchlistOrderEnabled    bool           `json:"sync_watchlist_order_enabled"`
+	ScrobbleEnabled              bool           `json:"scrobble_enabled"`
+	ImportRatingsEnabled         bool           `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
+	ExportRatingsEnabled         bool           `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
+	SyncDroppedEnabled           bool           `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
+	ConnectionSettings           map[string]any `json:"connection_settings" doc:"The value of every setting in the provider's connection_settings, keyed by setting key: true or false for a boolean setting. A setting the profile has not changed has its default. Empty when the provider declares none."`
 }
 
 func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSettings {
@@ -119,15 +144,35 @@ func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSet
 		ImportRatingsEnabled:         status.ImportRatingsEnabled,
 		ExportRatingsEnabled:         status.ExportRatingsEnabled,
 		SyncDroppedEnabled:           status.SyncDroppedEnabled,
+		ConnectionSettings:           watchProviderSettingValuesOf(status.ConnectionSettingValues),
 	}
+}
+
+func watchProviderSettingValuesOf(values map[string]any) map[string]any {
+	if values == nil {
+		return map[string]any{}
+	}
+	return values
 }
 
 type guardedWatchProviderService interface {
 	UpdateConnectionConditional(context.Context, int, string, string, watchsync.ConnectionVersion, watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error)
 }
 
+// watchConnectionTag is the strong validator of WatchProviderSettings. The
+// connection row version covers the stored preferences; connection_settings
+// also reflects the provider's declared keys and defaults, which a plugin
+// upgrade can change without touching the row, so the resolved values are
+// part of the scope.
 func watchConnectionTag(userID int, profileID, provider string, status watchsync.ConnectionStatus) EntityTag {
-	return RenderETag("watch-provider-settings/"+strconv.Itoa(userID)+"/"+profileID+"/"+provider, status.Version.ID, status.Version.UpdatedAt.UnixMicro())
+	scope := "watch-provider-settings/" + strconv.Itoa(userID) + "/" + profileID + "/" + provider
+	if len(status.ConnectionSettingValues) > 0 {
+		// json.Marshal sorts map keys, so equal values encode identically.
+		if encoded, err := json.Marshal(status.ConnectionSettingValues); err == nil {
+			scope += "/connection-settings/" + string(encoded)
+		}
+	}
+	return RenderETag(scope, status.Version.ID, status.Version.UpdatedAt.UnixMicro())
 }
 
 type WatchProviderRunsOutput struct {
@@ -165,28 +210,37 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		if requests == nil {
 			return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: StateNotConfigured}}}, nil
 		}
-		status, err := requests.GetFeatureStatus(ctx, lifecycleViewer(ctx))
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
+		status, err := requests.GetFeatureStatus(ctx, viewer)
 		if err != nil {
 			return nil, requestProblem(err)
 		}
 		allowed := false
 		if status.RequestsEnabled {
-			allowed, err = requests.RequestCapabilityAllowed(ctx, lifecycleViewer(ctx))
+			allowed, err = requests.RequestCapabilityAllowed(ctx, viewer)
 			if err != nil {
 				return nil, requestProblem(err)
 			}
 		}
-		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced}}, nil
+		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true,
+			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
-		result, err := requests.Cancel(ctx, lifecycleViewer(ctx), string(in.ID), in.Body.Reason)
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
+		result, err := requests.Cancel(ctx, viewer, string(in.ID), in.Body.Reason)
 		if err != nil {
 			return nil, requestProblem(err)
 		}
-		return &MediaRequestOutput{Body: mediaRequestOf(result)}, nil
+		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
 	})
 	scope := func(ctx context.Context) (int, string, error) {
 		if providers == nil {
@@ -205,7 +259,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			if err != nil {
 				return nil, serviceProblem(err)
 			}
-			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: watchProviderCapabilitiesOf(row.Capabilities), ConnectionConfigSchema: schemas})
+			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: watchProviderCapabilitiesOf(row.Capabilities), ConnectionConfigSchema: schemas, ConnectionSettings: watchProviderConnectionSettingsOf(row.ConnectionSettings)})
 		}
 		return out, nil
 	})
@@ -355,9 +409,16 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		return out, nil
 	})
 }
-func lifecycleViewer(ctx context.Context) mediarequests.Viewer {
-	c := claimsFrom(ctx)
-	return mediarequests.Viewer{UserID: c.UserID, ProfileID: profileFrom(ctx), IsAdmin: c.Role == models.RoleAdmin}
+
+// lifecycleViewer is the request service's viewer for the current profile.
+// Admin reach over other accounts' requests follows the acting profile
+// (apimw.ActingAdmin), not the account role.
+func lifecycleViewer(ctx context.Context) (mediarequests.Viewer, *Problem) {
+	isAdmin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return mediarequests.Viewer{}, serviceProblem(err)
+	}
+	return mediarequests.Viewer{UserID: claimsFrom(ctx).UserID, ProfileID: profileFrom(ctx), IsAdmin: isAdmin}, nil
 }
 func watchProviderProblem(err error) *Problem {
 	if errors.Is(err, watchsync.ErrSettingsCleanupUnavailable) {
@@ -366,6 +427,9 @@ func watchProviderProblem(err error) *Problem {
 
 	if _, ok := errors.AsType[watchsync.UnknownProviderError](err); ok {
 		return NewProblem(TypeNotFound, "Watch provider not found.")
+	}
+	if invalid, ok := errors.AsType[watchsync.InvalidConnectionSettingError](err); ok {
+		return NewProblem(TypeValidationFailed, fmt.Sprintf("Connection setting %q %s.", invalid.Key, invalid.Reason))
 	}
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, watchsync.ErrConnectionNotFound) || errors.Is(err, watchsync.ErrAuthSessionMismatch) {
 		return NewProblem(TypeNotFound, "Watch-provider connection or authorization session not found.")
@@ -388,6 +452,9 @@ func watchProviderProblem(err error) *Problem {
 	}
 	if watchsync.IsInvalidCredentialError(err) {
 		return NewProblem(TypeValidationFailed, "The watch provider rejected the supplied credential.")
+	}
+	if invalid, ok := errors.AsType[watchsync.InvalidConnectionInputError](err); ok {
+		return NewProblem(TypeValidationFailed, invalid.Message)
 	}
 	if watchsync.IsRetryableProviderError(err) {
 		return NewProblem(TypeDependencyUnavailable, "The watch provider is temporarily unavailable.")
@@ -578,12 +645,35 @@ func watchProviderSyncRunOf(s watchsync.SyncRun) WatchProviderSyncRun {
 	}
 }
 
-var requestLifecycleOperationIDs = []string{"getRequestStatus", "cancelRequest", "listWatchProviders", opGetWatchProviderConnection, opGetWatchProviderSettings, opUpdateWatchProviderConnection, "deleteWatchProviderConnection", "startWatchProviderDeviceAuth", "pollWatchProviderDeviceAuth", "connectWatchProviderAPIKey", "triggerWatchProviderSync", "listWatchProviderSyncRuns"}
-
 // WatchProviderSummary shares configuration forms with plugin administration.
 type WatchProviderSummary struct {
-	Key                    string                    `json:"key"`
-	DisplayName            string                    `json:"display_name"`
-	Capabilities           WatchProviderCapabilities `json:"capabilities"`
-	ConnectionConfigSchema []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
+	Key                    string                           `json:"key"`
+	DisplayName            string                           `json:"display_name"`
+	Capabilities           WatchProviderCapabilities        `json:"capabilities"`
+	ConnectionConfigSchema []AdminPluginConfigSchema        `json:"connection_config_schema,omitempty"`
+	ConnectionSettings     []WatchProviderConnectionSetting `json:"connection_settings" doc:"Settings a profile can change on its connection at any time, shown with the connection's other sync options. Their values are read and written through the connection's settings. Empty when the provider declares none."`
+}
+
+// WatchProviderConnectionSetting is a setting a provider declares for each
+// connection, such as whether Simkl logs rewatches.
+type WatchProviderConnectionSetting struct {
+	Key          string `json:"key" doc:"The setting's key in connection_settings."`
+	Label        string `json:"label"`
+	Description  string `json:"description,omitempty"`
+	Type         string `json:"type" enum:"boolean" doc:"The value type. boolean is a switch whose value is true or false. A client skips a setting whose type it does not know; the server keeps its value."`
+	DefaultValue any    `json:"default_value" doc:"The value of a connection that has not changed the setting."`
+}
+
+func watchProviderConnectionSettingsOf(settings []watchsync.ConnectionSetting) []WatchProviderConnectionSetting {
+	out := make([]WatchProviderConnectionSetting, 0, len(settings))
+	for _, setting := range settings {
+		out = append(out, WatchProviderConnectionSetting{
+			Key:          setting.Key,
+			Label:        setting.Label,
+			Description:  setting.Description,
+			Type:         string(setting.Type),
+			DefaultValue: setting.Default,
+		})
+	}
+	return out
 }

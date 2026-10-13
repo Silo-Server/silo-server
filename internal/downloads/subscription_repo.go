@@ -10,7 +10,7 @@ import (
 )
 
 const subscriptionColumns = `id, user_id, profile_id, device_id, series_id, mode,
-	season_numbers, target_season, delete_watched, max_storage_bytes, active, created_at, updated_at`
+	season_numbers, target_season, delete_watched, max_storage_bytes, active, created_at, updated_at, quality`
 
 // SubscriptionRepository provides CRUD for download_subscriptions. Monitoring
 // is client-pull only: devices sync on app open / background refresh; there is
@@ -30,7 +30,7 @@ func scanSubscriptionInto(row pgx.Row, s *Subscription) error {
 	if err := row.Scan(
 		&s.ID, &s.UserID, &s.ProfileID, &s.DeviceID, &s.SeriesID, &s.Mode,
 		&seasons, &target, &s.DeleteWatched, &s.MaxStorageBytes, &s.Active,
-		&s.CreatedAt, &s.UpdatedAt,
+		&s.CreatedAt, &s.UpdatedAt, &s.Quality,
 	); err != nil {
 		return err
 	}

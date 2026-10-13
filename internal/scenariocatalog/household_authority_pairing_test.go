@@ -7,10 +7,7 @@ import (
 )
 
 func TestHouseholdAuthoritySelector(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := HouseholdAuthorityAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 12,
+  "revision": 17,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -450,6 +450,7 @@
         "backgroundColor": "#000000",
         "backgroundStyle": "box",
         "backgroundOpacity": 75,
+        "textOpacity": 100,
         "textOutline": false,
         "textOutlineColor": "#000000",
         "position": "bottom"
@@ -458,7 +459,7 @@
       "label": "Subtitle appearance",
       "description": "How subtitles are drawn during playback.",
       "recommended_control": "panel",
-      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. Revision 6 changes the fallback background from shadow to a 75% opaque box, matching the previous intended web default and the current Apple fallback. Connected clients receive the complete effective default from the server; clients should adopt revision 6 so their local and sparse-object decoding fallbacks match it. Stored profile and device overrides remain authoritative."
+      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. Revision 6 changes the fallback background from shadow to a 75% opaque box, matching the previous intended web default and the current Apple fallback. Connected clients receive the complete effective default from the server; clients should adopt revision 6 so their local and sparse-object decoding fallbacks match it. Stored profile and device overrides remain authoritative. Revision 14 adds the optional textOpacity property (1-100, default 100) controlling the opacity of the subtitle text itself, independent of backgroundOpacity; a value stored without it resolves to fully opaque text, matching pre-14 rendering."
     },
     {
       "key": "playback.preferred_quality",
@@ -660,6 +661,36 @@
       "notes": "Profile scope because the reader is a household parent deciding what a child may watch, and they browse on their own profile. Default false: the advisory is extra chrome most viewers do not want, and only the profiles that ask for it should carry it. This setting only controls whether the badge is shown: turning it on or off never changes what a profile is allowed to watch. Restricting a profile by advisory age is a separate access field, the profile's max_advisory_age, which a household manager sets on the profile itself. Coverage is partial by nature: the provider that supplies the advisory is rate limited per day, so on a large library some titles carry one and others do not."
     },
     {
+      "key": "catalog.hide_unwatched_episode_images",
+      "introduced_in": 17,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "catalog",
+      "label": "Blur unwatched episode images",
+      "description": "Blur an episode's thumbnail until you start watching it, so the image does not give away the story.",
+      "recommended_control": "switch",
+      "notes": "Clients apply this; the server never changes catalog responses, so cached catalog data stays shared across profiles. An episode counts as unwatched while it is neither played nor in progress (user_data.played is false and it has no saved position). Covers episode stills wherever a client shows one for a specific episode: season episode lists, other-episodes rows, Next Up and Continue Watching cards, and the next-episode screen in the player. Series and season artwork is not affected. Profile scope so the choice follows the viewer across devices; default false because most viewers expect to see episode stills."
+    },
+    {
+      "key": "catalog.hide_unwatched_episode_overviews",
+      "introduced_in": 17,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "catalog",
+      "label": "Hide unwatched episode descriptions",
+      "description": "Hide an episode's description until you start watching it.",
+      "recommended_control": "switch",
+      "notes": "Clients apply this with the same unwatched rule as catalog.hide_unwatched_episode_images: neither played nor in progress. Covers episode overviews in episode lists, on episode detail, and on the next-episode screen in the player. Series and season overviews are not affected. Separate from the image setting because some viewers want to hide only one of the two."
+    },
+    {
       "key": "player.hdr_enabled",
       "introduced_in": 1,
       "persistence": "remote",
@@ -667,6 +698,7 @@
       "resolution_order": ["profile_device", "default"],
       "value_schema": { "type": "boolean" },
       "default_value": true,
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
       "category": "player",
       "label": "HDR",
       "description": "Allow HDR output on this device.",
@@ -738,6 +770,7 @@
       "value_schema": { "type": "number", "minimum": 0.25, "maximum": 3.0, "step": 0.05 },
       "default_value": 1.0,
       "unit": "x",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
       "category": "player",
       "label": "Playback speed",
       "description": "Default playback speed on this device.",
@@ -768,6 +801,7 @@
       "value_schema": { "type": "integer", "minimum": -10000, "maximum": 10000 },
       "default_value": 0,
       "unit": "milliseconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
       "category": "player",
       "label": "Subtitle sync offset",
       "description": "Shift subtitles earlier or later on this device.",
@@ -992,6 +1026,20 @@
       "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
     },
     {
+      "key": "home.hide_watched_items",
+      "introduced_in": 12,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "navigation",
+      "label": "Hide watched items from Home",
+      "description": "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
+      "recommended_control": "switch"
+    },
+    {
       "key": "ui.library_page_state",
       "introduced_in": 1,
       "persistence": "remote",
@@ -1060,7 +1108,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15."
     },
     {
       "key": "ui.card_overlays_enabled",
@@ -1070,7 +1118,7 @@
       "resolution_order": ["profile", "default"],
       "value_schema": { "type": "boolean", "nullable": true },
       "default_value": null,
-      "platforms": ["web"],
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Card overlays enabled",
       "description": "Show overlay badges on media cards.",
@@ -1422,6 +1470,35 @@
       "description": "Show the Audiobooks section in navigation.",
       "recommended_control": "switch",
       "notes": "Contract-known local: an opt-in navigation surface, hidden by default, with existing Apple (AppNavPreferences.showAudiobooks) and Android parity. Android stores it locally at nav.show_audiobooks.local."
+    },
+    {
+      "key": "requests.watchlist_auto_request",
+      "introduced_in": 15,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "requests",
+      "label": "Request titles I add to my watchlist",
+      "description": "When you add a title that is not in the library to your watchlist, also request it.",
+      "recommended_control": "switch",
+      "notes": "Profile scope because each household member decides whether their own watchlist adds become requests. It applies only while the server-wide watchlist_requests request setting is on and the profile may request at all; a client shows it only then (GET /api/v2/requests/status reports the effective value as watchlist_requests). Request limits, approval and routing apply exactly as for the Request button. Turning it off never cancels an existing request."
+    },
+    {
+      "key": "ui.title_art",
+      "introduced_in": 16,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile", "profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "appearance",
+      "label": "Show title art",
+      "description": "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
+      "recommended_control": "switch",
+      "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos."
     }
   ]
 }

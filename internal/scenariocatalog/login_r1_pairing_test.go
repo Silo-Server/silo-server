@@ -7,10 +7,7 @@ import (
 )
 
 func TestLoginR1Selection(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := LoginR1Acceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)

@@ -31,6 +31,7 @@ export function librarySettingSupport(type: string) {
   return {
     trailers: video,
     chapterThumbnails: video,
+    trickplay: ["movie", "movies", "series", "tv", "show", "tvshows", "mixed"].includes(kind),
     introDetection: kind === "series" || kind === "mixed" || kind === "movies",
     // Movies get local credits only, on a best-effort basis, so new movie
     // libraries leave detection off. Mixed libraries also hold episodes,

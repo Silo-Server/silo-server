@@ -1,156 +1,280 @@
-import { useState } from "react";
+import { useId, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { useSortable, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Users } from "lucide-react";
-import type { GroupSortMode, LibraryCollection, LibraryCollectionGroup } from "@/api/types";
-import { CollectionRow } from "./CollectionRow";
+import { Info, MinusCircle, Pin, Users } from "lucide-react";
 
-export interface GroupCardProps {
-  group: LibraryCollectionGroup;
-  collections: LibraryCollection[];
-  onEdit: (id: string) => void;
-  onEditCollection: (collection: LibraryCollection) => void;
-  onDeleteCollection: (collection: LibraryCollection) => void;
-  onSyncCollection: (collection: LibraryCollection) => void;
-  syncingCollectionID?: string | null;
-  collapsed?: boolean;
-  dragDisabled?: boolean;
+import type { GroupSortMode, LibraryCollection } from "@/api/types";
+import { Grip, type ListRowProps } from "@/components/calm/ListRow";
+import {
+  MY_COLLECTIONS_NOTE,
+  MY_COLLECTIONS_NO_DROP,
+  MY_COLLECTIONS_TAG,
+  NO_HEADING_HELP,
+  PINNED_BAND,
+} from "@/lib/collections/copy";
+import {
+  SHELF_ORDER_LABEL,
+  pinnedBand,
+  shelfCountLine,
+  shownCollections,
+  type Shelf,
+} from "@/lib/collections/shelves";
+import { cn } from "@/lib/utils";
+
+/** What a shelf hands each card so it can be dragged by its grip only. */
+export interface SortableCardProps {
+  handleProps?: ListRowProps["handleProps"];
+  ref: (node: HTMLLIElement | null) => void;
+  style: React.CSSProperties;
+  dragging: boolean;
 }
 
-export function GroupCard({
-  group,
-  collections,
-  onEdit,
-  onEditCollection,
-  onDeleteCollection,
-  onSyncCollection,
-  syncingCollectionID = null,
-  collapsed = false,
-  dragDisabled: boardDragDisabled = false,
-}: GroupCardProps) {
-  const [viewMode, setViewMode] = useState<GroupSortMode>(group.default_sort_mode);
-  const dragDisabled = boardDragDisabled || viewMode !== "manual";
-  const isUserCollections = group.kind === "user_collections";
+/** Drag data, read by the board to tell what moved and where it landed. */
+export type ArrangeDragData =
+  | { kind: "shelf"; id: string }
+  /**
+   * `banded`: in its shelf's pinned band, which only pinned collections may
+   * join. `pinned`: the collection is pinned, so it may join a band even when
+   * its own shelf sorts itself and has none.
+   */
+  | { kind: "collection"; id: string; shelfId: string; banded: boolean; pinned: boolean }
+  | { kind: "body"; shelfId: string };
 
-  const sortableId = `group:${group.id}`;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: sortableId,
-    disabled: boardDragDisabled,
-    data: { kind: "group", id: group.id },
-  });
-  const style = {
-    transform: CSS.Translate.toString(transform),
+const SORT_MODES = Object.keys(SHELF_ORDER_LABEL) as GroupSortMode[];
+
+function SortableCard({
+  collection,
+  shelfId,
+  banded,
+  disabled,
+  children,
+}: {
+  collection: LibraryCollection;
+  shelfId: string;
+  banded: boolean;
+  disabled: boolean;
+  children: (props: SortableCardProps) => ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
     transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
-    id: `group-body:${group.id}`,
-    data: { kind: "group-body", groupID: group.id },
+    isDragging,
+  } = useSortable({
+    id: `col:${collection.id}`,
+    disabled,
+    data: {
+      kind: "collection",
+      id: collection.id,
+      shelfId,
+      banded,
+      pinned: collection.featured,
+    } satisfies ArrangeDragData,
   });
+  return children({
+    ref: setNodeRef,
+    style: { transform: CSS.Translate.toString(transform), transition },
+    dragging: isDragging,
+    handleProps: { ...attributes, ...listeners, ref: setActivatorNodeRef },
+  });
+}
 
-  const sorted = applySort(collections, viewMode);
-  const sortableIds = sorted.map((c) => `col:${c.id}`);
+/**
+ * One shelf on Arrange: grip, name and count, its Order (saved for viewers)
+ * and ⋯, then its collections as cards in the order viewers see them. On a
+ * Your order shelf, pinned collections sit in a band at the start.
+ * My collections holds each viewer's own collections, so it shows a note
+ * instead of cards and refuses server collections while one is dragged.
+ * No heading has neither Order nor ⋯.
+ */
+export function GroupCard({
+  shelf,
+  collapsed,
+  dragDisabled,
+  showGrips,
+  noDrop,
+  orderDisabled,
+  onSortChange,
+  menu,
+  renderCard,
+}: {
+  shelf: Shelf;
+  /** While a shelf is dragged, every shelf shrinks to its header. */
+  collapsed: boolean;
+  dragDisabled: boolean;
+  /** Phones have no drag, so no grips. */
+  showGrips: boolean;
+  /** A server collection is being dragged: My collections can't take it. */
+  noDrop: boolean;
+  orderDisabled: boolean;
+  onSortChange: (mode: GroupSortMode) => void;
+  menu: ReactNode;
+  renderCard: (collection: LibraryCollection, sortable: SortableCardProps) => ReactNode;
+}) {
+  const mine = shelf.kind === "user_collections";
+  const loose = shelf.kind === "ungrouped";
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: `shelf:${shelf.id}`,
+    disabled: dragDisabled,
+    data: { kind: "shelf", id: shelf.id } satisfies ArrangeDragData,
+  });
+  // My collections' body stays a drop target so a card dragged there is
+  // announced as refused; the board never moves a server collection onto it.
+  const { setNodeRef: setBodyRef, isOver } = useDroppable({
+    id: `body:${shelf.id}`,
+    data: { kind: "body", shelfId: shelf.id } satisfies ArrangeDragData,
+  });
+  const bandLabelId = useId();
+  const cards = shownCollections(shelf);
+  const bandIds = new Set(pinnedBand(shelf).map((entry) => entry.id));
+  const banded = cards.filter((collection) => bandIds.has(collection.id));
+  const rest = cards.filter((collection) => !bandIds.has(collection.id));
+  const cardsDisabled = dragDisabled || !showGrips;
+  const sortableCards = (list: LibraryCollection[]) => (
+    <ol className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2">
+      {list.map((collection) => (
+        <SortableCard
+          key={collection.id}
+          collection={collection}
+          shelfId={shelf.id}
+          banded={bandIds.has(collection.id)}
+          disabled={cardsDisabled}
+        >
+          {(sortable) =>
+            renderCard(collection, showGrips ? sortable : { ...sortable, handleProps: undefined })
+          }
+        </SortableCard>
+      ))}
+    </ol>
+  );
+  // The grip reads "Move shelf Studios".
+  const gripName = loose ? "the collections with no heading" : `shelf ${shelf.name}`;
 
   return (
-    <div ref={setNodeRef} style={style} className="bg-background rounded-lg border">
-      <div className="flex items-center gap-2 border-b p-3">
-        <button
-          {...attributes}
-          {...listeners}
-          className="text-muted-foreground hover:text-foreground cursor-grab"
-          disabled={boardDragDisabled}
-          aria-label="Drag group"
-          type="button"
-        >
-          ⋮⋮
-        </button>
-        <h3 className="flex-1 font-semibold">
-          {group.name}
-          {isUserCollections && (
-            <span className="ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-normal">
-              <Users className="mr-1 h-3 w-3" />
-              User Collections
+    <section
+      ref={setNodeRef}
+      aria-label={loose ? shelf.name : `Shelf ${shelf.name}`}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(
+        "surface-panel grid gap-2.5 rounded-[22px] p-3",
+        isDragging && "z-10 shadow-lg",
+        mine && noDrop && "border-destructive/70 bg-destructive/5 border border-dashed",
+      )}
+    >
+      <div
+        className={cn(
+          "grid items-center gap-2",
+          showGrips
+            ? "grid-cols-[28px_minmax(0,1fr)_auto_auto]"
+            : "grid-cols-[minmax(0,1fr)_auto_auto] pl-1",
+        )}
+      >
+        {showGrips ? (
+          <Grip
+            title={gripName}
+            collapsed={false}
+            handleProps={{ ...attributes, ...listeners, ref: setActivatorNodeRef }}
+          />
+        ) : null}
+        <h3 className="m-0 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold tracking-[-0.01em]">
+          <span className="min-w-0 break-words">{shelf.name}</span>
+          {mine ? (
+            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset">
+              <Users aria-hidden className="size-3" />
+              {MY_COLLECTIONS_TAG}
             </span>
+          ) : (
+            <small className="text-muted-foreground text-[12.5px] font-normal">
+              {loose ? NO_HEADING_HELP : shelfCountLine(shelf)}
+            </small>
           )}
         </h3>
-        <label className="text-muted-foreground text-xs">View:</label>
-        <select
-          value={viewMode}
-          onChange={(e) => setViewMode(e.target.value as GroupSortMode)}
-          className="border-input bg-background text-foreground rounded-md border px-2 py-1 text-sm"
-          aria-label="View sort"
-        >
-          <option value="manual">Manual</option>
-          <option value="name_asc">Name A–Z</option>
-          <option value="name_desc">Name Z–A</option>
-          <option value="recent">Recently Updated</option>
-          <option value="most_items">Most Items</option>
-        </select>
-        <button
-          onClick={() => onEdit(group.id)}
-          className="hover:bg-muted rounded p-1"
-          aria-label="Group settings"
-          type="button"
-        >
-          ⋯
-        </button>
+        {mine && noDrop ? (
+          <span className="text-destructive inline-flex items-center gap-1.5 text-[12.5px] font-medium">
+            <MinusCircle aria-hidden className="size-3.5" />
+            {MY_COLLECTIONS_NO_DROP}
+          </span>
+        ) : loose || mine ? (
+          <span />
+        ) : (
+          <label className="text-muted-foreground inline-flex items-center gap-2 text-[12.5px]">
+            {/* Phones keep the select and drop the word, which the select's label still says. */}
+            <span className="max-lg:sr-only">Order</span>
+            <select
+              value={shelf.sortMode}
+              disabled={orderDisabled}
+              aria-label={`Order of ${shelf.name}`}
+              onChange={(event) => onSortChange(event.target.value as GroupSortMode)}
+              className="border-input bg-background text-foreground h-8 rounded-[9px] border px-2 text-[13px] max-lg:h-11 max-lg:max-w-[140px]"
+            >
+              {SORT_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {SHELF_ORDER_LABEL[mode]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {menu ?? <span />}
       </div>
 
-      {!collapsed && (
-        <div ref={setDroppableRef} className={`p-3 ${isOver ? "bg-muted/40" : ""}`}>
-          {sorted.length === 0 ? (
-            <div className="text-muted-foreground rounded border border-dashed p-4 text-center text-sm">
-              {isUserCollections
-                ? "Reserved slot for user-published collections. Drag this group to set where they'd appear on the library tab."
-                : "Drag a collection here, or add one with + New collection."}
-            </div>
+      {collapsed ? null : mine ? (
+        <p
+          ref={setBodyRef}
+          className="bg-muted/30 text-muted-foreground m-0 flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] leading-normal"
+        >
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+          {MY_COLLECTIONS_NOTE}
+        </p>
+      ) : (
+        <div ref={setBodyRef} className={cn("rounded-[14px]", isOver && "bg-accent/40")}>
+          {cards.length === 0 ? (
+            <p className="border-border text-muted-foreground m-0 rounded-[14px] border border-dashed px-4 py-4 text-center text-[13px]">
+              {loose
+                ? "Collections on no shelf show here, without a title."
+                : "Drag a collection here, or use a collection's ⋯ › Move to shelf."}
+            </p>
           ) : (
-            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
-                {sorted.map((c) => (
-                  <CollectionRow
-                    key={c.id}
-                    collection={c}
-                    dragDisabled={dragDisabled}
-                    parentGroupID={group.id}
-                    parentCollectionIDs={sorted.map((x) => x.id)}
-                    isInUserCollectionsGroup={isUserCollections}
-                    onEdit={() => onEditCollection(c)}
-                    onDelete={() => onDeleteCollection(c)}
-                    onSync={() => onSyncCollection(c)}
-                    isSyncing={syncingCollectionID === c.id}
-                  />
-                ))}
-              </div>
+            <SortableContext
+              items={cards.map((collection) => `col:${collection.id}`)}
+              strategy={rectSortingStrategy}
+            >
+              {banded.length > 0 ? (
+                <div
+                  role="group"
+                  aria-labelledby={bandLabelId}
+                  className={cn(
+                    "border-border/70 bg-muted/20 grid gap-2 rounded-[16px] border p-2",
+                    rest.length > 0 && "mb-2",
+                  )}
+                >
+                  <span
+                    id={bandLabelId}
+                    className="text-muted-foreground flex items-center gap-1.5 px-1 text-[12px]"
+                  >
+                    <Pin aria-hidden className="size-3" />
+                    {PINNED_BAND}
+                  </span>
+                  {sortableCards(banded)}
+                </div>
+              ) : null}
+              {rest.length > 0 ? sortableCards(rest) : null}
             </SortableContext>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
-}
-
-function applySort(cs: LibraryCollection[], mode: GroupSortMode): LibraryCollection[] {
-  const cp = [...cs];
-  switch (mode) {
-    case "name_asc":
-      cp.sort((a, b) => a.title.localeCompare(b.title));
-      break;
-    case "name_desc":
-      cp.sort((a, b) => b.title.localeCompare(a.title));
-      break;
-    case "recent":
-      cp.sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at));
-      break;
-    case "most_items":
-      cp.sort((a, b) => (b.item_count ?? 0) - (a.item_count ?? 0));
-      break;
-    case "manual":
-    default:
-      // preserve incoming order (already sort_order asc from server)
-      break;
-  }
-  return cp;
 }

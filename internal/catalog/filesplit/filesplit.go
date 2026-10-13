@@ -75,22 +75,34 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 	if len(fileIDs) != len(opts.Files) {
 		return nil, fmt.Errorf("filesplit: file ids must be positive and unique")
 	}
-	tag, err := tx.Exec(ctx, `
-		UPDATE media_files
-		SET content_id = $1,
-			episode_id = NULL,
-			match_attempted_at = NULL,
-			updated_at = NOW()
-		WHERE content_id = $2
-		  AND id = ANY($3::bigint[])
-	`, opts.ToContentID, opts.FromContentID, fileIDs)
-	if err != nil {
+	// The self-join reads each row as it was before the update, so the source
+	// episodes the moved files leave behind come from the database rather than
+	// from the caller's selection.
+	var moved int
+	var sourceEpisodeIDs []string
+	if err := tx.QueryRow(ctx, `
+		WITH moved AS (
+			UPDATE media_files mf
+			SET content_id = $1,
+				episode_id = NULL,
+				match_attempted_at = NULL,
+				updated_at = NOW()
+			FROM media_files previous
+			WHERE previous.id = mf.id
+			  AND mf.content_id = $2
+			  AND mf.id = ANY($3::bigint[])
+			RETURNING previous.episode_id
+		)
+		SELECT COUNT(*)::int,
+		       COALESCE(array_agg(DISTINCT episode_id) FILTER (WHERE episode_id IS NOT NULL), ARRAY[]::text[])
+		FROM moved
+	`, opts.ToContentID, opts.FromContentID, fileIDs).Scan(&moved, &sourceEpisodeIDs); err != nil {
 		return nil, fmt.Errorf("filesplit: moving files: %w", err)
 	}
-	if tag.RowsAffected() != int64(len(fileIDs)) {
+	if moved != len(fileIDs) {
 		return nil, fmt.Errorf(
 			"filesplit: moved %d of %d selected files; source ownership changed",
-			tag.RowsAffected(),
+			moved,
 			len(fileIDs),
 		)
 	}
@@ -103,6 +115,48 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 		`, opts.ToContentID, folderID); err != nil {
 			return nil, fmt.Errorf("filesplit: adding target library membership: %w", err)
 		}
+	}
+	// A folder whose files all moved no longer holds the source. Remove that
+	// membership here: a later subtree scan only reconciles content its files
+	// link to, and none of them link to the source any more.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_libraries membership
+		WHERE membership.content_id = $1
+		  AND membership.media_folder_id = ANY($2::int[])
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files remaining
+			WHERE remaining.content_id = membership.content_id
+			  AND remaining.media_folder_id = membership.media_folder_id
+			  AND remaining.missing_since IS NULL
+		  )
+	`, opts.FromContentID, distinctFolderIDs(opts.Files)); err != nil {
+		return nil, fmt.Errorf("filesplit: removing stale source library membership: %w", err)
+	}
+	// Root claims keep their first owner, so a root the split emptied would
+	// still resolve new files there to the source. Hand those claims over.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_item_roots claim
+		SET content_id = $1, last_seen_at = NOW()
+		FROM (
+			SELECT DISTINCT media_folder_id, canonical_root_path
+			FROM media_files
+			WHERE id = ANY($3::bigint[])
+			  AND canonical_root_path <> ''
+		) moved
+		WHERE claim.media_folder_id = moved.media_folder_id
+		  AND claim.canonical_root_path = moved.canonical_root_path
+		  AND claim.content_id = $2
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_files remaining
+			WHERE remaining.media_folder_id = claim.media_folder_id
+			  AND remaining.canonical_root_path = claim.canonical_root_path
+			  AND remaining.content_id = $2
+			  AND remaining.missing_since IS NULL
+		  )
+	`, opts.ToContentID, opts.FromContentID, fileIDs); err != nil {
+		return nil, fmt.Errorf("filesplit: moving source root claims: %w", err)
 	}
 
 	derivedEpisodePairs := DeriveEpisodePairs(opts.ItemType, opts.Files, opts.ToContentID)
@@ -153,7 +207,7 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 		`, fileIDs); err != nil {
 			return nil, fmt.Errorf("filesplit: adding target episode library membership: %w", err)
 		}
-		if len(derivedEpisodePairs) > 0 {
+		if len(sourceEpisodeIDs) > 0 {
 			if _, err := tx.Exec(ctx, `
 				DELETE FROM episode_libraries source_membership
 				WHERE source_membership.episode_id = ANY($1::text[])
@@ -164,7 +218,7 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 					  AND remaining.media_folder_id = source_membership.media_folder_id
 					  AND remaining.missing_since IS NULL
 				  )
-			`, episodePairSources(derivedEpisodePairs)); err != nil {
+			`, sourceEpisodeIDs); err != nil {
 				return nil, fmt.Errorf("filesplit: removing stale source episode library membership: %w", err)
 			}
 		}
@@ -251,14 +305,6 @@ func keepFullyMovedEpisodePairs(
 		return nil, fmt.Errorf("filesplit: iterating movable episode state: %w", err)
 	}
 	return filtered, nil
-}
-
-func episodePairSources(pairs []reattribute.IDPair) []string {
-	ids := make([]string, 0, len(pairs))
-	for _, pair := range pairs {
-		ids = append(ids, pair.From)
-	}
-	return ids
 }
 
 func distinctFileIDs(files []File) []int {

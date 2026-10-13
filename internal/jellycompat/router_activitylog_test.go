@@ -215,5 +215,5 @@ func TestSkipCompatActivityLog_MatchesRegisteredRoutes(t *testing.T) {
 }
 
 func isSkippedArtworkOrWeb(route string) bool {
-	return strings.Contains(route, "/Images/") || route == "/UserImage" || route == "/api/v2/artwork/*" || route == "/web/*"
+	return strings.Contains(route, "/Images/") || strings.Contains(route, "/Trickplay/") || route == "/UserImage" || route == "/api/v2/artwork/*" || route == "/web/*"
 }

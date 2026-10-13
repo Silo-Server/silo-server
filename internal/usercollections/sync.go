@@ -2,9 +2,11 @@ package usercollections
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,15 +16,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+// ErrOwnerAccessUnavailable reports that a sync could not resolve what the
+// collection's owner profile may access. The sync records it as the
+// collection's failed status and leaves the members unchanged; it never fills
+// the collection from the whole catalog instead.
+var ErrOwnerAccessUnavailable = errors.New("couldn't check which titles this collection's owner can access, so the collection was not updated")
+
 // Service performs sync runs for user-owned imported collections. The result
 // of each sync is written into user_personal_collection_items via the
-// per-user store; downstream catalog reads enforce profile-level access
-// filtering, so this service resolves against the entire catalog regardless
-// of who owns the collection.
+// per-user store. Members are limited to titles the collection's owner
+// profile can access, so the item limit fills with titles the owner can see;
+// catalog reads still apply each viewer's own access on top.
 type Service struct {
 	storeProvider userstore.UserStoreProvider
 	items         *catalog.ItemRepository
 	libraryItems  *catalog.LibraryItemRepository
+	owners        catalog.PersonalCollectionAccess
 	httpClient    *http.Client
 	logger        *slog.Logger
 
@@ -30,12 +39,19 @@ type Service struct {
 	TMDBLists          catalog.TMDBListFetcher
 	TraktCollections   catalog.TraktCollectionFetcher
 	TraktTokenResolver catalog.TraktAccessTokenResolver
+
+	// Collages builds the collage of a synced collection without an uploaded
+	// or imported poster; nil when artwork storage is not configured.
+	Collages *catalog.PersonalCollectionCollages
 }
 
+// NewService builds the sync service. owners resolves each collection
+// owner's access; without it every sync fails with ErrOwnerAccessUnavailable.
 func NewService(
 	storeProvider userstore.UserStoreProvider,
 	items *catalog.ItemRepository,
 	libraryItems *catalog.LibraryItemRepository,
+	owners catalog.PersonalCollectionAccess,
 	httpClient *http.Client,
 	logger *slog.Logger,
 ) *Service {
@@ -47,6 +63,7 @@ func NewService(
 		storeProvider: storeProvider,
 		items:         items,
 		libraryItems:  libraryItems,
+		owners:        owners,
 		httpClient:    httpClient,
 		logger:        logger,
 	}
@@ -73,32 +90,111 @@ func (s *Service) SyncCollection(ctx context.Context, userID int, collectionID s
 	if err != nil {
 		return nil, err
 	}
-	result, _, err := s.RunSync(ctx, store, collection)
+	result, _, err := s.RunSync(ctx, userID, store, collection)
 	return result, err
 }
 
-// RunSync syncs an already-loaded collection. Handlers that have validated
-// ownership pass the collection in to avoid a second GetCollection round
-// trip. Returns both the sync result and the post-sync collection state so
-// callers can render the updated row without an extra read.
-func (s *Service) RunSync(ctx context.Context, store userstore.UserStore, collection *userstore.Collection) (*SyncResult, *userstore.Collection, error) {
+// sourceMatcher fetches a collection's source list and returns, for each
+// entry in source order, the catalog content_id it names ("" when the
+// catalog has no such title).
+type sourceMatcher func(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error)
+
+// RunSync syncs an already-loaded collection of account userID. Handlers
+// that have validated ownership pass the collection in to avoid a second
+// GetCollection round trip. Returns both the sync result and the post-sync
+// collection state so callers can render the updated row without an extra
+// read.
+func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection) (*SyncResult, *userstore.Collection, error) {
 	cfg, err := ParseSourceConfig(collection.SourceConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing source_config: %w", err)
 	}
-	startedAt := time.Now().UTC()
+	var match sourceMatcher
 	switch cfg.Mode {
 	case SourceModeMDBList:
-		return s.syncMDBList(ctx, store, collection, cfg, startedAt)
+		match = s.matchMDBList
 	case SourceModeTMDBPreset:
-		return s.syncTMDB(ctx, store, collection, cfg, startedAt)
+		match = s.matchTMDB
 	case SourceModeTMDBList:
-		return s.syncTMDBList(ctx, store, collection, cfg, startedAt)
+		match = s.matchTMDBList
 	case SourceModeTraktPreset:
-		return s.syncTrakt(ctx, store, collection, cfg, startedAt)
+		match = s.matchTrakt
 	default:
 		return nil, nil, ErrSyncUnsupported
 	}
+	startedAt := time.Now().UTC()
+	owner, err := s.ownerFilter(ctx, userID, store, collection)
+	if err != nil {
+		return nil, nil, err
+	}
+	contentIDs, err := match(ctx, collection, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	members, scanned, unmatched, err := s.selectMembers(ctx, owner, cfg, contentIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	result, updated, err := s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
+	if err == nil {
+		s.refreshCollage(userID, store, updated, owner)
+	}
+	return result, updated, err
+}
+
+// refreshCollage builds, in the background, the collage a synced collection
+// shows its owner when it has no uploaded or imported poster. A sync has no
+// request, so the owner's content access stands in for the owner's own read;
+// other viewers' collages are built when they first read the collection.
+func (s *Service) refreshCollage(userID int, store userstore.UserStore, c *userstore.Collection, owner catalog.AccessFilter) {
+	RefreshCollage(s.Collages, store, userID, c, owner)
+}
+
+// ownerFilter resolves the access of the collection's owner profile, which
+// limits its members. A scheduled sync has no request, so the owner is the
+// only profile whose access can apply. When it cannot be resolved, the sync
+// fails: the failure is recorded on the collection, so the owner sees it
+// whether the sync ran on a schedule or by hand, and its members stay as
+// they were.
+func (s *Service) ownerFilter(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection) (catalog.AccessFilter, error) {
+	var (
+		filter catalog.AccessFilter
+		err    error
+	)
+	switch {
+	case s.owners == nil:
+		err = errors.New("owner access is not configured")
+	case collection.CreatorProfileID == "":
+		err = errors.New("the collection has no owner profile")
+	default:
+		filter, err = s.owners.OwnerFilter(ctx, userID, collection.CreatorProfileID)
+	}
+	if err == nil {
+		return filter, nil
+	}
+	s.logger.ErrorContext(ctx, "user collection sync: resolving owner access failed",
+		"user_id", userID,
+		"collection_id", collection.ID,
+		"owner_profile_id", collection.CreatorProfileID,
+		"error", err,
+	)
+	if stateErr := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
+		ID:                collection.ID,
+		Status:            "failed",
+		Message:           ErrOwnerAccessUnavailable.Error(),
+		ItemCount:         collection.ItemCount,
+		LastSyncAt:        time.Now().UTC(),
+		NextSyncAt:        collection.NextSyncAt,
+		ScheduleAtStart:   collection.SyncSchedule,
+		NextSyncAtAtStart: collection.NextSyncAt,
+	}); stateErr != nil {
+		s.logger.ErrorContext(ctx, "user collection sync: recording the failed sync failed",
+			"user_id", userID,
+			"collection_id", collection.ID,
+			"error", stateErr,
+		)
+	}
+	return catalog.AccessFilter{}, ErrOwnerAccessUnavailable
 }
 
 // ── MDBList ──────────────────────────────────────────────────────────────────
@@ -113,10 +209,10 @@ type mdblistEntry struct {
 	ReleaseYear int    `json:"release_year"`
 }
 
-func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
+func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
 	urls := collectionutil.MDBListURLCandidates(cfg.URL, collection.SourceURL)
 	if len(urls) == 0 {
-		return nil, nil, fmt.Errorf("mdblist sync: url is required")
+		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
 
 	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
@@ -124,7 +220,7 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 		return s.fetchMDBListEntries(ctx, url, fetchLimit)
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
@@ -146,15 +242,14 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 
 	movieLookup, err := s.items.GetByExternalIDs(ctx, movieBatch, "movie")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	seriesLookup, err := s.items.GetByExternalIDs(ctx, seriesBatch, "series")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	resolveLimit := collectionResolveLimit(cfg)
-	matched, unmatched, scanned := resolveMatchedWithLimit(len(entries), resolveLimit, func(i int) string {
+	return matchEntries(len(entries), func(i int) string {
 		entry := entries[i]
 		itemType := mdbListItemType(entry)
 		lookup := movieLookup
@@ -170,13 +265,7 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 			tmdb = fmt.Sprintf("%d", entry.ID)
 		}
 		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
-	})
-	matched, droppedByLib, err := s.filterByLibraries(ctx, matched, cfg.LibraryIDs)
-	if err != nil {
-		return nil, nil, err
-	}
-	matched = limitCollectionItems(matched, cfg.Limit)
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(entries), scanned, unmatched+droppedByLib)
+	}), nil
 }
 
 func mdbListItemType(entry mdblistEntry) string {
@@ -212,92 +301,88 @@ func resolveCandidate(lookup *catalog.ExternalIDLookup, itemType, tvdbID, tmdbID
 	return ""
 }
 
-// filterByLibraries drops matched items that are not present in any of the
-// supplied libraries. Returns the surviving items (with positions
-// recompacted) plus a count of items removed by the filter, which the caller
-// rolls into the unmatched count so the user sees an honest match summary.
-func (s *Service) filterByLibraries(ctx context.Context, matched []userstore.CollectionItemReplacement, libraryIDs []int) ([]userstore.CollectionItemReplacement, int, error) {
-	if len(libraryIDs) == 0 || len(matched) == 0 || s.libraryItems == nil {
-		return matched, 0, nil
+// matchEntries resolves each of total source entries to its catalog
+// content_id, in source order.
+func matchEntries(total int, resolve func(i int) string) []string {
+	contentIDs := make([]string, total)
+	for i := range contentIDs {
+		contentIDs[i] = resolve(i)
 	}
-	ids := make([]string, len(matched))
-	for i, m := range matched {
-		ids[i] = m.MediaItemID
-	}
-	membership, err := s.libraryItems.GetItemsInFolders(ctx, ids, libraryIDs)
-	if err != nil {
-		return nil, 0, err
-	}
-	kept := make([]userstore.CollectionItemReplacement, 0, len(matched))
-	for _, m := range matched {
-		if !membership[m.MediaItemID] {
-			continue
-		}
-		m.Position = len(kept)
-		kept = append(kept, m)
-	}
-	return kept, len(matched) - len(kept), nil
+	return contentIDs
 }
 
-// resolveMatched walks `total` entries, calls `resolve` to get the candidate
-// content_id for each, and produces deduped, position-numbered replacements
-// plus an unmatched count. Shared by all three source backends.
-func resolveMatchedWithLimit(total int, limit *int, resolve func(i int) string) ([]userstore.CollectionItemReplacement, int, int) {
-	capacity := total
-	if limit != nil && *limit > 0 && *limit < total {
+// selectMembers picks the collection's members from the matched source
+// entries: titles the owner can access and, when the source config names
+// libraries, that are in one of them. All matches are checked before the item
+// limit applies, so titles the owner can't access never use up the limit.
+func (s *Service) selectMembers(ctx context.Context, owner catalog.AccessFilter, cfg SourceConfig, contentIDs []string) ([]userstore.CollectionItemReplacement, int, int, error) {
+	ids := make([]string, 0, len(contentIDs))
+	seen := make(map[string]struct{}, len(contentIDs))
+	for _, id := range contentIDs {
+		if _, dup := seen[id]; id == "" || dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	allowed, err := s.items.EnsureAccessibleIDs(ctx, ids, owner)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("checking the owner's access to matched titles: %w", err)
+	}
+	if len(cfg.LibraryIDs) > 0 && s.libraryItems != nil {
+		// A title must sit in a chosen library the owner can also access, not
+		// pass each check through a different library.
+		libraries := cfg.LibraryIDs
+		if owner.AllowedLibraryIDs != nil {
+			libraries = slices.DeleteFunc(slices.Clone(libraries), func(id int) bool {
+				return !slices.Contains(owner.AllowedLibraryIDs, id)
+			})
+		}
+		inLibraries := map[string]bool{}
+		if len(libraries) > 0 {
+			inLibraries, err = s.libraryItems.GetItemsInFolders(ctx, ids, libraries)
+			if err != nil {
+				return nil, 0, 0, err
+			}
+		}
+		for id := range allowed {
+			allowed[id] = inLibraries[id]
+		}
+	}
+	members, scanned, unmatched := pickMembers(contentIDs, allowed, cfg.Limit)
+	return members, scanned, unmatched, nil
+}
+
+// pickMembers walks the matched source entries in order and keeps each
+// allowed title once, until limit members are kept. It returns the members,
+// the number of entries scanned, and how many of those were unmatched. An
+// entry whose title is not allowed counts as unmatched, exactly like one the
+// catalog lacks, so the sync summary never reveals titles outside the
+// owner's access.
+func pickMembers(contentIDs []string, allowed map[string]bool, limit *int) ([]userstore.CollectionItemReplacement, int, int) {
+	capacity := len(contentIDs)
+	if limit != nil && *limit > 0 && *limit < capacity {
 		capacity = *limit
 	}
-	matched := make([]userstore.CollectionItemReplacement, 0, capacity)
+	members := make([]userstore.CollectionItemReplacement, 0, capacity)
 	seen := make(map[string]struct{}, capacity)
-	unmatched := 0
-	scanned := 0
-	for i := 0; i < total; i++ {
-		scanned = i + 1
-		contentID := resolve(i)
-		if contentID == "" {
+	scanned, unmatched := 0, 0
+	for _, id := range contentIDs {
+		scanned++
+		if !allowed[id] {
 			unmatched++
 			continue
 		}
-		if _, dup := seen[contentID]; dup {
+		if _, dup := seen[id]; dup {
 			continue
 		}
-		seen[contentID] = struct{}{}
-		matched = append(matched, userstore.CollectionItemReplacement{
-			MediaItemID: contentID,
-			Position:    len(matched),
-		})
-		if collectionutil.ItemLimitReached(len(matched), limit) {
+		seen[id] = struct{}{}
+		members = append(members, userstore.CollectionItemReplacement{MediaItemID: id, Position: len(members)})
+		if collectionutil.ItemLimitReached(len(members), limit) {
 			break
 		}
 	}
-	return matched, unmatched, scanned
-}
-
-// collectionResolveLimit returns the limit to pass into resolveMatchedWithLimit.
-//
-// When LibraryIDs is set we cannot break early on cfg.Limit during the resolve
-// pass: filterByLibraries runs after resolve and may drop most items, so an
-// early break would leave us short of cfg.Limit final items. Returning nil
-// disables the inline break; limitCollectionItems then truncates to cfg.Limit
-// after filtering. This trades a wider GetItemsInFolders IN-array (bounded by
-// the source-fetch cap) for a correct result count when the library filter is
-// selective.
-func collectionResolveLimit(cfg SourceConfig) *int {
-	if len(cfg.LibraryIDs) > 0 {
-		return nil
-	}
-	return cfg.Limit
-}
-
-func limitCollectionItems(items []userstore.CollectionItemReplacement, limit *int) []userstore.CollectionItemReplacement {
-	if limit == nil || *limit <= 0 || len(items) <= *limit {
-		return items
-	}
-	items = items[:*limit]
-	for i := range items {
-		items[i].Position = i
-	}
-	return items
+	return members, scanned, unmatched
 }
 
 func (s *Service) fetchMDBListEntries(ctx context.Context, url string, maxEntries int) ([]mdblistEntry, error) {
@@ -306,9 +391,9 @@ func (s *Service) fetchMDBListEntries(ctx context.Context, url string, maxEntrie
 
 // ── TMDB presets ─────────────────────────────────────────────────────────────
 
-func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
+func (s *Service) matchTMDB(ctx context.Context, _ *userstore.Collection, cfg SourceConfig) ([]string, error) {
 	if s.TMDBCollections == nil {
-		return nil, nil, fmt.Errorf("TMDB sync requires configured TMDB access")
+		return nil, fmt.Errorf("TMDB sync requires configured TMDB access")
 	}
 	preset := cfg.Preset
 	mediaType := cfg.MediaType
@@ -321,16 +406,16 @@ func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, colle
 	if err != nil {
 		// The error text reaches the collection's stored sync message, and a
 		// transport error embeds the request URL, which carries the API key.
-		return nil, nil, fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))
+		return nil, fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))
 	}
-	return s.completeTMDBSync(ctx, store, collection, cfg, startedAt, results)
+	return s.matchTMDBEntries(ctx, results)
 }
 
 // ── TMDB lists ───────────────────────────────────────────────────────────────
 
-func (s *Service) syncTMDBList(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
+func (s *Service) matchTMDBList(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
 	if s.TMDBLists == nil {
-		return nil, nil, fmt.Errorf("TMDB list sync requires configured TMDB access")
+		return nil, fmt.Errorf("TMDB list sync requires configured TMDB access")
 	}
 	listURL := cfg.URL
 	if strings.TrimSpace(listURL) == "" {
@@ -338,18 +423,18 @@ func (s *Service) syncTMDBList(ctx context.Context, store userstore.UserStore, c
 	}
 	listID, err := collectionutil.ParseTMDBListURL(listURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("TMDB list sync: %w", err)
+		return nil, fmt.Errorf("TMDB list sync: %w", err)
 	}
 	results, err := s.TMDBLists.GetList(ctx, listID, collectionutil.SourceFetchLimit(cfg.Limit))
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))
+		return nil, fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))
 	}
-	return s.completeTMDBSync(ctx, store, collection, cfg, startedAt, results)
+	return s.matchTMDBEntries(ctx, results)
 }
 
-// completeTMDBSync matches fetched TMDB entries against the catalog in source
-// order and stores the result. Shared by the TMDB preset and list sources.
-func (s *Service) completeTMDBSync(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time, results []catalog.TMDBCollectionEntry) (*SyncResult, *userstore.Collection, error) {
+// matchTMDBEntries matches fetched TMDB entries against the catalog in source
+// order. Shared by the TMDB preset and list sources.
+func (s *Service) matchTMDBEntries(ctx context.Context, results []catalog.TMDBCollectionEntry) ([]string, error) {
 	// TMDB returns mixed-media-type results (the "trending all" preset and
 	// user lists can emit both movie and tv). Batch by item type so each gets
 	// a single catalog lookup instead of N round-trips through GetByExternalID.
@@ -371,15 +456,14 @@ func (s *Service) completeTMDBSync(ctx context.Context, store userstore.UserStor
 	}
 	movieLookup, err := s.items.GetByExternalIDs(ctx, movieBatch, "movie")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	seriesLookup, err := s.items.GetByExternalIDs(ctx, seriesBatch, "series")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	resolveLimit := collectionResolveLimit(cfg)
-	matched, unmatched, scanned := resolveMatchedWithLimit(len(results), resolveLimit, func(i int) string {
+	return matchEntries(len(results), func(i int) string {
 		entry := results[i]
 		itemType := "movie"
 		lookup := movieLookup
@@ -396,20 +480,14 @@ func (s *Service) completeTMDBSync(ctx context.Context, store userstore.UserStor
 			tvdb = fmt.Sprintf("%d", entry.TVDBID)
 		}
 		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
-	})
-	matched, droppedByLib, err := s.filterByLibraries(ctx, matched, cfg.LibraryIDs)
-	if err != nil {
-		return nil, nil, err
-	}
-	matched = limitCollectionItems(matched, cfg.Limit)
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), scanned, unmatched+droppedByLib)
+	}), nil
 }
 
 // ── Trakt presets ────────────────────────────────────────────────────────────
 
-func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
+func (s *Service) matchTrakt(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
 	if s.TraktCollections == nil {
-		return nil, nil, fmt.Errorf("Trakt sync requires configured Trakt access")
+		return nil, errors.New("Trakt sync requires configured Trakt access") //nolint:staticcheck // ST1005: user-facing sync status, matches library collection wording
 	}
 	preset := strings.TrimSpace(cfg.Preset)
 	mediaType := strings.TrimSpace(cfg.MediaType)
@@ -417,7 +495,7 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 		mediaType = "movie"
 	}
 	if preset != "trending" && preset != "popular" && preset != "recommended" {
-		return nil, nil, fmt.Errorf("unsupported Trakt preset: %s", preset)
+		return nil, fmt.Errorf("unsupported Trakt preset: %s", preset)
 	}
 
 	accessToken := ""
@@ -427,11 +505,11 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 			profileID = collection.CreatorProfileID
 		}
 		if profileID == "" || s.TraktTokenResolver == nil {
-			return nil, nil, fmt.Errorf("Trakt recommendations require a profile binding")
+			return nil, errors.New("Trakt recommendations require a profile binding") //nolint:staticcheck // ST1005: user-facing sync status, matches library collection wording
 		}
 		token, err := s.TraktTokenResolver.ResolveTraktAccessToken(ctx, profileID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolving Trakt access token: %w", err)
+			return nil, fmt.Errorf("resolving Trakt access token: %w", err)
 		}
 		accessToken = token
 	}
@@ -439,7 +517,7 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 	limit := collectionutil.SourceFetchLimit(cfg.Limit)
 	results, err := s.TraktCollections.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetching Trakt preset: %w", err)
+		return nil, fmt.Errorf("fetching Trakt preset: %w", err)
 	}
 
 	itemType := "movie"
@@ -460,11 +538,10 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 	}
 	lookup, err := s.items.GetByExternalIDs(ctx, batch, itemType)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	resolveLimit := collectionResolveLimit(cfg)
-	matched, unmatched, scanned := resolveMatchedWithLimit(len(results), resolveLimit, func(i int) string {
+	return matchEntries(len(results), func(i int) string {
 		entry := results[i]
 		var tmdb, tvdb string
 		if entry.TMDBID > 0 {
@@ -474,13 +551,7 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 			tvdb = fmt.Sprintf("%d", entry.TVDBID)
 		}
 		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
-	})
-	matched, droppedByLib, err := s.filterByLibraries(ctx, matched, cfg.LibraryIDs)
-	if err != nil {
-		return nil, nil, err
-	}
-	matched = limitCollectionItems(matched, cfg.Limit)
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), scanned, unmatched+droppedByLib)
+	}), nil
 }
 
 // ── Result application ───────────────────────────────────────────────────────
@@ -515,22 +586,24 @@ func (s *Service) applyResult(
 	}
 
 	if err := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-		ID:         collection.ID,
-		Status:     status,
-		Message:    message,
-		ItemCount:  len(matched),
-		LastSyncAt: completedAt,
-		NextSyncAt: nextSyncAt,
+		ID:                collection.ID,
+		Status:            status,
+		Message:           message,
+		ItemCount:         len(matched),
+		LastSyncAt:        completedAt,
+		NextSyncAt:        nextSyncAt,
+		ScheduleAtStart:   collection.SyncSchedule,
+		NextSyncAtAtStart: collection.NextSyncAt,
 	}); err != nil {
 		return nil, nil, err
 	}
 
-	updated := *collection
-	updated.LastSyncAt = &completedAt
-	updated.LastSyncStatus = status
-	updated.LastSyncMessage = message
-	updated.ItemCount = len(matched)
-	updated.NextSyncAt = nextSyncAt
+	// Read the row back: a schedule edited while the sync ran, on any node,
+	// kept its own next run, and the caller renders what was stored.
+	updated, err := store.GetCollection(ctx, collection.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading the synced collection: %w", err)
+	}
 
 	s.logger.InfoContext(ctx, "user collection synced",
 		"collection_id", collection.ID,
@@ -549,5 +622,5 @@ func (s *Service) applyResult(
 		ItemsUnmatched: unmatched,
 		StartedAt:      startedAt,
 		CompletedAt:    completedAt,
-	}, &updated, nil
+	}, updated, nil
 }

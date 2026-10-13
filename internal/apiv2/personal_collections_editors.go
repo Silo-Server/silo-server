@@ -15,7 +15,7 @@ type CollectionPreconditions struct {
 	IfNoneMatch string `header:"If-None-Match"`
 }
 type CollectionOrderReadInput struct {
-	GroupID string `query:"group_id"`
+	GroupID string `query:"group_id" doc:"Omit: personal collection groups are no longer supported, and any value is a validation failure"`
 }
 type CollectionOrderOutput struct {
 	ETag string `header:"ETag"`
@@ -35,7 +35,7 @@ type CollectionItemsOrderOutput struct {
 }
 type collectionEditors interface {
 	PersonalCollectionEditor(context.Context, int, string, string) (handlers.PersonalCollectionEditorView, error)
-	PersonalCollectionOrderEditor(context.Context, int, string, *string) (handlers.PersonalCollectionOrderView, error)
+	PersonalCollectionOrderEditor(context.Context, int, string) (handlers.PersonalCollectionOrderView, error)
 	PersonalCollectionGroupsEditor(context.Context, int) ([]handlers.CollectionGroupView, int64, error)
 	PersonalCollectionGroupEditor(context.Context, int, string) (handlers.PersonalCollectionGroupEditorView, error)
 	PersonalCollectionItemsOrderEditor(context.Context, int, string, string) (handlers.PersonalCollectionOrderView, error)
@@ -51,6 +51,14 @@ func (reg *Registry) collectionEditors() (collectionEditors, *Problem) {
 func collectionEditorTag(ctx context.Context, kind, id string, revision int64) EntityTag {
 	return RenderETag("collections:"+kind+":"+strconv.Itoa(claimsFrom(ctx).UserID)+":"+profileFrom(ctx)+":"+viewerScopeDigest(ctx), id, revision)
 }
+
+// personalCollectionEditorTag includes the live count, which can change when
+// catalog contents or watch state change without a collection edit. The
+// collection revision still fences stored edits in the mutation transaction.
+func personalCollectionEditorTag(ctx context.Context, id string, view handlers.PersonalCollectionEditorView) EntityTag {
+	return collectionEditorTag(ctx, "collection:count:"+strconv.Itoa(view.Collection.ItemCount), id, view.Revision)
+}
+
 func collectionGuard(ctx context.Context, headers CollectionPreconditions, tag EntityTag, revision int64) (context.Context, *Problem) {
 	if p := EvaluateGuardedPreconditions(headers.IfMatch, headers.IfNoneMatch, tag); p != nil {
 		return ctx, p
@@ -65,8 +73,15 @@ func registerCollectionEditors(reg *Registry) {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "collections", "Read the canonical collection editor state and its strong validator."), Class: ClassProfileScoped, ServiceBacked: true}
 	}
 	Register(reg, op("/collections/order", "getCollectionOrder"), reg.getCollectionOrder)
-	Register(reg, op("/collections/groups/order", "getCollectionGroupsOrder"), reg.getCollectionGroupsOrder)
-	Register(reg, op("/collections/groups/{id}", "getCollectionGroup"), reg.getCollectionGroup)
+	// Personal collection groups were removed (#1615): these answer 501.
+	groupOp := func(path, id string) Operation {
+		o := op(path, id)
+		o.Summary = groupsRemovedSummary
+		o.Errors = append(o.Errors, http.StatusNotImplemented)
+		return o
+	}
+	Register(reg, groupOp("/collections/groups/order", "getCollectionGroupsOrder"), reg.getCollectionGroupsOrder)
+	Register(reg, groupOp("/collections/groups/{id}", "getCollectionGroup"), reg.getCollectionGroup)
 	Register(reg, op("/collections/{id}/items/order", "getCollectionItemsOrder"), reg.getCollectionItemsOrder)
 }
 func (reg *Registry) getCollectionOrder(ctx context.Context, in *CollectionOrderReadInput) (*CollectionOrderOutput, error) {
@@ -74,11 +89,10 @@ func (reg *Registry) getCollectionOrder(ctx context.Context, in *CollectionOrder
 	if p != nil {
 		return nil, p
 	}
-	var group *string
 	if in.GroupID != "" {
-		group = &in.GroupID
+		return nil, collectionGroupScopeProblem("query.group_id")
 	}
-	v, e := s.PersonalCollectionOrderEditor(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), group)
+	v, e := s.PersonalCollectionOrderEditor(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
 	if e != nil {
 		return nil, collectionProblem(e)
 	}
@@ -86,11 +100,7 @@ func (reg *Registry) getCollectionOrder(ctx context.Context, in *CollectionOrder
 	for _, id := range v.OrderedIDs {
 		ids = append(ids, ID(id))
 	}
-	var groupID *ID
-	if group != nil {
-		groupID = new(ID(*group))
-	}
-	return &CollectionOrderOutput{ETag: collectionEditorTag(ctx, "order", in.GroupID, v.Revision).String(), Body: CollectionOrder{GroupID: groupID, OrderedIDs: ids}}, nil
+	return &CollectionOrderOutput{ETag: collectionEditorTag(ctx, "order", "", v.Revision).String(), Body: CollectionOrder{OrderedIDs: ids}}, nil
 }
 func (reg *Registry) getCollectionGroupsOrder(ctx context.Context, _ *struct{}) (*CollectionGroupsOrderOutput, error) {
 	s, p := reg.collectionEditors()
@@ -142,6 +152,7 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 	u := claimsFrom(ctx).UserID
 	var rev int64
 	var err error
+	var tag EntityTag
 	switch kind {
 	case "collection":
 		var v handlers.PersonalCollectionEditorView
@@ -150,6 +161,7 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 			return ctx, EntityTag{}, NewProblem(TypePermissionDenied, "Only the creator can edit this collection.")
 		}
 		rev = v.Revision
+		tag = personalCollectionEditorTag(ctx, id, v)
 	case "items-order":
 		var v handlers.PersonalCollectionOrderView
 		v, err = s.PersonalCollectionItemsOrderEditor(ctx, u, profileFrom(ctx), id)
@@ -161,18 +173,16 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 	case "groups-order":
 		_, rev, err = s.PersonalCollectionGroupsEditor(ctx, u)
 	case "order":
-		var group *string
-		if id != "" {
-			group = &id
-		}
 		var v handlers.PersonalCollectionOrderView
-		v, err = s.PersonalCollectionOrderEditor(ctx, u, profileFrom(ctx), group)
+		v, err = s.PersonalCollectionOrderEditor(ctx, u, profileFrom(ctx))
 		rev = v.Revision
 	}
 	if err != nil {
 		return ctx, EntityTag{}, collectionProblem(err)
 	}
-	tag := collectionEditorTag(ctx, kind, id, rev)
+	if tag.IsZero() {
+		tag = collectionEditorTag(ctx, kind, id, rev)
+	}
 	next, p := collectionGuard(ctx, headers, tag, rev)
 	return next, tag, p
 }

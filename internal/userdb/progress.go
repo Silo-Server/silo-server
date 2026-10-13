@@ -233,6 +233,8 @@ const addVisibleHistorySQL = `
 		  ON hhi.profile_id = ?
 		 AND hhi.media_item_id = ?
 		WHERE true
+		ON CONFLICT (id) DO UPDATE SET completed = 1
+		WHERE NOT watch_history.completed AND excluded.completed
 		RETURNING watched_at
 	`
 
@@ -543,6 +545,25 @@ func ListProgress(db *sql.DB, profileID string, status string, limit, offset int
 	return queryProgressRows(db, query, profileID, limit, offset)
 }
 
+// ListCompletedProgressSince returns completed rows updated after since and,
+// when until is non-zero, not after until, newest first. updated_at is
+// whole-second RFC 3339 UTC text, so text order is time order.
+func ListCompletedProgressSince(db *sql.DB, profileID string, since, until time.Time, limit int) ([]WatchProgress, error) {
+	if until.IsZero() {
+		query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at > ?
+		ORDER BY updated_at DESC
+		LIMIT ?`
+		return queryProgressRows(db, query, profileID, since.UTC().Format(time.RFC3339), limit)
+	}
+	query := progressListSelect + progressStatusPredicate("completed") + `
+		  AND updated_at > ?
+		  AND updated_at <= ?
+		ORDER BY updated_at DESC
+		LIMIT ?`
+	return queryProgressRows(db, query, profileID, since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339), limit)
+}
+
 // ListProgressPage pages by keyset over (updated_at DESC, media_item_id DESC).
 // updated_at is RFC 3339 UTC text at whole-second precision, so text order is
 // time order and the key string compares exactly. The comparison is spelled
@@ -754,6 +775,9 @@ func addVisibleHistory(ctx context.Context, db interface {
 		entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
 		entry.ProfileID, entry.MediaItemID,
 	).Scan(&entry.WatchedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return entry, userstore.ErrHistoryEntryExists
+		}
 		return entry, fmt.Errorf("adding visible history entry: %w", err)
 	}
 	return entry, nil

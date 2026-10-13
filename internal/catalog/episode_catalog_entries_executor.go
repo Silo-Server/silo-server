@@ -130,11 +130,9 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	}
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		whereParts = append(whereParts, fmt.Sprintf(
-			"(ece.sort_key LIKE $%d ESCAPE '\\' OR LOWER(ece.title) LIKE $%d ESCAPE '\\')",
-			argIdx,
-			argIdx,
-		))
+		// sort_key is the lowered episode title (or "episode N"), the key
+		// the list sorts by, so it alone decides the letter.
+		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
 	}
@@ -182,7 +180,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 		%s
 		LIMIT $%d%s`,
 		strings.Join(ctes, ",\n"),
-		fromClause,
+		fromClause+episodeCatalogEntrySortJoin(plan.sortField),
 		whereClause,
 		orderBy,
 		limitArgIdx,
@@ -288,11 +286,9 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 	}
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		whereParts = append(whereParts, fmt.Sprintf(
-			"(ece.sort_key LIKE $%d ESCAPE '\\' OR LOWER(ece.title) LIKE $%d ESCAPE '\\')",
-			argIdx,
-			argIdx,
-		))
+		// sort_key is the lowered episode title (or "episode N"), the key
+		// the list sorts by, so it alone decides the letter.
+		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
 	}
@@ -331,10 +327,11 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 
 	pageSQL := fmt.Sprintf(
 		`SELECT ece.episode_id, ece.added_at
-		FROM episode_catalog_entries ece
+		FROM episode_catalog_entries ece%s
 		%s
 		%s
 		LIMIT $%d%s`,
+		episodeCatalogEntrySortJoin(def.Sort.Field),
 		whereClause,
 		orderBy,
 		limitArgIdx,
@@ -762,19 +759,9 @@ func (e *QueryExecutor) hydrateEpisodeCatalogEntryPage(
 }
 
 func singleEpisodeCatalogLibraryID(def QueryDefinition, access AccessFilter) (int, bool, bool) {
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
-	if len(libraryIDs) == 0 {
-		if access.AllowedLibraryIDs != nil {
-			return 0, true, true
-		}
-		return 0, false, false
+	libraryIDs, empty := access.LibraryScope(def.LibraryIDs)
+	if empty {
+		return 0, true, true
 	}
 	if len(libraryIDs) != 1 {
 		return 0, false, false
@@ -782,11 +769,6 @@ func singleEpisodeCatalogLibraryID(def QueryDefinition, access AccessFilter) (in
 	libraryID := libraryIDs[0]
 	if libraryID <= 0 {
 		return 0, true, true
-	}
-	for _, disabledID := range access.DisabledLibraryIDs {
-		if disabledID == libraryID {
-			return 0, true, true
-		}
 	}
 	return libraryID, false, true
 }
@@ -996,12 +978,8 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		return fmt.Sprintf("%s = %s", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
 	case "is_not":
 		return fmt.Sprintf("NOT (%s = %s)", column, placeholder(argIdx)), []any{rule.Value}, argIdx + 1, true, nil
-	case "in_last":
-		duration, ok := rule.Value.(string)
-		if !ok {
-			return "", nil, argIdx, true, fmt.Errorf("in_last requires a duration string like '30d'")
-		}
-		interval, err := parseDuration(duration)
+	case ruleOpInLast, ruleOpNotInLast:
+		interval, err := ruleInterval(rule)
 		if err != nil {
 			return "", nil, argIdx, true, err
 		}
@@ -1009,7 +987,7 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		if cast == "date" {
 			cutoff = fmt.Sprintf("(CURRENT_DATE - INTERVAL '%s')::date", interval)
 		}
-		return fmt.Sprintf("%s >= %s", column, cutoff), nil, argIdx, true, nil
+		return relativeDateClause(column, rule.Op, cutoff), nil, argIdx, true, nil
 	default:
 		return "", nil, argIdx, true, fmt.Errorf("unsupported comparison operator %q", rule.Op)
 	}
@@ -1044,6 +1022,16 @@ func buildEpisodeCatalogBitrateClause(rule QueryRule, argIdx int) (string, []any
 	}
 }
 
+// episodeCatalogEntrySortJoin adds the series title and episode numbers that
+// break air-date ties; episode_catalog_entries stores neither.
+func episodeCatalogEntrySortJoin(field string) string {
+	if field == querySortReleaseDate || field == querySortLastAirDate {
+		return " JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id" +
+			" JOIN media_items sort_series ON sort_series.content_id = ece.series_id"
+	}
+	return ""
+}
+
 func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	sortConfig = NormalizeQuerySort(sortConfig)
 	dir := "DESC"
@@ -1057,7 +1045,11 @@ func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	case "added_at":
 		return fmt.Sprintf("ORDER BY ece.added_at %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "release_date", "last_air_date":
-		return fmt.Sprintf("ORDER BY ece.episode_air_date %s NULLS LAST, ece.sort_key ASC, ece.episode_id ASC", dir), true
+		return fmt.Sprintf(
+			"ORDER BY ece.episode_air_date %[1]s NULLS LAST, %[2]s ASC, ece.series_id ASC, sort_episode.season_number %[1]s, sort_episode.episode_number %[1]s, ece.episode_id ASC",
+			dir,
+			queryColumnSQL("sort_series", querySortDefs["title"].columnSQL),
+		), true
 	case "year":
 		return fmt.Sprintf("ORDER BY ece.year %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "content_rating":

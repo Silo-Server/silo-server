@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Built-in host metadata providers are registered as data: one reserved
@@ -70,4 +72,26 @@ func builtinProvider(capabilityID string) (Provider, bool) {
 		return nil, false
 	}
 	return construct(), true
+}
+
+// RatingSourceDeclarer is implemented by a built-in provider that reports
+// ratings beyond IMDb and TMDB. It declares them in code, the way a plugin
+// declares rating_sources in its manifest, since a built-in provider's
+// capability row is seeded by a migration.
+type RatingSourceDeclarer interface {
+	RatingSources() []models.RatingSourceDefinition
+}
+
+// builtinRatingSources returns the rating sources a registered built-in
+// provider declares, or nil.
+func builtinRatingSources(capabilityID string) []models.RatingSourceDefinition {
+	provider, ok := builtinProvider(capabilityID)
+	if !ok {
+		return nil
+	}
+	declarer, ok := provider.(RatingSourceDeclarer)
+	if !ok {
+		return nil
+	}
+	return declarer.RatingSources()
 }

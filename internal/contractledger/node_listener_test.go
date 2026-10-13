@@ -1,7 +1,6 @@
 package contractledger
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -76,23 +75,4 @@ func TestNodeListenerRatifiedRowNeedsRuleAndNote(t *testing.T) {
 			expectFailure(t, fsys, c.want)
 		})
 	}
-}
-
-// TestNodeListenerProposedRowIsUnconstrained keeps the pre-decision shape
-// valid: a proposed node row with default_ported and the historical note.
-func TestNodeListenerProposedRowIsUnconstrained(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, e := range ledger.Entries {
-		if isNodeListener(e.Listener) && e.Disposition == DispositionPorted && e.ReviewState == ReviewProposed {
-			seen++
-			if strings.HasPrefix(e.Notes, nodeListenerRetentionPrefix) {
-				t.Errorf("%s: proposed row already claims retention", e.key())
-			}
-		}
-	}
-	t.Logf("proposed node-listener ported rows: %d", seen)
 }

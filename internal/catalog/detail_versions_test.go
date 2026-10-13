@@ -17,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type versionsQueryCounter struct{ calls atomic.Int64 }
@@ -58,6 +60,7 @@ func (f *versionsFileFetcher) GetByExtraID(ctx context.Context, id string) ([]*m
 }
 
 type versionsFixture struct {
+	pool    *pgxpool.Pool
 	svc     *DetailService
 	queries *versionsQueryCounter
 	images  *versionsImageCounter
@@ -91,7 +94,7 @@ func newVersionsFixture(t testing.TB) *versionsFixture {
 			t.Fatal(err)
 		}
 	}
-	f := &versionsFixture{queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
+	f := &versionsFixture{pool: pool, queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
 	prefix := fmt.Sprintf("versions-%d-", time.Now().UnixNano())
 	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type,name) VALUES ('movies',$1) RETURNING id`, prefix).Scan(&f.library); err != nil {
 		t.Fatal(err)
@@ -281,7 +284,7 @@ func TestGetItemVersionsSkipsPresentationAndPlaybackSafety(t *testing.T) {
 func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	f := newVersionsFixture(t)
 	file := f.files.files[f.ids["movie"]][0]
-	file.Chapters[0].ThumbnailPath = "chapters/movie/original.jpg"
+	file.Chapters[0].ThumbnailPath = "chapter-images/7/0/w300.webp"
 	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Forced: true}}
 	detail, err := f.svc.GetItemDetail(t.Context(), f.ids["movie"], AccessFilter{})
 	if err != nil {
@@ -300,6 +303,10 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	if f.images.calls.Load() != 1 {
 		t.Fatal("versions must still resolve the returned chapter thumbnail")
 	}
+	// thumbnail_path names the served object and is signed as stored.
+	if got, want := versions[0].Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
+		t.Fatalf("chapter thumbnail_url = %q, want %q", got, want)
+	}
 	f.files.files[f.ids["movie"]] = nil
 	versions, err = f.svc.GetItemVersions(t.Context(), f.ids["movie"], AccessFilter{})
 	if err != nil {
@@ -317,6 +324,39 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 	f.svc.seasonRepo = nil
 	if _, err := f.svc.GetItemVersions(t.Context(), f.ids["episode"], AccessFilter{}); !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("missing season repository: %v", err)
+	}
+}
+
+func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
+	f := newVersionsFixture(t)
+	file := f.files.files[f.ids["movie"]][0]
+	for _, count := range []int{1, 64} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			file.Chapters = make([]models.MediaChapter, count)
+			for i := range count {
+				file.Chapters[i] = models.MediaChapter{
+					Index: i, Title: fmt.Sprintf("Chapter %d", i), StartSeconds: float64(i * 10), EndSeconds: float64((i + 1) * 10),
+					Source: "embedded", ThumbnailPath: fmt.Sprintf("chapter-images/7/%d/w300.webp", i), ThumbnailThumbhash: "thumbhash",
+				}
+			}
+			f.images.calls.Store(0)
+			versions, err := f.svc.GetItemVersions(t.Context(), f.ids["movie"], AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls := f.images.calls.Load(); calls != 1 {
+				t.Fatalf("%d chapter images made %d resolver calls; want one batch", count, calls)
+			}
+			if len(versions) != 2 || len(versions[0].Chapters) != count {
+				t.Fatalf("chapter metadata missing: %+v", versions)
+			}
+			for i, chapter := range versions[0].Chapters {
+				input := file.Chapters[i]
+				if chapter.Index != input.Index || chapter.Title != input.Title || chapter.StartSeconds != input.StartSeconds || chapter.EndSeconds != input.EndSeconds || chapter.Source != input.Source || chapter.ThumbnailThumbhash != input.ThumbnailThumbhash || chapter.ThumbnailURL != "https://images.invalid/"+input.ThumbnailPath {
+					t.Fatalf("chapter %d metadata changed: %+v", i, chapter)
+				}
+			}
+		})
 	}
 }
 
@@ -343,6 +383,138 @@ func BenchmarkGetItemVersions(b *testing.B) {
 				b.ReportMetric(float64(f.queries.calls.Load())/float64(b.N), "SQL/op")
 				b.ReportMetric(float64(f.images.calls.Load())/float64(b.N), "image-calls/op")
 			})
+		}
+	}
+}
+
+type countingUserStores struct {
+	store userstore.UserStore
+	calls int
+}
+
+func (p *countingUserStores) ForUser(context.Context, int) (userstore.UserStore, error) {
+	p.calls++
+	return p.store, nil
+}
+
+func (*countingUserStores) Close() error { return nil }
+
+// Jellyfin season pages build every episode's detail in one batch; the
+// viewer's preference lookups must not grow with the number of episodes.
+func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T) {
+	f := newVersionsFixture(t)
+	store := newDetailTestStore(t)
+	setProfileAudioLanguage(t, store, "fr")
+	encoded, _ := json.Marshal("always")
+	if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1"}, encoded); err != nil {
+		t.Fatal(err)
+	}
+	users := &countingUserStores{store: store}
+	f.svc.SetUserStoreProvider(users)
+
+	episodes := []string{f.ids["episode"]}
+	for n := 2; n <= 4; n++ {
+		id := fmt.Sprintf("%s-%d", f.ids["episode"], n)
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title) VALUES ($1,$2,$3,1,$4,'Episode')`, id, f.ids["series"], f.ids["season"], n); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, id, f.library); err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range f.files.files[f.ids["episode"]] {
+			clone := *file
+			clone.ContentID = id
+			f.files.files[id] = append(f.files.files[id], &clone)
+		}
+		episodes = append(episodes, id)
+	}
+
+	lookups := func(ids []string) int {
+		t.Helper()
+		users.calls = 0
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, AccessFilter{UserID: 1, ProfileID: "profile-1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			detail := details[id]
+			if detail == nil || detail.EffectiveSubtitleMode != "always" || *detail.Versions[0].EffectiveAudioTrackIndex != 1 {
+				t.Fatalf("episode %s lost the viewer's preferences: %+v", id, detail)
+			}
+		}
+		return users.calls
+	}
+	if one, all := lookups(episodes[:1]), lookups(episodes); all != one {
+		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
+	}
+}
+
+// A batch shares the series' preference lookups only with that series'
+// episodes; an episode of another series keeps its own series-level subtitle,
+// audio and version choices.
+func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
+	f := newVersionsFixture(t)
+	store := newDetailTestStore(t)
+	for _, seed := range []struct {
+		scope    settingscontract.Scope
+		seriesID string
+		mode     string
+	}{
+		{settingscontract.ScopeProfile, "", "always"},
+		{settingscontract.ScopeProfileSeries, f.ids["series"] + "-other", "off"},
+	} {
+		encoded, _ := json.Marshal(seed.mode)
+		if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: seed.scope, ProfileID: "profile-1", SeriesID: seed.seriesID}, encoded); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Audio too: English for the profile, French for the other series.
+	setProfileAudioLanguage(t, store, "en")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, f.ids["series"]+"-other", 0, "fr")
+	// Version preference: 1080p for the batch series, 2160p for the other.
+	for series, resolution := range map[string]string{f.ids["series"]: "1080p", f.ids["series"] + "-other": "2160p"} {
+		if err := store.SetSeriesPlaybackPreference(t.Context(), userstore.SeriesPlaybackPreference{ProfileID: "profile-1", SeriesID: series, Resolution: resolution}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
+
+	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series',$1,'{}')`, otherSeries); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,'Episode')`, otherEpisode, otherSeries); err != nil {
+		t.Fatal(err)
+	}
+	f.files.files[otherEpisode] = f.files.files[f.ids["episode"]]
+
+	details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], []string{f.ids["episode"], otherEpisode}, AccessFilter{UserID: 1, ProfileID: "profile-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]struct {
+		mode, resolution string
+		audio            int
+	}{f.ids["episode"]: {"always", "1080p", 0}, otherEpisode: {"off", "2160p", 1}} {
+		if details[id] == nil {
+			t.Fatalf("episode %s missing from the batch", id)
+		}
+		if got := details[id].EffectiveSubtitleMode; got != want.mode {
+			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want.mode)
+		}
+		got := details[id].Versions[0].EffectiveAudioTrackIndex
+		if got == nil {
+			t.Fatalf("episode %s has no effective audio track", id)
+		}
+		if *got != want.audio {
+			t.Fatalf("episode %s audio track = %d, want %d", id, *got, want.audio)
+		}
+		res := details[id].EffectiveVersionResolution
+		if res == nil {
+			t.Fatalf("episode %s has no effective version resolution", id)
+		}
+		if *res != want.resolution {
+			t.Fatalf("episode %s version resolution = %s, want %s", id, *res, want.resolution)
 		}
 	}
 }

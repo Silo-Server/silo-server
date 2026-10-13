@@ -252,7 +252,7 @@ external = {
     "api GET /api/v1/notifications/email/verify": "tokenized link in an outbound email",
     "api GET /api/v1/notifications/email/unsubscribe": "tokenized link in an outbound email",
     "api POST /api/v1/notifications/email/unsubscribe": "RFC 8058 one-click unsubscribe POST from a mail client",
-    "api GET /api/v1/ready": "orchestrator readiness probe (docs/continuum-to-silo-docker-migration.md)",
+    "api GET /api/v1/ready": "orchestrator readiness probe",
     "api GET /api/v1/plugin-assets/{installation_id}/*": "asset references inside plugin-served pages",
     "api GET /api/v1/plugins/{installation_id}/*": "plugin-served pages and their own fetches",
     "api GET /api/v1/branding/assets/{kind}": "browser loads of server-rendered asset URLs (favicon, PWA manifest, email)",

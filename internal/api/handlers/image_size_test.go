@@ -10,40 +10,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
-var imageSizePaths = []string{
-	"tmdb/movies/550/poster/original.abc123.webp",
-	"tmdb/movies/550/backdrop/original.abc123.webp",
-	"tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
-	"tmdb/movies/550/logo/original.png",
-	"https://image.tmdb.org/t/p/original/xyz.jpg",
-	"plugin://tmdb/movies/550/poster/original.jpg",
-	"",
-}
-
-// A request without image_size must produce byte-identical paths to the
-// per-context helpers the server has always used. This is the regression guard:
-// every existing client sends no parameter.
-func TestUnsetImageSizeKeepsExistingPaths(t *testing.T) {
-	for _, path := range imageSizePaths {
-		if got, want := sizedCardPath(path, "poster", imagesize.Unset), cardThumbnailPath(path); got != want {
-			t.Errorf("sizedCardPath(%q, Unset) = %q, want %q", path, got, want)
-		}
-		if got, want := sizedPosterPath(path, imagesize.Unset), featuredPosterPath(path); got != want {
-			t.Errorf("sizedPosterPath(%q, Unset) = %q, want %q", path, got, want)
-		}
-		if got, want := sizedBackdropPath(path, imagesize.Unset), featuredBackdropPath(path); got != want {
-			t.Errorf("sizedBackdropPath(%q, Unset) = %q, want %q", path, got, want)
-		}
-		for _, sectionType := range []sections.SectionType{sections.SectionContinueWatching, sections.SectionNextUp, sections.SectionRecentlyAdded} {
-			got := sizedSectionBackdropPath(sectionType, path, imagesize.Unset)
-			want := sectionBackdropPath(sectionType, path)
-			if got != want {
-				t.Errorf("sizedSectionBackdropPath(%v, %q, Unset) = %q, want %q", sectionType, path, got, want)
-			}
-		}
-	}
-}
-
 // An explicit size overrides every per-context default uniformly, including the
 // Continue Watching w1280 backdrop.
 func TestExplicitImageSizeOverridesContextDefaults(t *testing.T) {
@@ -120,35 +86,6 @@ func TestSizedCardBackdropPathFollowsTheStillLadder(t *testing.T) {
 	}
 }
 
-// Absent parameter still means byte-identical output for both kinds of path.
-func TestSizedCardBackdropPathUnsetUnchanged(t *testing.T) {
-	for _, path := range imageSizePaths {
-		if got, want := sizedCardBackdropPath(path, imagesize.Unset), cardThumbnailPath(path); got != want {
-			t.Errorf("sizedCardBackdropPath(%q, Unset) = %q, want %q", path, got, want)
-		}
-	}
-}
-
-func TestRequestVariantHint(t *testing.T) {
-	if got := requestVariantHint("card", imagesize.Unset); got != "card" {
-		t.Errorf("Unset hint = %q, want the caller's card default", got)
-	}
-	if got := requestVariantHint("featured", imagesize.Unset); got != "featured" {
-		t.Errorf("Unset hint = %q, want the caller's featured default", got)
-	}
-	if got := requestVariantHint("card", imagesize.Original); got != "original" {
-		t.Errorf("original hint = %q", got)
-	}
-	if got := requestVariantHint("featured", imagesize.Small); got != "card" {
-		t.Errorf("small hint = %q, want card", got)
-	}
-	// Large is its own plugin tier, not a synonym for featured: a plugin that
-	// can serve a wider image should be told to.
-	if got := requestVariantHint("featured", imagesize.Large); got != "large" {
-		t.Errorf("large hint = %q, want large", got)
-	}
-}
-
 func TestRequestImageSizeIgnoresInvalidValue(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?image_size=enormous", nil)
 	if got := requestImageSize(r); got != imagesize.Unset {
@@ -156,31 +93,31 @@ func TestRequestImageSizeIgnoresInvalidValue(t *testing.T) {
 	}
 }
 
-func TestRejectInvalidImageSize(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		if !rejectInvalidImageSize(rec, httptest.NewRequest(http.MethodGet, "/home/sections?image_size=large", nil)) {
-			t.Fatal("rejected a valid image_size")
+// A listing card's logo is the file item detail serves: unsized is the medium
+// rung, the same key an explicit medium names, never the full original.
+func TestSizedLogoPathMatchesItemDetail(t *testing.T) {
+	const logo = "tmdb/movies/550/logo/original.png"
+	tests := []struct {
+		size imagesize.Size
+		want string
+	}{
+		{imagesize.Unset, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Small, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Medium, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Large, "tmdb/movies/550/logo/w1280.png"},
+		{imagesize.Original, logo},
+	}
+	if got := sizedFeaturedLogoPath(logo, imagesize.Unset); got != logo {
+		t.Errorf("sizedFeaturedLogoPath(Unset) = %q, want stored path %q", got, logo)
+	}
+	for _, tt := range tests {
+		if got := sizedLogoPath(logo, tt.size); got != tt.want {
+			t.Errorf("sizedLogoPath(%q, %q) = %q, want %q", logo, tt.size, got, tt.want)
 		}
-	})
-
-	t.Run("absent", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		if !rejectInvalidImageSize(rec, httptest.NewRequest(http.MethodGet, "/home/sections", nil)) {
-			t.Fatal("rejected a request with no image_size")
+	}
+	for _, path := range []string{"https://image.tmdb.org/t/p/original/xyz.png", "plugin://tmdb/movies/550/logo/original.png", ""} {
+		if got := sizedLogoPath(path, imagesize.Unset); got != path {
+			t.Errorf("sizedLogoPath(%q, Unset) = %q, want it unchanged", path, got)
 		}
-	})
-
-	t.Run("invalid", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		if rejectInvalidImageSize(rec, httptest.NewRequest(http.MethodGet, "/home/sections?image_size=huge", nil)) {
-			t.Fatal("accepted an invalid image_size")
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400", rec.Code)
-		}
-		if !strings.Contains(rec.Body.String(), "invalid_image_size") {
-			t.Fatalf("error body = %s, want an invalid_image_size code", rec.Body.String())
-		}
-	})
+	}
 }

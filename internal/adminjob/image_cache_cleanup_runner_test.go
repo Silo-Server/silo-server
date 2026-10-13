@@ -146,10 +146,13 @@ func TestImageCacheCleanupProgressResetsStalledClaims(t *testing.T) {
 	const most = imageCacheCleanupMaxStalledClaims - 1
 	r := lifecycleRepo(t)
 	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(3))
-	// Prefix 0 stalls for most claims and then finishes. Prefix 1 stalls in
-	// that same claim and in most claims after it.
+	// Prefix 0 stalls for most claims and then finishes; prefix 1 then stalls
+	// most times. Its first stall usually shares the claim that finished
+	// prefix 0, but a slow progress write can push it into a claim of its
+	// own, so neither prefix stalls enough alone to fail the job. Together
+	// they would, unless progress resets the count.
 	store := &cleanupStore{deleteFn: func(ctx context.Context, call int, _ string) (int, error) {
-		if call < most || (call > most && call <= 2*most+1) {
+		if call < most || (call > most && call <= 2*most) {
 			return stallUntilDone(ctx)
 		}
 		return 1, nil

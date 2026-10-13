@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,6 +19,9 @@ func TestLogin(t *testing.T) {
 	}
 	// Wrong credentials: 401 invalid_token, never authentication_required.
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"nope"}`, nil), TypeInvalidToken)
+	// A directory sign-in with no account while account creation is off is
+	// account_required, not the not_permitted v1 answers.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"newcomer","password":"pw"}`, nil), TypeAccountRequired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"off","password":"pw"}`, nil), TypePermissionDenied)
 	// A blank password is refused by the schema, naming the member.
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":""}`, nil), TypeValidationFailed)
@@ -37,6 +41,13 @@ func TestLogin(t *testing.T) {
 	rec = do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"pw","provider":"`+longProvider+`"}`, nil)
 	if rec.Code != 200 || sessions.lastLogin.Provider != longProvider {
 		t.Fatalf("%d %s provider=%q", rec.Code, rec.Body.String(), sessions.lastLogin.Provider)
+	}
+	// The session the login opens records the device headers.
+	rec = do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/login", `{"username":"laura","password":"pw"}`, map[string]string{
+		"User-Agent": "okhttp/4.12.0", "X-Silo-Device-Id": "android-7f3c9a", "X-Silo-Device-Name": "Google Pixel 8 Pro", "X-Silo-Device-Platform": "android",
+	})
+	if got := sessions.lastLoginDevice; rec.Code != 200 || got.ID != "android-7f3c9a" || got.Name != "Google Pixel 8 Pro" || got.Platform != "android" || sessions.lastLogin.DeviceName != "okhttp/4.12.0" {
+		t.Fatalf("%d device=%+v name=%q", rec.Code, got, sessions.lastLogin.DeviceName)
 	}
 	deps = pilotDeps(nil, nil)
 	deps.Sessions = nil
@@ -105,15 +116,26 @@ func TestEndImpersonation(t *testing.T) {
 
 func TestCompleteOAuthLogin(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil)
+	// A web code redeems only in the browser holding its completion cookie.
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil), TypeInvalidGrant)
+	if p.Detail != "This web completion code belongs to another browser." {
+		t.Fatalf("detail = %q", p.Detail)
+	}
+	rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, completionCookie)
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if rec.Body.String() != `{"access_token":"acc","refresh_token":"ref","expires_in":3600,"next":"/me"}`+"\n" {
+	if !strings.HasPrefix(rec.Body.String(), `{"access_token":"acc","refresh_token":"ref","expires_in":3600,"next":"/me","user":{"id":"1","username":"laura"`) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+	// A native code needs its verifier; a web code refuses one.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"n4tive"}`, nil), TypeInvalidGrant)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de","code_verifier":"`+fixtureNativeVerifier+`"}`, completionCookie), TypeInvalidGrant)
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"n4tive","code_verifier":"`+fixtureNativeVerifier+`"}`, nil); rec.Code != 200 {
+		t.Fatalf("native redemption: %d %s", rec.Code, rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"nope"}`, nil), TypeInvalidToken)
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":""}`, nil), TypeValidationFailed)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":""}`, nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.code" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
@@ -122,4 +144,17 @@ func TestCompleteOAuthLogin(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.OAuth = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, nil), TypeDependencyUnavailable)
+
+	// Redemption already supplies the account: a separate account lookup
+	// failure cannot strand the tokens or revoke the new session.
+	deps = pilotDeps(nil, nil)
+	deps.Accounts = fakeAccounts{err: errors.New("database unavailable")}
+	sessions := &fakeSessionService{}
+	deps.Sessions = sessions
+	if rec := do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/auth/oauth/complete", `{"code":"c0de"}`, completionCookie); rec.Code != http.StatusOK {
+		t.Fatalf("redemption with account snapshot: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(sessions.revoked) != 0 {
+		t.Fatalf("successful redemption revoked sessions: %v", sessions.revoked)
+	}
 }

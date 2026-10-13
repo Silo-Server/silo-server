@@ -48,7 +48,7 @@ type ItemsHandler struct {
 	images           *ImageCache
 	nextUpRepo       *catalog.NextUpRepository
 	browseRepo       *catalog.BrowseRepository
-	personRepo       *catalog.PersonRepository
+	personRepo       itemPersonRepository
 	detailSvc        *catalog.DetailService
 	durationSrc      probedDurationSource
 	itemRepo         itemRepoForBatchLoader
@@ -61,6 +61,10 @@ type ItemsHandler struct {
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
+	// collectionPosters is optional; when set, BoxSets show each viewer the
+	// collage of the members it can access. Without it, only uploaded and
+	// template posters are shown.
+	collectionPosters CollectionPosterResolver
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
 	queryExecutor   smartCollectionQueryExecutor
@@ -74,6 +78,9 @@ type ItemsHandler struct {
 	// unbounded progress scan. It is the section subsystem's read-time fetcher and
 	// is independent of any virtual-library/hub-section exposure.
 	sectionsFetcher *sections.Fetcher
+	// realtimeMonitoring reads the live server-wide
+	// scanner.realtime_monitoring switch. Nil counts as on, the default.
+	realtimeMonitoring func() bool
 }
 
 type MarkerPopulationService interface {
@@ -90,7 +97,6 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		images:       images,
 		nextUpRepo:   nextUpRepo,
 		browseRepo:   browseRepo,
-		personRepo:   personRepo,
 		detailSvc:    detailSvc,
 		durationSrc:  detailSvc,
 		itemRepo:     itemRepo,
@@ -104,7 +110,17 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 	if seasonRepo != nil {
 		h.seasonRepo = seasonRepo
 	}
+	if personRepo != nil {
+		h.personRepo = personRepo
+	}
 	return h
+}
+
+// itemPersonRepository is what GET /Items/{id} needs to answer a person.
+type itemPersonRepository interface {
+	GetVisible(ctx context.Context, id int64, filter catalog.AccessFilter) (*models.Person, error)
+	EnsureAccessible(ctx context.Context, id int64, filter catalog.AccessFilter) error
+	CountItemsByType(ctx context.Context, personID int64) (map[string]int, error)
 }
 
 // HandleViews serves GET /Users/{userId}/Views.
@@ -139,6 +155,7 @@ func (h *ItemsHandler) handleViewsResponse(w http.ResponseWriter, r *http.Reques
 // userViews builds the session's library views as CollectionFolder items. The
 // synthetic "Collections" view is prepended (first library) when the session
 // can see at least one collection; see collectionsView/collectionsViewVisible.
+// The profile's view order then applies; see loadUserViewOrder.
 func (h *ItemsHandler) userViews(ctx context.Context, session *Session) ([]baseItemDTO, error) {
 	libraries, err := h.content.ListUserLibraries(ctx, session)
 	if err != nil {
@@ -149,11 +166,17 @@ func (h *ItemsHandler) userViews(ctx context.Context, session *Session) ([]baseI
 	if h.collectionsViewVisible(ctx, libraries) {
 		items = append(items, h.collectionsView())
 	}
+	var order userViewOrder
+	if len(libraries)+len(items) > 1 {
+		order = h.loadUserViewOrder(ctx, session)
+		sortByPreferredOrder(libraries, order.libraryOrder, func(library upstreamUserLibrary) string { return strconv.Itoa(library.ID) })
+	}
 	for _, library := range libraries {
 		dto := h.mapper.viewFromLibrary(library)
 		h.rememberLibraryImages(library, dto.ID)
 		items = append(items, dto)
 	}
+	sortByPreferredOrder(items, order.orderedViews, func(item baseItemDTO) string { return item.ID })
 	return items, nil
 }
 
@@ -479,7 +502,10 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	person, err := h.personRepo.Get(r.Context(), personID)
+	// A person whose credits are all on titles the viewer cannot see reads as
+	// unknown, matching native person detail.
+	access := h.resolveAccessFilter(r.Context(), session)
+	person, err := h.personRepo.GetVisible(r.Context(), personID, access)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
@@ -540,7 +566,7 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 	if photoURL != "" {
 		// The signed tag authorizes anonymous image GETs, so mint it only for a
 		// viewer with a visible credit; the image route refuses everyone else.
-		err := h.personRepo.EnsureAccessible(r.Context(), personID, h.resolveAccessFilter(r.Context(), session))
+		err := h.personRepo.EnsureAccessible(r.Context(), personID, access)
 		switch {
 		case err == nil:
 			dto.ImageTags = map[string]string{compatImagePrimary: personPrimaryImageTag(h.mapper.imageTagSigner, routeID, person.PhotoPath, person.PhotoThumbhash)}
@@ -915,6 +941,14 @@ func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, []struct{}{})
 }
 
+// enableRealtimeMonitor is a library's Jellyfin EnableRealtimeMonitor value:
+// real-time monitoring is effective only while both the library's switch and
+// the live server-wide switch are on. A nil server reader counts as on, the
+// setting's default.
+func enableRealtimeMonitor(server func() bool, library bool) bool {
+	return library && (server == nil || server())
+}
+
 // HandleVirtualFolders serves GET /Library/VirtualFolders.
 // Returns library metadata so clients like Infuse know library collection types.
 func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Request) {
@@ -939,7 +973,7 @@ func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Reque
 			ItemID:         h.codec.EncodeIntID(EncodedIDLibrary, int64(lib.ID)),
 			LibraryOptions: virtualLibraryOptDTO{
 				Enabled:                 true,
-				EnableRealtimeMonitor:   true,
+				EnableRealtimeMonitor:   enableRealtimeMonitor(h.realtimeMonitoring, lib.RealtimeMonitoring),
 				EnableInternetProviders: true,
 				SeasonZeroDisplayName:   "Specials",
 				TypeOptions:             []string{},
@@ -1241,7 +1275,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	if h.sectionsFetcher != nil && latestFastPathEligible(params, libraryItemType) {
 		items, err := h.loadLatestViaSections(r.Context(), session, query)
 		if err == nil {
-			h.applyListMediaSourceCounts(r.Context(), session, items, query)
+			h.applyListFileFields(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, items)
 			return
@@ -1264,7 +1298,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, items)
 }
@@ -1397,8 +1431,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch. Jellyfin expects a flat list of parent series,
-// so this compatibility path explicitly opts out of the native TV scan-event
-// grouping that may return episode cards or repeat a series across scan runs.
+// so this compatibility path explicitly opts out of the native TV arrival-event
+// grouping that may return episode cards or repeat a series across arrivals.
 // The cached *models.MediaItem values are treated read-only;
 // LocalizeItemModels deep-copies before any presign mutation.
 func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
@@ -1858,6 +1892,12 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 // the result before detail hydration. Only the bounded AdjacentTo window
 // bypasses paging.
 func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, seriesID, requestedSeasonID string, page bool) {
+	// Jellyfin returns every episode when Limit is absent, and Infuse relies on
+	// that to build its season list; parseItemsQuery's default page size is for
+	// item browsing.
+	if query.limitDefaulted {
+		query.limit = catalog.MaxEpisodePageSize
+	}
 	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -2099,7 +2139,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 	if page {
 		startIndex = query.startIndex
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	if query.totalOverride != nil {
 		total = *query.totalOverride
@@ -2278,7 +2318,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 			items[i] = dto
 		}
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2365,7 +2405,7 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 	for i, ep := range episodes {
 		applyPlayableLocation(&items[i], hasFiles[ep.ContentID])
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, 200, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2548,7 +2588,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2620,7 +2660,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range listItems {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
-		h.applyListMediaSourceCounts(r.Context(), session, items, query)
+		h.applyListFileFields(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2670,7 +2710,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range result.Items {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
-		h.applyListMediaSourceCounts(r.Context(), session, items, query)
+		h.applyListFileFields(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2707,7 +2747,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	}
 	total := len(items)
 	items = sliceBaseItems(items, query.startIndex, query.limit)
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2779,7 +2819,7 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2868,7 +2908,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		total = 0
 	}
 	items = slicePage(items, query.startIndex, query.limit)
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2906,7 +2946,7 @@ func (h *ItemsHandler) handlePlayedItems(w http.ResponseWriter, r *http.Request,
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 
 	writeJSON(w, http.StatusOK, queryResultDTO{
@@ -2956,7 +2996,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
-			h.applyListMediaSourceCounts(r.Context(), session, items, query)
+			h.applyListFileFields(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, queryResultDTO{
 				Items:            items,
@@ -2973,7 +3013,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	h.applyListFileFields(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -3387,7 +3427,6 @@ func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL str
 	if dto.SeriesID != "" {
 		h.images.RememberSized(dto.SeriesID, "Primary", series.PosterURL, compatCardImageSize)
 		h.images.RememberSized(dto.SeriesID, "Backdrop", series.BackdropURL, compatCardImageSize)
-		h.images.RememberSized(dto.SeriesID, "Thumb", series.BackdropURL, compatCardImageSize)
 	}
 }
 
@@ -3733,9 +3772,6 @@ func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *S
 		cache[seriesContentID] = imgs
 	}
 	h.mapper.applySeriesImages(dto, imgs)
-	if imgs.BackdropURL != "" && h.images != nil {
-		h.images.RememberSized(dto.SeriesID, "Thumb", imgs.BackdropURL, compatCardImageSize)
-	}
 }
 
 func max(value, fallback int) int {

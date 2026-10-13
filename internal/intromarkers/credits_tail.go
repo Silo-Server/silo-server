@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -51,11 +52,11 @@ var creditsTailParams = fmt.Sprintf("tail=%.0f:%.2f;crop=%.2fx%.2f;width=%d;blac
 	tailSilenceNoiseDB, tailSilenceSeconds, creditsTailFormat)
 
 // creditsTailKey keys an episode's cached tail pass.
-func creditsTailKey() ArtifactKey {
-	return ArtifactKey{
+func creditsTailKey() mediaartifact.Key {
+	return mediaartifact.Key{
 		Kind:             ArtifactKindCreditsTail,
 		AlgorithmVersion: AlgorithmVersion,
-		ConfigHash:       ArtifactConfigHash(ArtifactKindCreditsTail, creditsTailParams),
+		ConfigHash:       mediaartifact.ConfigHash(ArtifactKindCreditsTail, creditsTailParams),
 	}
 }
 

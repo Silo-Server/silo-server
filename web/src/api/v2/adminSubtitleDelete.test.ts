@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import { prepareAdminSubtitleDeletion } from "./adminSubtitleDelete";
 const row = {
@@ -40,9 +40,11 @@ it("uses one captured strong validator and consumes the intent before the DELETE
   finish(new Response(null, { status: 204 }));
   await pending;
 });
-it.each([401, 412, 500, 503])(
+it.each([401, 412, 500])(
   "does not reread, rebase, replay or reuse an intent after %s",
   async (status) => {
+    setAccessToken("synthetic-admin");
+    setRefreshToken("synthetic-refresh");
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(canonical())

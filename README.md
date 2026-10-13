@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a>
-  · <a href="docs/wiki/index.md">Documentation</a>
+  · <a href="https://siloserver.org/docs">Documentation</a>
   · <a href="docs/release-versioning.md">Builds &amp; releases</a>
   · <a href="https://discord.gg/siloserver">Discord</a>
   · <a href="#supporting-silo">Support Silo</a>
@@ -105,11 +105,10 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-The [Docker deployment guide](docs/wiki/deployment/docker.md) covers the
-`SECRET_KEY` backup requirement, storage paths, GPU acceleration, Meilisearch,
-external PostgreSQL and Redis, distributed roles, PostgreSQL tuning, backups,
-and updates. Migrating from Continuum? Use the
-[cutover guide](docs/continuum-to-silo-docker-migration.md).
+The [user manual](https://siloserver.org/docs) covers the rest, starting with
+[installation](https://siloserver.org/docs/install): backing up `SECRET_KEY`,
+storage, GPU acceleration, Meilisearch, external PostgreSQL and Redis,
+transcode nodes, PostgreSQL tuning, backups, and updates.
 
 ## Builds and releases
 
@@ -120,7 +119,7 @@ defines each tag and the SemVer contract.
 
 ## Documentation
 
-- [Documentation index](docs/wiki/index.md) — user and operator guides
+- [User manual](https://siloserver.org/docs) — installing, configuring, and running Silo
 - [Development guide](DEVELOPMENT.md) — source setup, builds, tests, migrations
 - [Settings API](docs/settings-api.md), [Downloads API](docs/downloads-api.md), and [Apple Push Display Token](docs/notifications-push-api.md) — client contracts
 
@@ -136,8 +135,15 @@ Native clients are developed in
 [`silo-android`](https://github.com/Silo-Server/silo-android). Client-visible
 API, authentication, playback, or metadata changes should consider both.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Features,
-API changes, migrations, and behavior changes should start as an issue.
+Right now, the most helpful way to contribute is a clear, accurate issue. We
+implement and review changes through our own workflow, and pull request volume
+has outgrown what we can review carefully, so a good issue usually helps us
+more than a pull request.
+
+Pull requests are still welcome from contributors who've had one merged in a
+Silo repository, or when a maintainer asks for one. We close other pull
+requests without review. [CONTRIBUTING.md](CONTRIBUTING.md) explains what makes
+an issue useful.
 
 ## Supporting Silo
 

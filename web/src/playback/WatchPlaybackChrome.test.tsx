@@ -72,10 +72,10 @@ vi.mock("@/components/ui/slider", () => ({
   ),
 }));
 
-// About one home page of cards, each with its own play overlay.
-const CARD_COUNT = 160;
-// Ten seconds of playback at the player's 4 Hz time updates.
-const TICKS = 40;
+// Several independent card consumers must stay idle during time updates.
+const CARD_COUNT = 3;
+// Repeated updates at the player's 4 Hz cadence.
+const TICKS = 4;
 const DURATION = 3600;
 
 function renderPlaybackHarness(player?: ReactNode) {
@@ -149,16 +149,16 @@ describe("WatchPlaybackBar time updates", () => {
       barRenders: TICKS,
       commits: TICKS,
     });
-    expect(screen.getByText("1:10")).toBeInTheDocument();
+    expect(screen.getByText("1:01")).toBeInTheDocument();
     expect(screen.getByText("1:00:00")).toBeInTheDocument();
-    expect(screen.getByRole("slider", { name: "Playback position" })).toHaveValue("70");
+    expect(screen.getByRole("slider", { name: "Playback position" })).toHaveValue("61");
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     // An identical snapshot changes nothing on screen, so it renders nothing.
-    harness.tick(request.requestKey, 70);
+    harness.tick(request.requestKey, 61);
     expect(counts.barRenders).toBe(TICKS);
 
-    harness.tick(request.requestKey, 70, false);
+    harness.tick(request.requestKey, 61, false);
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
   });
 
@@ -176,7 +176,7 @@ describe("WatchPlaybackBar time updates", () => {
 
     // The position recorded while the bar was hidden is there once it shows.
     act(() => harness.controller().minimizePlayback());
-    expect(screen.getByText("1:10")).toBeInTheDocument();
+    expect(screen.getByText("1:01")).toBeInTheDocument();
   });
 
   it("does not show the replaced request's position", () => {

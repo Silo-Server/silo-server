@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -92,7 +91,7 @@ func TestScanControlsDiscoveryAndDemoExemption(t *testing.T) {
 	}
 }
 
-func TestScanStartDisabledLibraryConflictIsDeclared(t *testing.T) {
+func TestScanStartDisabledLibraryConflict(t *testing.T) {
 	deps := parityDeps(false)
 	fixture := &scanControlFixture{failure: &handlers.APIError{Status: http.StatusConflict, Message: "Library is disabled"}}
 	deps.ScanControls = fixture
@@ -101,20 +100,5 @@ func TestScanStartDisabledLibraryConflictIsDeclared(t *testing.T) {
 	requireProblem(t, response, TypeConflict)
 	if response.Code != http.StatusConflict || fixture.calls != 1 {
 		t.Fatal(response.Code, fixture.calls)
-	}
-	generated, err := GenerateOpenAPI()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		Paths map[string]struct {
-			Post struct{ Responses map[string]json.RawMessage }
-		}
-	}
-	if err := json.Unmarshal(generated, &document); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := document.Paths[Prefix+"/scan"].Post.Responses["409"]; !exists {
-		t.Fatal("disabled-library409 missing from scan contract")
 	}
 }

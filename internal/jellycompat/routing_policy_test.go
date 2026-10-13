@@ -217,7 +217,8 @@ func TestCompatChildHLSRoutesRequireBoundPolicyCompliantTransport(t *testing.T) 
 			store := NewPlaybackSessionStore(0, nil)
 			store.Put(PlaybackSession{
 				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1", UpstreamSessionID: "upstream-1",
-				MediaSources: []PlaybackMediaSource{source}, Recipe: recipe, RoutingAssignment: assignment,
+				UpstreamPlayMethod: "transcode",
+				MediaSources:       []PlaybackMediaSource{source}, Recipe: recipe, RoutingAssignment: assignment,
 			})
 			handler := &PlaybackHandler{playbackStore: store}
 

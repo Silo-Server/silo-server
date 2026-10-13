@@ -126,7 +126,7 @@ func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
 }
 
 func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
-	for _, credential := range []struct {
+	credentials := []struct {
 		name          string
 		user          int
 		scopes        []string
@@ -136,13 +136,19 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 		{"groups reader", 2, []string{auth.ScopeAdminAccessGroupsRead}, true, false},
 		{"users manager", 2, []string{auth.ScopeAdminUsers}, false, false},
 		{"ordinary account", 1, nil, false, false},
-	} {
+	}
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccessGroups = f
+	keys := make(map[string]*models.APIKey, len(credentials))
+	for i, credential := range credentials {
+		keys["sa_"+strings.ReplaceAll(credential.name, " ", "_")] = &models.APIKey{ID: int64(i + 1), UserID: credential.user, Scopes: credential.scopes}
+	}
+	deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: keys}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
+	h := NewHandler(deps)
+	for _, credential := range credentials {
 		t.Run(credential.name, func(t *testing.T) {
-			f := fixtureAdminAccessGroups()
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAccessGroups = f
-			deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: map[string]*models.APIKey{apiKeyToken: {ID: 9, UserID: credential.user, Scopes: credential.scopes}}}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
-			h := NewHandler(deps)
+			*f = *fixtureAdminAccessGroups()
 			for _, op := range []struct {
 				method, path, body string
 				status             int
@@ -150,7 +156,7 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 				{http.MethodGet, "/admin/access-groups", "", 200}, {http.MethodGet, "/admin/access-groups/7", "", 200},
 				{http.MethodPost, "/admin/access-groups", `{"name":"Tool"}`, 201}, {http.MethodPut, "/admin/access-groups/7", `{"name":"New"}`, 200}, {http.MethodDelete, "/admin/access-groups/7", "", 204},
 			} {
-				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer(apiKeyToken), "If-Match", "*"))
+				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer("sa_"+strings.ReplaceAll(credential.name, " ", "_")), "If-Match", "*"))
 				allowed := credential.writes
 				if op.method == http.MethodGet {
 					allowed = credential.reads

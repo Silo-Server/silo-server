@@ -137,13 +137,13 @@ func (w *serverChannelWorker) runPass(ctx context.Context) {
 		if !pending {
 			continue
 		}
-		sent, err := w.processChannel(ctx, ch.ID, batchAge)
+		more, err := w.processChannel(ctx, ch.ID, batchAge)
 		if err != nil {
 			failures++
 			w.logger.WarnContext(ctx, "server channel sweep failed", "channel_id", ch.ID, "error", err)
 			continue
 		}
-		if sent {
+		if more {
 			// Drain a large backlog promptly instead of waiting a poll cycle.
 			w.Nudge()
 		}
@@ -153,8 +153,9 @@ func (w *serverChannelWorker) runPass(ctx context.Context) {
 // processChannel sweeps one channel under its row lock: read events past the
 // watermark, group, send, and advance the watermark — all in one transaction
 // so the watermark commits only with the outcome it describes. Returns
-// whether a post went out.
-func (w *serverChannelWorker) processChannel(ctx context.Context, channelID string, batchAge time.Duration) (sent bool, runErr error) {
+// whether another sweep should follow promptly: a post went out, or a full
+// batch was skipped entirely, which leaves more backlog behind it.
+func (w *serverChannelWorker) processChannel(ctx context.Context, channelID string, batchAge time.Duration) (more bool, runErr error) {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin server channel sweep tx: %w", err)
@@ -203,11 +204,21 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 		}
 		fresh = append(fresh, event)
 	}
+	// A title another library already had is a second copy (a 4K library
+	// beside an HD one), not news for a server-wide post. Profile fanout
+	// keeps these events: it dedupes per episode across libraries and still
+	// reaches profiles that can see only the newer library.
+	if len(fresh) > 0 {
+		fresh, err = w.dropLibraryRepeats(ctx, tx, fresh)
+		if err != nil {
+			return false, err
+		}
+	}
 	if len(fresh) == 0 {
 		if err := w.repo.MarkSwept(ctx, tx, ch.ID, watermark); err != nil {
 			return false, err
 		}
-		return false, tx.Commit(ctx)
+		return len(events) == serverChannelFetchLimit, tx.Commit(ctx)
 	}
 
 	metas, err := loadContentMeta(ctx, tx, fresh)
@@ -247,6 +258,29 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 		"channel_id", ch.ID, "url_host", ch.URLHost,
 		"events", len(fresh), "groups", len(groups))
 	return true, nil
+}
+
+// dropLibraryRepeats removes the events whose content another library had
+// already made available.
+func (w *serverChannelWorker) dropLibraryRepeats(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) ([]ReleaseEvent, error) {
+	ids := make([]string, len(events))
+	for i, event := range events {
+		ids[i] = event.ID
+	}
+	repeated, err := w.releases.RepeatedFromOtherLibraries(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if len(repeated) == 0 {
+		return events, nil
+	}
+	kept := make([]ReleaseEvent, 0, len(events)-len(repeated))
+	for _, event := range events {
+		if _, ok := repeated[event.ID]; !ok {
+			kept = append(kept, event)
+		}
+	}
+	return kept, nil
 }
 
 // loadContentMeta batch-fetches display metadata for every series and flat

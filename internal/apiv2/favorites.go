@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -138,7 +139,7 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, func(e userstore.Favorite) userstore.ListKey {
+	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, reg.ratingSelection(ctx), func(e userstore.Favorite) userstore.ListKey {
 		return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
 	})
 	if p != nil {
@@ -152,7 +153,7 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 // probe row followed. The cards preserve entry order and omit unresolved
 // entries, so the probe row's card, when it has one, can only be the last
 // card.
-func personalListPage[E any](cursors *Cursors, scope CursorScope, limit int, entries []E, cards []handlers.CollectionItemView, keyOf func(E) userstore.ListKey) ([]CatalogItem, string, *Problem) {
+func personalListPage[E any](cursors *Cursors, scope CursorScope, limit int, entries []E, cards []handlers.CollectionItemView, sel ratingsources.Selection, keyOf func(E) userstore.ListKey) ([]CatalogItem, string, *Problem) {
 	next := ""
 	if len(entries) > limit {
 		probe := keyOf(entries[limit])
@@ -167,7 +168,7 @@ func personalListPage[E any](cursors *Cursors, scope CursorScope, limit int, ent
 	}
 	items := make([]CatalogItem, 0, len(cards))
 	for _, card := range cards {
-		items = append(items, catalogItemOfListing(card))
+		items = append(items, catalogItemOfListing(card, sel))
 	}
 	return items, next, nil
 }

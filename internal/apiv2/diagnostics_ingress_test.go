@@ -176,6 +176,8 @@ func TestDiagnosticsIngressStreamsBeforeRequestCompletes(t *testing.T) {
 }
 
 func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T) {
+	f := availableIngress()
+	h := ingressHandler(f)
 	for _, tc := range []struct {
 		name, token string
 		status      diagnostics.AvailabilityStatus
@@ -187,11 +189,11 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 		{"storage", memberToken, diagnostics.StatusStorageUnavailable, TypeCapabilityNotConfigured},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := availableIngress()
+			*f = *availableIngress()
 			f.status.Status = tc.status
 			body := &ingressUnreadBody{}
 			rec := httptest.NewRecorder()
-			ingressHandler(f).ServeHTTP(rec, ingressRequest(body, "multipart/form-data; boundary=test", tc.token))
+			h.ServeHTTP(rec, ingressRequest(body, "multipart/form-data; boundary=test", tc.token))
 			requireProblem(t, rec, tc.want)
 			if body.read {
 				t.Fatal("rejected upload consumed body")
@@ -213,7 +215,7 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 		{"child_profile", false, 1, diagnostics.ErrChildProfileForbidden, TypePermissionDenied, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := availableIngress()
+			*f = *availableIngress()
 			f.status.MaxBundleBytes = 1
 			if tc.ingestError != nil {
 				f.ingest = func(context.Context, int, *string, []byte, io.Reader) (diagnostics.IngestResult, error) {
@@ -222,7 +224,7 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 			}
 			body, ct := ingressBody(t, tc.reverse, tc.size)
 			rec := httptest.NewRecorder()
-			ingressHandler(f).ServeHTTP(rec, ingressRequest(body, ct, memberToken))
+			h.ServeHTTP(rec, ingressRequest(body, ct, memberToken))
 			requireProblem(t, rec, tc.want)
 			if rec.Header().Get("Retry-After") != tc.retry {
 				t.Fatal(rec.Header())

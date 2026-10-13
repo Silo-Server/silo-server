@@ -151,7 +151,7 @@ describe("useDeleteAdminCollections", () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(v2Problem(404, "not_found", "Collection not found"))
       .mockRejectedValueOnce(
-        v2Problem(409, "collection_in_use", "Collection is used by one or more sections"),
+        v2Problem(409, "conflict", "Collection is used by one or more sections"),
       );
     invalidateAdminCollectionQueriesMock.mockResolvedValue(undefined);
     const { result } = renderDeleteCollectionsHook();

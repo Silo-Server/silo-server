@@ -1,6 +1,7 @@
 {
   "status": "approved",
   "poll_after": 5,
+  "opened": false,
   "tokens": {
     "access_token": "acc",
     "refresh_token": "ref",

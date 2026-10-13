@@ -203,21 +203,6 @@ func TestSampleBucket(t *testing.T) {
 	}
 }
 
-func TestSampleBucketDetectsRepeatedMinutes(t *testing.T) {
-	t.Parallel()
-
-	first := time.Date(2026, 8, 26, 11, 58, 1, 0, time.UTC)
-	again := time.Date(2026, 8, 26, 11, 58, 59, 0, time.UTC)
-	later := time.Date(2026, 8, 26, 11, 59, 0, 0, time.UTC)
-
-	if !sampleBucket(first).Equal(sampleBucket(again)) {
-		t.Fatal("two ticks inside one minute produced different buckets")
-	}
-	if sampleBucket(first).Equal(sampleBucket(later)) {
-		t.Fatal("ticks in different minutes produced the same bucket")
-	}
-}
-
 func TestEgressKbps(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
 
 /**
  * A 401 or 403 describes the caller, not a transient fault: the session layer
@@ -24,13 +24,26 @@ function isNotFoundAnswer(error: unknown): boolean {
   return error instanceof V2ProblemError && error.status === 404;
 }
 
+/**
+ * A timed-out read has already waited the full deadline. Retrying it would
+ * hold the page on a loading state for a second deadline before the error and
+ * its Try again appear, and a server that went quiet seldom recovers within
+ * one more.
+ */
+function isTimeout(error: unknown): boolean {
+  return error instanceof V2TimeoutError;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 2 * 60_000,
       gcTime: 10 * 60_000,
       retry: (failureCount, error) =>
-        failureCount < 1 && !isAuthorizationRefusal(error) && !isNotFoundAnswer(error),
+        failureCount < 1 &&
+        !isAuthorizationRefusal(error) &&
+        !isNotFoundAnswer(error) &&
+        !isTimeout(error),
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       throwOnError: false,

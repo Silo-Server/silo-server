@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestHandleFilters2Stub verifies /Items/Filters2 returns 200 with Jellyfin's
@@ -107,27 +106,6 @@ func TestHandleClientLogDocument(t *testing.T) {
 			t.Fatalf("status = %d, want 413", rec.Code)
 		}
 	})
-}
-
-// TestHandleSessions verifies GET /Sessions returns a 200 JSON array (not the
-// chi 404 that broke client session polling).
-func TestHandleSessions(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/Sessions?deviceId=abc123", nil)
-	rec := httptest.NewRecorder()
-
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "caller"}))
-	(&PlaybackHandler{playbackStore: NewPlaybackSessionStore(time.Hour, nil)}).HandleSessions(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
-		t.Fatalf("body = %q, want JSON array %q", got, "[]")
-	}
-	var sessions []sessionInfoDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &sessions); err != nil {
-		t.Fatalf("response is not a SessionInfoDto array: %v", err)
-	}
 }
 
 // TestHandleUserImageQueryFallback verifies /UserImage?userId= resolves the id

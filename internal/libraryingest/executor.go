@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ type Scanner interface {
 	ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*scanner.ScanResult, error)
 	ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error
 	FinalizeVariantsByPathPrefix(ctx context.Context, folder *models.MediaFolder, pathPrefix string) error
+	ObserveFileRoot(ctx context.Context, folderID int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error)
 }
 
 // Matcher drains unmatched files and retries linked unmatched items.
@@ -31,6 +33,14 @@ type Matcher interface {
 	ProcessBatchByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, attemptBefore time.Time) (processed int, err error)
 	ProcessAllByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, attemptBefore time.Time) (processed int, err error)
 	RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) (retried int, stillUnmatched int, err error)
+}
+
+// LocalSidecarChecker re-applies the local sidecar metadata (NFO, artwork) of
+// matched items under a scanned scope whose sidecar files changed, and returns
+// the content IDs it re-applied. listing is what the scan read, nil when it
+// read no directories.
+type LocalSidecarChecker interface {
+	CheckLocalSidecars(ctx context.Context, folderID int, scopePath string, listing scanner.SidecarListing) (reapplied []string, err error)
 }
 
 // FolderRepository provides scan bookkeeping for library ingest.
@@ -52,10 +62,13 @@ type Result struct {
 	MatchedFiles           int
 	RetriedItems           int
 	StillUnmatchedWarnings int
+	// LocalMetadataReapplied counts the items whose changed local sidecar
+	// metadata (their own, or their seasons' and episodes') the scan applied
+	// again.
+	LocalMetadataReapplied int
 	ScanDuration           time.Duration
 	MatchDuration          time.Duration
 	RetryDuration          time.Duration
-	Skipped                bool
 }
 
 type scopeMode string
@@ -76,10 +89,14 @@ const scopedDrainInterval = 2 * time.Second
 const scopedTVDrainSettleWindow = 11 * time.Second
 
 // runningClaim pairs a scope claim with an optional cancel function so that
-// running scans can be canceled from the outside (e.g. via admin API).
+// running and waiting scans can be canceled from the outside (e.g. via admin
+// API).
 type runningClaim struct {
 	scopeClaim
 	cancel context.CancelFunc
+	// done is closed when the claim leaves the executor: when its scan
+	// finishes, or when it stops waiting without scanning.
+	done chan struct{}
 }
 
 // Executor coordinates scan, scoped matching, retry, and completion events.
@@ -91,6 +108,7 @@ type Executor struct {
 	events          cache.EventBus
 	realtime        *notifications.Hub
 	availability    *notifications.AvailabilityDetector
+	localSidecars   LocalSidecarChecker
 	now             func() time.Time
 
 	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
@@ -99,7 +117,10 @@ type Executor struct {
 	tvDrainSettleWindow time.Duration
 
 	mu      sync.Mutex
-	running []runningClaim
+	running []*runningClaim
+	// waiting holds claims blocked behind an overlapping claim, in arrival
+	// order, so CancelLibrary reaches them before they start scanning.
+	waiting []*runningClaim
 }
 
 // NewExecutor creates a new ingest executor.
@@ -128,6 +149,14 @@ func NewExecutor(
 func (e *Executor) SetAvailabilityDetector(detector *notifications.AvailabilityDetector) {
 	if e != nil {
 		e.availability = detector
+	}
+}
+
+// SetLocalSidecarChecker makes scans of video libraries re-apply local
+// metadata whose sidecar files changed.
+func (e *Executor) SetLocalSidecarChecker(checker LocalSidecarChecker) {
+	if e != nil {
+		e.localSidecars = checker
 	}
 }
 
@@ -161,11 +190,11 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		path:     cleanScopePath(rawPath),
 	}
 	matchScopes := scopeMatchPaths(folder, mode, claim.path)
-	if !e.begin(claim, cancel) {
-		cancel()
-		return &Result{Skipped: true}, nil
+	entry, err := e.begin(scanCtx, claim, cancel)
+	if err != nil {
+		return nil, err
 	}
-	defer e.finish(claim)
+	defer e.finish(entry)
 
 	var (
 		concurrentMatched       atomic.Int64
@@ -356,6 +385,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 			return result, fmt.Errorf("finalize variants for scope %q: %w", scopePath, err)
 		}
 	}
+	e.checkLocalSidecars(scanCtx, folder, matchScopes, scanResult, result)
 
 	if mode == scopeModeLibrary && e.folders != nil {
 		if err := e.folders.UpdateLastScanned(scanCtx, folder.ID, e.now().UTC()); err != nil {
@@ -470,6 +500,54 @@ func usesDedicatedEnrichment(folderType string) bool {
 	return librarykind.Of(folderType).Ebook
 }
 
+// maxLocalMetadataItemEvents bounds the item-changed events one scan
+// publishes for re-applied local metadata; a bulk NFO rewrite is announced by
+// the library-changed event alone.
+const maxLocalMetadataItemEvents = 100
+
+// checkLocalSidecars re-applies changed local sidecar metadata in the scanned
+// scopes. It runs after matching, so an item matched by this scan is recorded
+// with the sidecars it was matched with. A failure is logged, not returned:
+// the next scan checks again.
+func (e *Executor) checkLocalSidecars(ctx context.Context, folder *models.MediaFolder, scopes []string, scanResult *scanner.ScanResult, result *Result) {
+	if e.localSidecars == nil {
+		return
+	}
+	if kind := librarykind.Of(folder.Type); !kind.Movie && !kind.TV && !kind.Mixed {
+		return
+	}
+	var listing scanner.SidecarListing
+	if scanResult != nil {
+		listing = scanResult.Sidecars
+	}
+	for _, scopePath := range scopes {
+		reportProgress(ctx, ProgressUpdate{
+			Phase:        "matching",
+			Message:      "Checking local metadata files",
+			CurrentScope: scopePath,
+			MatchedFiles: result.MatchedFiles,
+		})
+		reapplied, err := e.localSidecars.CheckLocalSidecars(ctx, folder.ID, scopePath, listing)
+		for _, contentID := range reapplied {
+			if result.LocalMetadataReapplied < maxLocalMetadataItemEvents && e.realtime != nil {
+				_ = e.realtime.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
+					LibraryID: folder.ID,
+					ContentID: contentID,
+					Change:    "metadata_updated",
+				})
+			}
+			result.LocalMetadataReapplied++
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.WarnContext(ctx, "library ingest: local sidecar check failed", "component", "libraryingest",
+				"folder_id", folder.ID, "scope", scopePath, "error", err)
+		}
+	}
+}
+
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
 	if folder == nil || (!librarykind.IsTV(folder.Type) && !librarykind.IsMixed(folder.Type)) {
 		return false
@@ -527,7 +605,10 @@ func (e *Executor) reconcileSkippedRoots(
 	case scanResult != nil:
 		observations = append(observations, scanResult.RootObservations...)
 	case mode == scopeModeFile:
-		observation, ok := scanner.ObserveRoot(scopePath, folderType, libraryRoots...)
+		observation, ok, err := e.scanner.ObserveFileRoot(ctx, folderID, scopePath, folderType, libraryRoots...)
+		if err != nil {
+			return fmt.Errorf("observe root of %q: %w", scopePath, err)
+		}
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -540,7 +621,7 @@ func (e *Executor) reconcileSkippedRoots(
 	seenSkippedRoots := make([]string, 0, len(observations))
 
 	for _, observation := range observations {
-		if observation.HasFolderIDs {
+		if observation.HasProviderIDs {
 			if err := e.skippedRootRepo.Delete(ctx, folderID, observation.RootPath); err != nil {
 				return fmt.Errorf("clear skipped root %q: %w", observation.RootPath, err)
 			}
@@ -580,48 +661,133 @@ func (e *Executor) reconcileSkippedRoots(
 	return nil
 }
 
-func (e *Executor) begin(claim scopeClaim, cancel context.CancelFunc) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// begin records claim as running. When claim overlaps a scan already running
+// in this process, it waits for that scan to finish first rather than skipping:
+// the caller asked to observe the filesystem after its own signal, and the
+// running scan may already have walked past the change. Overlapping waiters
+// start in arrival order. While waiting the claim is registered for
+// CancelLibrary, and it returns ctx's error if ctx ends first. A waiter waits
+// only on running scans, which make progress independently, or on an older
+// waiter, so waits cannot form a cycle.
+func (e *Executor) begin(ctx context.Context, claim scopeClaim, cancel context.CancelFunc) (*runningClaim, error) {
+	entry := &runningClaim{scopeClaim: claim, cancel: cancel, done: make(chan struct{})}
 
+	e.mu.Lock()
+	blocker := e.blockerLocked(entry)
+	if blocker == nil {
+		e.running = append(e.running, entry)
+		e.mu.Unlock()
+		return entry, nil
+	}
+	e.waiting = append(e.waiting, entry)
+	e.mu.Unlock()
+
+	slog.InfoContext(ctx, "library ingest: waiting for overlapping scan to finish", "component", "libraryingest",
+		"folder_id", claim.folderID,
+		"mode", claim.mode,
+		"scope", claim.path,
+		"blocking_mode", blocker.mode,
+		"blocking_scope", blocker.path,
+	)
+	reportProgress(ctx, ProgressUpdate{
+		Phase:        "preparing",
+		Message:      "Waiting for an overlapping scan to finish",
+		CurrentScope: claim.path,
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+		case <-blocker.done:
+		}
+
+		e.mu.Lock()
+		// Re-check ctx under the lock: when the blocker finishes and ctx ends
+		// together, select may pick either, and a canceled waiter must not start.
+		if err := ctx.Err(); err != nil {
+			e.removeWaitingLocked(entry)
+			// Newer waiters may be blocked on this one; let them re-check.
+			close(entry.done)
+			e.mu.Unlock()
+			return nil, fmt.Errorf("wait for overlapping scan: %w", err)
+		}
+		blocker = e.blockerLocked(entry)
+		if blocker == nil {
+			// done stays open: newer waiters blocked on this claim keep waiting
+			// until its scan finishes.
+			e.removeWaitingLocked(entry)
+			e.running = append(e.running, entry)
+			e.mu.Unlock()
+			slog.InfoContext(ctx, "library ingest: overlapping scan finished, starting", "component", "libraryingest",
+				"folder_id", claim.folderID,
+				"mode", claim.mode,
+				"scope", claim.path,
+			)
+			return entry, nil
+		}
+		e.mu.Unlock()
+	}
+}
+
+// blockerLocked returns the claim entry has to wait for: a running claim that
+// overlaps it, or an overlapping claim that started waiting before it. e.mu
+// must be held.
+func (e *Executor) blockerLocked(entry *runningClaim) *runningClaim {
 	for _, running := range e.running {
-		if conflicts(running.scopeClaim, claim) {
-			return false
+		if conflicts(running.scopeClaim, entry.scopeClaim) {
+			return running
 		}
 	}
-
-	e.running = append(e.running, runningClaim{scopeClaim: claim, cancel: cancel})
-	return true
+	for _, waiting := range e.waiting {
+		if waiting == entry {
+			break
+		}
+		if conflicts(waiting.scopeClaim, entry.scopeClaim) {
+			return waiting
+		}
+	}
+	return nil
 }
 
-func (e *Executor) finish(claim scopeClaim) {
+// removeWaitingLocked drops entry from the waiting list. e.mu must be held.
+func (e *Executor) removeWaitingLocked(entry *runningClaim) {
+	if i := slices.Index(e.waiting, entry); i >= 0 {
+		e.waiting = slices.Delete(e.waiting, i, i+1)
+	}
+}
+
+// finish releases a running claim and wakes the waiters blocked on it.
+func (e *Executor) finish(entry *runningClaim) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for i, running := range e.running {
-		if running.scopeClaim == claim {
-			e.running = append(e.running[:i], e.running[i+1:]...)
-			return
-		}
+	if i := slices.Index(e.running, entry); i >= 0 {
+		e.running = slices.Delete(e.running, i, i+1)
 	}
+	close(entry.done)
 }
 
-// CancelLibrary cancels all running scans for the given library (folder ID).
-// Returns the number of scans that were canceled.
+// CancelLibrary cancels all running scans for the given library (folder ID),
+// including scans still waiting for an overlapping scan to finish. Returns the
+// number of scans that were canceled.
 func (e *Executor) CancelLibrary(folderID int) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	canceled := 0
-	for _, running := range e.running {
-		if running.folderID == folderID && running.cancel != nil {
-			running.cancel()
-			canceled++
+	for _, claims := range [][]*runningClaim{e.running, e.waiting} {
+		for _, claim := range claims {
+			if claim.folderID == folderID && claim.cancel != nil {
+				claim.cancel()
+				canceled++
+			}
 		}
 	}
 	return canceled
 }
 
+// conflicts reports whether two claims must not scan at the same time in one
+// process; the later claim waits for the earlier one (see begin).
 func conflicts(a, b scopeClaim) bool {
 	if a.folderID != b.folderID {
 		return false
@@ -676,7 +842,7 @@ func shouldPublish(result *Result) bool {
 	if result == nil {
 		return false
 	}
-	if result.MatchedFiles > 0 || result.RetriedItems > 0 || result.StillUnmatchedWarnings > 0 {
+	if result.MatchedFiles > 0 || result.RetriedItems > 0 || result.StillUnmatchedWarnings > 0 || result.LocalMetadataReapplied > 0 {
 		return true
 	}
 	if result.ScanResult == nil {

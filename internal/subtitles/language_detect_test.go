@@ -46,16 +46,6 @@ func TestDetectSubtitleLanguageFromReleaseFilename(t *testing.T) {
 	}
 }
 
-func TestDetectSubtitleLanguageFromFilename(t *testing.T) {
-	detected := DetectSubtitleLanguage("Movie.en.srt", FormatSRT, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"))
-	if detected.Language != "en" {
-		t.Fatalf("language = %q, want en", detected.Language)
-	}
-	if detected.Source != LanguageSourceFilename {
-		t.Fatalf("source = %q, want filename", detected.Source)
-	}
-}
-
 func TestDetectSubtitleLanguageFromASSMetadata(t *testing.T) {
 	data := []byte(`[Script Info]
 Title: Example

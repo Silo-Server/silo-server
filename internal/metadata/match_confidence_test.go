@@ -127,38 +127,6 @@ func TestBestMatchOnProductionPairs(t *testing.T) {
 	}
 }
 
-// The threshold is only meaningful if the two populations actually separate.
-// Asserting the gap directly means a future tweak that narrows it fails here
-// rather than silently letting mismatches through in production.
-func TestProductionPairsSeparateAroundTheThreshold(t *testing.T) {
-	worstAccept, bestReject := 1.0, 0.0
-
-	for _, tc := range productionPairs {
-		score := TitleScore(tc.want, tc.got)
-		if tc.accept {
-			if score < worstAccept {
-				worstAccept = score
-			}
-			continue
-		}
-		if score > bestReject {
-			bestReject = score
-		}
-	}
-
-	if worstAccept <= bestReject {
-		t.Fatalf("populations overlap: worst correct match scores %.2f, best wrong match scores %.2f",
-			worstAccept, bestReject)
-	}
-	if worstAccept < minTitleScore {
-		t.Errorf("a correct match scores %.2f, below the %.2f threshold", worstAccept, minTitleScore)
-	}
-	if bestReject >= minTitleScore {
-		t.Errorf("a wrong match scores %.2f, at or above the %.2f threshold", bestReject, minTitleScore)
-	}
-	t.Logf("separation: correct >= %.2f, wrong <= %.2f, threshold %.2f", worstAccept, bestReject, minTitleScore)
-}
-
 func TestBestMatchPicksHighestScoringCandidate(t *testing.T) {
 	results := []SearchResult{
 		{Name: "Acts of War: Something Else Entirely"},

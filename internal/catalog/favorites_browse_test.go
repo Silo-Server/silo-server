@@ -168,12 +168,11 @@ func TestBuildBrowseFavoritesPlan_LibraryIDIntersectsAllowedLibraries(t *testing
 	}
 }
 
-// TestBuildBrowseFavoritesPlan_NamePrefixDualColumnLike pins the dual-column
+// TestBuildBrowseFavoritesPlan_NamePrefixSortKeyLike pins the sort-key
 // LIKE shape that powers /Items?Filters=IsFavorite&NameStartsWith=Star. The
-// pattern must be anchored to the prefix only (no leading wildcard) so the
-// idx_media_items_sort_key index can serve the lookup. (code review on
-// 614e45ac, formerly uncovered.)
-func TestBuildBrowseFavoritesPlan_NamePrefixDualColumnLike(t *testing.T) {
+// pattern must be anchored to the prefix only (no leading wildcard). (code
+// review on 614e45ac, formerly uncovered.)
+func TestBuildBrowseFavoritesPlan_NamePrefixSortKeyLike(t *testing.T) {
 	plan, err := buildBrowseFavoritesPlan(BrowseFavoritesFilters{
 		UserID:     1,
 		ProfileID:  "p1",
@@ -187,24 +186,21 @@ func TestBuildBrowseFavoritesPlan_NamePrefixDualColumnLike(t *testing.T) {
 	if !strings.Contains(sql, "LIKE") {
 		t.Fatalf("expected LIKE for NamePrefix; got %s", sql)
 	}
-	// The dual-column form ORs the sort-key expression against LOWER(title)
-	// so titles without a curated sort_title still match AND both arms are
-	// sargable: first arm via idx_media_items_sort_key (migration 102),
-	// second arm via idx_media_items_search_exact_title (migration 001).
-	// Pin both arms.
+	// The sort-key expression falls back to title when sort_title is empty.
+	// Matching LOWER(title) too would list "The Hobbit" under T as well as H.
 	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
-		t.Fatalf("expected sort-key LIKE arm matching idx_media_items_sort_key; got %s", sql)
+		t.Fatalf("expected LIKE on the title sort key; got %s", sql)
 	}
-	if !strings.Contains(sql, "LOWER(mi.title) LIKE") {
-		t.Fatalf("expected mi.title LIKE arm; got %s", sql)
+	if strings.Contains(sql, "LOWER(mi.title) LIKE") {
+		t.Fatalf("prefix must not match the raw title alongside the sort key; got %s", sql)
 	}
 	// Pattern must escape backslash to defuse user-supplied %/_ wildcards.
 	if !strings.Contains(sql, "ESCAPE '\\'") {
 		t.Fatalf("expected ESCAPE '\\\\' clause; got %s", sql)
 	}
 	// Verify the bound pattern is "star%" — anchored prefix, lowercased, no
-	// leading wildcard. A leading "%" would defeat the index and let users
-	// substring-search the whole catalog.
+	// leading wildcard. A leading "%" would let users substring-search the
+	// whole catalog.
 	foundPrefixArg := false
 	for _, a := range args {
 		s, ok := a.(string)

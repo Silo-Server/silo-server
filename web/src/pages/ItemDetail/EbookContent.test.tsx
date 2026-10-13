@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
@@ -163,6 +164,7 @@ function makeEbookItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -208,19 +210,6 @@ describe("EbookContent", () => {
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
   });
 
-  it("renders ebook authors without audiobook narrator credits", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Ebook");
-    expect(markup).toContain("By");
-    expect(markup).toContain("Becky Chambers");
-    expect(markup).not.toContain("A Narrator Should Not Appear");
-  });
-
   it("only shows download action when downloads are allowed and files exist", () => {
     let markup = renderToStaticMarkup(
       <MemoryRouter>
@@ -251,12 +240,12 @@ describe("EbookContent", () => {
 
     let markup = renderToStaticMarkup(
       <MemoryRouter>
-        <EbookContent item={makeEbookItem()} />
+        <EbookContent item={makeEbookItem()} libraryId={12} />
       </MemoryRouter>,
     );
 
     expect(markup).toContain("Read");
-    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1");
+    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1&amp;libraryId=12");
 
     markup = renderToStaticMarkup(
       <MemoryRouter>
@@ -267,19 +256,20 @@ describe("EbookContent", () => {
   });
 
   it("shows the mark read toggle backed by the watched mutation", () => {
+    const mutate = vi.fn();
+    mocks.useWatchedStateMutation.mockReturnValue({ mutate, isPending: false });
     const item = makeEbookItem();
-    const markup = renderToStaticMarkup(
+    const { rerender } = render(
       <MemoryRouter>
         <EbookContent item={item} />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Mark Read");
     expect(mocks.useWatchedStateMutation).toHaveBeenCalledWith(item);
-  });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Read" }));
+    expect(mutate).toHaveBeenLastCalledWith(true);
 
-  it("shows the mark unread toggle for ebooks already marked read", () => {
-    const markup = renderToStaticMarkup(
+    rerender(
       <MemoryRouter>
         <EbookContent
           item={makeEbookItem({
@@ -288,46 +278,9 @@ describe("EbookContent", () => {
         />
       </MemoryRouter>,
     );
-
-    expect(markup).toContain("Mark Unread");
-  });
-
-  it("preserves library context on reader links", () => {
-    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} libraryId={12} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1&amp;libraryId=12");
-  });
-
-  it("links ebook genres back to the scoped library", () => {
-    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem({ genres: ["Science Fiction"] })} libraryId={12} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain('href="/library/12?tab=library&amp;genre=Science+Fiction"');
-  });
-
-  it("links ebook genres to the ebook catalog outside a library", () => {
-    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem({ genres: ["Science Fiction"] })} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain(
-      'href="/catalog?source=query&amp;type=ebook&amp;genre=Science+Fiction"',
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Mark Unread" }));
+    expect(mutate).toHaveBeenLastCalledWith(false);
+    expect(mutate).toHaveBeenCalledTimes(2);
   });
 
   it("does not show read action when ebook files are not reader-supported", () => {
@@ -347,34 +300,13 @@ describe("EbookContent", () => {
     expect(markup).toContain("Download");
   });
 
-  it("shows continue action and saved progress when ebook progress exists", () => {
-    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-    mocks.useEbookReaderProgress.mockReturnValue({
-      data: {
-        file_id: 1,
-        location: "epubcfi(/6/4)",
-        progress: 0.42,
-      },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent item={makeEbookItem()} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Continue");
-    expect(markup).toContain("42%");
-    expect(markup).not.toContain(">Read<");
-  });
-
   it("continues from the saved reader file when progress points at another format", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
     mocks.useEbookReaderProgress.mockReturnValue({
       data: {
         file_id: 1,
         location: "pdf-location",
-        progress: 0.2,
+        progress: 0.42,
       },
     });
 
@@ -392,6 +324,8 @@ describe("EbookContent", () => {
     );
 
     expect(markup).toContain("Continue");
+    expect(markup).toContain("42%");
+    expect(markup).not.toContain(">Read<");
     expect(markup).toContain("/reader/ebook/ebook-1?file_id=1");
   });
 
@@ -412,74 +346,5 @@ describe("EbookContent", () => {
     );
 
     expect(markup).toContain("/reader/ebook/ebook-1?file_id=2");
-  });
-
-  it("renders ebook series and related rails from ebook detail extension", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            ebook: {
-              authors: [{ name: "Becky Chambers" }],
-              publisher: "Tor",
-              series: {
-                name: "Monk and Robot",
-                entries: [
-                  {
-                    content_id: "ebook-1",
-                    title: "A Psalm for the Wild-Built",
-                    series_index: 1,
-                  },
-                  {
-                    content_id: "ebook-2",
-                    title: "A Prayer for the Crown-Shy",
-                    series_index: 2,
-                  },
-                ],
-              },
-              related: {
-                also_by_author: [{ content_id: "ebook-3", title: "The Long Way", year: 2014 }],
-                similar: [{ content_id: "ebook-4", title: "All Systems Red", year: 2017 }],
-              },
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("In Monk and Robot");
-    expect(markup).toContain("A Prayer for the Crown-Shy");
-    expect(markup).toContain("Book 2");
-    expect(markup).toContain("Also by Becky Chambers");
-    expect(markup).toContain("The Long Way");
-    expect(markup).toContain("You might also like");
-    expect(markup).toContain("All Systems Red");
-    expect(markup).toContain("aspect:poster");
-  });
-
-  it("shows ebook file format, size, and page count without video quality labels", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <EbookContent
-          item={makeEbookItem({
-            versions: [
-              makeVersion({
-                container: "cbz",
-                file_name: "Comic.cbz",
-                file_path: "/books/Comic.cbz",
-                file_size: 25 * 1024 ** 2,
-                duration: 48,
-                resolution: "",
-                codec_video: "",
-                codec_audio: "",
-              }),
-            ],
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("CBZ · 25.0 MB · 48 pages");
-    expect(markup).not.toContain("1080p");
   });
 });

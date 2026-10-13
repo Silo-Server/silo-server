@@ -34,6 +34,14 @@ func userAccount() models.User {
 	return models.User{ID: testAdminID, Username: "user", Email: "user@example.test", Role: models.RoleUser, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
 }
 
+// providerAdminAccount is an admin that signs in only through a provider:
+// its local password sign-in is off.
+func providerAdminAccount() models.User {
+	account := adminAccount()
+	account.LocalPasswordLoginEnabled = false
+	return account
+}
+
 func claimsCtx(userID int) context.Context {
 	return apimw.SetClaims(context.Background(), &auth.Claims{UserID: userID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"})
 }
@@ -81,6 +89,14 @@ func TestAdminAccountServiceProtectsOwner(t *testing.T) {
 		{"owner demotes admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{Role: &demote}), true},
 		{"owner deletes admin", adminAccount(), testOwnerID, remove, true},
 		{"owner promotes user", userAccount(), testOwnerID, update(models.UpdateUserInput{Role: &promote}), true},
+		{"admin limits self", adminAccount(), testAdminID, update(models.UpdateUserInput{MaxStreams: models.SetValue(2)}), false},
+		{"admin resends own policy", adminAccount(), testAdminID, update(models.UpdateUserInput{Username: &rename, MaxStreams: models.ClearValue[int]()}), true},
+		{"owner limits admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{MaxStreams: models.SetValue(2)}), true},
+		{"admin sets own password", adminAccount(), testAdminID, update(models.UpdateUserInput{Password: new("long-enough")}), true},
+		{"provider-only admin sets own password", providerAdminAccount(), testAdminID, update(models.UpdateUserInput{Password: new("long-enough")}), false},
+		{"owner sets a provider-only admin's password", providerAdminAccount(), testOwnerID, update(models.UpdateUserInput{Password: new("long-enough")}), true},
+		{"admin makes itself break-glass", adminAccount(), testAdminID, update(models.UpdateUserInput{BreakGlass: new(true)}), false},
+		{"owner makes an admin break-glass", adminAccount(), testOwnerID, update(models.UpdateUserInput{BreakGlass: new(true)}), true},
 	}
 	for _, tc := range cases {
 		repo := &mutatingUserRepo{current: tc.stored}
@@ -92,6 +108,45 @@ func TestAdminAccountServiceProtectsOwner(t *testing.T) {
 			continue
 		}
 		requireOwnerProtected(t, tc.name, err)
+		if repo.applied {
+			t.Errorf("%s: the refused change was applied", tc.name)
+		}
+	}
+}
+
+// TestAdminAccountServiceGuardsBreakGlass: a scoped API key, even the
+// Owner's, may not change an admin's break-glass flag, and the flag is only
+// valid on an admin account.
+func TestAdminAccountServiceGuardsBreakGlass(t *testing.T) {
+	scopedKey := func(userID int) context.Context {
+		return apimw.SetClaims(context.Background(), &auth.Claims{UserID: userID, Role: "admin", TokenType: auth.TokenTypeAPIKey, APIKeyScopes: []string{"admin"}})
+	}
+	for _, tc := range []struct {
+		name       string
+		stored     models.User
+		ctx        context.Context
+		breakGlass bool
+		status     int
+		code       string
+		field      string
+	}{
+		{"owner's scoped key on an admin", adminAccount(), scopedKey(testOwnerID), true, http.StatusForbidden, "insufficient_scope", ""},
+		{"owner's scoped key clears an admin's flag", adminAccount(), scopedKey(testOwnerID), false, http.StatusForbidden, "insufficient_scope", ""},
+		{"owner on a user account", userAccount(), claimsCtx(testOwnerID), true, http.StatusBadRequest, policyErrorBadRequest, "break_glass"},
+		{"owner's session on an admin", adminAccount(), claimsCtx(testOwnerID), true, 0, "", ""},
+	} {
+		repo := &mutatingUserRepo{current: tc.stored}
+		_, err := (&AdminHandler{userRepo: repo}).UpdateAdminAccount(tc.ctx, tc.stored.ID, -1, 0, models.UpdateUserInput{BreakGlass: new(tc.breakGlass)})
+		if tc.status == 0 {
+			if err != nil || !repo.applied {
+				t.Errorf("%s: err = %v, applied %v", tc.name, err, repo.applied)
+			}
+			continue
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code || apiErr.Field != tc.field {
+			t.Errorf("%s: err = %#v, want %d %s field %q", tc.name, err, tc.status, tc.code, tc.field)
+		}
 		if repo.applied {
 			t.Errorf("%s: the refused change was applied", tc.name)
 		}
@@ -137,6 +192,11 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 		{"admin disables self", http.MethodPut, `{"enabled":false}`, adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin deletes self", http.MethodDelete, "", adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
+		{"admin changes own policy", http.MethodPut, `{"download_transcode_allowed":false}`, adminAccount(), testAdminID, http.StatusForbidden},
+		{"admin saves self with its policy unchanged", http.MethodPut, `{"email":"new@example.test","max_streams":null}`, adminAccount(), testAdminID, http.StatusOK},
+		{"owner limits admin", http.MethodPut, `{"max_streams":2}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
+		{"provider-only admin sets own password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), testAdminID, http.StatusForbidden},
+		{"owner sets a provider-only admin's password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"owner demotes admin", http.MethodPut, `{"role":"user"}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"owner deletes admin", http.MethodDelete, "", adminAccount(), scopedKeyTestOwnerID, http.StatusNoContent},
 	} {

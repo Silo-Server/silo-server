@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { FileVersion, PlaybackVariant } from "@/api/types";
 import { resolveSelectedMediaSummary } from "./selectedMediaSummary";

@@ -2,17 +2,14 @@ package jellycompat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -278,8 +275,9 @@ func (p *progressCountingStoreProvider) ForUser(context.Context, int) (userstore
 func (p *progressCountingStoreProvider) Close() error { return nil }
 
 // progressCountingStore is a userstore.UserStore stub that counts calls to
-// ListProgressByMediaItems. Other methods panic so we catch unexpected use.
+// ListProgressByMediaItems. The nil embedded store catches unexpected methods.
 type progressCountingStore struct {
+	userstore.UserStore
 	forUserCalls           int
 	listProgressCalls      int
 	lastListedMediaItemIDs []string
@@ -291,336 +289,11 @@ func (s *progressCountingStore) ListProgressByMediaItems(_ context.Context, _ st
 	return map[string]userstore.WatchProgress{}, nil
 }
 
-// Remaining UserStore methods panic — the test should not exercise them.
-func (s *progressCountingStore) CreateProfile(context.Context, userstore.Profile) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetProfile(context.Context, string) (*userstore.Profile, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProfiles(context.Context) ([]userstore.Profile, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProfile(context.Context, string, userstore.UpdateProfileInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteProfile(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) VerifyPIN(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgressAt(context.Context, string, string, float64, float64, bool, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgressIfNewer(context.Context, string, string, float64, float64, bool, time.Time) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProgressHints(context.Context, string, string, userstore.VersionHints) error {
-	panic("unused")
-}
-func (s *progressCountingStore) MarkWatched(context.Context, string, string, float64) error {
-	panic("unused")
-}
-func (s *progressCountingStore) MarkProgressBatch(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearProgressBatch(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearProgress(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetProgress(context.Context, string, string) (*userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddHistoryIfMissing(context.Context, userstore.WatchHistoryEntry) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHistory(context.Context, string, int, int) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHistoryPage(context.Context, string, *userstore.HistoryKey, int) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCompletedHistory(context.Context, userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
 func (s *progressCountingStore) ListCompletedHistoryItems(context.Context, userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	return nil, nil
 }
-func (s *progressCountingStore) RemoveHistoryItems(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteHistoryBySource(context.Context, string, []string, userstore.WatchHistorySource) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHomeDismissals(context.Context, string, string) ([]userstore.HomeItemDismissal, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertHomeDismissal(context.Context, userstore.HomeItemDismissal) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteHomeDismissal(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddFavorite(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) RemoveFavorite(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavoritesPage(context.Context, string, *userstore.ListKey, int) ([]userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) IsFavorite(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
-	panic("unused")
-}
 func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
 	return true, nil
-}
-func (s *progressCountingStore) RemoveFromWatchlist(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlistPage(context.Context, string, *userstore.ListKey, int) ([]userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlistByMediaItems(context.Context, string, []string) (map[string]bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) InWatchlist(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) CreateCollection(context.Context, userstore.CreateCollectionInput) (*userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetCollection(context.Context, string) (*userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollections(context.Context, string) ([]userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollection(context.Context, userstore.UpdateCollectionInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteCollection(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) AddCollectionItem(context.Context, string, string, int) error {
-	panic("unused")
-}
-func (s *progressCountingStore) RemoveCollectionItem(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollectionItems(context.Context, string) ([]userstore.CollectionItem, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ReplaceCollectionItems(context.Context, string, []userstore.CollectionItemReplacement) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollectionItems(context.Context, string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollections(context.Context, string, *string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollectionGroups(context.Context) ([]userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) EnsureCollectionGroup(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) CreateCollectionGroup(context.Context, string, string, userstore.GroupSortMode) (*userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollectionGroup(context.Context, string, *string, *string, *userstore.GroupSortMode) (*userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteCollectionGroup(context.Context, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollectionGroups(context.Context, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSectionOverrides(context.Context, string, string, string) ([]userstore.SectionOverride, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SaveSectionOverrides(context.Context, string, string, string, []userstore.SectionOverride) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ResetSectionOverrides(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSetting(context.Context, string) (string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSetting(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetJellycompatDisplayPrefs(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSetting(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) ListSettings(context.Context) ([]userstore.SettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetDeviceSetting(context.Context, string, string, string) (*userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetDeviceSetting(context.Context, userstore.DeviceSettingEntry) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteDeviceSetting(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteAllDeviceSettings(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteDeviceSettingsByKey(context.Context, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListDeviceSettings(context.Context, string) ([]userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListAllDeviceSettings(context.Context) ([]userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSubtitlePreference(context.Context, userstore.SubtitlePreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSubtitlePreference(context.Context, string, string) (*userstore.SubtitlePreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSubtitlePreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetAudioPreference(context.Context, userstore.AudioPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetAudioPreference(context.Context, string, string) (*userstore.AudioPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteAudioPreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSeriesPlaybackPreference(context.Context, userstore.SeriesPlaybackPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSeriesPlaybackPreference(context.Context, string, string) (*userstore.SeriesPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSeriesPlaybackPreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetCollectionSortPreference(context.Context, userstore.CollectionSortPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetCollectionSortPreference(context.Context, string, string, string) (*userstore.CollectionSortPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearCollectionSortPreference(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetLibraryPlaybackPreference(context.Context, string, int) (*userstore.LibraryPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListLibraryPlaybackPreferences(context.Context, string) ([]userstore.LibraryPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertLibraryPlaybackPreference(context.Context, userstore.LibraryPlaybackPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context, string, int) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSettingValue(context.Context, userstore.SettingIdentity) (*userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSettingValuesByScope(context.Context, string, settingscontract.Scope, []string) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValue(context.Context, userstore.SettingIdentity) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForProfile(context.Context, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForDevice(context.Context, string, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForLibrary(context.Context, int) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForSeries(context.Context, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSettingMutation(context.Context, string) (*userstore.SettingMutationRecord, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) PutSettingMutation(context.Context, userstore.SettingMutationRecord) (userstore.SettingMutationRecord, bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteExpiredSettingMutations(context.Context, time.Time) (int64, error) {
-	panic("unused")
 }
 
 // stubBrowseSource is a deterministic browseSource for testing

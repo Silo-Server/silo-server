@@ -63,7 +63,9 @@
       "file_size": 0,
       "duration": 0,
       "bitrate": 0,
-      "added_at": "2026-01-02T03:04:05.678Z"
+      "added_at": "2026-01-02T03:04:05.678Z",
+      "effective_audio_track_index": 1,
+      "effective_audio_language": "en"
     }
   ],
   "rating_sources": [
@@ -71,10 +73,14 @@
       "source": "imdb",
       "score": 83,
       "votes": 673852
-    },
+    }
+  ],
+  "ratings": [
     {
-      "source": "mdblist",
-      "score": 86
+      "source": "imdb",
+      "name": "IMDb",
+      "score": 83,
+      "display": "8.3"
     }
   ],
   "subtitles": []

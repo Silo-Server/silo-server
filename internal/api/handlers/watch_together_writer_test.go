@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
@@ -224,32 +225,34 @@ func TestWatchTogetherReplacementFlushesBeforeClose(t *testing.T) {
 }
 
 func TestWatchTogetherReplacementClosesBlockedWriter(t *testing.T) {
-	socket := newRoomWriterSocket(true)
-	conn := newWatchTogetherRoomConn(socket)
-	conn.includeMemberStatus = true
-	t.Cleanup(func() { _ = conn.Close() })
-	if err := conn.WriteJSON(map[string]string{"type": "snapshot"}); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*watchTogetherReplacementTimeout)
-	defer cancel()
-	select {
-	case <-socket.started:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	done := make(chan struct{})
-	go func() { _ = conn.CloseReplaced(); close(done) }()
-	select {
-	case <-done:
-	case <-ctx.Done():
-		t.Fatal("blocked writer delayed replacement beyond its deadline")
-	}
-	select {
-	case <-socket.closed:
-	default:
-		t.Fatal("blocked displaced socket remains open")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		socket := newRoomWriterSocket(true)
+		conn := newWatchTogetherRoomConn(socket)
+		conn.includeMemberStatus = true
+		t.Cleanup(func() { _ = conn.Close() })
+		if err := conn.WriteJSON(map[string]string{"type": "snapshot"}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 2*watchTogetherReplacementTimeout)
+		defer cancel()
+		select {
+		case <-socket.started:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		done := make(chan struct{})
+		go func() { _ = conn.CloseReplaced(); close(done) }()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Fatal("blocked writer delayed replacement beyond its deadline")
+		}
+		select {
+		case <-socket.closed:
+		default:
+			t.Fatal("blocked displaced socket remains open")
+		}
+	})
 }
 
 func TestWatchTogetherV1ReplacementRetainsCloseBehavior(t *testing.T) {

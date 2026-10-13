@@ -12,6 +12,7 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
+import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
@@ -19,6 +20,10 @@ import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
+import { useSubtitleSync } from "../hooks/useSubtitleSync";
+import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
+import { syncKeyOf } from "../utils/subtitleSync";
+import { SubtitleSyncIndicator } from "./SubtitleSyncIndicator";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
@@ -71,6 +76,7 @@ import type {
   SubtitleMode,
   VideoFitMode,
 } from "../types";
+import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
   mediaDurationSeconds,
@@ -160,6 +166,11 @@ interface VideoPlayerProps {
   versions?: PlayerFileVersion[];
   activeFileId?: number | null;
   chapters?: PlayerChapter[];
+  /** Seek-bar previews of the file being played. */
+  trickplay?: PlayerTrickplay | null;
+  trickplayUpdatedAt?: number;
+  /** A preview sheet failed to load; read the previews again. */
+  onTrickplayError?: () => void;
   onSwitchVersion?: (fileId: number, currentPosition: number) => void;
   subtitleUrls: PlayerSubtitleInfo[];
   initialPosition: number;
@@ -169,6 +180,19 @@ interface VideoPlayerProps {
   onSubtitleTrackChange?: (combinedIndex: number | null, currentPosition: number) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   onPlanFailure?: (failure: FailureV3, currentPosition: number) => void;
+  /**
+   * The stream already played and then lost its connection to the server. The
+   * session reconnects and resumes at `positionSeconds`, playing again only
+   * when `resume` is set.
+   */
+  onConnectionLost?: (positionSeconds: number, resume: boolean) => void;
+  /** Starts another reconnect after the session gave up. */
+  onRetryConnection?: () => void;
+  /** The session's mid-stream connection state. */
+  connectionStatus?: PlaybackConnectionStatus;
+  /** Why reconnecting gave up, while `connectionStatus` is `lost`. */
+  connectionErrorTitle?: string | null;
+  connectionError?: string | null;
   /**
    * Replan for a plan the server invalidated over the realtime
    * `plan_invalidated` command. Resolving false rejects the command, which is
@@ -233,6 +257,8 @@ interface VideoPlayerProps {
 }
 
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
+// MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
+const MEDIA_ERR_NETWORK = 2;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 // How often a rejected autoplay is retried, and how many times. A transport
 // swap tears the previous source down with `load()`, and the media element load
@@ -335,12 +361,20 @@ export function VideoPlayer({
   versions = [],
   activeFileId,
   chapters = [],
+  trickplay = null,
+  trickplayUpdatedAt,
+  onTrickplayError,
   onSwitchVersion,
   subtitleUrls,
   initialPosition,
   onQualitySelect,
   onSubtitleTrackChange,
   onPlanFailure,
+  onConnectionLost,
+  onRetryConnection,
+  connectionStatus = "connected",
+  connectionErrorTitle = null,
+  connectionError = null,
   onPlanInvalidated,
   onReanchorSeek,
   preferredSubtitleLanguage,
@@ -397,8 +431,23 @@ export function VideoPlayer({
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
+  // Whether the current transport has shown a frame. A network error after
+  // that is a lost connection, not a route that cannot play. Reset whenever
+  // the transport is rebuilt (see the hls.js lifecycle effect).
+  const streamPlayedRef = useRef(false);
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
   const transportFailedForPlanRevisionRef = useRef<number | null>(null);
   const timelineOffsetRef = useRef(0);
+  // Where the direct-play engine's clock starts, in player seconds. Chrome keeps
+  // a Matroska file's container start time (seconds into a TS remux), so its
+  // currentTime runs ahead of the media timeline by that much.
+  const [directPlayOriginSeconds, setDirectPlayOriginSeconds] = useState(0);
+  const planTimelineOffsetRef = useRef(0);
+  // True between loading an original file and learning its clock origin. A
+  // seek in that window is held as pending: written to the element it would
+  // become the default start position and be misread as the origin.
+  const directPlayOriginPendingRef = useRef(false);
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
@@ -521,6 +570,35 @@ export function VideoPlayer({
     };
   }, [activeFileId, sessionId]);
 
+  // -- Subtitle sync --
+  // A sync or timing change alters what a stored or sidecar track's unchanged
+  // URL serves. Each observed change bumps that subtitle's cue revision, which
+  // makes the subtitle hooks refetch the track instead of reusing cues.
+  const subtitleSyncKeys = useMemo(
+    () => subtitleUrls.map(syncKeyOf).filter((key): key is string => key !== null),
+    [subtitleUrls],
+  );
+  const [syncCueRevisions, setSyncCueRevisions] = useState<Record<string, number>>({});
+  const bumpSyncCueRevision = useCallback((key: string) => {
+    setSyncCueRevisions((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+  }, []);
+  const subtitleSync = useSubtitleSync({
+    playerConfig,
+    mediaFileId: activeFileId ?? undefined,
+    sessionId,
+    syncKeys: subtitleSyncKeys,
+    onTimingChanged: bumpSyncCueRevision,
+  });
+  const subtitleTimingChanged = subtitleSync.timingChanged;
+  const subtitleSyncUpdated = subtitleSync.syncUpdated;
+  const activeSyncKey = syncKeyOf(
+    activeSubtitleIndex !== null
+      ? subtitleUrls.find((track) => track.index === activeSubtitleIndex)
+      : null,
+  );
+  const activeSubtitleCueRevision =
+    activeSyncKey !== null ? (syncCueRevisions[activeSyncKey] ?? 0) : 0;
+
   const reportSubtitleFailure = useCallback((jobId: string, message?: string) => {
     if (reportedSubtitleFailureRef.current === jobId) return;
     reportedSubtitleFailureRef.current = jobId;
@@ -573,7 +651,12 @@ export function VideoPlayer({
   const reportCurrentPlanFailure = useCallback(
     (failure: FailureV3): boolean => {
       if (!onPlanFailure) return false;
-      const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+      // While the session reconnects, a dying transport says nothing about
+      // its route; the reconnect replaces it anyway.
+      if (connectionStatusRef.current !== "connected") return true;
+      // The revision is part of the key: a reconnect can hand back the same
+      // route under the same attempt key, and its transport can fail as well.
+      const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
       if (reportedPlanFailureKeyRef.current === failureKey) return true;
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
@@ -587,6 +670,42 @@ export function VideoPlayer({
   useEffect(() => {
     transportFailedForPlanRevisionRef.current = null;
   }, [planRevision]);
+
+  /**
+   * Hands a network failure to the session's reconnect when the stream has
+   * already played. Returns false before the first frame, where the failure
+   * keeps going through route recovery: a stream that never started may be
+   * one this route cannot deliver.
+   */
+  const reportConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
+    if (connectionStatusRef.current === "connected") {
+      // A seek still in flight is where the viewer wants to be.
+      const positionSeconds =
+        pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
+      onConnectionLost(positionSeconds, !video.paused);
+    }
+    return true;
+  }, [onConnectionLost]);
+  // The transport effect reads it through a ref so a new callback identity
+  // never tears the transport down.
+  const reportConnectionLostRef = useRef(reportConnectionLost);
+  reportConnectionLostRef.current = reportConnectionLost;
+
+  // While the session reconnects, nothing plays: the element is paused (so
+  // progress reports say so), and hls.js stops hammering the server. The
+  // transport is rebuilt from the plan the reconnect adopts.
+  useEffect(() => {
+    if (connectionStatus === "connected") return;
+    hlsRef.current?.stopLoad();
+    videoRef.current?.pause();
+    if (bufferingTimerRef.current) {
+      clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = null;
+    }
+    setBuffering(false);
+  }, [connectionStatus]);
 
   const failHlsStartup = useCallback(() => {
     console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
@@ -744,14 +863,18 @@ export function VideoPlayer({
   const isCopyOriginalHLS = plan.delivery === "server_remux_hls";
 
   // Keep the player-local clock mapped onto the canonical media timeline.
-  const timelineOffsetSeconds = plan.timeline.timeline_offset_seconds;
+  const planTimelineOffset = plan.timeline.timeline_offset_seconds;
+  planTimelineOffsetRef.current = planTimelineOffset;
+  const playsOriginalFile = plan.delivery === "original_http";
+  const timelineOffsetSeconds =
+    planTimelineOffset - (playsOriginalFile ? directPlayOriginSeconds : 0);
   timelineOffsetRef.current = timelineOffsetSeconds;
 
   // Media-time position playback is heading to, for consumers that need a
   // position before the element has media loaded (when currentTime still
   // reads 0): an in-flight seek target, else the session's start position.
   subtitleFetchAnchorRef.current =
-    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, timelineOffsetSeconds);
+    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, planTimelineOffset);
 
   useEffect(() => {
     if (backendDuration > 0) {
@@ -946,7 +1069,7 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
 
-    const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+    const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
@@ -959,6 +1082,31 @@ export function VideoPlayer({
   // Only the progressive/direct routes take this path; HLS seeking is handled
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
+
+  // Where the media is on the element's clock. While an original file's clock
+  // origin is unknown the element has no position on the stream yet, so that
+  // is where playback is heading.
+  const elementMediaPosition = useCallback((): number | null => {
+    const video = videoRef.current;
+    if (!video) return null;
+    if (directPlayOriginPendingRef.current) return subtitleFetchAnchorRef.current;
+    return toMediaTime(video.currentTime, timelineOffsetRef.current);
+  }, []);
+
+  // Publishes the element's duration on the media timeline. A direct-play
+  // engine's duration runs on its own clock, which starts at the origin, so
+  // it waits until the origin is known.
+  const applyElementDuration = useCallback((video: HTMLVideoElement) => {
+    if (directPlayOriginPendingRef.current) return;
+    if (!video.duration || !isFinite(video.duration)) return;
+    const originSeconds = planTimelineOffsetRef.current - timelineOffsetRef.current;
+    const mediaDuration = video.duration - originSeconds;
+    // For HLS EVENT playlists still being written, the element reports the
+    // length produced so far. The plan's source duration is the media's
+    // full runtime, so it wins whenever the engine reports something short.
+    if (backendDurationRef.current && mediaDuration < backendDurationRef.current) return;
+    setDuration(mediaDuration);
+  }, []);
 
   const rememberPendingSeek = useCallback((seconds: number) => {
     pendingSeekTimeRef.current = seconds;
@@ -994,6 +1142,12 @@ export function VideoPlayer({
       if (!video) return false;
 
       resetRoomCatchupRate();
+
+      if (directPlayOriginPendingRef.current) {
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        return true;
+      }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
@@ -1094,17 +1248,13 @@ export function VideoPlayer({
   // scrub instead of snapping back to where the element still is.
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
-      const now =
-        pendingSeekTimeRef.current ??
-        (videoRef.current
-          ? toMediaTime(videoRef.current.currentTime, timelineOffsetRef.current)
-          : currentTimeRef.current);
+      const now = pendingSeekTimeRef.current ?? elementMediaPosition() ?? currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
       handlePlayerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
       );
     },
-    [handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
+    [elementMediaPosition, handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
   );
   const handleSkipRef = useRef(handleSkip);
   useEffect(() => {
@@ -1123,14 +1273,18 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const flushWatchProgress = useWatchProgress(sessionId, videoRef, timelineOffsetRef);
+  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
+  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const flushWatchProgress = useWatchProgress(
+    sessionId,
+    videoRef,
+    timelineOffsetRef,
+    markSessionEnded,
+  );
 
   const buildExitState = useCallback((): PlaybackExitState => {
-    const video = videoRef.current;
-    const positionSeconds = toMediaTime(
-      video?.currentTime ?? currentTime,
-      timelineOffsetRef.current,
-    );
+    const positionSeconds =
+      elementMediaPosition() ?? toMediaTime(currentTime, timelineOffsetRef.current);
     // positionSeconds is media time, so the runtime paired with it must be too.
     const durationSeconds = mediaDurationSeconds(backendDurationRef.current, duration);
 
@@ -1143,7 +1297,7 @@ export function VideoPlayer({
       lastCodecVideo: selectedVersion?.codec_video,
       lastEditionKey: selectedVersion?.edition_key,
     };
-  }, [activeFileId, currentTime, duration, selectedVersion]);
+  }, [activeFileId, currentTime, duration, elementMediaPosition, selectedVersion]);
 
   useEffect(() => {
     if (!watchTogetherRoomId || !watchTogether.closedReason || leaveInProgressRef.current) {
@@ -1291,6 +1445,17 @@ export function VideoPlayer({
     await handleLeave("exit");
   }, [handleLeave]);
 
+  // The server ended the session for good (an administrator stopped it while
+  // this player could not be told directly): leave instead of reconnecting.
+  const sessionEndedHandledRef = useRef(false);
+  useEffect(() => {
+    if (connectionStatus !== "ended" && !progressSessionEnded) return;
+    if (sessionEndedHandledRef.current) return;
+    sessionEndedHandledRef.current = true;
+    toast.info("An administrator ended this playback session.");
+    void handleExit();
+  }, [connectionStatus, handleExit, progressSessionEnded]);
+
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
   }, [handleLeave]);
@@ -1400,6 +1565,23 @@ export function VideoPlayer({
             } else {
               onRefreshSubtitles?.(getSubtitleStartPosition());
             }
+          }
+          break;
+        }
+        case "subtitle_timing_changed": {
+          // A subtitle of this file was retimed. Its URL already serves the
+          // new timing; the sync hook reloads the track if it is on screen
+          // and refreshes the status the subtitle menu shows.
+          if (event.payload.file_id === activeFileId) {
+            subtitleTimingChanged(event.payload.sync_key);
+          }
+          break;
+        }
+        case "subtitle_sync_updated": {
+          // A sync job of this file's subtitle moved on: queued, a step of
+          // its progress, or how it ended.
+          if (event.payload.file_id === activeFileId) {
+            subtitleSyncUpdated(event.payload);
           }
           break;
         }
@@ -1520,6 +1702,8 @@ export function VideoPlayer({
       resumeFromTranslationPause,
       reportSubtitleFailure,
       sessionId,
+      subtitleSyncUpdated,
+      subtitleTimingChanged,
       subtitleUrls,
     ],
   );
@@ -1787,6 +1971,10 @@ export function VideoPlayer({
 
   // -- hls.js lifecycle --
   useEffect(() => {
+    // "Played" belongs to one transport. A replacement that has not shown a
+    // frame yet may be a route this browser cannot reach, so its network
+    // failures go through startup recovery rather than the reconnect.
+    streamPlayedRef.current = false;
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
 
@@ -1797,6 +1985,7 @@ export function VideoPlayer({
     let autoplayAttempts = 0;
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
+    let directPlayMetadataHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1817,6 +2006,11 @@ export function VideoPlayer({
         video.removeEventListener("loadedmetadata", nativeHLSMetadataHandler);
         nativeHLSMetadataHandler = null;
       }
+      if (directPlayMetadataHandler) {
+        video.removeEventListener("loadedmetadata", directPlayMetadataHandler);
+        directPlayMetadataHandler = null;
+      }
+      directPlayOriginPendingRef.current = false;
     };
 
     // Settles the player into a deliberate paused state: the startup guard is
@@ -1965,6 +2159,12 @@ export function VideoPlayer({
                 error: data.error?.message,
               });
 
+              // hls.js has already retried the request; a fatal network error
+              // on a stream that played means the server went away.
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && reportConnectionLostRef.current()) {
+                return;
+              }
+
               const now = Date.now();
               if (now - lastRecoveryRef.current < 3000) return;
               lastRecoveryRef.current = now;
@@ -2055,8 +2255,34 @@ export function VideoPlayer({
         // the load algorithm that is about to seek to the resume position, and
         // the spec has that algorithm reject it.
         video.src = effectiveStreamUrl;
-        video.currentTime = effectiveInitialPosition;
-        attemptAutoplayWhenReady();
+        if (playsOriginalFile) {
+          // The original file's clock can start at the container's start time
+          // instead of zero. Load without a start position so currentTime at
+          // loadedmetadata reports where the clock starts, fold that into the
+          // timeline offset, then seek to the start position on the corrected
+          // clock. Subtitles, seeks, and progress then share the media timeline
+          // the server's streams use.
+          directPlayOriginPendingRef.current = true;
+          directPlayMetadataHandler = () => {
+            directPlayMetadataHandler = null;
+            directPlayOriginPendingRef.current = false;
+            const origin = Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0;
+            const planOffset = planTimelineOffsetRef.current;
+            timelineOffsetRef.current = planOffset - origin;
+            setDirectPlayOriginSeconds(origin);
+            // A seek made while the origin was unknown wins over the start position.
+            const mediaTarget =
+              pendingSeekTimeRef.current ?? toMediaTime(effectiveInitialPosition, planOffset);
+            const target = toPlayerTime(mediaTarget, timelineOffsetRef.current);
+            if (Math.abs(video.currentTime - target) > 0.01) video.currentTime = target;
+            applyElementDuration(video);
+            attemptAutoplayWhenReady();
+          };
+          video.addEventListener("loadedmetadata", directPlayMetadataHandler, { once: true });
+        } else {
+          video.currentTime = effectiveInitialPosition;
+          attemptAutoplayWhenReady();
+        }
       }
     }
 
@@ -2080,11 +2306,13 @@ export function VideoPlayer({
     // `planRevision` is the single signal that the transport changed: two plans
     // can share a stream URL and still differ in protocol, timeline, or recipe.
   }, [
+    applyElementDuration,
     effectiveStreamUrl,
     effectiveInitialPosition,
     isHlsStream,
     isPlayerReady,
     planRevision,
+    playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
     reportCurrentPlanFailure,
@@ -2097,7 +2325,8 @@ export function VideoPlayer({
     if (!video) return;
 
     const onPlay = () => {
-      if (connectionReplacedRef.current) {
+      // Nothing can play until the reconnect hands over a new transport.
+      if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") {
         video.pause();
         return;
       }
@@ -2116,6 +2345,7 @@ export function VideoPlayer({
     };
     const markPlaybackStarted = () => {
       hlsStartupGuardRef.current?.markPlaybackStarted();
+      streamPlayedRef.current = true;
       setAwaitingFirstFrame(false);
     };
     // `timeupdate` and `seeked` prove a frame is on screen only once the
@@ -2126,9 +2356,16 @@ export function VideoPlayer({
     // counting it would cancel the render: no loading overlay, a startup
     // guard marked started, and the new transport's first frame never seen.
     const hasCurrentFrame = () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    // Until an original file's clock origin is known the element has no media;
+    // its events are load resets. They must not settle a held seek or move the
+    // shown position off where playback is heading.
+    const resolveSeekAt = (actualTime: number) =>
+      directPlayOriginPendingRef.current
+        ? { currentTime: pendingSeekTime ?? subtitleFetchAnchorRef.current, pendingSeekTime }
+        : resolvePendingSeekTime(actualTime, pendingSeekTime);
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
-      const resolved = resolvePendingSeekTime(nextTime, pendingSeekTime);
+      const resolved = resolveSeekAt(nextTime);
       setCurrentTime(resolved.currentTime);
       if (resolved.pendingSeekTime !== pendingSeekTime) {
         setPendingSeekTime(resolved.pendingSeekTime);
@@ -2161,10 +2398,7 @@ export function VideoPlayer({
       }
     };
     const onSeeked = () => {
-      const resolved = resolvePendingSeekTime(
-        toMediaTime(video.currentTime, timelineOffsetRef.current),
-        pendingSeekTime,
-      );
+      const resolved = resolveSeekAt(toMediaTime(video.currentTime, timelineOffsetRef.current));
       setCurrentTime(resolved.currentTime);
       setPendingSeekTime(resolved.pendingSeekTime);
       // Reloading a stream can finish an older native seek. It does not settle
@@ -2178,15 +2412,7 @@ export function VideoPlayer({
       if (hasCurrentFrame()) markPlaybackStarted();
       clearBuffering();
     };
-    const onDurationChange = () => {
-      if (video.duration && isFinite(video.duration)) {
-        // For HLS EVENT playlists still being written, the element reports the
-        // length produced so far. The plan's source duration is the media's
-        // full runtime, so it wins whenever the engine reports something short.
-        if (backendDurationRef.current && video.duration < backendDurationRef.current) return;
-        setDuration(video.duration);
-      }
-    };
+    const onDurationChange = () => applyElementDuration(video);
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
@@ -2243,6 +2469,7 @@ export function VideoPlayer({
     };
     const onError = () => {
       if (video.error) {
+        if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
           setError(`Playback error: ${message}`);
@@ -2299,7 +2526,9 @@ export function VideoPlayer({
     // deps are intentionally narrowed to the primitives the handlers read so
     // room snapshot churn doesn't re-subscribe every listener.
   }, [
+    applyElementDuration,
     pendingSeekTime,
+    reportConnectionLost,
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
     roomReadinessPending,
@@ -2600,6 +2829,7 @@ export function VideoPlayer({
     liveTranslation?.trackKey ?? null,
     subtitleStreamGeneration,
     setTextSubtitleState,
+    activeSubtitleCueRevision,
   );
 
   // -- ASS/SSA subtitle rendering via JASSUB (client-side libass) --
@@ -2613,8 +2843,34 @@ export function VideoPlayer({
     setASSSubtitleState,
     videoFit,
     coverCrop,
+    activeSubtitleCueRevision,
   );
   const subtitleLoadState = isASSActive ? assSubtitleState : textSubtitleState;
+  const subtitleSyncFeedback = useSubtitleSyncFeedback({
+    sync: subtitleSync,
+    tracks: subtitleUrls,
+    activeKey: activeSyncKey,
+    cueRevisions: syncCueRevisions,
+    loadState: subtitleLoadState,
+  });
+  const subtitleSyncNotice = isDetached ? null : subtitleSyncFeedback.notice;
+
+  // -- Reconnect subtitle handover --
+  // The session a lost connection left behind. When a reconnect has to start
+  // a new session, the first render of that session still holds the old
+  // selection; the handover below replaces it with the granted one, and until
+  // then nothing may send the stale track to the server.
+  const reconnectFromSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (connectionStatus !== "connected") {
+      reconnectFromSessionRef.current ??= sessionId;
+      return;
+    }
+    // The session survived the reconnect: nothing to hand over.
+    if (reconnectFromSessionRef.current === sessionId) reconnectFromSessionRef.current = null;
+  }, [connectionStatus, sessionId]);
+  const subtitleHandoverPending =
+    reconnectFromSessionRef.current !== null && reconnectFromSessionRef.current !== sessionId;
 
   // -- Authoritative subtitle track selection --
   // Some tracks (bitmap PGS/DVD/DVB) cannot be delivered as a sidecar and are
@@ -2634,6 +2890,10 @@ export function VideoPlayer({
       requestedSubtitleTrackChangeRef.current = null;
       return;
     }
+    // The selection is the lost session's until the handover applies the one
+    // the reconnect's start was granted; asking for it now would re-request a
+    // track the server may just have refused.
+    if (subtitleHandoverPending) return;
     const desiredServerIndex = pendingServerSubtitleSelection(
       plan.subtitle.mode,
       plan.selected_tracks.subtitle?.index ?? null,
@@ -2666,6 +2926,7 @@ export function VideoPlayer({
     plan.plan_id,
     plan.selected_tracks.subtitle?.index,
     plan.subtitle.mode,
+    subtitleHandoverPending,
   ]);
 
   // A refused replan leaves the previous stream playing, so the selection has
@@ -2691,7 +2952,22 @@ export function VideoPlayer({
   // A refusal pin belongs only to the session that rejected the automatic
   // selection. Clear it before the auto-selection effect evaluates a new
   // session so the viewer's persisted subtitle mode applies to the next title.
+  //
+  // A new session that a reconnect started is the same viewing, not the next
+  // title: it carries the viewer's subtitle state (including "off") in its
+  // start request, so the player adopts what the server granted and pins it
+  // rather than auto-selecting from the profile again. A track the server had
+  // to drop (a refused burn-in) comes back as no subtitle.
+  const grantedSubtitleIndexRef = useRef<number | null>(null);
+  grantedSubtitleIndexRef.current = plan.selected_tracks.subtitle?.index ?? null;
   useEffect(() => {
+    const reconnectFrom = reconnectFromSessionRef.current;
+    if (reconnectFrom !== null && reconnectFrom !== sessionId) {
+      reconnectFromSessionRef.current = null;
+      subtitleSelectionWasManualRef.current = true;
+      setActiveSubtitleIndex(grantedSubtitleIndexRef.current);
+      return;
+    }
     subtitleSelectionWasManualRef.current = false;
   }, [sessionId]);
 
@@ -2962,7 +3238,8 @@ export function VideoPlayer({
       const decision = decideRoomCatchup({
         action: command.action,
         targetPositionSeconds,
-        localPositionSeconds: toMediaTime(video.currentTime, timelineOffsetRef.current),
+        localPositionSeconds:
+          elementMediaPosition() ?? toMediaTime(video.currentTime, timelineOffsetRef.current),
         targetLocallySeekable,
       });
 
@@ -3091,6 +3368,7 @@ export function VideoPlayer({
     };
   }, [
     canSeekAnywhere,
+    elementMediaPosition,
     resetRoomCatchupRate,
     sessionId,
     watchTogetherRoomId,
@@ -3209,18 +3487,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps),
+    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps);
+      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe?.bitrate_kbps, qualityOptions]);
+  }, [activeQualityId, plan.effective_recipe, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -3230,7 +3508,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -3247,7 +3525,7 @@ export function VideoPlayer({
     );
   }, [
     activeQualityId,
-    plan.effective_recipe?.bitrate_kbps,
+    plan.effective_recipe,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -3726,8 +4004,56 @@ export function VideoPlayer({
         />
       ) : null}
 
+      {/* Mid-stream connection loss: retrying, or given up */}
+      {!isDetached && connectionStatus !== "connected" && connectionStatus !== "ended" && (
+        <div
+          role={connectionStatus === "reconnecting" ? "status" : "alert"}
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6"
+        >
+          <div className="flex max-w-md flex-col items-center gap-4 text-center">
+            {connectionStatus === "reconnecting" && (
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            )}
+            <div className="space-y-1">
+              <p className="text-base font-semibold text-white">
+                {connectionStatus === "reconnecting"
+                  ? "Reconnecting…"
+                  : (connectionErrorTitle ?? "Connection lost")}
+              </p>
+              <p className="text-sm text-white/60">
+                {connectionStatus === "reconnecting"
+                  ? "The connection to the server was lost. Playback will continue where you left off."
+                  : (connectionError ?? "Silo couldn't reconnect to the server.")}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {connectionStatus === "lost" && onRetryConnection && (
+                <button
+                  onClick={onRetryConnection}
+                  disabled={isLeaving}
+                  type="button"
+                  className="rounded bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90"
+                >
+                  Try again
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void handleExit();
+                }}
+                disabled={isLeaving}
+                type="button"
+                className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error state */}
-      {!isDetached && error && (
+      {!isDetached && error && connectionStatus === "connected" && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center">
             <div className="mb-4 text-sm text-white/60">{error}</div>
@@ -3760,8 +4086,17 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
+      {subtitleSyncNotice && (
+        <SubtitleSyncIndicator
+          notice={subtitleSyncNotice}
+          onDismiss={subtitleSyncFeedback.dismiss}
+        />
+      )}
+
+      {/* The sync indicator already says the corrected track is loading. */}
       {!isDetached &&
         activeSubtitleIndex !== null &&
+        subtitleSyncNotice?.tone !== "progress" &&
         (subtitleLoadState === "loading" || subtitleLoadState === "error") && (
           <div
             role="status"
@@ -3859,6 +4194,9 @@ export function VideoPlayer({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
+          trickplay={trickplay}
+          trickplayUpdatedAt={trickplayUpdatedAt}
+          onTrickplayError={onTrickplayError}
           regions={markerRegions}
           editing={markerEditor.editing}
           activeEditKind={markerEditor.activeKind}
@@ -3883,11 +4221,13 @@ export function VideoPlayer({
           sessionId={sessionId}
           getSubtitleStartPosition={getSubtitleStartPosition}
           onSubtitleJobAccepted={handleSubtitleJobAccepted}
+          subtitleSync={subtitleSync}
           audioTracks={audioTracks}
           activeAudioIndex={activeAudioIndex}
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
+          deliveredRecipe={plan.effective_recipe}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}

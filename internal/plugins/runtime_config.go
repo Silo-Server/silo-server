@@ -374,29 +374,73 @@ func backfillEncryptedConfigs(
 	return updated, nil
 }
 
+// ErrAuthProviderAlreadyEnabled refuses enabling an auth binding while
+// another one of the same kind, or of the same installation, is enabled: a
+// server has at most one primary external sign-in provider (OIDC, LDAP) and
+// at most one network identity provider, plus the built-in local accounts.
+// Identities and account rechecks are keyed by installation, so the two must
+// come from different installations.
+var ErrAuthProviderAlreadyEnabled = errors.New("another external sign-in provider is already enabled")
+
+// authBindingsLock serializes auth binding writes so two concurrent enables
+// cannot both pass the one-provider check.
+const authBindingsLock = "silo:plugin_auth_bindings"
+
+// AuthBindingIsNetworkSQL is the SQL test that the auth binding named by the
+// installation and capability expressions declares the "network" auth mode.
+// It reads the capability's stored manifest metadata, so a binding's kind
+// never drifts from what the plugin declares.
+func AuthBindingIsNetworkSQL(installation, capability string) string {
+	return `COALESCE((SELECT c.metadata->'auth_modes' ? 'network' FROM plugin_capabilities c
+		WHERE c.plugin_installation_id = ` + installation + ` AND c.capability_type = 'auth_provider.v1'
+			AND c.capability_id = ` + capability + `), false)`
+}
+
+// UpsertAuthBinding writes one binding row. Enabling it is refused with
+// ErrAuthProviderAlreadyEnabled while a different binding of the same kind
+// (network identity or not), or of the same installation, is enabled.
 func (s *RuntimeConfigStore) UpsertAuthBinding(ctx context.Context, binding AuthBinding) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO plugin_auth_bindings (
-			plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login
-		) VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
-			enabled = EXCLUDED.enabled,
-			display_order = EXCLUDED.display_order,
-			auto_provision = EXCLUDED.auto_provision,
-			default_login = EXCLUDED.default_login,
-			updated_at = NOW()
-	`,
-		binding.InstallationID,
-		binding.CapabilityID,
-		binding.Enabled,
-		binding.DisplayOrder,
-		binding.AutoProvision,
-		binding.DefaultLogin,
-	)
-	if err != nil {
-		return fmt.Errorf("upserting plugin auth binding: %w", err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, authBindingsLock); err != nil {
+			return fmt.Errorf("locking plugin auth bindings: %w", err)
+		}
+		if binding.Enabled {
+			var other bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (
+				SELECT 1 FROM plugin_auth_bindings b
+				WHERE b.enabled AND NOT (b.plugin_installation_id = $1 AND b.capability_id = $2)
+					AND (b.plugin_installation_id = $1
+						OR `+AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+` =
+							`+AuthBindingIsNetworkSQL("$1::bigint", "$2::text")+`))`,
+				binding.InstallationID, binding.CapabilityID).Scan(&other); err != nil {
+				return fmt.Errorf("checking enabled plugin auth bindings: %w", err)
+			}
+			if other {
+				return ErrAuthProviderAlreadyEnabled
+			}
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO plugin_auth_bindings (
+				plugin_installation_id, capability_id, enabled, display_order, auto_provision, default_login
+			) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
+				enabled = EXCLUDED.enabled,
+				display_order = EXCLUDED.display_order,
+				auto_provision = EXCLUDED.auto_provision,
+				default_login = EXCLUDED.default_login,
+				updated_at = NOW()
+		`,
+			binding.InstallationID,
+			binding.CapabilityID,
+			binding.Enabled,
+			binding.DisplayOrder,
+			binding.AutoProvision,
+			binding.DefaultLogin,
+		); err != nil {
+			return fmt.Errorf("upserting plugin auth binding: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *RuntimeConfigStore) GetAuthBinding(

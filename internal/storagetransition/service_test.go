@@ -124,11 +124,6 @@ func (j *activeMemoryJobs) Create(context.Context, adminjob.CreateJobInput) (*mo
 	return nil, errors.New("unexpected create")
 }
 
-type applyingErrorSettings struct {
-	*memorySettings
-	failCommit bool
-}
-
 type applyingFlakyReadSettings struct {
 	*memorySettings
 	remainingFailures int
@@ -192,23 +187,6 @@ func (s *applyingFlakyReadSettings) UpdateAtomic(ctx context.Context, update fun
 	s.mu.Unlock()
 	if committed && !s.committed {
 		s.committed = true
-		return errors.New("injected ambiguous commit error")
-	}
-	return nil
-}
-
-func (s *applyingErrorSettings) UpdateAtomic(ctx context.Context, update func(map[string]string) (map[string]string, error)) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	writes, err := update(clone(s.values))
-	if err != nil {
-		return err
-	}
-	for key, value := range writes {
-		s.values[key] = value
-	}
-	if s.failCommit && writes[blobstore.IdentitySettingKey] != "" {
-		s.failCommit = false
 		return errors.New("injected ambiguous commit error")
 	}
 	return nil
@@ -689,31 +667,6 @@ func TestFinalizeCommittedKeepsTargetIdentityMismatchFatal(t *testing.T) {
 	}
 }
 
-func TestPostRestartBrandingReconcileClearsDanglingReference(t *testing.T) {
-	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
-	stage := stagedTarget{ID: "branding", Policy: PolicyFresh, SourceIdentity: "s3|old|public|", TargetIdentity: target.Identity(), BrandingReconcile: true, Phase: transitionPhaseRestartPending, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal}}
-	raw, err := json.Marshal(stage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw), "branding.logo_asset": "missing.webp"}}
-	service := New(nil, settings, nil, target, nil)
-	service.postRestartBackoff = func(context.Context, int) error { return nil }
-	service.SetBrandingReconciler(func(context.Context) (int, int, error) {
-		if _, err := target.Stat(t.Context(), "branding/missing.webp"); !errors.Is(err, blobstore.ErrNotFound) {
-			return 1, 0, err
-		}
-		_ = settings.Set(t.Context(), "branding.logo_asset", "")
-		return 1, 1, nil
-	})
-	if err := service.RunPostRestartWork(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if settings.values["branding.logo_asset"] != "" {
-		t.Fatal("dangling branding reference survived post-restart reconciliation")
-	}
-}
-
 func TestBrandingFailureDoesNotRepeatCompletedCatalogReconcile(t *testing.T) {
 	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
 	stage := stagedTarget{ID: "branding-retry", Policy: PolicyFresh, SourceIdentity: "s3|old|public|", TargetIdentity: target.Identity(), PublicReconcile: true, BrandingReconcile: true, Phase: transitionPhaseRestartPending, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal}}
@@ -812,32 +765,6 @@ func TestPostRestartRetriesTransientPrecheckReadAndClearsRecovery(t *testing.T) 
 	}
 	if backoffs != 1 || settings.values[StagedTargetSettingKey] != "" {
 		t.Fatalf("backoffs=%d staged=%q", backoffs, settings.values[StagedTargetSettingKey])
-	}
-}
-
-func TestPostRestartFinalizesStageAfterBootReadFailure(t *testing.T) {
-	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
-	stage := stagedTarget{ID: "boot-read-retry", TargetIdentity: target.Identity(), Phase: transitionPhaseRestartPending}
-	raw, err := json.Marshal(stage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := &transientGetSettings{memorySettings: &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}, remainingFailures: 1}
-	service := New(nil, settings, nil, target, nil)
-	if err := service.FinalizeCommitted(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if settings.values[StagedTargetSettingKey] == "" {
-		t.Fatal("boot read failure unexpectedly cleared the committed stage")
-	}
-	if err := service.RunPostRestartWork(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if settings.values[StagedTargetSettingKey] != "" {
-		t.Fatal("post-restart recovery left the committed stage behind")
-	}
-	if err := service.RunPostRestartWork(t.Context()); err != nil {
-		t.Fatalf("repeated recovery failed: %v", err)
 	}
 }
 
@@ -957,28 +884,6 @@ func TestMigrateAllCopiesProviderCache(t *testing.T) {
 		if _, err := target.Stat(t.Context(), key); err != nil {
 			t.Fatalf("%s not copied: %v", key, err)
 		}
-	}
-}
-
-func TestMigrateAllKeepsAvatarsOutOfPublicS3Target(t *testing.T) {
-	source := &memoryStore{identity: "local|source", objects: map[string][]byte{
-		"branding/mark/a.webp":          []byte("brand"),
-		"profile-avatars/u/avatar.webp": []byte("private-avatar"),
-	}}
-	public := &memoryStore{identity: "s3|public", objects: map[string][]byte{}}
-	private := &memoryStore{identity: "s3|private", objects: map[string][]byte{}}
-	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:", source, public, "", func(int, int, string) {}, 0, "profile-avatars"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "avatars:profile-avatars", source, private, "profile-avatars", func(int, int, string) {}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := public.objects["profile-avatars/u/avatar.webp"]; ok {
-		t.Fatal("private avatar was copied to public target")
-	}
-	if string(private.objects["profile-avatars/u/avatar.webp"]) != "private-avatar" {
-		t.Fatal("avatar was not copied to private target")
 	}
 }
 
@@ -1311,6 +1216,7 @@ func TestLegacySharedSourceSeparatesPublicAndPrivateData(t *testing.T) {
 		"tmdb/poster.webp":              []byte("public"),
 		"profile-avatars/u/avatar.webp": []byte("avatar"),
 		"diagnostics/report.zip":        []byte("diagnostic"),
+		"catalog-seeds/library.zip":     []byte("seed"),
 	}}
 	publicTarget := &memoryStore{identity: "s3|endpoint|public-new|", objects: map[string][]byte{}}
 	privateTarget := &memoryStore{identity: "s3|endpoint|private-new|", objects: map[string][]byte{}}
@@ -1320,8 +1226,8 @@ func TestLegacySharedSourceSeparatesPublicAndPrivateData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pass.objects != 3 {
-		t.Fatalf("copied objects = %d, want public artwork, avatar, and diagnostic", pass.objects)
+	if pass.objects != 4 {
+		t.Fatalf("copied objects = %d, want public artwork, avatar, diagnostic, and catalog seed", pass.objects)
 	}
 	if string(privateTarget.objects["profile-avatars/u/avatar.webp"]) != "avatar" {
 		t.Fatal("avatar missing from private target")
@@ -1334,6 +1240,12 @@ func TestLegacySharedSourceSeparatesPublicAndPrivateData(t *testing.T) {
 	}
 	if _, ok := publicTarget.objects["diagnostics/report.zip"]; ok {
 		t.Fatal("legacy diagnostic was copied to public storage")
+	}
+	if string(privateTarget.objects["catalog-seeds/library.zip"]) != "seed" {
+		t.Fatal("legacy catalog seed missing from private target")
+	}
+	if _, ok := publicTarget.objects["catalog-seeds/library.zip"]; ok {
+		t.Fatal("legacy catalog seed was copied to public storage")
 	}
 }
 
@@ -1388,21 +1300,6 @@ func TestFinalFencedPassIncludesObjectWrittenAfterBulkCopy(t *testing.T) {
 	_ = reader.Close()
 	if string(data) != "between-passes" {
 		t.Fatalf("target data = %q", data)
-	}
-}
-
-func TestFinalFencedPassSkipsReadsForUnchangedSameRunObjects(t *testing.T) {
-	base := &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{"tmdb/a.webp": []byte("a")}}
-	source := &fencedMemoryStore{memoryStore: base}
-	target := &memoryStore{identity: "local|target", objects: map[string][]byte{}}
-	settings := stagedLocal(t, t.TempDir())
-	service := New(nil, settings, nil, source, nil)
-	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
-	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
-		t.Fatal(err)
-	}
-	if base.gets != 1 {
-		t.Fatalf("source Get calls = %d, want one bulk-pass read and no fenced-pass read", base.gets)
 	}
 }
 
@@ -1730,26 +1627,6 @@ func TestSameRunListingShortcutCoversMultiplePages(t *testing.T) {
 	}
 }
 
-func TestAmbiguousCommitErrorRemainsCommitted(t *testing.T) {
-	source := &fencedMemoryStore{memoryStore: &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{"tmdb/a.webp": []byte("a")}}}
-	baseSettings := stagedLocal(t, t.TempDir())
-	settings := &applyingErrorSettings{memorySettings: baseSettings, failCommit: true}
-	service := New(nil, settings, nil, source, nil)
-	service.reconcile = func(context.Context, blobstore.Store, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
-		return metadata.ArtworkReconcileStats{}, nil
-	}
-	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
-		t.Fatalf("ambiguous committed update returned failure: %v", err)
-	}
-	var staged stagedTarget
-	if err := json.Unmarshal([]byte(baseSettings.values[StagedTargetSettingKey]), &staged); err != nil {
-		t.Fatal(err)
-	}
-	if staged.Phase != transitionPhaseRestartPending || source.released || !source.fenced {
-		t.Fatalf("committed stage/fence = %#v fenced=%t released=%t", staged, source.fenced, source.released)
-	}
-}
-
 func TestAmbiguousCommitVerificationRetriesThroughTransientReadFailures(t *testing.T) {
 	source := &fencedMemoryStore{memoryStore: &memoryStore{identity: "s3|old|public|", objects: map[string][]byte{"tmdb/a.webp": []byte("a")}}}
 	settings := &applyingFlakyReadSettings{memorySettings: stagedLocal(t, t.TempDir()), remainingFailures: 2}
@@ -1757,6 +1634,13 @@ func TestAmbiguousCommitVerificationRetriesThroughTransientReadFailures(t *testi
 	service.commitVerifyBackoff = func(context.Context, int) error { return nil }
 	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
 		t.Fatalf("ambiguous committed update returned failure after verification recovered: %v", err)
+	}
+	var staged stagedTarget
+	if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &staged); err != nil {
+		t.Fatal(err)
+	}
+	if staged.Phase != transitionPhaseRestartPending {
+		t.Fatalf("committed stage phase = %q, want restart_pending", staged.Phase)
 	}
 	if !source.fenced || source.released {
 		t.Fatalf("committed source fence was released: fenced=%t released=%t", source.fenced, source.released)
@@ -1847,25 +1731,6 @@ func TestCancelQueuedTransitionMakesStageReplaceable(t *testing.T) {
 	}
 }
 
-func TestCopyPrefixSkipsInvalidListedKeys(t *testing.T) {
-	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{
-		"branding/":          {},
-		"branding/logo.webp": []byte("logo"),
-	}}
-	target := &memoryStore{identity: "s3|new|bucket|", objects: map[string][]byte{}}
-	service := testService(&memorySettings{values: map[string]string{}}, source)
-	copied, _, skipped, err := service.copyPrefix(t.Context(), "invalid-keys", "public:", source, target, "", func(int, int, string) {}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if copied != 1 || len(skipped) != 1 || skipped[0] != "branding/" {
-		t.Fatalf("copied=%d skipped=%#v", copied, skipped)
-	}
-	if _, ok := target.objects["branding/"]; ok {
-		t.Fatal("invalid folder marker was copied")
-	}
-}
-
 func TestTransitionResultSurfacesSkippedInvalidKeys(t *testing.T) {
 	source := &memoryStore{identity: "s3|old|bucket|", objects: map[string][]byte{
 		"branding/":          {},
@@ -1881,7 +1746,7 @@ func TestTransitionResultSurfacesSkippedInvalidKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := value.(Result)
-	if result.SkippedObjects != 1 || len(result.SkippedKeys) != 1 || result.SkippedKeys[0] != "branding/" {
+	if result.CopiedObjects != 1 || result.SkippedObjects != 1 || len(result.SkippedKeys) != 1 || result.SkippedKeys[0] != "branding/" {
 		t.Fatalf("result skipped fields = %#v", result)
 	}
 	if !slices.Contains(messages, "Skipped invalid storage key branding/") {
@@ -1984,11 +1849,11 @@ func TestCopyPrefixResumeRevalidatesCompletedSourceObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "initial", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	firstGets := source.gets
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "resumed", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if source.gets != firstGets+2 {
@@ -2002,11 +1867,11 @@ func TestCopyPrefixResumeFindsObjectsAddedBeforeSavedCursor(t *testing.T) {
 	}}
 	target := &memoryStore{identity: "s3|new|bucket|", objects: map[string][]byte{}}
 	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "initial", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	source.objects["tmdb/a.webp"] = []byte("new-before-cursor")
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "resumed", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if string(target.objects["tmdb/a.webp"]) != "new-before-cursor" {
@@ -2020,11 +1885,11 @@ func TestCopyPrefixResumeRepairsChangedSourceObject(t *testing.T) {
 	}}
 	target := &memoryStore{identity: "s3|new|bucket|", objects: map[string][]byte{}}
 	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "initial", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	source.objects["tmdb/a.webp"] = []byte("other") // same size, different content
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "resumed", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if string(target.objects["tmdb/a.webp"]) != "other" {
@@ -2038,12 +1903,12 @@ func TestCopyPrefixRepairsSameSizeCorruptionOnResume(t *testing.T) {
 	}}
 	target := &memoryStore{identity: "target", objects: map[string][]byte{}}
 	service := testService(&memorySettings{values: map[string]string{}}, source)
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "initial", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	firstGets := source.gets
 	target.objects["tmdb/a.webp"] = []byte("wrong") // same length as the verified source object
-	if _, _, _, err := service.copyPrefix(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0); err != nil {
+	if _, _, _, err := service.copyPrefixPass(t.Context(), "transition-1", "public:tmdb", source, target, "tmdb", func(int, int, string) {}, 0, "resumed", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if source.gets != firstGets+2 {

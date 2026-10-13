@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from "lucide-react";
+import { Link } from "react-router";
 import type {
   AutoscanConnection,
   AutoscanConnectionInput,
@@ -52,7 +53,7 @@ import {
   useTestAutoscanConnection,
   useUpdateAutoscanConnection,
 } from "@/hooks/queries/useAutoscan";
-import { useRequestIntegrations } from "@/hooks/queries/useRequests";
+import { useRequestIntegrations } from "@/hooks/queries/admin/requests";
 
 // ---------------------------------------------------------------------------
 // Dialog mode types
@@ -401,12 +402,19 @@ export default function ConnectionsPanel() {
             {/* Reuse mode */}
             {dialog.mode === "reuse" && (
               <div className="space-y-1.5">
-                <Label>Requests integration</Label>
+                <Label>Request server</Label>
                 {requestIntegrations.isLoading ? (
-                  <p className="text-muted-foreground text-sm">Loading integrations…</p>
+                  <p className="text-muted-foreground text-sm">Loading servers…</p>
                 ) : arrIntegrations.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
-                    No Sonarr/Radarr integrations found. Add one in the Requests page first.
+                    No Sonarr or Radarr servers yet. Add one under{" "}
+                    <Link
+                      to="/admin/settings/requests"
+                      className="text-foreground underline underline-offset-2"
+                    >
+                      Settings › Requests
+                    </Link>{" "}
+                    first, or enter credentials manually.
                   </p>
                 ) : (
                   <Select
@@ -417,7 +425,7 @@ export default function ConnectionsPanel() {
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select an integration…" />
+                      <SelectValue placeholder="Select a server…" />
                     </SelectTrigger>
                     <SelectContent>
                       {arrIntegrations.map((integration) => (

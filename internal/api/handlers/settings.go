@@ -14,7 +14,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -59,33 +58,18 @@ type ServerSettingReader interface {
 type SettingsHandler struct {
 	storeProvider  userstore.UserStoreProvider
 	serverSettings ServerSettingReader
-	deviceSeen     *cache.TTLCache[struct{}]
-	EventsHub      *evt.Hub
+	// DeviceSightings registers the request's device; the router shares one
+	// instance across every handler that records sightings.
+	DeviceSightings *DeviceSightings
+	EventsHub       *evt.Hub
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
 func NewSettingsHandler(provider userstore.UserStoreProvider) *SettingsHandler {
 	return &SettingsHandler{
-		storeProvider: provider,
-		deviceSeen:    cache.NewTTLCache[struct{}](),
+		storeProvider:   provider,
+		DeviceSightings: NewDeviceSightings(),
 	}
-}
-
-// shouldRegisterDevice reports whether the device's last_seen_at should be
-// refreshed now, throttling to one upsert per deviceSeenThrottle window per
-// (profile, device). It marks the device seen before returning true so a burst
-// of concurrent reads collapses to a single upsert instead of contending on the
-// device row.
-func (h *SettingsHandler) shouldRegisterDevice(profileID, deviceID string) bool {
-	if h == nil || h.deviceSeen == nil {
-		return true
-	}
-	key := profileID + "\x00" + deviceID
-	if _, seen := h.deviceSeen.Get(key); seen {
-		return false
-	}
-	h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
-	return true
 }
 
 // SetServerSettings configures the optional server settings reader for overlay config etc.
@@ -904,31 +888,7 @@ func (h *SettingsHandler) registerRequestDevice(
 	profileID string,
 	device DeviceMetadata,
 ) {
-	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(device.DeviceID) == "" {
-		return
-	}
-	if store == nil {
-		return
-	}
-	if !h.shouldRegisterDevice(profileID, device.DeviceID) {
-		return
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		return
-	}
-	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
-		ProfileID:      profileID,
-		DeviceID:       device.DeviceID,
-		DeviceName:     device.DeviceName,
-		DevicePlatform: device.DevicePlatform,
-	}); err != nil {
-		slog.WarnContext(ctx, "failed to register request device", "component", "api",
-			"profile_id", profileID,
-			"device_id", device.DeviceID,
-			"error", err,
-		)
-	}
+	h.DeviceSightings.Record(ctx, store, profileID, device)
 }
 
 func clampHeaderValue(value string, maxLen int) string {

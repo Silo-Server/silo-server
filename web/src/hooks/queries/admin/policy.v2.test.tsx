@@ -12,7 +12,6 @@ import {
   useActivatePolicyVersion,
   useCreatePolicyDocument,
   useCreatePolicyVersion,
-  useDeletePolicyDocument,
   useSetPolicyDocumentEnabled,
   useSimulatePolicy,
   useValidatePolicy,
@@ -57,7 +56,6 @@ it("sends each nonretryable policy mutation only once on401 even with refresh av
       save: useCreatePolicyVersion(),
       activate: useActivatePolicyVersion(),
       enable: useSetPolicyDocumentEnabled(),
-      remove: useDeletePolicyDocument(),
       validate: useValidatePolicy(),
       simulate: useSimulatePolicy(),
     }),
@@ -70,7 +68,6 @@ it("sends each nonretryable policy mutation only once on401 even with refresh av
       result.current.activate.mutateAsync({ documentId: "12", version: "95", etag: '"original"' }),
     () =>
       result.current.enable.mutateAsync({ documentId: "12", enabled: false, etag: '"original"' }),
-    () => result.current.remove.mutateAsync({ documentId: "12", etag: '"original"' }),
     () => result.current.validate.mutateAsync({ domain: "scope", source: "source" }),
     () => result.current.simulate.mutateAsync({ domain: "scope", input: {} }),
   ];

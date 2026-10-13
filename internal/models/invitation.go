@@ -10,11 +10,22 @@ const (
 	InvitationStatusRevoked  = "revoked"
 )
 
-// Invitation is a single-use, email-bound claim token carrying the access
-// the admin chose at send time. No users row exists until it is accepted.
+// Invitation delivery records how the claim link reached the invitee. Empty
+// means the row predates delivery tracking.
+const (
+	InvitationDeliveryLink             = "link"
+	InvitationDeliveryEmailSent        = "email_sent"
+	InvitationDeliveryEmailUnconfirmed = "email_unconfirmed"
+)
+
+// Invitation is a single-use claim token carrying the access the admin chose
+// at send time. No users row exists until it is accepted.
 type Invitation struct {
-	ID            int64
+	ID int64
+	// Email is the bound address. It is empty for a pending link invitation,
+	// whose invitee enters an address at accept; accept then records it.
 	Email         string
+	Delivery      string
 	TokenHash     string
 	Role          string
 	AccessGroupID *int64
@@ -53,7 +64,9 @@ func (i *Invitation) Status(now time.Time) string {
 
 // CreateInvitationInput carries the admin's choices for a new invitation.
 type CreateInvitationInput struct {
+	// Email is empty for a link invitation.
 	Email         string
+	Delivery      string
 	Role          string
 	AccessGroupID *int64
 	LibraryIDs    []int

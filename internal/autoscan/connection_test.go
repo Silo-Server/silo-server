@@ -57,14 +57,6 @@ func TestResolveConnectionLinked(t *testing.T) {
 	}
 }
 
-func TestResolveConnectionLinkedMissingErrors(t *testing.T) {
-	r := NewConnectionResolver(fakeRequestLookup{})
-	id := "gone"
-	if _, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id}); err == nil {
-		t.Fatal("expected error when linked Requests integration is missing")
-	}
-}
-
 func TestResolveConnectionLinkedLookupErrors(t *testing.T) {
 	r := NewConnectionResolver(fakeRequestLookup{err: errors.New("boom")})
 	id := "req-1"

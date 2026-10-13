@@ -1,0 +1,45 @@
+{
+  "items": [
+    {
+      "device_id": "device-tv",
+      "device_name": "Apple TV",
+      "device_platform": "tvOS",
+      "last_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_updated": "2026-01-02T03:04:05.000Z",
+      "override_count": 2,
+      "profiles": [
+        {
+          "profile_id": "p-owner",
+          "profile_name": "Owner",
+          "override_count": 2,
+          "last_seen_at": "2026-01-02T03:04:05.678Z"
+        },
+        {
+          "profile_id": "p-gone",
+          "profile_name": "",
+          "override_count": 0,
+          "last_seen_at": null
+        }
+      ]
+    },
+    {
+      "device_id": "device-settings-only",
+      "device_name": "Living Room",
+      "device_platform": "android",
+      "last_seen_at": null,
+      "last_updated": "2026-01-01T09:00:00.000Z",
+      "override_count": 1,
+      "profiles": [
+        {
+          "profile_id": "p-owner",
+          "profile_name": "Owner",
+          "override_count": 1,
+          "last_seen_at": null
+        }
+      ]
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

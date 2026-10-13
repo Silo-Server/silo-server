@@ -422,10 +422,6 @@ func (s *MetadataService) bulkEnrichmentTargets(ctx context.Context) ([]bulkEnri
 	}
 	// Chain providers are matched to capabilities by installation and
 	// capability ID, since two installations may share a capability ID.
-	type capabilityKey struct {
-		installationID int
-		capabilityID   string
-	}
 	var targets []bulkEnrichmentTarget
 	index := make(map[capabilityKey]int)
 	for _, capability := range capabilities {

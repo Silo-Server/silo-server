@@ -13,7 +13,7 @@ import (
 
 // positionOnlySamples is how many heartbeats each test sends without a pause
 // change.
-const positionOnlySamples = 100
+const positionOnlySamples = 2
 
 // A progress heartbeat must not reconcile the node's whole session snapshot.
 // The periodic reconcile tick carries position; a pause flip and a stop still

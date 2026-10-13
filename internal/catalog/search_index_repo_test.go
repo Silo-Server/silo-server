@@ -96,17 +96,6 @@ func TestEnqueueSearchIndexUpsertRunsWhenProviderIsMeilisearch(t *testing.T) {
 	}
 }
 
-func TestItemRepositoryActiveProviderDisablesSearchIndexEvents(t *testing.T) {
-	repo := (&ItemRepository{}).WithActiveSearchProvider(SearchProviderPostgres)
-
-	if repo.searchIndexEvents == nil {
-		t.Fatal("searchIndexEvents is nil")
-	}
-	if !repo.searchIndexEvents.disabledByActiveProvider() {
-		t.Fatal("postgres active provider should disable search index event work")
-	}
-}
-
 func TestPruneProcessedSearchIndexEventsPreservesRecoveryRows(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {

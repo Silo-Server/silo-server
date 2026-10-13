@@ -10,23 +10,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
-func TestParseArtworkObjectKeyRebuildsOriginalVariant(t *testing.T) {
-	t.Parallel()
-	got, ok := parseArtworkObjectKey(blobstore.ObjectInfo{
-		Key: "local/movies/31190/19f56348/poster/w780.abc123.webp",
-	})
-	if !ok {
-		t.Fatal("expected a well-formed ladder key to parse")
-	}
-	want := "local/movies/31190/19f56348/poster/original.abc123.webp"
-	if got.original != want {
-		t.Fatalf("original path = %q, want %q", got.original, want)
-	}
-	if got.key != "local/movies/31190/19f56348/poster/w780.abc123.webp" {
-		t.Fatalf("key was rewritten: %q", got.key)
-	}
-}
-
 func TestParseArtworkObjectKeyLeavesOriginalUnchanged(t *testing.T) {
 	t.Parallel()
 	// The original variant must map to itself, or every currently-referenced
@@ -58,21 +41,6 @@ func TestParseArtworkObjectKeyRejectsUnrecognizedShapes(t *testing.T) {
 		if _, ok := parseArtworkObjectKey(blobstore.ObjectInfo{Key: key}); ok {
 			t.Errorf("key %q parsed but should have been rejected", key)
 		}
-	}
-}
-
-func TestParseArtworkObjectKeyCarriesModifiedTime(t *testing.T) {
-	t.Parallel()
-	when := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
-	got, ok := parseArtworkObjectKey(blobstore.ObjectInfo{
-		Key:     "local/movies/1/poster/w300.abc.webp",
-		ModTime: when,
-	})
-	if !ok {
-		t.Fatal("expected key to parse")
-	}
-	if got.modified.IsZero() || !got.modified.Equal(when) {
-		t.Fatalf("modified = %v, want %v", got.modified, when)
 	}
 }
 
@@ -304,30 +272,6 @@ func TestSweepResumesAcrossPagesAndStopsAtMaxPages(t *testing.T) {
 	}
 	if stats.PrefixDone {
 		t.Fatal("a bounded run that stopped early must not claim the prefix is finished")
-	}
-}
-
-func TestSweepWithoutAPoolSkipsClusterLocking(t *testing.T) {
-	t.Parallel()
-	// The lock needs a pool. A sweeper without one (as in these tests) must
-	// still run rather than dereference nil — pglock's nil-pool behavior is
-	// not safe to rely on.
-	storage := &fakeArtworkStorage{
-		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 2, 72*time.Hour)},
-		tokens: []string{""},
-	}
-	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{
-		"local/item0/poster/original.hash0.webp": {},
-		"local/item1/poster/original.hash1.webp": {},
-	}, 1)
-	if err != nil {
-		t.Fatalf("sweep failed: %v", err)
-	}
-	if stats.Skipped {
-		t.Fatal("a sweeper with no pool must not report itself skipped")
-	}
-	if stats.Referenced != 2 {
-		t.Fatalf("referenced = %d, want 2", stats.Referenced)
 	}
 }
 

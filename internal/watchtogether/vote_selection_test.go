@@ -112,33 +112,29 @@ func TestPromotingBeforeAnyoneVotesIsRefused(t *testing.T) {
 	}
 }
 
-// The host bypassing the tally with a direct selection would make the counts on
-// everyone else's screen decoration.
-
 // VoteWinner still reports the leader (and refuses to name one with no votes)
 // for v1 promotion and clients that show who is ahead.
 func TestVoteWinnerStillReportsTheLeader(t *testing.T) {
-	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
+	ordered := voteRoomSuggestions()
+	ordered[1].VoteCount = ordered[0].VoteCount
+	service, _ := newVoteRoomService(t, RoomSelectionModeVote, ordered)
 	winner, err := service.VoteWinner(context.Background(), "room-1")
 	if err != nil || winner.ID != "winner" {
 		t.Fatalf("VoteWinner() = %+v, %v", winner, err)
 	}
-	service.suggestions = &stubSuggestions{ordered: []Suggestion{{ID: "a", RoomID: "room-1", VoteCount: 0}}}
-	if _, err := service.VoteWinner(context.Background(), "room-1"); !errors.Is(err, ErrNoVotesCast) {
-		t.Fatalf("VoteWinner() with no votes error = %v, want ErrNoVotesCast", err)
-	}
-}
-
-// The host bypassing the tally with a direct selection would make the counts on
-// everyone else's screen decoration.
-func TestDirectSelectionIsRefusedInAVoteRoom(t *testing.T) {
-	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
-
-	_, err := service.SelectItem(context.Background(), "room-1", 7, "host", SelectItemInput{
-		ContentID: "movie-winner",
-	})
-	if !errors.Is(err, ErrVoteRoomSelection) {
-		t.Fatalf("SelectItem() error = %v, want ErrVoteRoomSelection", err)
+	for _, tt := range []struct {
+		name        string
+		suggestions []Suggestion
+	}{
+		{name: "empty"},
+		{name: "unvoted", suggestions: []Suggestion{{ID: "a", RoomID: "room-1", VoteCount: 0}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			service.suggestions = &stubSuggestions{ordered: tt.suggestions}
+			if _, err := service.VoteWinner(context.Background(), "room-1"); !errors.Is(err, ErrNoVotesCast) {
+				t.Fatalf("VoteWinner() with no votes error = %v, want ErrNoVotesCast", err)
+			}
+		})
 	}
 }
 

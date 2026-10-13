@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAccountPasswordCapability, useChangeAccountPassword } from "@/hooks/queries/account";
+import { AccountSignInSection } from "./AccountSignInSection";
 
 function passwordByteLength(value: string) {
   return new TextEncoder().encode(value).length;
@@ -142,6 +143,8 @@ export default function AccountSettings() {
           </form>
         )}
       </SettingsGroup>
+
+      <AccountSignInSection />
     </div>
   );
 }

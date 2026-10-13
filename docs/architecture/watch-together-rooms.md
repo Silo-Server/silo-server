@@ -64,6 +64,17 @@ that member (an explicit action is intent, not a stale position). While it is
 set, a host's reports are treated like a guest's: corrected, never
 authoritative. The flag is persisted with the shared room runtime.
 
+An authoritative host report that changes the pause state is a transport
+decision, such as a pause from the system controls that never became a
+transport request. It moves `Room.PlaybackState` (`playing`/`paused`) and
+`Room.ResumeOnReady` together with `Room.IsPaused`, the same way a play or
+pause request does. Guest corrections, re-attach syncs, and buffering barriers
+choose play or pause from those two fields; a report that updates only `IsPaused`
+would leave a paused room telling members to play. Any authoritative host report
+is also issued as the room's transport command, as a request would be: members
+on other API servers receive it through the reconciler, and an earlier command
+cannot be replayed to a member whose socket renews before it re-attaches.
+
 ## Two counters
 
 `generation` is the optimistic-concurrency counter. Every persisted change

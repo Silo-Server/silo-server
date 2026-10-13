@@ -12,31 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestRenderCollectionPosterPNG(t *testing.T) {
-	got, err := generatedCollectionPoster("My Favorite Films")
-	if err != nil {
-		t.Fatalf("render poster: %v", err)
-	}
-	img, err := png.Decode(bytes.NewReader(got))
-	if err != nil {
-		t.Fatalf("decode poster PNG: %v", err)
-	}
-	if w := img.Bounds().Dx(); w != generatedPosterWidth {
-		t.Fatalf("poster width = %d, want %d", w, generatedPosterWidth)
-	}
-	if h := img.Bounds().Dy(); h != generatedPosterHeight {
-		t.Fatalf("poster height = %d, want %d", h, generatedPosterHeight)
-	}
-
-	cached, err := generatedCollectionPoster("My Favorite Films")
-	if err != nil {
-		t.Fatalf("render cached poster: %v", err)
-	}
-	if !bytes.Equal(got, cached) {
-		t.Fatal("cached poster bytes differ from first render")
-	}
-}
-
 func TestServeCollectionImageServesBundledTemplatePoster(t *testing.T) {
 	const secret = "image-secret"
 	codec := NewResourceIDCodec()
@@ -115,8 +90,12 @@ func TestServeCollectionImageGeneratesFallbackWhenNoPoster(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
 		t.Fatalf("Content-Type = %q, want image/png", ct)
 	}
-	if _, err := png.Decode(bytes.NewReader(rec.Body.Bytes())); err != nil {
+	img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
 		t.Fatalf("generated fallback is not a valid PNG: %v", err)
+	}
+	if img.Bounds().Dx() != generatedPosterWidth || img.Bounds().Dy() != generatedPosterHeight {
+		t.Fatalf("poster dimensions = %v, want %dx%d", img.Bounds(), generatedPosterWidth, generatedPosterHeight)
 	}
 }
 

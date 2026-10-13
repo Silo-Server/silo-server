@@ -90,3 +90,28 @@ func TestNativeSubtitlePlanIdentityDistinguishesFallbackAndTrack(t *testing.T) {
 		}
 	}
 }
+
+// A remuxed MKV keeps its original Matroska track numbers, so the second
+// subtitle stream can be track 6. The planner hands the client the number the
+// scanner recorded, never one derived from the stream index.
+func TestNativeEmbeddedSubtitleV3UsesRecordedMatroskaTrackNumber(t *testing.T) {
+	f := detailedFixtureFileV3()
+	f.Container = "mkv"
+	f.ExternalSubtitles = nil
+	f.SubtitleTracks = []models.SubtitleTrack{
+		{Index: 2, ContainerTrackID: "5", Codec: "subrip", Language: "eng"},
+		{Index: 3, ContainerTrackID: "6", Codec: "subrip", Language: "eng", HearingImpaired: true},
+	}
+	r := validStartRequestV3()
+	r.SubtitleTrackIndex = new(1)
+	r.ClientFeatures = append(r.ClientFeatures, FeatureEmbeddedSubtitlesV3)
+	d := DeliveryClassOriginalHTTPV3
+	caps := r.ClientPlaybackContext.Deliveries[d]
+	caps.Subtitles.NativeEmbedded = []NativeEmbeddedSubtitleCapabilityV3{{Container: "mkv", Codecs: []string{"subrip", "ass"}, TrackIdentity: "container_track_id"}}
+	r.ClientPlaybackContext.Deliveries[d] = caps
+
+	got := ResolveSubtitlePolicyV3(f, r, true, d, nil)
+	if got.Decision.Embedded == nil || got.Decision.Embedded.StreamIndex != 3 || got.Decision.Embedded.ContainerTrackID != "6" {
+		t.Fatalf("decision = %+v, want stream 3 as Matroska track 6", got.Decision)
+	}
+}

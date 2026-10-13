@@ -44,11 +44,48 @@ type QueryExecutor struct {
 	// this timestamp.  This prevents offset-based pagination drift when new
 	// items are inserted between page fetches (e.g. during a scan).
 	SnapshotAt *time.Time
+	// SeekAnchors, when set, lets SeekCursor start from a cached anchor
+	// instead of numbering every row before the target. Set it only with a
+	// SnapshotAt the caller keeps across requests: anchors are cached per
+	// snapshot.
+	SeekAnchors *seekAnchorCache
+	// LetterIndexes, when set, caches LetterIndex answers per query.
+	LetterIndexes *letterIndexCache
 }
 
 func (e *QueryExecutor) Preview(ctx context.Context, def QueryDefinition, access AccessFilter, limit int) ([]*models.MediaItem, int, error) {
 	items, total, _, err := e.PreviewPage(ctx, def, access, limit, 0, true)
 	return items, total, err
+}
+
+// Count answers how many items def matches for the viewer, capped at def.Limit,
+// without reading a page: the total PreviewCursorPage reports for the same
+// definition and access.
+func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access AccessFilter) (int, error) {
+	if e == nil || e.Pool == nil {
+		return 0, fmt.Errorf("query executor requires a database pool")
+	}
+	countSQL, countArgs, err := e.buildCountQuery(def, access)
+	if err != nil {
+		return 0, err
+	}
+	var total int
+	if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting query matches: %w", err)
+	}
+	return total, nil
+}
+
+func (e *QueryExecutor) buildCountQuery(def QueryDefinition, access AccessFilter) (string, []any, error) {
+	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	if err != nil {
+		return "", nil, err
+	}
+	if def.Limit != nil && !e.GroupByWork {
+		plan.maxResults = *def.Limit
+	}
+	countSQL, countArgs := plan.countSQL()
+	return countSQL, countArgs, nil
 }
 
 func (e *QueryExecutor) PreviewPage(
@@ -175,6 +212,9 @@ type previewPagePlan struct {
 	maxResults            int
 	limitArgIdx           int
 	deferEpisodeHydration bool
+	// titleKey is the scope's title sort key, which title order sorts by and
+	// the letter index files items under. It binds no arguments.
+	titleKey string
 }
 
 // countSQL renders a count-only query that returns the total number of rows
@@ -280,14 +320,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		return previewPagePlan{}, err
 	}
 
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
+	libraryIDs, libraryScopeEmpty := access.LibraryScope(def.LibraryIDs)
 
 	// Scope can be set externally (e.g. catalog resolver pre-fills it from
 	// the request) or implied by the query definition's MediaScope (e.g.
@@ -313,7 +346,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		libraryScopeHandledInBaseRelation = handled
 	}
 	if strings.TrimSpace(baseRelation) == "" {
-		baseRelation = "media_items mi"
+		baseRelation = mediaItemsBaseRelation
 	}
 
 	builder := NewQueryBuilder("mi").
@@ -321,6 +354,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		WithUserScope(access.UserID, access.ProfileID).
 		WithMediaScope(effectiveScope).
 		WithLibraryScope(libraryIDs)
+	if baseRelation == mediaItemsBaseRelation {
+		builder.WithMediaItemsRelation()
+	}
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
 		return previewPagePlan{}, err
@@ -378,7 +414,8 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
-	} else if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+	}
+	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")
 	}
 	if access.AllowedContentIDs != nil {
@@ -404,15 +441,12 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		// Dual-column OR matching browse.go and favorites_browse.go: items where
-		// a curated sort_title differs from title (e.g. title="The Office",
-		// sort_title="Office, The") would be silently lost on prefix="the" if we
-		// only checked the COALESCE'd sort-key expression. The first arm uses the
-		// scope-specific sort key; the second arm keeps literal title prefixes.
-		prefixSortExpr := builder.normalizedTitleExpr()
+		// Match only the scope-specific sort key that title sorting orders by,
+		// like sortTitlePrefixCondition in browse.go: title="The Office" with
+		// sort_title="Office, The" belongs under O, not also under T.
 		conditions = append(conditions, fmt.Sprintf(
-			"(%s LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			prefixSortExpr, argIdx, argIdx,
+			"%s LIKE $%d ESCAPE '\\'",
+			builder.normalizedTitleExpr(), argIdx,
 		))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
@@ -499,6 +533,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		offset:          offset,
 		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
+		titleKey:        builder.normalizedTitleExpr(),
 		// Keep non-episode relations, sort joins, history CTEs and source-ordered
 		// plans on their existing paths. Only the built-in episode relation
 		// guarantees the unique IDs and simple, deterministic title sort required
@@ -558,7 +593,12 @@ func (e *QueryExecutor) buildPreviewPageSQL(
 // escapePrefixForLike lower-cases the prefix and escapes %, _, and \ so the
 // resulting string is safe to use as a LIKE pattern with ESCAPE '\'.
 func escapePrefixForLike(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
+	return escapeLikeLiteral(strings.ToLower(strings.TrimSpace(s)))
+}
+
+// escapeLikeLiteral escapes LIKE wildcards and the escape character itself
+// for use with ESCAPE '\', leaving case to the database.
+func escapeLikeLiteral(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
@@ -607,6 +647,14 @@ func buildLibraryScopeJoin(
 	}
 
 	if len(disabledLibraryIDs) > 0 {
+		// Match per-item access: a disabled-only scope must not admit orphan
+		// items through a vacuous NOT EXISTS.
+		if len(allowedLibraryIDs) == 0 {
+			clauses = append(clauses, fmt.Sprintf(
+				`EXISTS (SELECT 1 FROM %s mil_scope_in WHERE mil_scope_in.%s = %s)`,
+				tableName, keyColumn, itemContentExpr,
+			))
+		}
 		clauses = append(clauses, fmt.Sprintf(
 			`NOT EXISTS (SELECT 1 FROM %s mil_scope_out WHERE mil_scope_out.%s = %s AND mil_scope_out.media_folder_id = ANY($%d))`,
 			tableName, keyColumn, itemContentExpr, argIdx,

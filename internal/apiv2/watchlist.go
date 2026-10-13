@@ -86,7 +86,7 @@ func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *Wa
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, func(e userstore.WatchlistEntry) userstore.ListKey {
+	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, reg.ratingSelection(ctx), func(e userstore.WatchlistEntry) userstore.ListKey {
 		return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
 	})
 	if p != nil {

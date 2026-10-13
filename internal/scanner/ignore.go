@@ -155,6 +155,15 @@ func dirIgnoreRules(inherited []ignoreRules, dirLogicalPath, dirPhysicalPath str
 	return rules, false
 }
 
+// DirSkipped reports whether a directory's own ignore files exclude it and
+// everything under it: it holds .nomedia, or an .ignore without a valid
+// pattern. entries is the directory's listing. Real-time library monitoring
+// uses it, so it skips exactly the directories a scan skips.
+func DirSkipped(dir string, entries []fs.DirEntry) bool {
+	_, skip := dirIgnoreRules(nil, dir, dir, entries)
+	return skip
+}
+
 // parseIgnorePatterns converts .siloignore file content into match patterns.
 // Blank lines and `#` comments are dropped, the rest is kept verbatim.
 func parseIgnorePatterns(content string) []string {

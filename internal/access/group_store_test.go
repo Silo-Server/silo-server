@@ -433,3 +433,60 @@ func accessPolicyRevisionForUser(t *testing.T, ctx context.Context, pool *pgxpoo
 	}
 	return revision
 }
+
+func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
+	ctx, pool, store, suffix := newGroupStoreDBTest(t)
+	seedID := defaultAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+
+	group := createTestGroup(t, ctx, store, suffix, "delete-moving")
+	first := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 1)
+	second := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 2)
+	revisions := map[int]int64{}
+	for _, id := range []int{first, second} {
+		var revision int64
+		if err := pool.QueryRow(ctx, `SELECT access_policy_revision FROM users WHERE id = $1`, id).Scan(&revision); err != nil {
+			t.Fatalf("load revision: %v", err)
+		}
+		revisions[id] = revision
+	}
+
+	// Moved members keep their sign-ins; the revision bump alone carries the
+	// policy change.
+	sessionID := "delete-moving-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at) VALUES ($1, $2, 'test', now() + interval '1 day')`, sessionID, first); err != nil {
+		t.Fatalf("insert member session: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM auth_sessions WHERE id = $1`, sessionID) })
+
+	if err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}); err != nil {
+		t.Fatalf("DeleteMovingMembers() error: %v", err)
+	}
+	var revokedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT revoked_at FROM auth_sessions WHERE id = $1`, sessionID).Scan(&revokedAt); err != nil {
+		t.Fatalf("load member session: %v", err)
+	}
+	if revokedAt != nil {
+		t.Fatalf("moved member's session revoked at %v, want it kept", revokedAt)
+	}
+	for _, id := range []int{first, second} {
+		var (
+			groupID  *int64
+			revision int64
+		)
+		if err := pool.QueryRow(ctx, `SELECT access_group_id, access_policy_revision FROM users WHERE id = $1`, id).Scan(&groupID, &revision); err != nil {
+			t.Fatalf("load moved member: %v", err)
+		}
+		if groupID == nil || *groupID != seedID {
+			t.Fatalf("member %d group = %v, want the default group %d", id, groupID, seedID)
+		}
+		if revision != revisions[id]+1 {
+			t.Fatalf("member %d access_policy_revision = %d, want %d", id, revision, revisions[id]+1)
+		}
+	}
+	if _, err := store.Get(ctx, group.ID); !errors.Is(err, ErrGroupNotFound) {
+		t.Fatalf("Get(deleted group) error = %v, want ErrGroupNotFound", err)
+	}
+}

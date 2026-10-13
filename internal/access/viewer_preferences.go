@@ -24,6 +24,9 @@ type ViewerPreferences struct {
 	// NextUpMode is ui.next_up_mode. It rides along so home-section requests
 	// can read it from the resolved scope instead of resolving it again.
 	NextUpMode string
+	// Degraded reports that the read failed and the values are the contract
+	// defaults rather than the profile's own.
+	Degraded bool
 }
 
 // ResolveViewerPreferences resolves the profile's viewer-scope preferences in
@@ -42,7 +45,7 @@ func ResolveViewerPreferences(
 	preferences, err := ResolveViewerPreferencesStrict(ctx, store, profileID)
 	if err != nil {
 		slog.WarnContext(ctx, "viewer preference resolution degraded", "component", "access", "profile_id", profileID, "error", err)
-		return ViewerPreferences{}
+		return ViewerPreferences{Degraded: true}
 	}
 	return preferences
 }

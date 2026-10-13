@@ -1315,10 +1315,6 @@ func probeTargetStorage(ctx context.Context, target blobstore.Store) (resultErr 
 	return nil
 }
 
-func (s *Service) copyPrefix(ctx context.Context, transitionID, scope string, source, target blobstore.Store, prefix string, progress func(int, int, string), offset int, excludedPrefixes ...string) (int, int64, []string, error) {
-	return s.copyPrefixPass(ctx, transitionID, scope, source, target, prefix, progress, offset, uuid.NewString(), nil, false, excludedPrefixes...)
-}
-
 func (s *Service) copyPrefixPass(ctx context.Context, transitionID, scope string, source, target blobstore.Store, prefix string, progress func(int, int, string), offset int, runID string, sameRunListings map[string]objectListing, finalPass bool, excludedPrefixes ...string) (int, int64, []string, error) {
 	state, err := s.loadCursor(ctx, transitionID, scope)
 	if err != nil {

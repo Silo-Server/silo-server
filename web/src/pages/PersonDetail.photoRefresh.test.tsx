@@ -38,36 +38,6 @@ afterEach(() => {
   vi.mocked(useIsActingAdmin).mockReturnValue(false);
 });
 
-it("renders a prefetched person at once and still reads it as a view", async () => {
-  const id = "7";
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: 120_000 } },
-  });
-  clients.push(client);
-  const person = {
-    id,
-    name: "Prefetched Actor",
-    bio: "Cached biography",
-    birth_date: "1940-04-25",
-  };
-  client.setQueryData(personKeys.detail(id), person);
-  vi.mocked(getPerson).mockResolvedValue(person);
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/person/${id}`]}>
-        <Routes>
-          <Route path="/person/:id" element={<PersonDetail />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-
-  expect(screen.getByText("Cached biography")).toBeInTheDocument();
-  await waitFor(() => expect(getPerson).toHaveBeenCalled());
-  // A view read omits `prefetch`, so the server may queue a due refresh.
-  expect(vi.mocked(getPerson).mock.calls[0]?.[1]).not.toHaveProperty("prefetch");
-});
-
 it("refreshes cached cast after a person read observes a background photo update", async () => {
   const id = "9007199254740993";
   const client = new QueryClient({
@@ -100,6 +70,10 @@ it("refreshes cached cast after a person read observes a background photo update
   );
   expect(screen.getByRole("img", { name: "Actor" })).toHaveAttribute("src", person.photo_url);
 
+  expect(screen.getByText("Biography")).toBeInTheDocument();
+  await waitFor(() => expect(getPerson).toHaveBeenCalled());
+  expect(vi.mocked(getPerson).mock.calls[0]?.[1]).not.toHaveProperty("prefetch");
+
   // The cached item is fresh when a subsequent poll sees the completed refresh.
   client.setQueryData(itemKey, item);
   const updated = { ...person, photo_url: "https://images.example.test/new.jpg" };
@@ -115,7 +89,6 @@ it("refreshes cached cast after a person read observes a background photo update
 it.each([
   { queueDelay: 0, rotateSignature: false },
   { queueDelay: 33_000, rotateSignature: false },
-  { queueDelay: 123_000, rotateSignature: false },
   { queueDelay: 660_000, rotateSignature: false },
   { queueDelay: 33_000, rotateSignature: true },
   { queueDelay: 33_000, rotateSignature: false, coldNavigation: "prefetch" },

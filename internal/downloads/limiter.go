@@ -42,6 +42,13 @@ func (l *QuantityLimiter) Reload(maxConcurrent, maxPerPeriod int, periodDuration
 // The batchSize parameter accounts for series batch downloads where
 // multiple records will be created at once.
 func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) error {
+	return l.CheckCounts(ctx, userID, batchSize, batchSize)
+}
+
+// CheckCounts is Check with separate counts: activating is how many downloads
+// become active, created how many new downloads are created. Replacing an
+// entry in place can make it active without creating one.
+func (l *QuantityLimiter) CheckCounts(ctx context.Context, userID int, activating, created int) error {
 	if l == nil {
 		return nil
 	}
@@ -57,7 +64,7 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 		if err != nil {
 			return err
 		}
-		if active+batchSize > maxConc {
+		if active+activating > maxConc {
 			return ErrConcurrentLimitReached
 		}
 	}
@@ -68,10 +75,30 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 		if err != nil {
 			return err
 		}
-		if count+batchSize > maxPer {
+		if count+created > maxPer {
 			return ErrPeriodLimitReached
 		}
 	}
 
 	return nil
+}
+
+// FreeConcurrentSlots reports how many more downloads userID may have active
+// under the concurrent cap, or -1 when there is no cap. Monitors use it to
+// pace prepared episodes instead of being refused outright.
+func (l *QuantityLimiter) FreeConcurrentSlots(ctx context.Context, userID int) (int, error) {
+	if l == nil {
+		return -1, nil
+	}
+	l.mu.RLock()
+	maxConc := l.maxConcurrent
+	l.mu.RUnlock()
+	if maxConc <= 0 {
+		return -1, nil
+	}
+	active, err := l.repo.CountActiveByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return max(0, maxConc-active), nil
 }

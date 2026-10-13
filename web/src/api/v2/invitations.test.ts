@@ -64,9 +64,12 @@ it("preserves false, explicit empty libraries, omitted inheritance, and exact st
   });
   await resendAdminInvitation(row.id);
   expect(String(fetch.mock.calls[2]![0])).toBe(`/api/v2/admin/invitations/${row.id}/resend`);
+  expect(fetch.mock.calls[2]![1]?.body).toBeUndefined();
+  await resendAdminInvitation(row.id, undefined, "link");
+  expect(JSON.parse(String(fetch.mock.calls[3]![1]?.body))).toEqual({ delivery: "link" });
   fetch.mockResolvedValue(new Response(null, { status: 204 }));
   await revokeAdminInvitation(row.id);
-  expect(String(fetch.mock.calls[3]![0])).toBe(`/api/v2/admin/invitations/${row.id}`);
+  expect(String(fetch.mock.calls[4]![0])).toBe(`/api/v2/admin/invitations/${row.id}`);
 });
 it("never refreshes or replays any mutation on401", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>

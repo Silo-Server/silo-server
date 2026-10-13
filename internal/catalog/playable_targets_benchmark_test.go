@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,15 +14,24 @@ import (
 )
 
 type playableTargetBenchmarkProgressStore struct {
-	delegate PlayableTargetProgressStore
-	queries  int
-	ids      int
+	delegate   PlayableTargetProgressStore
+	queries    int
+	ids        int
+	sqlWinners bool
 }
 
 func (s *playableTargetBenchmarkProgressStore) ListProgressByMediaItems(ctx context.Context, profile string, ids []string) (map[string]userstore.WatchProgress, error) {
 	s.queries++
 	s.ids += len(ids)
 	return s.delegate.ListProgressByMediaItems(ctx, profile, ids)
+}
+
+func (s *playableTargetBenchmarkProgressStore) CatalogProgressRelation(pool *pgxpool.Pool, userID int, profileID string, firstArg int) (string, []any, bool) {
+	store, ok := s.delegate.(userstore.CatalogProgressRelationStore)
+	if !s.sqlWinners || !ok {
+		return "", nil, false
+	}
+	return store.CatalogProgressRelation(pool, userID, profileID, firstArg)
 }
 
 // This benchmark requires a disposable migrated database. It reports progress
@@ -32,7 +42,13 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 	if dsn == "" {
 		b.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	pool, err := pgxpool.New(b.Context(), dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		b.Fatal(err)
+	}
+	trace := &playableTargetQueryTrace{}
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(b.Context(), cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -42,8 +58,10 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 	for i := range movieIDs {
 		movieIDs[i] = fmt.Sprintf("%s-movie-%03d", prefix, i)
 	}
+	const episodeCount = 4200
 	seriesID := prefix + "-series"
 	profileID := prefix + "-profile"
+	unseenProfileID, completedProfileID := profileID+"-unseen", profileID+"-completed"
 	var userID, folderID int
 	if err := pool.QueryRow(b.Context(), `INSERT INTO users (email, username, role, enabled)
 		VALUES ($1, $1, 'user', TRUE) RETURNING id`, prefix+"@example.invalid").Scan(&userID); err != nil {
@@ -63,7 +81,8 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 		sql  string
 		args []any
 	}{
-		{`INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'Benchmark')`, []any{profileID, userID}},
+		{`INSERT INTO user_profiles (id, user_id, name)
+			VALUES ($1, $2, 'Benchmark'), ($3, $2, 'Unseen'), ($4, $2, 'Completed')`, []any{profileID, userID, unseenProfileID, completedProfileID}},
 		{`INSERT INTO media_items (content_id, type, title, status, genres)
 			SELECT id, 'movie', id, 'matched', '{}'::text[] FROM unnest($1::text[]) id`, []any{movieIDs}},
 		{`INSERT INTO media_items (content_id, type, title, status, genres)
@@ -71,9 +90,13 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 		{`INSERT INTO media_files (content_id, media_folder_id, file_path)
 			SELECT id, $2, id || '.mkv' FROM unnest($1::text[]) id`, []any{movieIDs, folderID}},
 		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-			SELECT $1 || '-episode-' || n, $1, 1, n, 'Episode ' || n FROM generate_series(1, 200) n`, []any{seriesID}},
+			SELECT $1 || '-episode-' || n, $1, 1, n, 'Episode ' || n FROM generate_series(1, $2) n`, []any{seriesID, episodeCount}},
 		{`INSERT INTO media_files (episode_id, media_folder_id, file_path)
 			SELECT content_id, $2, content_id || '.mkv' FROM episodes WHERE series_id = $1`, []any{seriesID, folderID}},
+		{`INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, completed)
+			VALUES ($1, $2, $3, 300, FALSE)`, []any{userID, profileID, seriesID + "-episode-4000"}},
+		{`INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, completed)
+			SELECT $1, $2, content_id, 0, TRUE FROM episodes WHERE series_id = $3`, []any{userID, completedProfileID, seriesID}},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(b.Context(), statement.sql, statement.args...); err != nil {
@@ -82,7 +105,8 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 	}
 	// Give both benchmark binaries plans based on the fixture cardinalities,
 	// rather than empty-table estimates left over from initial migrations.
-	if _, err := pool.Exec(b.Context(), `ANALYZE media_items; ANALYZE episodes; ANALYZE media_files; ANALYZE media_folders`); err != nil {
+	if _, err := pool.Exec(b.Context(), `ANALYZE media_items; ANALYZE episodes; ANALYZE media_files; ANALYZE media_folders;
+		ANALYZE user_watch_progress; ANALYZE user_history_hidden_items`); err != nil {
 		b.Fatal(err)
 	}
 	delegate, err := pgstore.NewPostgresProvider(pool).ForUser(b.Context(), userID)
@@ -90,8 +114,9 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 		b.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name  string
-		items []PlayableTargetInput
+		name      string
+		profileID string
+		items     []PlayableTargetInput
 	}{
 		{name: "movie-targets-100", items: func() []PlayableTargetInput {
 			items := make([]PlayableTargetInput, len(movieIDs))
@@ -100,21 +125,48 @@ func BenchmarkPlayableTargetReadQueries(b *testing.B) {
 			}
 			return items
 		}()},
-		{name: "hinted-series-200-episodes", items: []PlayableTargetInput{{ContentID: seriesID, Type: "series", PreferredContentID: seriesID + "-episode-100"}}},
-		{name: "unhinted-series-200-episodes", items: []PlayableTargetInput{{ContentID: seriesID, Type: "series"}}},
+		{name: "hinted-series-4200-episodes", items: []PlayableTargetInput{{ContentID: seriesID, Type: "series", PreferredContentID: seriesID + "-episode-100"}}},
+		{name: "unhinted-series-4200-episodes", items: []PlayableTargetInput{{ContentID: seriesID, Type: "series"}}},
+		{name: "unseen-series-4200-episodes", profileID: unseenProfileID, items: []PlayableTargetInput{{ContentID: seriesID, Type: "series"}}},
+		{name: "completed-series-4200-episodes", profileID: completedProfileID, items: []PlayableTargetInput{{ContentID: seriesID, Type: "series"}}},
 	} {
-		b.Run(tc.name, func(b *testing.B) {
-			store := &playableTargetBenchmarkProgressStore{delegate: delegate}
-			resolver := NewPlayableTargetResolver(pool)
-			query := PlayableTargetQuery{UserID: userID, ProfileID: profileID, Items: tc.items, ProgressStore: store,
-				Access: AccessFilter{AllowedLibraryIDs: []int{folderID}}}
-			for b.Loop() {
-				if _, err := resolver.Resolve(b.Context(), query); err != nil {
-					b.Fatal(err)
-				}
+		resolver := NewPlayableTargetResolver(pool)
+		query := PlayableTargetQuery{UserID: userID, ProfileID: profileID, Items: tc.items,
+			ProgressStore: &playableTargetBenchmarkProgressStore{delegate: delegate},
+			Access:        AccessFilter{AllowedLibraryIDs: []int{folderID}}}
+		if tc.profileID != "" {
+			query.ProfileID = tc.profileID
+		}
+		want, err := resolver.Resolve(b.Context(), query)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, sqlWinners := range []bool{false, true} {
+			mode := "generic"
+			if sqlWinners {
+				mode = "sql-winners"
 			}
-			b.ReportMetric(float64(store.queries)/float64(b.N), "progress-queries/op")
-			b.ReportMetric(float64(store.ids)/float64(b.N), "progress-IDs/op")
-		})
+			b.Run(tc.name+"/"+mode, func(b *testing.B) {
+				store := &playableTargetBenchmarkProgressStore{delegate: delegate, sqlWinners: sqlWinners}
+				query.ProgressStore = store
+				got, err := resolver.Resolve(b.Context(), query)
+				if err != nil || !reflect.DeepEqual(got, want) {
+					b.Fatalf("targets = %#v, err %v; generic targets = %#v", got, err, want)
+				}
+				store.queries, store.ids = 0, 0
+				trace.rows.Store(0)
+				trace.queries.Store(0)
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := resolver.Resolve(b.Context(), query); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.ReportMetric(float64(store.queries)/float64(b.N), "progress-queries/op")
+				b.ReportMetric(float64(store.ids)/float64(b.N), "progress-ids/op")
+				b.ReportMetric(float64(trace.rows.Load())/float64(b.N), "rows/op")
+				b.ReportMetric(float64(trace.queries.Load())/float64(b.N), "queries/op")
+			})
+		}
 	}
 }

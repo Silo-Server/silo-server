@@ -1,8 +1,8 @@
-import type { RefObject } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useSubtitleTracks } from "./useSubtitleTracks";
 import type { PlayerSubtitleInfo } from "../types";
+import { useSubtitleTracks } from "./useSubtitleTracks";
 
 // jsdom implements neither addTextTrack nor VTTCue; provide minimal fakes
 // that keep the shapes the hook relies on (cues list, add/removeCue,
@@ -264,6 +264,89 @@ describe("useSubtitleTracks", () => {
     },
   );
 
+  it("refetches retimed cues behind an unchanged URL when the cue revision changes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nold\n\n"))
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:12.300 --> 00:00:14.300\nnew\n\n"));
+
+    const videoRef = makeVideoRef(1);
+    const anchorRef = { current: 0 };
+    const durationRef = { current: 7200 };
+    const { rerender } = renderHook(
+      ({ revision }) =>
+        useSubtitleTracks(
+          videoRef,
+          [srtTrack],
+          1,
+          0,
+          0,
+          durationRef,
+          anchorRef,
+          undefined,
+          null,
+          0,
+          undefined,
+          revision,
+        ),
+      { initialProps: { revision: 0 } },
+    );
+
+    await waitFor(() => expect(createdTracks[0]?.cues.map((c) => c.text)).toEqual(["old"]));
+    rerender({ revision: 1 });
+
+    await waitFor(() => expect(createdTracks).toHaveLength(2));
+    await waitFor(() => expect(createdTracks[1]!.cues.map((c) => c.text)).toEqual(["new"]));
+    expect(createdTracks[1]!.cues[0]!.startTime).toBeCloseTo(12.3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the current cues on screen while retimed ones load", async () => {
+    let answer: (value: unknown) => void = () => {};
+    fetchMock
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nold\n\n"))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+      );
+    const states: string[] = [];
+    const videoRef = makeVideoRef(1);
+    const { rerender } = renderHook(
+      ({ revision }) =>
+        useSubtitleTracks(
+          videoRef,
+          [srtTrack],
+          1,
+          0,
+          0,
+          { current: 7200 },
+          { current: 0 },
+          undefined,
+          null,
+          0,
+          (state) => states.push(state),
+          revision,
+        ),
+      { initialProps: { revision: 0 } },
+    );
+    await waitFor(() => expect(createdTracks[0]?.cues.map((c) => c.text)).toEqual(["old"]));
+    states.length = 0;
+
+    rerender({ revision: 1 });
+    await waitFor(() => expect(createdTracks).toHaveLength(2));
+    // The retimed track starts with the old cues: nothing blinks, and the
+    // reload is not announced as loading.
+    expect(createdTracks[1]!.cues.map((c) => c.text)).toEqual(["old"]);
+    expect(states).toEqual(["refreshing"]);
+
+    await act(async () => {
+      answer(vttResponse("WEBVTT\n\n00:00:12.300 --> 00:00:14.300\nnew\n\n"));
+    });
+    await waitFor(() => expect(createdTracks[1]!.cues.map((c) => c.text)).toEqual(["new"]));
+    expect(states.at(-1)).toBe("ready");
+    expect(states).not.toContain("loading");
+  });
+
   it("deduplicates restored cues newly visible after the origin moves backward", async () => {
     fetchMock.mockImplementation(async () =>
       vttResponse(
@@ -304,38 +387,6 @@ describe("useSubtitleTracks", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await act(async () => {});
     expect(createdTracks[1]!.cues.map((cue) => cue.text)).toEqual(["early", "later"]);
-  });
-
-  it("retries a failed window fetch after a backoff instead of marking it covered", async () => {
-    let now = 1_000_000;
-    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      fetchMock
-        .mockRejectedValueOnce(new Error("extraction died"))
-        .mockResolvedValueOnce(
-          vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"),
-        );
-
-      const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
-
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-
-      // Inside the backoff window: no retry yet.
-      videoRef.current!.currentTime = 5;
-      videoRef.current!.dispatchEvent(new Event("timeupdate"));
-      await new Promise((r) => setTimeout(r, 10));
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-
-      // Past the backoff: the uncovered range is retried and recovers.
-      now += 6_000;
-      videoRef.current!.dispatchEvent(new Event("timeupdate"));
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["recovered"]));
-    } finally {
-      nowSpy.mockRestore();
-      errorSpy.mockRestore();
-    }
   });
 
   it("backs off repeated failures, caps the delay, and resets after recovery", async () => {

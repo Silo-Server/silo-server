@@ -9,14 +9,14 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
-  useRequestFeatureStatus: () => mocks.useRequestFeatureStatus(),
+  useRequestFeatureStatus: (...args: unknown[]) => mocks.useRequestFeatureStatus(...args),
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => mocks.useCurrentProfile(),
 }));
 
-import { useCanRequest } from "./useCanRequest";
+import { useCanRequest, useMissingSeasonsRequestable } from "./useCanRequest";
 
 function CaptureHook({ onResult }: { onResult: (r: ReturnType<typeof useCanRequest>) => void }) {
   const result = useCanRequest();
@@ -116,6 +116,52 @@ describe("useCanRequest", () => {
       discoveryEnabled: false,
       isResolving: true,
       submitDisabledReason: null,
+    });
+  });
+});
+
+describe("useMissingSeasonsRequestable", () => {
+  function Capture({ enabled, onResult }: { enabled: boolean; onResult: (r: boolean) => void }) {
+    onResult(useMissingSeasonsRequestable(enabled));
+    return null;
+  }
+
+  function capture(enabled: boolean): boolean | null {
+    let captured: boolean | null = null;
+    render(
+      <Capture
+        enabled={enabled}
+        onResult={(r) => {
+          captured = r;
+        }}
+      />,
+    );
+    return captured;
+  }
+
+  it("needs requests on, the viewer allowed, and a library-only setup", () => {
+    const status = { requests_enabled: true, allowed: true, missing_seasons_requestable: true };
+    mocks.useRequestFeatureStatus.mockReturnValue({ data: status });
+    expect(capture(true)).toBe(true);
+    expect(mocks.useRequestFeatureStatus).toHaveBeenLastCalledWith({
+      enabled: true,
+      refetchOnMount: false,
+    });
+
+    mocks.useRequestFeatureStatus.mockReturnValue({
+      data: { ...status, missing_seasons_requestable: false },
+    });
+    expect(capture(true)).toBe(false);
+    mocks.useRequestFeatureStatus.mockReturnValue({ data: { ...status, allowed: false } });
+    expect(capture(true)).toBe(false);
+  });
+
+  it("stays off, without reading the status, when disabled", () => {
+    mocks.useRequestFeatureStatus.mockReturnValue({ data: undefined });
+    expect(capture(false)).toBe(false);
+    expect(mocks.useRequestFeatureStatus).toHaveBeenLastCalledWith({
+      enabled: false,
+      refetchOnMount: false,
     });
   });
 });

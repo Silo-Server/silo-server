@@ -128,7 +128,7 @@ func TestRefresherSavesOrderedContentIDs(t *testing.T) {
 			{ID: 10, MediaType: "movie"},
 			{ID: 20, MediaType: "tv"},
 		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -162,7 +162,7 @@ func TestRefresherSkipsFetchWhenLeaseIsHeld(t *testing.T) {
 		Snapshots:    store,
 		Resolver:     fakeResolver{},
 		TMDBTrending: fakeTMDB{err: errors.New("must not fetch")},
-		Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -251,7 +251,7 @@ func TestRefresherFailurePreservesLastGood(t *testing.T) {
 		Snapshots:    store,
 		Resolver:     fakeResolver{},
 		TMDBTrending: fakeTMDB{err: errors.New("tmdb 503")},
-		Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -281,7 +281,7 @@ func TestRefresherEmptyProviderPreservesLastGood(t *testing.T) {
 		Snapshots: store,
 		Resolver:  fakeResolver{},
 		// TMDBTrending nil => provider unconfigured => empty entries, no error.
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -318,7 +318,7 @@ func TestRefresherSkipsPersonEntries(t *testing.T) {
 			{ID: 99, MediaType: "person"},
 			{ID: 20, MediaType: "tv"},
 		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	if _, err := r.RunOnce(context.Background()); err != nil {
@@ -345,7 +345,7 @@ func TestRefresherTraktInterleavesMoviesAndShows(t *testing.T) {
 			"movie": {{TMDBID: 1, MediaType: "movie"}, {TMDBID: 2, MediaType: "movie"}},
 			"tv":    {{TMDBID: 3, MediaType: "tv"}},
 		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	if _, err := r.RunOnce(context.Background()); err != nil {
@@ -371,7 +371,7 @@ func TestRefresherTraktPartialFailurePreservesLastGood(t *testing.T) {
 			byMediaType: map[string][]catalog.TraktCollectionEntry{"movie": {{TMDBID: 1, MediaType: "movie"}}},
 			errByType:   map[string]error{"tv": errors.New("trakt shows 500")},
 		},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	if _, err := r.RunOnce(context.Background()); err != nil {
@@ -426,7 +426,7 @@ func TestRefresherAlwaysRefreshesCalendarFeed(t *testing.T) {
 					"movie": {ByTMDB: map[string]string{"10": "c-movie"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
 				}},
 				TMDBTrending: fakeTMDB{entries: []catalog.TMDBCollectionEntry{{ID: 10, MediaType: "movie"}}},
-				Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+				Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 			}
 
 			_, err := r.RunOnce(context.Background())
