@@ -56,7 +56,7 @@ func TestAdminNodeReprobeView(t *testing.T) {
 		refreshErr error
 	}{{"success", 200, nil}, {"store failure", 200, errors.New("store unavailable")}, {"busy", 409, nil}, {"unavailable", 503, nil}} {
 		t.Run(tc.name, func(t *testing.T) {
-			url, auth := fakeNodeServer(t, tc.status, `{"resolved":"qsv","capability_hash":"new"}`)
+			url, signedWith := fakeNodeServer(t, tc.status, `{"resolved":"qsv","capability_hash":"new"}`)
 			repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "Synthetic", URL: url, Type: nodepool.NodeTypeTranscode}}
 			refresh := &stubCapabilityRefresher{err: tc.refreshErr}
 			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
@@ -64,8 +64,8 @@ func TestAdminNodeReprobeView(t *testing.T) {
 			writer := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 			before := time.Now()
 			out, err := h.ReprobeAdminNode(writer, httptest.NewRequest("POST", "/", nil).WithContext(t.Context()), 1)
-			if err != nil || *auth != "Bearer synthetic-secret" || !writer.deadline.After(before) {
-				t.Fatal(out, err, *auth, writer.deadline)
+			if err != nil || !signedWith("synthetic-secret") || !writer.deadline.After(before) {
+				t.Fatal(out, err, writer.deadline)
 			}
 			if tc.status == 200 {
 				if out.Status != "ok" || out.CapabilityHash != "new" || out.CapabilitiesRefreshed != (tc.refreshErr == nil) || refresh.calls.Load() != 1 {

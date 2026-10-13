@@ -172,6 +172,11 @@ type CatalogResolver struct {
 	// collectionOwners limits another profile's shared personal collection
 	// to its owner's access. Without it such a collection cannot be read.
 	collectionOwners PersonalCollectionAccess
+	// seekAnchors serves window jumps into a browse snapshot; see
+	// seekAnchorCache.
+	seekAnchors *seekAnchorCache
+	// letterIndexes serves the A-Z bar; see letterIndexCache.
+	letterIndexes *letterIndexCache
 }
 
 // WatchlistPromoter moves a profile's watchlist entries for titles the
@@ -196,6 +201,8 @@ func NewCatalogResolver(browseRepo *BrowseRepository, itemRepo *ItemRepository) 
 		browseRepo:     browseRepo,
 		itemRepo:       itemRepo,
 		searchProvider: NewPostgresSearchProvider(itemRepo),
+		seekAnchors:    newSeekAnchorCache(),
+		letterIndexes:  newLetterIndexCache(),
 	}
 	if browseRepo != nil {
 		r.facets = browseRepo.facetFetcher()
@@ -426,6 +433,11 @@ func (r *CatalogResolver) previewQuerySource(ctx context.Context, req CatalogReq
 		}
 		pager := r.queryExecutorForScope(req.Query.MediaScope, &snapshot)
 		pager.GroupByWork = req.GroupByWork
+		if req.SnapshotAt != nil {
+			// The client pins this snapshot for the whole browse, so its
+			// later jumps reuse the anchors.
+			pager.SeekAnchors = r.seekAnchors
+		}
 		if req.Seek != nil {
 			after, err := pager.SeekCursor(ctx, req.Query, access, *req.Seek)
 			if errors.Is(err, pgx.ErrNoRows) {

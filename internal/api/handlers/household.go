@@ -68,6 +68,11 @@ func canManageHouseholdAs(
 	activeProfileID string,
 	verify func(profileID string) error,
 ) (bool, error) {
+	// A remote-playback handoff never manages the household, even when it is
+	// bound to the primary profile.
+	if apimw.GetClaims(ctx).IsRemotePlayback() {
+		return false, nil
+	}
 	if activeProfileID == "" {
 		return profileLessAdminMayManage(ctx, store)
 	}

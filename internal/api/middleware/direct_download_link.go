@@ -43,7 +43,7 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 			writeForbidden(w, "The download link does not authorize this file")
 			return
 		}
-		role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+		authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
 		if err != nil {
 			writeCredentialCheckUnavailable(w, r, err)
 			return
@@ -52,9 +52,15 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 			writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 			return
 		}
+		// A remote-playback handoff cannot mint download links; one an
+		// older release minted for it is refused.
+		if authority.IsRemotePlayback() {
+			writeForbidden(w, "A remote-playback session cannot download files")
+			return
+		}
 		// A link lasts minutes and grants nothing role-gated, so a role
 		// change does not refuse it; the request carries the current role.
-		claims.Role = role
+		claims.Role = authority.Role
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
 			lc.UserID = &uid

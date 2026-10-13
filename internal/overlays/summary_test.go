@@ -401,3 +401,30 @@ func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 		t.Error("MultiSub = false, want true")
 	}
 }
+
+// The stored codec of an Atmos track is plain eac3 or truehd, so with no
+// "Atmos" in the title only the FFprobe profile identifies it.
+func TestNormalizeAudioReadsAtmosFromProfile(t *testing.T) {
+	tests := []struct {
+		name   string
+		tracks []models.AudioTrack
+		want   string
+	}{
+		// Untagged tracks get the codec's long name as their title.
+		{name: "E-AC-3 Atmos", tracks: []models.AudioTrack{{Codec: "eac3", Title: "ATSC A/52B (AC-3, E-AC-3)", Profile: "Dolby Digital Plus + Dolby Atmos", Default: true}}, want: "Atmos"},
+		{name: "TrueHD Atmos", tracks: []models.AudioTrack{{Codec: "truehd", Title: "TrueHD 7.1", Profile: "Dolby TrueHD + Dolby Atmos", Default: true}}, want: "Atmos"},
+		{name: "plain E-AC-3", tracks: []models.AudioTrack{{Codec: "eac3", Title: "ATSC A/52B (AC-3, E-AC-3)", Default: true}}, want: "EAC3"},
+		{name: "DTS profile keeps the codec badge", tracks: []models.AudioTrack{{Codec: "dts", Title: "DCA (DTS Coherent Acoustics)", Profile: "DTS-HD MA", Default: true}}, want: "DTS"},
+		{name: "default track wins over a later Atmos track", tracks: []models.AudioTrack{
+			{Codec: "eac3", Title: "ATSC A/52B (AC-3, E-AC-3)", Default: true},
+			{Codec: "truehd", Title: "TrueHD", Profile: "Dolby TrueHD + Dolby Atmos"},
+		}, want: "EAC3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeAudio(&models.MediaFile{AudioTracks: tt.tracks}); got != tt.want {
+				t.Fatalf("normalizeAudio() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

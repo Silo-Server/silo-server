@@ -34,7 +34,50 @@ func TestStreamExtractSubtitleBoundsWindow(t *testing.T) {
 	if got := output.String(); !strings.Contains(got, "Inside window") ||
 		!strings.Contains(got, "13:20.000 --> 13:25.000") ||
 		strings.Contains(got, "Before window") || strings.Contains(got, "After window") {
-		t.Fatalf("expected only the in-window cue at its absolute timestamp, got %q", got)
+		t.Fatalf("expected only the in-window cue at its source timestamp, got %q", got)
+	}
+}
+
+// The playback timeline starts at the container start. A window cut after a
+// seek must put each cue where the unseeked extract does, even when the
+// container's first timestamp is not zero (TS remuxes), or subtitles run late
+// by that start time after every seek.
+func TestStreamExtractSubtitleSeekKeepsContainerRelativeTimeline(t *testing.T) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required to verify subtitle window timestamps")
+	}
+	dir := t.TempDir()
+	srt := filepath.Join(dir, "captions.srt")
+	if err := os.WriteFile(srt, []byte("1\n00:00:40,000 --> 00:00:42,000\nForty seconds in\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "offset.mkv")
+	mux := exec.CommandContext(t.Context(), bin, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=64x64:r=5:d=60", "-i", srt,
+		"-map", "0:v", "-map", "1:s", "-c:v", "mpeg4", "-c:s", "srt",
+		"-output_ts_offset", "30", source)
+	if out, err := mux.CombinedOutput(); err != nil {
+		t.Fatalf("build fixture: %v: %s", err, out)
+	}
+
+	extract := func(seek float64) string {
+		t.Helper()
+		var output bytes.Buffer
+		if err := StreamExtractSubtitle(t.Context(), StreamExtractOpts{
+			InputPath: source, SourceCodec: "subrip", SeekSeconds: seek, DurationSeconds: 600,
+			FFmpegPath: bin, Writer: &output,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return output.String()
+	}
+	const cue = "00:40.000 --> 00:42.000"
+	if got := extract(0); !strings.Contains(got, cue) {
+		t.Fatalf("unseeked extract should place the cue at %s, got %q", cue, got)
+	}
+	if got := extract(35); !strings.Contains(got, cue) {
+		t.Fatalf("seeked window should place the cue at %s like the unseeked extract, got %q", cue, got)
 	}
 }
 
@@ -134,7 +177,7 @@ func TestStreamExtractArgs_WholeTrackCodecsIgnoreWindow(t *testing.T) {
 }
 
 // A client that opts in via AllowWindow gets a seeked, duration-capped PGS
-// extract with -copyts preserving absolute source timestamps — the -ss must
+// extract with -copyts keeping cues on the playback timeline — the -ss must
 // be an input option (before -i) so ffmpeg uses the container index.
 func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 	args := streamExtractArgs(StreamExtractOpts{
@@ -170,7 +213,7 @@ func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 // sup demuxer (the elementary stream has no container header to probe from
 // arbitrary offsets), remap to the file's sole stream regardless of the
 // original container's track ordinal, and still seek/window with -copyts so
-// the cached stream's absolute timestamps survive into the output.
+// the cached stream's stored timestamps survive into the output.
 func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	args := streamExtractArgs(StreamExtractOpts{
 		InputPath:           "/transcode/subtitle-cache/abc-s3-1-2.sup",
@@ -201,7 +244,12 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 		t.Fatalf("-ss must be an input option (before -i): %s", joined)
 	}
 	if !strings.Contains(joined, "-copyts") {
-		t.Fatalf("cached sup extract must preserve absolute timestamps: %s", joined)
+		t.Fatalf("cached sup extract must preserve its stored timestamps: %s", joined)
+	}
+	// The cached .sup is already on the playback timeline and its start time
+	// is its first cue; rebasing it would pull every cue early by that much.
+	if slices.Contains(args, "-start_at_zero") {
+		t.Fatalf("cached sup extract must not rebase its timestamps: %s", joined)
 	}
 	if !strings.Contains(joined, "-c:s copy") || !strings.Contains(joined, "-f sup pipe:1") {
 		t.Fatalf("cached sup extract should copy into a sup stream: %s", joined)

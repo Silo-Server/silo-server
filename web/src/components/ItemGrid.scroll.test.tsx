@@ -1,7 +1,8 @@
+import { createRef } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowseItem } from "@/api/types";
-import ItemGrid from "./ItemGrid";
+import ItemGrid, { type ItemGridHandle } from "./ItemGrid";
 
 // Keep the real window virtualizer: taller cards must be discovered only
 // when they enter its rendered range, rather than all being measured at mount.
@@ -78,6 +79,22 @@ describe("ItemGrid scroll anchoring", () => {
     expect(getByRole("list").style.gridAutoRows).toBe("328px");
     expect(window.scrollY).toBe(71 * 340 + 17);
     expect(getByRole("list").querySelector('[data-id="item-142"]')).not.toBeNull();
+  });
+
+  it("reports a jump's row as the top row when the scroll settles a fraction short", () => {
+    // On a long list the browser can settle a fraction of a pixel above a
+    // jump's offset; that must not count as the row above it.
+    vi.spyOn(window, "scrollTo").mockImplementation((options: ScrollToOptions | number) => {
+      if (typeof options !== "number" && options.top !== undefined) scrollTo(options.top - 0.5);
+    });
+    const gridRef = createRef<ItemGridHandle>();
+    const onTopRowChange = vi.fn();
+    render(<ItemGrid items={items} gridRef={gridRef} onTopRowChange={onTopRowChange} />);
+
+    act(() => gridRef.current?.scrollToItem(41));
+
+    expect(window.scrollY % 1).toBe(0.5);
+    expect(onTopRowChange).toHaveBeenLastCalledWith(40, 41);
   });
 
   it("keeps the visible row when a windowed page arrives while scrolled", () => {

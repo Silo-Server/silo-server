@@ -162,6 +162,43 @@ func TestSanitizeURLErrorPreservesMultiPercentWFmtMessage(t *testing.T) {
 	}
 }
 
+func TestSanitizeURLErrorSanitizesEveryJoinedURL(t *testing.T) {
+	err := fmt.Errorf("fetch: %w", errors.Join(
+		&url.Error{Op: "Get", URL: "https://operator:first-secret@a.example/v?token=first-token", Err: errors.New("timeout")},
+		&url.Error{Op: "Get", URL: "https://operator:second-secret@b.example/v?token=second-token", Err: errors.New("refused")},
+	))
+
+	message := SanitizeURLError(err).Error()
+	for _, secret := range []string{"operator", "first-secret", "first-token", "second-secret", "second-token"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("sanitized joined error contains %q: %q", secret, message)
+		}
+	}
+	for _, want := range []string{"fetch: ", "https://a.example/v", "timeout", "https://b.example/v", "refused"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("sanitized joined error lost %q: %q", want, message)
+		}
+	}
+}
+
+func TestSanitizeURLErrorSanitizesURLRepeatedByWrapper(t *testing.T) {
+	const raw = "https://cdn.example/v.mp4?token=query-secret"
+	cause := errors.New("timeout")
+	err := fmt.Errorf("GET %s failed: %w", raw, &url.Error{Op: "Get", URL: raw, Err: cause})
+
+	sanitized := SanitizeURLError(err)
+	message := sanitized.Error()
+	if strings.Contains(message, "query-secret") {
+		t.Fatalf("sanitized wrapper repeats the raw URL: %q", message)
+	}
+	if want := `GET https://cdn.example/v.mp4 failed: Get "https://cdn.example/v.mp4": timeout`; message != want {
+		t.Fatalf("sanitized wrapper = %q, want %q", message, want)
+	}
+	if !errors.Is(sanitized, cause) {
+		t.Fatalf("sanitized wrapper does not preserve its cause: %v", sanitized)
+	}
+}
+
 func TestSanitizeURLFailsClosedForMalformedInput(t *testing.T) {
 	const secret = "node-password"
 	got := SanitizeURL("https://operator:" + secret + "@node.example/\x00")

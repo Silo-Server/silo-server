@@ -1,10 +1,13 @@
 import {
+  audioTrackHasAtmos,
+  audioTrackLabel,
   dolbyVisionLabel,
   formatBitrate,
   formatCodecLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  mentionsAtmos,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
 import type { DeliveryV3, EffectiveRecipeV3, PlanV3 } from "./protocol-v3";
@@ -467,6 +470,11 @@ export function formatOriginalAudioCodec(
   track?: PlayerAudioTrack,
 ): string {
   const title = track?.title || track?.embedded_title;
+  // An Atmos track whose title does not say so, such as the codec's long
+  // name the scanner gives an untagged track, shows its family label.
+  if (track?.codec && audioTrackHasAtmos(track) && !mentionsAtmos(title)) {
+    return audioTrackLabel(track);
+  }
   if (title) {
     return title;
   }

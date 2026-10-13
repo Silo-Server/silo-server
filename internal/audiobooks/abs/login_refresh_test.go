@@ -32,9 +32,6 @@ func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.A
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return nil, nil
 }
-func (noopMediaStore) GetMediaFileByID(context.Context, int) (*models.MediaFile, error) {
-	return nil, nil
-}
 func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
 }
@@ -151,7 +148,7 @@ func newRefreshTestHandler(t *testing.T) (*Handler, *memTokenStore, *staticConfi
 func mintAndPersistRefresh(t *testing.T, store *memTokenStore, cfg *staticConfig, userID string) (string, string) {
 	t.Helper()
 	jti := "test-refresh-jti-" + userID
-	refresh, err := IssueRefreshToken(cfg.secret, userID, "", jti, 30*24*time.Hour)
+	refresh, err := IssueRefreshToken(cfg.secret, userID, "", nil, jti, 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("mint refresh: %v", err)
 	}
@@ -307,7 +304,7 @@ func TestHandleRefresh_NoToken_400(t *testing.T) {
 func TestHandleRefresh_AccessTokenRejected(t *testing.T) {
 	h, store, cfg := newRefreshTestHandler(t)
 	jti := "an-access-jti"
-	access, _ := IssueAccessToken(cfg.secret, "9", "", jti, time.Hour)
+	access, _ := IssueAccessToken(cfg.secret, "9", "", nil, jti, time.Hour)
 	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "9", JTI: jti, ExpiresAt: time.Now().Add(time.Hour)})
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(""))

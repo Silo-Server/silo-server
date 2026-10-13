@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -162,6 +163,9 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 		if r.Method != http.MethodPost || r.URL.Path != "/transcode/start" {
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if !nodeauthtest.Signed(r, "secret") {
+			t.Error("remote transcode start was not signed with the shared secret")
 		}
 		if err := json.NewDecoder(r.Body).Decode(&remoteReq); err != nil {
 			t.Errorf("decode remote request: %v", err)

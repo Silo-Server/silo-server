@@ -109,7 +109,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 	if !jellyfinSessionExists(t, pool, targetJellyfin) {
 		t.Fatal("single-session revoke must leave the account's Jellyfin-compatible sessions")
 	}
-	if _, active, err := repo.ActiveSessionRole(ctx, one); err != nil || active {
+	if _, active, err := repo.ActiveSession(ctx, one); err != nil || active {
 		t.Fatalf("revoked session still valid: %t %v", active, err)
 	}
 	if err := repo.UpdateLastSeen(ctx, one, later.Add(time.Minute)); err != nil {
@@ -145,11 +145,11 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 		t.Fatal("account-wide revoke must delete only the target's Jellyfin-compatible sessions")
 	}
 	for _, id := range []string{one, two} {
-		if _, active, err := repo.ActiveSessionRole(ctx, id); err != nil || active {
+		if _, active, err := repo.ActiveSession(ctx, id); err != nil || active {
 			t.Fatalf("target session remains valid: %t %v", active, err)
 		}
 	}
-	if _, active, err := repo.ActiveSessionRole(ctx, untouched); err != nil || !active {
+	if _, active, err := repo.ActiveSession(ctx, untouched); err != nil || !active {
 		t.Fatalf("other account lost access: %t %v", active, err)
 	}
 	var passwordHash string
@@ -230,7 +230,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 				t.Fatalf("single revoke withdrew %s approval: %+v, %v", request.ClientPurpose, info, err)
 			}
 		}
-		if _, active, err := repo.ActiveSessionRole(ctx, impersonation.SessionID); err != nil || !active {
+		if _, active, err := repo.ActiveSession(ctx, impersonation.SessionID); err != nil || !active {
 			t.Fatalf("single revoke ended another impersonation: %t %v", active, err)
 		}
 		// Hold one session row so revocation pauses after acquiring the account
@@ -320,7 +320,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 			t.Fatal("impersonation did not finish after account-wide revocation")
 		}
 		for _, id := range []string{direct, single, impersonation.SessionID} {
-			if _, active, err := repo.ActiveSessionRole(ctx, id); err != nil || active {
+			if _, active, err := repo.ActiveSession(ctx, id); err != nil || active {
 				t.Fatalf("account-wide revoke left a session active: %t %v", active, err)
 			}
 		}
@@ -339,7 +339,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 		if poll, err := devices.Poll(ctx, unrelated.DeviceCode); err != nil || poll.Status != DeviceLoginStatusApproved || poll.TokenPair == nil {
 			t.Fatalf("other account's device approval lost: %+v, %v", poll, err)
 		}
-		if _, active, err := repo.ActiveSessionRole(ctx, untouched); err != nil || !active {
+		if _, active, err := repo.ActiveSession(ctx, untouched); err != nil || !active {
 			t.Fatalf("viewed account's own session lost: %t %v", active, err)
 		}
 		if n, err := repo.RevokeAsAdmin(ctx, actor, actor, nil); err != nil || n != 0 {

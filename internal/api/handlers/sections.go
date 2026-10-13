@@ -17,6 +17,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -821,15 +822,19 @@ func userAddedRecipe(o userstore.SectionOverride) string {
 
 // SaveProfileOverrides replaces the profile's override set for one page:
 // the recipe gate on user-added sections (registered recipe, config
-// validated by the recipe, and a profile that is not an admin may keep but
-// not add a section of an admin-only recipe), then the store write. v1 PUT
-// /profile/sections and v2 replaceProfileSectionOverrides both call it; a
-// failure is an *APIError carrying the v1 status, code and message.
+// validated by the recipe, and a profile that is not the acting admin may
+// keep but not add a section of an admin-only recipe), then the store write.
+// v1 PUT /profile/sections and v2 replaceProfileSectionOverrides both call
+// it; a failure is an *APIError carrying the v1 status, code and message.
 func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite) error {
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
-	return h.saveProfileOverrides(ctx, q, writes, apimw.IsAdmin(ctx))
+	actingAdmin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+	}
+	return h.saveProfileOverrides(ctx, q, writes, actingAdmin)
 }
 
 // saveProfileOverrides is SaveProfileOverrides after the library check, with
@@ -1448,7 +1453,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			ProgressStore: h.sectionProgressStore(ctx),
 		})
 		if err != nil {
-			slog.WarnContext(ctx, "resolving section playable targets", "component", "api", "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "resolving section playable targets", "component", "api", "error", err)
 			return
 		}
 		playTargets = resolvedTargets

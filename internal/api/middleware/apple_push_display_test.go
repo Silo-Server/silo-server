@@ -11,22 +11,28 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // fakeSessionValidator maps each active session to its account's role; a
-// session it does not list is revoked or expired. err, when set, is a store
+// session it does not list is revoked or expired. remote maps a
+// remote-playback session to its bound profile. err, when set, is a store
 // failure every lookup returns.
 type fakeSessionValidator struct {
-	roles map[string]string
-	err   error
+	roles  map[string]string
+	remote map[string]string
+	err    error
 }
 
-func (f *fakeSessionValidator) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+func (f *fakeSessionValidator) ActiveSession(_ context.Context, id string) (auth.SessionAuthority, bool, error) {
 	if f.err != nil {
-		return "", false, f.err
+		return auth.SessionAuthority{}, false, f.err
+	}
+	if profile, ok := f.remote[id]; ok {
+		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: profile}, true, nil
 	}
 	role, ok := f.roles[id]
-	return role, ok, nil
+	return auth.SessionAuthority{Role: role, Purpose: models.SessionPurposeAccount}, ok, nil
 }
 
 func TestRequireApplePushDisplayAuth(t *testing.T) {

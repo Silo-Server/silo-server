@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -377,5 +378,24 @@ func TestResendInvitationDeliveryChoice(t *testing.T) {
 	requireProblem(t, noAddress, TypeValidationFailed)
 	if !strings.Contains(noAddress.Body.String(), `"location":"body.delivery"`) {
 		t.Fatal(noAddress.Body.String())
+	}
+}
+
+// An invitation's library list is applied verbatim when it is accepted, so an
+// id no library carries is refused before the invitation is sent.
+func TestInvitationRejectsUnknownLibraries(t *testing.T) {
+	f := fixtureInvitations()
+	h := invitationTestHandler(f) // knows libraries 1-4
+	path := Prefix + "/admin/invitations"
+	p := requireProblem(t, do(t, h, http.MethodPost, path, `{"email":"a@example.invalid","library_ids":["2","9"]}`, actingRequestAdmin), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != locationLibraryIDs || p.Errors[0].Detail != "unknown library identifier: 9" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	if f.writes != 0 {
+		t.Fatal("unknown library reached the service")
+	}
+	r := do(t, h, http.MethodPost, path, `{"email":"a@example.invalid","library_ids":["2","1"]}`, actingRequestAdmin)
+	if r.Code != 201 || f.send == nil || !slices.Equal(f.send.LibraryIDs, []int{2, 1}) {
+		t.Fatal(r.Code, r.Body.String(), f.send)
 	}
 }

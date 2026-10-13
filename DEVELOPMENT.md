@@ -142,6 +142,11 @@ that can hold millions of rows. Keep locks on existing tables short:
   before creating a new index: a copy left by an interrupted run is invalid, and
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS` would keep it, so the planner would
   never use the index.
+- When a migration replaces one index with another, a retry must not drop the
+  replacement: goose records the version only after the last statement, so a
+  run that already dropped the old index can run again. Use a Go migration
+  that builds through `ensureIndexConcurrently` in `internal/database`, which
+  drops only an invalid copy (`internal/database/push_attempt_key_migration.go`).
 - Add foreign keys and `CHECK` constraints to existing tables as `NOT VALID`,
   and run `VALIDATE CONSTRAINT` only after that commits: in a later migration,
   or as a separate statement in a `NO TRANSACTION` file. Inside one

@@ -103,7 +103,7 @@ type CatalogService struct {
 func NewCatalogService(repositories *RepositoryStore, opts CatalogServiceOptions) *CatalogService {
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newPackageFetchClient(defaultPackageFetchTimeouts)
 	}
 
 	apiVersion := opts.SiloAPIVersion

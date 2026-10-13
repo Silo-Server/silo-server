@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
 
@@ -25,12 +26,17 @@ func TestRemoteCompatRelayReusesNodeConnectionsAndRecordsDependencyMetrics(t *te
 		concurrency = 20
 		waves       = 5
 		upstream    = "remote-session"
+		secret      = "compat-relay-secret"
 	)
 	var dials, acks atomic.Int32
 	arrived := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})
 	node := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !nodeauthtest.Signed(r, secret) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		switch {
 		case r.Method == http.MethodPost:
 			acks.Add(1)
@@ -61,7 +67,7 @@ func TestRemoteCompatRelayReusesNodeConnectionsAndRecordsDependencyMetrics(t *te
 	t.Cleanup(node.Close)
 	t.Cleanup(func() { close(done) })
 
-	handler := &PlaybackHandler{JWTSecret: "compat-relay-secret"}
+	handler := &PlaybackHandler{JWTSecret: secret}
 	streamCallsBefore := nodeDependencyOperations(t, "stream")
 
 	if _, err := handler.fetchRemoteCompatManifest(t.Context(), node.URL, upstream); err != nil {
