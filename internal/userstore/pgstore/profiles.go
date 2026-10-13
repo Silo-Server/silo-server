@@ -376,6 +376,14 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 
 	var deleted *userstore.Profile
 	if audit != nil {
+		// Setting clears delete user_setting_values rows and then update the
+		// profile's legacy columns under this account lock. Taking it before
+		// the profile row lock keeps that order; locking the profile first
+		// and then deleting its settings would deadlock against a clear.
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
+			preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil {
+			return fmt.Errorf("locking preference settings transaction: %w", err)
+		}
 		if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
 			return fmt.Errorf("locking profile %s: %w", id, err)
 		}
