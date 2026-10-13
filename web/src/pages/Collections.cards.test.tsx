@@ -289,7 +289,6 @@ describe("Server collections", () => {
     // Opening the page reads no library's whole list.
     expect(libraryReads()).toEqual([]);
 
-    // Without IntersectionObserver, Load more stands in for scrolling to the end.
     await userEvent.click(within(server).getByRole("button", { name: "Load more" }));
     await within(server).findByRole("link", { name: "Space operas" });
     expect(cardsIn(server)).toEqual([
@@ -324,12 +323,12 @@ describe("Server collections", () => {
       show();
       const server = await screen.findByRole("region", { name: "Server collections" });
       await within(server).findByRole("link", { name: "Studio Ghibli" });
-      expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
       expect(libraryReads()).toEqual([]);
 
       act(() => observed.at(-1)!([{ isIntersecting: true }]));
       expect(await within(server).findByRole("link", { name: "Space operas" })).toBeInTheDocument();
       expect(libraryReads()).toEqual(["/api/v2/library/1/collections"]);
+      expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -386,6 +385,22 @@ describe("Server collections", () => {
 
     await userEvent.click(within(server).getByRole("button", { name: "Kids" }));
     expect(libraryOf(card())).toBe("2");
+  });
+
+  it("keeps the first collections in the server collections answer's order", async () => {
+    v2Recorder.answer("GET /api/v2/collections/server", {
+      libraries: [serverLibrary("1", "Movies", [oscarWinners, heistNight], 3)],
+    });
+    // A library list that disagrees with the first ones, as an older cached copy can.
+    v2Recorder.answer(
+      "GET /api/v2/library/{id}/collections",
+      libraryTab("1", [heistNight, spaceOperas, oscarWinners]),
+    );
+    show();
+    const server = await screen.findByRole("region", { name: "Server collections" });
+    await userEvent.click(await within(server).findByRole("button", { name: "Load more" }));
+    await within(server).findByRole("link", { name: "Space operas" });
+    expect(cardsIn(server)).toEqual([oscarWinners.title, "Heist night", "Space operas"]);
   });
 
   it("finds a collection in several libraries among the rest of a library too", async () => {
