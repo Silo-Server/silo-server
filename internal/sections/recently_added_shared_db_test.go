@@ -285,3 +285,53 @@ func TestScopeTVLibraries(t *testing.T) {
 		})
 	}
 }
+
+// The default home Recently Added TV row is scoped to series. A TV library
+// typed with an alias such as "tv" counts as covered by that row, so the row
+// has to show it.
+func TestSeriesRecentlyAddedIncludesTVAliasLibrariesDB(t *testing.T) {
+	pool := openRecentlyAddedTestPool(t)
+	ctx := t.Context()
+	suffix := time.Now().UnixNano()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	var showsID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('tv', $1, true) RETURNING id`, fmt.Sprintf("alias-recent-tv-%d", suffix)).Scan(&showsID); err != nil {
+		t.Fatalf("seed tv folder: %v", err)
+	}
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	seriesID := fmt.Sprintf("alias-recent-series-%d", suffix)
+	episodeID := fmt.Sprintf("alias-recent-episode-%d", suffix)
+	runID := fmt.Sprintf("alias-recent-run-%d", suffix)
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id = $1`, showsID)
+	})
+	exec(`INSERT INTO media_items (content_id, type, title, status, genres, created_at) VALUES ($1, 'series', 'Alias Show', 'matched', '{}'::text[], $2)`, seriesID, base)
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, seriesID, showsID, base)
+	exec(`INSERT INTO scan_runs (id, media_folder_id, mode, status) VALUES ($1, $2, 'library', 'completed')`, runID, showsID)
+	exec(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, rating_imdb) VALUES ($1, $2, 1, 1, 'Pilot', '', 45, 0)`, episodeID, seriesID)
+	exec(`INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id) VALUES ($1, $2, $3, $4)`, episodeID, showsID, base.Add(time.Minute), runID)
+	exec(`INSERT INTO media_files (episode_id, media_folder_id, file_path) VALUES ($1, $2, $3)`, episodeID, showsID, "/alias-recent/"+episodeID+".mkv")
+
+	items, _, err := NewFetcher(pool).fetchRecentlyAdded(ctx, ResolvedSection{
+		SectionType: SectionRecentlyAdded,
+		ItemLimit:   20,
+		Config:      defaultMediaScopeConfig("series"),
+	}, nil, []int{showsID}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("fetch series row: %v", err)
+	}
+	got := make([]string, len(items))
+	for i, item := range items {
+		got[i] = item.Type + ":" + item.ContentID
+	}
+	if want := []string{"episode:" + episodeID}; !slices.Equal(got, want) {
+		t.Fatalf("series row over a tv-typed library = %v, want %v", got, want)
+	}
+}
