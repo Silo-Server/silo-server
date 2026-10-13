@@ -83,3 +83,31 @@ describe("EditMetadataDialog image locks", () => {
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
   });
 });
+
+describe("EditMetadataDialog cleared fields", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+  });
+
+  // The server clears a nullable field only on an explicit null; it leaves an
+  // omitted field as it was.
+  it("sends null for a cleared rating, date, and air timezone", () => {
+    const item = {
+      ...series(),
+      rating_imdb: 7.2,
+      first_air_date: "2016-03-08",
+      air_timezone: "America/New_York",
+    } as ItemDetail;
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));
+    for (const value of ["7.2", "2016-03-08", "America/New_York"]) {
+      fireEvent.change(screen.getByDisplayValue(value), { target: { value: "" } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ rating_imdb: null, first_air_date: null, air_timezone: null }),
+      expect.any(Object),
+    );
+  });
+});

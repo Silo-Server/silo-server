@@ -349,6 +349,24 @@ func TestAdminTaskHistoryAndJobCursorBinding(t *testing.T) {
 	}
 }
 
+// TestJobPollsFollowActingProfile: the job polls outside the admin class
+// give admin reach only to the acting admin. A non-primary profile on the
+// admin's account gets the 404 any other non-owner gets.
+func TestJobPollsFollowActingProfile(t *testing.T) {
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: &models.AdminJob{ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-1", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	h := newTestHandler(t, deps)
+	child := with(bearer(adminToken), "X-Profile-Id", "p-owner")
+	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+	for _, path := range []string{Prefix + "/admin/jobs/transition", Prefix + "/library-jobs/job-1"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", child), TypeNotFound)
+		if rec := do(t, h, http.MethodGet, path, "", primary); rec.Code != http.StatusOK {
+			t.Fatalf("%s as the primary profile: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestAdminJobOwnerReadIsSafe(t *testing.T) {
 	f := newFakeAdminTasks()
 	h := adminTasksTestHandler(t, f)

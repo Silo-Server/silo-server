@@ -868,6 +868,27 @@
       "body_file": "admin_apple_push_test.json"
     },
     {
+      "name": "admin_apple_push_test_notification",
+      "operation_id": "testAdminApplePushNotification",
+      "scenario": "The test push carries the profile's newest notification and names it, so the device shows that notification's real text.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/notifications/push/apple/test",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"profile_id\":\"notified-profile\",\"server_device_id\":\"target-device\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminNotificationPushTestResult",
+      "body_file": "admin_apple_push_test_notification.json"
+    },
+    {
       "name": "admin_catalog_export_link",
       "operation_id": "publishCatalogExportJob",
       "scenario": "A saved signed URL retains its original seven-day expiry.",
@@ -3874,9 +3895,33 @@
       "body_file": "admin_user_policy_defaults.json"
     },
     {
+      "name": "android_push_registration_ok",
+      "operation_id": "registerPushDevice",
+      "scenario": "An Android installation registers for private push; the receipt names the server so the app can route that server's pushes by server and profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/push/devices",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner",
+          "X-Push-Generation": "3",
+          "X-Push-Installation-Key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s"
+        },
+        "body": "{\"device_id\":\"install\",\"platform\":\"android\",\"token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"push_mode\":\"private_push\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AndroidPushRegistrationReceipt",
+      "body_file": "android_push_registration_ok.json"
+    },
+    {
       "name": "apple_push_registration_capability",
       "operation_id": "getApplePushRegistrationCapabilities",
-      "scenario": "Local ordered Apple registration is unavailable when the service is absent; this does not describe provider delivery.",
+      "scenario": "Local ordered Apple registration and current-login validation are configured; this does not describe provider delivery.",
       "request": {
         "method": "GET",
         "path": "/api/v2/devices/push/apple/capabilities",
@@ -3893,6 +3938,30 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ApplePushRegistrationCapability",
       "body_file": "apple_push_registration_capability.json"
+    },
+    {
+      "name": "apple_push_registration_ok",
+      "operation_id": "registerApplePushDevice",
+      "scenario": "An iPhone registers for private push and receives a display credential; the receipt names the server so the app can key that credential by server and profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/devices/push/apple",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner",
+          "X-Push-Generation": "3",
+          "X-Push-Installation-Key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s"
+        },
+        "body": "{\"device_id\":\"install\",\"apns_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"apns_environment\":\"production\",\"apns_topic\":\"org.siloserver.silo\",\"push_mode\":\"private_push\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ApplePushRegistrationReceipt",
+      "body_file": "apple_push_registration_ok.json"
     },
     {
       "name": "approve_device_handoff_ok",
@@ -7002,6 +7071,49 @@
       "body_file": "get_for_you_main_profile_header_required.json"
     },
     {
+      "name": "get_home_capabilities_ok",
+      "operation_id": "getHomeCapabilities",
+      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"59a9dab7b74c563cd0809b2a1152c35a11c592c44ebda15b6ca6c64da090c7a9\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/HomeCapabilities",
+      "body_file": "get_home_capabilities_ok.json"
+    },
+    {
+      "name": "get_home_layout_include_items_out_of_range",
+      "operation_id": "getHomeLayout",
+      "scenario": "An include_items above the maximum of 4 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout?include_items=5",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_layout_include_items_out_of_range.json"
+    },
+    {
       "name": "get_home_layout_ok",
       "operation_id": "getHomeLayout",
       "scenario": "The home page's section layout for the acting profile, without items.",
@@ -7019,7 +7131,7 @@
         "Content-Type": "application/json"
       },
       "response_media_type": "application/json",
-      "schema": "#/components/schemas/SectionLayout",
+      "schema": "#/components/schemas/HomeLayout",
       "body_file": "get_home_layout_ok.json"
     },
     {
@@ -7041,6 +7153,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "get_home_layout_profile_header_required.json"
+    },
+    {
+      "name": "get_home_layout_with_items_ok",
+      "operation_id": "getHomeLayout",
+      "scenario": "The home layout with the cards of its first section, artwork presigned at the requested size.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout?include_items=1&image_size=medium",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/HomeLayout",
+      "body_file": "get_home_layout_with_items_ok.json"
     },
     {
       "name": "get_home_section_items_not_found",
@@ -12747,6 +12880,28 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "query_catalog_items_profile_header_required.json"
+    },
+    {
+      "name": "query_catalog_letters_ok",
+      "operation_id": "queryCatalogLetters",
+      "scenario": "The letter index of a library sorted by title: each letter with titles, its count, and its first list position.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/letters",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"library_id\":\"1\",\"type\":\"movie\",\"order\":\"asc\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CatalogLetters",
+      "body_file": "query_catalog_letters_ok.json"
     },
     {
       "name": "rate_limited",

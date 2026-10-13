@@ -1559,3 +1559,16 @@ func TestSameOriginComparesCanonicalHosts(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleCompleteRejectsOversizedBody(t *testing.T) {
+	rig := newOAuthRig(t)
+	body := `{"code":"` + strings.Repeat("a", maxOAuthCompleteBodyBytes) + `"}`
+	w := httptest.NewRecorder()
+	rig.h.HandleComplete(w, httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/complete", strings.NewReader(body)))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
+	}
+	if len(rig.comp.opened) != 0 {
+		t.Fatalf("an oversized completion opened a session: %+v", rig.comp.opened)
+	}
+}

@@ -1012,6 +1012,12 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 	imgRows, err := q.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = ANY($1)
 		UNION ALL
+		SELECT banner_path, thumb_path, clearart_path FROM media_items WHERE content_id = ANY($1)
+		UNION ALL
+		SELECT disc_path, '', '' FROM media_items WHERE content_id = ANY($1)
+		UNION ALL
+		SELECT path, '', '' FROM media_item_backdrops WHERE content_id = ANY($1)
+		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
@@ -1045,9 +1051,9 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 }
 
 // filterUnreferencedImageDirs returns the candidate directories that no
-// surviving row still has artwork under: no poster, backdrop, logo, season
-// poster or episode still outside deletingContentIDs has a path that starts
-// with the directory.
+// surviving row still has artwork under: no item artwork slot, extra backdrop,
+// season poster or episode still outside deletingContentIDs has a path that
+// starts with the directory.
 //
 // The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
 // and that is what this used to run. A pattern built from a column cannot be
@@ -1103,8 +1109,12 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			FROM unnest($1::text[]) AS t(dir)
 		), referenced_path AS (
 			SELECT a.path FROM media_items mi
-				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path)) AS a(path)
+				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path),
+					(mi.banner_path), (mi.thumb_path), (mi.clearart_path), (mi.disc_path)) AS a(path)
 				WHERE NOT (mi.content_id = ANY($2::text[])) AND a.path <> ''
+			UNION ALL
+			SELECT b.path FROM media_item_backdrops b
+				WHERE NOT (b.content_id = ANY($2::text[])) AND b.path <> ''
 			UNION ALL
 			SELECT s.poster_path FROM seasons s
 				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''

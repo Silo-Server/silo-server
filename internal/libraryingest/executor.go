@@ -35,6 +35,14 @@ type Matcher interface {
 	RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) (retried int, stillUnmatched int, err error)
 }
 
+// LocalSidecarChecker re-applies the local sidecar metadata (NFO, artwork) of
+// matched items under a scanned scope whose sidecar files changed, and returns
+// the content IDs it re-applied. listing is what the scan read, nil when it
+// read no directories.
+type LocalSidecarChecker interface {
+	CheckLocalSidecars(ctx context.Context, folderID int, scopePath string, listing scanner.SidecarListing) (reapplied []string, err error)
+}
+
 // FolderRepository provides scan bookkeeping for library ingest.
 type FolderRepository interface {
 	UpdateLastScanned(ctx context.Context, id int, scannedAt time.Time) error
@@ -54,6 +62,10 @@ type Result struct {
 	MatchedFiles           int
 	RetriedItems           int
 	StillUnmatchedWarnings int
+	// LocalMetadataReapplied counts the items whose changed local sidecar
+	// metadata (their own, or their seasons' and episodes') the scan applied
+	// again.
+	LocalMetadataReapplied int
 	ScanDuration           time.Duration
 	MatchDuration          time.Duration
 	RetryDuration          time.Duration
@@ -96,6 +108,7 @@ type Executor struct {
 	events          cache.EventBus
 	realtime        *notifications.Hub
 	availability    *notifications.AvailabilityDetector
+	localSidecars   LocalSidecarChecker
 	now             func() time.Time
 
 	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
@@ -136,6 +149,14 @@ func NewExecutor(
 func (e *Executor) SetAvailabilityDetector(detector *notifications.AvailabilityDetector) {
 	if e != nil {
 		e.availability = detector
+	}
+}
+
+// SetLocalSidecarChecker makes scans of video libraries re-apply local
+// metadata whose sidecar files changed.
+func (e *Executor) SetLocalSidecarChecker(checker LocalSidecarChecker) {
+	if e != nil {
+		e.localSidecars = checker
 	}
 }
 
@@ -364,6 +385,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 			return result, fmt.Errorf("finalize variants for scope %q: %w", scopePath, err)
 		}
 	}
+	e.checkLocalSidecars(scanCtx, folder, matchScopes, scanResult, result)
 
 	if mode == scopeModeLibrary && e.folders != nil {
 		if err := e.folders.UpdateLastScanned(scanCtx, folder.ID, e.now().UTC()); err != nil {
@@ -476,6 +498,54 @@ func scopeMatchPaths(folder *models.MediaFolder, mode scopeMode, scopePath strin
 
 func usesDedicatedEnrichment(folderType string) bool {
 	return librarykind.Of(folderType).Ebook
+}
+
+// maxLocalMetadataItemEvents bounds the item-changed events one scan
+// publishes for re-applied local metadata; a bulk NFO rewrite is announced by
+// the library-changed event alone.
+const maxLocalMetadataItemEvents = 100
+
+// checkLocalSidecars re-applies changed local sidecar metadata in the scanned
+// scopes. It runs after matching, so an item matched by this scan is recorded
+// with the sidecars it was matched with. A failure is logged, not returned:
+// the next scan checks again.
+func (e *Executor) checkLocalSidecars(ctx context.Context, folder *models.MediaFolder, scopes []string, scanResult *scanner.ScanResult, result *Result) {
+	if e.localSidecars == nil {
+		return
+	}
+	if kind := librarykind.Of(folder.Type); !kind.Movie && !kind.TV && !kind.Mixed {
+		return
+	}
+	var listing scanner.SidecarListing
+	if scanResult != nil {
+		listing = scanResult.Sidecars
+	}
+	for _, scopePath := range scopes {
+		reportProgress(ctx, ProgressUpdate{
+			Phase:        "matching",
+			Message:      "Checking local metadata files",
+			CurrentScope: scopePath,
+			MatchedFiles: result.MatchedFiles,
+		})
+		reapplied, err := e.localSidecars.CheckLocalSidecars(ctx, folder.ID, scopePath, listing)
+		for _, contentID := range reapplied {
+			if result.LocalMetadataReapplied < maxLocalMetadataItemEvents && e.realtime != nil {
+				_ = e.realtime.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
+					LibraryID: folder.ID,
+					ContentID: contentID,
+					Change:    "metadata_updated",
+				})
+			}
+			result.LocalMetadataReapplied++
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.WarnContext(ctx, "library ingest: local sidecar check failed", "component", "libraryingest",
+				"folder_id", folder.ID, "scope", scopePath, "error", err)
+		}
+	}
 }
 
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
@@ -772,7 +842,7 @@ func shouldPublish(result *Result) bool {
 	if result == nil {
 		return false
 	}
-	if result.MatchedFiles > 0 || result.RetriedItems > 0 || result.StillUnmatchedWarnings > 0 {
+	if result.MatchedFiles > 0 || result.RetriedItems > 0 || result.StillUnmatchedWarnings > 0 || result.LocalMetadataReapplied > 0 {
 		return true
 	}
 	if result.ScanResult == nil {

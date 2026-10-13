@@ -91,9 +91,10 @@ for its live status, with a ten-second timeout per host:
 - `host.id` is `api` for the API server and `node:<id>` for a proxy node; it
   is also the instance-state scope the plugin's node keys are stored under.
   The API host comes first, then every enabled proxy node in id order. Proxy
-  rows are read over the node's backend URL with the node bearer
+  rows are read over the node's backend URL with
+  [signed worker requests](architecture/worker-http-protocol.md#authentication)
   (`GET /network-access/{provider}/status` on the proxy listener) with the same
-  ten-second timeout; a proxy that cannot be reached, refuses the bearer,
+  ten-second timeout; a proxy that cannot be reached, refuses the request,
   runs a build without the routes, or has not resolved its `stream_nodes`
   row yet answers `unavailable` with the reason in `error`. Transcode nodes
   are never listed. Each request reads only the named provider, so another
@@ -143,7 +144,7 @@ Both are naturally idempotent: repeating connect converges on one connected
 instance per host, repeating disconnect on disconnected. An unknown provider
 is `404 not_found`.
 
-Proxy hosts are commanded over the node bearer routes
+Proxy hosts are commanded over the signed worker routes
 `POST /network-access/{provider}/connect` and
 `POST /network-access/{provider}/disconnect` on the proxy listener, each
 bounded by the same ten seconds; the proxy answers the state its own

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Sentinel errors for JWT operations.
@@ -36,6 +38,15 @@ type Claims struct {
 	// FileID is the one media file a direct-download link token authorizes;
 	// zero on every other token type.
 	FileID int `json:"file_id,omitempty"`
+	// SessionPurpose is models.SessionPurposeRemotePlayback on the tokens of
+	// a remote-playback handoff session, whose ProfileID is the bound
+	// profile; empty for an ordinary sign-in. The session row is the
+	// authority: RequireAuth sets both from it, so a token issued before the
+	// session was bound (by an older release) is restricted the same way.
+	SessionPurpose string `json:"session_purpose,omitempty"`
+	// SessionEndsAt, when set, caps the expiry of tokens generated from
+	// these claims at the session's absolute end. Never serialized.
+	SessionEndsAt time.Time `json:"-"`
 	jwt.RegisteredClaims
 }
 
@@ -64,12 +75,19 @@ const (
 const DirectDownloadLinkTTL = 5 * time.Minute
 
 // IsOwnLoginSession reports whether the claims come from the account's own
-// login session: not an API key, not a sessionless token and not an
-// impersonation session. Operations that act for the person themselves
-// (approving a device, linking or unlinking a sign-in, provider logout,
-// handing over ownership) admit only these.
+// login session: not an API key, not a sessionless token, not an
+// impersonation session and not a remote-playback handoff. Operations that
+// act for the person themselves (approving a device, linking or unlinking a
+// sign-in, provider logout, handing over ownership) admit only these.
 func (c *Claims) IsOwnLoginSession() bool {
-	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil
+	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
+		!c.IsRemotePlayback()
+}
+
+// IsRemotePlayback reports whether the claims belong to a remote-playback
+// handoff session.
+func (c *Claims) IsRemotePlayback() bool {
+	return c != nil && c.SessionPurpose == models.SessionPurposeRemotePlayback
 }
 
 const PluginAccessCookieName = "silo_plugin_access"
@@ -210,6 +228,17 @@ func (j *JWTService) generateAccessToken(claims Claims) (string, error) {
 	return j.generateToken(claims, TokenTypeAccess, j.AccessExpiry())
 }
 
+// accessExpiresIn is the expires_in a token pair reports for claims: the
+// access token lifetime, or the time left before the session ends when that
+// is sooner.
+func (j *JWTService) accessExpiresIn(claims Claims) int {
+	expiry := j.AccessExpiry()
+	if !claims.SessionEndsAt.IsZero() {
+		expiry = min(expiry, max(0, time.Until(claims.SessionEndsAt)))
+	}
+	return int(expiry.Seconds())
+}
+
 func (j *JWTService) generateRefreshToken(claims Claims) (string, error) {
 	return j.generateToken(claims, TokenTypeRefresh, j.RefreshExpiry())
 }
@@ -217,9 +246,13 @@ func (j *JWTService) generateRefreshToken(claims Claims) (string, error) {
 // generateToken creates a signed JWT with the given claims and expiry duration.
 func (j *JWTService) generateToken(claims Claims, tokenType string, expiry time.Duration) (string, error) {
 	now := time.Now()
+	expiresAt := now.Add(expiry)
+	if !claims.SessionEndsAt.IsZero() && claims.SessionEndsAt.Before(expiresAt) {
+		expiresAt = claims.SessionEndsAt
+	}
 	claims.TokenType = tokenType
 	claims.RegisteredClaims = jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
 		IssuedAt:  jwt.NewNumericDate(now),
 	}
 
@@ -260,4 +293,21 @@ func (j *JWTService) ValidateToken(tokenStr string) (*Claims, error) {
 	}
 
 	return claims, nil
+}
+
+// StoredRefreshTokenSessionID returns the login session a refresh token that
+// Silo issued and stored itself belongs to, such as the one a
+// Jellyfin-compatible session keeps. It reads the claims without checking the
+// signature or expiry: the token comes from Silo's own encrypted storage, not
+// from a client, and an expired token still names its session. Never use it
+// on a token a request presented.
+func StoredRefreshTokenSessionID(tokenStr string) (string, error) {
+	claims := &Claims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(tokenStr, claims); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
+	if claims.TokenType != TokenTypeRefresh || claims.SessionID == "" {
+		return "", fmt.Errorf("%w: not a refresh token of a login session", ErrInvalidToken)
+	}
+	return claims.SessionID, nil
 }

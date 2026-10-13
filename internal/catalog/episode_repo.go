@@ -1096,7 +1096,8 @@ func (r *EpisodeRepository) ListBySeasonIDs(ctx context.Context, seasonIDs []str
 }
 
 // UpdateMetadata builds a dynamic UPDATE query for the episodes table,
-// setting only the non-nil fields in upd. Always bumps updated_at.
+// setting only the non-nil fields in upd and NULLing the ones it clears.
+// Always bumps updated_at.
 // Returns ErrEpisodeNotFound if no row matches contentID.
 func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
 	var setClauses []string
@@ -1142,6 +1143,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 	}
 	addString("still_source_path", upd.StillSourcePath)
 	addString("still_thumbhash", upd.StillThumbhash)
+	setClauses = append(setClauses, upd.nullClauses(episodeClearableColumns...)...)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
@@ -1166,7 +1168,7 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 		}
 		return fmt.Errorf("updating episode metadata: %w", err)
 	}
-	if upd.AirDate != nil {
+	if upd.AirDate != nil || upd.clears(columnAirDate) {
 		if _, err := tx.Exec(ctx, refreshSeriesAirDatesSQL, []string{seriesID}); err != nil {
 			return fmt.Errorf("update series air dates: %w", err)
 		}
@@ -1282,7 +1284,8 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	case BrowseSortTitle:
 		order = "LOWER(e.title), e.content_id"
 	case BrowseSortReleaseDate:
-		order = "e.air_date, e.content_id"
+		// Same-day episodes keep their season/episode order, like the catalog.
+		order = "e.air_date, e.season_number, e.episode_number, e.content_id"
 	case BrowseSortCreatedAt:
 		order = "e.created_at, e.content_id"
 	}

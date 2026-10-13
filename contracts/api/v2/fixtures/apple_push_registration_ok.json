@@ -1,0 +1,11 @@
+{
+  "generation": "3",
+  "id": "registration",
+  "server_device_id": "server-device",
+  "push_mode": "private_push",
+  "enabled": true,
+  "removed": false,
+  "display_token": "synthetic-display",
+  "display_token_expires_at": "2026-02-01T03:04:05.678Z",
+  "server_id": "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"
+}

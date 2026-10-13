@@ -27,12 +27,13 @@ func (f *fakeOrderedApple) RegisterApplePush(_ context.Context, cmd notification
 	f.calls++
 	f.cmd = cmd
 	f.identity = identity
-	return notifications.ApplePushReceipt{Generation: cmd.Generation, RegistrationID: "registration", ServerDeviceID: "server-device", Enabled: true, PushMode: cmd.PushMode}, "synthetic-display", time.Now().Add(time.Hour), f.err
+	return notifications.ApplePushReceipt{Generation: cmd.Generation, RegistrationID: "registration", ServerDeviceID: "server-device", Enabled: true, PushMode: cmd.PushMode}, "synthetic-display", fixedTime().Add(30 * 24 * time.Hour), f.err
 }
 func TestOrderedApplePushTransport(t *testing.T) {
 	f := new(fakeOrderedApple)
 	deps := pilotDeps(nil, nil)
 	deps.OrderedApplePush = f
+	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	claims := &auth.Claims{UserID: 1, Role: "user", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims}}, fakeSessions{map[string]string{"session": "user"}}, nil, nil)
 	h := NewHandler(deps)
@@ -42,7 +43,7 @@ func TestOrderedApplePushTransport(t *testing.T) {
 	body := `{"device_id":"install","apns_token":"` + strings.Repeat("a", 64) + `","apns_environment":"production","apns_topic":"org.siloserver.silo","push_mode":"private_push"}`
 	path := Prefix + "/devices/push/apple"
 	r := do(t, h, http.MethodPost, path, body, headers)
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"generation":"9007199254740993"`) || !strings.Contains(r.Body.String(), `"display_token":"synthetic-display"`) || f.identity.SessionID != "session" || f.cmd.ProfileID != "p-owner" || f.cmd.UserID != 1 {
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"generation":"9007199254740993"`) || !strings.Contains(r.Body.String(), `"display_token":"synthetic-display"`) || !strings.Contains(r.Body.String(), `"server_id":"`+fixtureServerID+`"`) || f.identity.SessionID != "session" || f.cmd.ProfileID != "p-owner" || f.cmd.UserID != 1 {
 		t.Fatalf("%d %s %+v", r.Code, r.Body.String(), f)
 	}
 	if r.Header().Get("Cache-Control") != "no-store" || strings.Contains(r.Body.String(), headers["X-Push-Installation-Key"]) || strings.Contains(r.Body.String(), strings.Repeat("a", 64)) {

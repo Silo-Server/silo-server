@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
@@ -81,10 +82,10 @@ func FullRepresentationSize(resp *http.Response) int64 {
 	return size
 }
 
-// Acknowledge reports a completed downstream response to the transcode node.
-// The opaque generation token makes delayed acknowledgements harmless after a
-// restart or reconstruction.
-func Acknowledge(ctx context.Context, client *http.Client, targetURL, jwtSecret, generation string) error {
+// Acknowledge reports a completed downstream response to the transcode node at
+// nodeURL for the segment at segmentPath. The opaque generation token makes
+// delayed acknowledgements harmless after a restart or reconstruction.
+func Acknowledge(ctx context.Context, client *http.Client, nodeURL, segmentPath, jwtSecret, generation string) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -94,11 +95,13 @@ func Acknowledge(ctx context.Context, client *http.Client, targetURL, jwtSecret,
 	// bounded lifetime so a successful delivery is not mistaken for a disconnect.
 	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ackCtx, http.MethodPost, targetURL+"/downloaded", nil)
+	req, err := http.NewRequestWithContext(ackCtx, http.MethodPost, nodeURL+segmentPath+"/downloaded", nil)
 	if err != nil {
 		return fmt.Errorf("build acknowledgement: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+jwtSecret)
+	if err := nodeauth.Sign(req, nodeURL, jwtSecret); err != nil {
+		return fmt.Errorf("sign acknowledgement: %w", err)
+	}
 	req.Header.Set(GenerationHeader, generation)
 	resp, err := telemetry.DoTrustedNode(client, req, "stream_ack")
 	if err != nil {

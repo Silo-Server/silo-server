@@ -351,10 +351,10 @@ func (reg *Registry) refreshCatalogItemTrailers(ctx context.Context, in *Catalog
 	return out, nil
 }
 
-func (reg *Registry) getMetadataAICapability(_ context.Context, _ *CapabilityInput) (*MetadataAICapabilityOutput, error) {
+func (reg *Registry) getMetadataAICapability(ctx context.Context, _ *CapabilityInput) (*MetadataAICapabilityOutput, error) {
 	view := handlers.MetadataAIStatusView{OnView: metadataAIOnViewOff}
 	if reg.deps.MetadataAI != nil {
-		view = reg.deps.MetadataAI.Status()
+		view = reg.deps.MetadataAI.Status(ctx)
 	}
 	state := StateNotConfigured
 	if view.Enabled {

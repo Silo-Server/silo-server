@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1177,7 +1178,7 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 // ResolveDirectFile authorizes a browser-style original download without
 // writing response bytes. It is used by the API before minting a proxy token.
 func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, format string, filter catalog.AccessFilter) (*FileTarget, error) {
-	cfg, _, err := s.downloadConfigForUser(ctx, userID, "")
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1196,6 +1197,16 @@ func (s *Service) ResolveDirectFile(ctx context.Context, userID, fileID int, for
 	}
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
+	}
+	// The original goes out unchanged, so the policy's download quality
+	// ceiling, which a custom override can narrow, must admit its resolution,
+	// as for a managed original. This route offers no other quality, so an
+	// over-ceiling original is a policy refusal.
+	if err := s.policy.ensureServedQualityAllowed(ctx, user, cfg, s.artifacts != nil, file, ""); err != nil {
+		if errors.Is(err, ErrQualityUnavailable) {
+			return nil, fmt.Errorf("original is above the download quality ceiling: %w", ErrDownloadNotAllowed)
+		}
+		return nil, err
 	}
 	return &FileTarget{Path: file.FilePath, MediaFileID: file.ID, ProxyEligible: proxyDeliveryAllowed(cfg)}, nil
 }
@@ -1515,6 +1526,9 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Disposition", attachmentDisposition(path))
 	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
+	if etag := serveEntityTag(ctx, f, stat); etag != "" {
+		w.Header().Set("ETag", etag)
+	}
 
 	var reader io.ReadSeeker = f
 	if s.bandwidth != nil {
@@ -1595,9 +1609,11 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// attachmentDisposition names the saved file in the header form proxy nodes
+// use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
+// as raw UTF-8 in filename, which clients may misread.
 func attachmentDisposition(path string) string {
-	filename := sanitizeFilename(filepath.Base(path))
-	return fmt.Sprintf(`attachment; filename="%s"`, filename)
+	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(filepath.Base(path))})
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {

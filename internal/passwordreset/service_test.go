@@ -30,7 +30,7 @@ type requestedLink struct {
 	minAge    time.Duration
 }
 
-func (f *fakeRepo) Issue(_ context.Context, _ int, tokenHash string, _ *int, _ time.Time) error {
+func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ *int, _ time.Time) error {
 	f.issued = append(f.issued, tokenHash)
 	return nil
 }
@@ -40,7 +40,7 @@ func (f *fakeRepo) Withdraw(_ context.Context, _ int, tokenHash string) error {
 	return nil
 }
 
-func (f *fakeRepo) IssueUnlessRecent(_ context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
+func (f *fakeRepo) IssueUnlessRecent(_ context.Context, userID int, _, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
 	f.requested = append(f.requested, requestedLink{userID, tokenHash, expiresAt, minAge})
 	return !f.recent, nil
 }

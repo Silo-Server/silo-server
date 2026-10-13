@@ -414,10 +414,13 @@ evolution:
   surviving token. No cross-process enumeration-failure mode for the supported
   topology.
 - **Signing-key blast radius (E / tr-7, G13).** A single `JWTSecret` signs native
-  auth, the stream token, and the node bearer, so a node-secret leak can forge
-  native logins. **Accepted risk** on the trusted-node precondition. **Deferred
-  hardening:** split the stream-token secret from the native-auth secret, then
-  asymmetric stream-token signing before any untrusted/edge node.
+  auth and the stream token, and every node holds it, so a compromised node can
+  forge native logins. **Accepted risk** on the trusted-node precondition.
+  Watching a node link is not the same as compromising a node: calls to nodes
+  carry an HMAC under a key derived from the secret, never the secret itself
+  (see [worker authentication](worker-http-protocol.md#authentication)).
+  **Deferred hardening:** split the stream-token secret from the native-auth
+  secret, then asymmetric stream-token signing before any untrusted/edge node.
 
 ---
 

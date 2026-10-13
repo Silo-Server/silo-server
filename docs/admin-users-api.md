@@ -5,6 +5,13 @@ retain the demo write guard. Scoped API keys retain their existing account and
 access-group grants; they cannot impersonate accounts. A household primary
 profile is not a server administrator.
 
+An `admin:users` key cannot create or promote an administrator, or set an
+administrator account's password, recovery email (`email`), role, or break-glass
+flag. These writes return 403 (`insufficient_scope` in v1, `permission_denied`
+in v2), including on the key owner's own account. Email is a recovery credential
+because a reset link permits a full login session. Other account fields remain
+subject to the Owner rules, and ordinary accounts remain editable within the scope.
+
 `GET /api/v2/admin/users/capabilities` reports account management, guarded
 configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
@@ -139,13 +146,15 @@ instead. `link` returns the URL for the administrator to share with the account
 holder. The URL is a bearer credential for the account's password until it expires.
 
 An account holds at most one live link: issuing a new one replaces the old. The link
-works once. Any other password change also retires it. The public side of the flow
+works once. Changing the password or recovery email also retires it; changing only
+the email's letter case preserves it. The public side of the flow
 is described in [password reset links](auth-api.md#password-reset-links).
 
 | Condition | Result |
 |-----------|--------|
 | No such account | `404 not_found` |
 | Account without local password sign-in (`password_login` false), account disabled, or no email address for `email` | `409 conflict` |
+| Recovery email or account eligibility changed while issuing the link | `409 conflict`; reload the account before trying again |
 | Email not configured for `email` | `409 capability_not_configured` |
 | No server public URL (`server.public_url`) | `409 capability_not_configured` |
 

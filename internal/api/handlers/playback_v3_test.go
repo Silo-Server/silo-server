@@ -4189,6 +4189,21 @@ func TestResolveV3AudioIndexFallsBackWhenSelectionIsOutOfRange(t *testing.T) {
 	}
 }
 
+// The fallback never lands on a track FFmpeg cannot decode, while an explicit
+// choice of one is kept for the planner to refuse by name.
+func TestResolveV3AudioIndexAvoidsUndecodableFallback(t *testing.T) {
+	file := &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Codec: "", Default: true}, {Codec: "eac3"}}}
+
+	out := 7
+	if index, degraded, err := resolveV3AudioIndex(file, "", &out); err != nil || !degraded || index != 1 {
+		t.Fatalf("out-of-range fallback = %d degraded=%v err=%v, want the decodable track 1", index, degraded, err)
+	}
+	explicit := 0
+	if index, degraded, err := resolveV3AudioIndex(file, "", &explicit); err != nil || degraded || index != 0 {
+		t.Fatalf("explicit undecodable choice = %d degraded=%v err=%v, want it kept", index, degraded, err)
+	}
+}
+
 func TestResolveV3AudioIndexRejectsNegativeIndex(t *testing.T) {
 	negative := -1
 	file := &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Language: "eng"}}}
@@ -7074,7 +7089,7 @@ func TestRefreshNodeCapabilitiesDropsReportFetchedBeforeInvalidation(t *testing.
 }
 
 func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
-	probeTimeoutMillis := int64(137000)
+	probeTimeoutMillis := int64(161000)
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ProbeRequestTimeoutMillis: probeTimeoutMillis})
 	}))
@@ -7090,14 +7105,14 @@ func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
 	// The node's own figure is what this path exists to use. It has to exceed
 	// what the cluster setting prices, or the floor below it would be answering
 	// and this would pass without the target node being consulted at all.
-	if cluster := playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device/one"); cluster >= 137*time.Second {
-		t.Fatalf("fixture is inert: the cluster price %s must stay under the node's 137s", cluster)
+	if cluster := playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device/one"); cluster >= 161*time.Second {
+		t.Fatalf("fixture is inert: the cluster price %s must stay under the node's 161s", cluster)
 	}
-	if got, want := handler.remoteToneMapProbeTimeoutV3(remote.URL), 137*time.Second; got != want {
+	if got, want := handler.remoteToneMapProbeTimeoutV3(remote.URL), 161*time.Second; got != want {
 		t.Fatalf("remote probe timeout = %s, want target node budget %s", got, want)
 	}
 	request := transcodenode.TranscodeStartRequest{ToneMapMode: tonemap.ModeHardware}
-	if got, want := handler.remotePlaybackTransportTimeout(remote.URL, request), 137*time.Second+playback.ManifestStartupTimeout; got != want {
+	if got, want := handler.remotePlaybackTransportTimeout(remote.URL, request), 161*time.Second+playback.ManifestStartupTimeout; got != want {
 		t.Fatalf("remote start timeout = %s, want target node budget %s", got, want)
 	}
 

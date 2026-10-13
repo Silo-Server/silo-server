@@ -19,6 +19,11 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
+// metaAttachSession marks a public operation whose answer depends on
+// whether a signed-in person asks: after its limiter, the gate chain attaches
+// the claims of a valid login session (AttachSession) and never refuses.
+const metaAttachSession = "silo.attach_session"
+
 // Legacy v1 error codes the gates translate that have no v2 problem type of
 // their own (the others reuse the matching ProblemType's ID).
 const (
@@ -46,6 +51,9 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		}
 		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
 			chain = directDownloadGateChain(deps, chain)
+		}
+		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
+			chain = append(chain, deps.Auth.AttachSession)
 		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
@@ -115,7 +123,7 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		if deps.ActingAdmin == nil {
 			return nil, "acting admin"
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, deps.ActingAdmin)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, apimw.RequireActingAdminWith(deps.ActingAdmin))
 	case ClassPermissionGated:
 		gate := deps.PermissionGates[permission]
 		if gate == nil {
