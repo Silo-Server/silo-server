@@ -2829,6 +2829,7 @@ describe("VideoPlayer intro skip prompt", () => {
     const video = rendered.container.querySelector("video");
     if (!video) throw new Error("expected video element");
 
+    fireEvent.loadedMetadata(video);
     video.currentTime = 12;
     fireFrameTimeUpdate(video);
     await act(async () => Promise.resolve());
@@ -3046,6 +3047,9 @@ describe("VideoPlayer source timeline", () => {
     const video = container.querySelector("video");
     if (!video) throw new Error("expected video element");
     await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    // A load's reset timeupdate leaves the shown position at the resume point.
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(1300);
 
     act(() => ready.mock.lastCall![0].skipForward());
     video.currentTime = origin;

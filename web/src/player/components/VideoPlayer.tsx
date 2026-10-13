@@ -2340,10 +2340,11 @@ export function VideoPlayer({
     // guard marked started, and the new transport's first frame never seen.
     const hasCurrentFrame = () => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     // Until an original file's clock origin is known the element has no media;
-    // its events are load resets and must not settle a held seek.
+    // its events are load resets. They must not settle a held seek or move the
+    // shown position off where playback is heading.
     const resolveSeekAt = (actualTime: number) =>
-      directPlayOriginPendingRef.current && pendingSeekTime !== null
-        ? { currentTime: pendingSeekTime, pendingSeekTime }
+      directPlayOriginPendingRef.current
+        ? { currentTime: pendingSeekTime ?? subtitleFetchAnchorRef.current, pendingSeekTime }
         : resolvePendingSeekTime(actualTime, pendingSeekTime);
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
