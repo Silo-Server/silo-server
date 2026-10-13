@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -239,5 +240,20 @@ func TestRunSheetsRepairsARecoveredRepeat(t *testing.T) {
 	}
 	if len(*calls) != 4 || !strings.Contains(strings.Join((*calls)[3], " "), "-skip_frame:v noref") {
 		t.Fatalf("runs %q, want a probe, the list, a keyframe repair, and a reference-frame repair", *calls)
+	}
+}
+
+// TestSourceSecondsFollowsAClampedInpoint places a frame back in the input
+// when the container starts before zero and an early sample's inpoint is
+// clamped there: the same keyframe gives both samples the same time.
+func TestSourceSecondsFollowsAClampedInpoint(t *testing.T) {
+	a := newSheetAssembler(SheetsOutput{TileWidth: 16, TileHeight: 16, Columns: 1, Rows: 1, Quality: 80}, []float64{0, 0.1}, true, 0, 0.5)
+	a.inputStart = -0.042
+	// The keyframe at container time 0 (input time 0.042) opens both entries:
+	// the first at its clamped inpoint 0, the second 0.058 before its inpoint.
+	first := a.sourceSeconds(sheetFrameMeta{seconds: 0, hasTime: true}, 0)
+	second := a.sourceSeconds(sheetFrameMeta{seconds: 0.5 - 0.058, hasTime: true}, 1)
+	if math.Abs(first-0.042) > 1e-9 || math.Abs(second-0.042) > 1e-9 {
+		t.Fatalf("source times %g and %g, want both 0.042", first, second)
 	}
 }

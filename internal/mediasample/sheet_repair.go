@@ -177,6 +177,7 @@ func (a attemptRun) repair(req Request, run *sheetAssembler, cells []int, inputS
 		return
 	}
 	collector := newSheetAssembler(*req.Sheets, times, true, 0, list.span)
+	collector.inputStart = inputStart
 	collector.candidates = make([]sheetCandidate, len(times))
 	finished := a.exec(req, args, stdinBytes, collector, collector.line) == nil
 	if (finished && collector.close() != nil) || (!finished && collector.broken()) {

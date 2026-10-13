@@ -90,13 +90,16 @@ type sheetAssembler struct {
 	sampled bool
 	cells   map[int64]int
 	offset  float64
-	// A sampled list's entries each last span seconds. header reads the
-	// list input's start time, by which ffmpeg shifted every frame's time;
-	// with both, sourceSeconds finds a frame's time in the input. sources
-	// holds that time for each cell's frame, NaN when it is unknown.
-	span    float64
-	header  inputHeaderParser
-	sources []float64
+	// A sampled list's entries each last span seconds and start at their
+	// sample's time plus inputStart, the input's container start time,
+	// clamped at zero. header reads the list input's start time, by which
+	// ffmpeg shifted every frame's time; with these, sourceSeconds finds a
+	// frame's time in the input. sources holds that time for each cell's
+	// frame, NaN when it is unknown.
+	span       float64
+	inputStart float64
+	header     inputHeaderParser
+	sources    []float64
 	// candidates, when set, collects each sample's nearest frame for a
 	// repair instead of tiling.
 	candidates []sheetCandidate
@@ -356,13 +359,14 @@ func (a *sheetAssembler) assignWindow(limit float64) {
 // sourceSeconds is the input time, counted from the start of the file as
 // sample times are, of a sampled list's frame for cell, NaN when the frame
 // has no time. The list's entry for cell starts cell*span seconds into the
-// list and at the sample's time in the input, and ffmpeg shifted every
-// frame by the list input's start time.
+// list and at its inpoint in the container (see buildConcatListSpan), and
+// ffmpeg shifted every frame by the list input's start time.
 func (a *sheetAssembler) sourceSeconds(meta sheetFrameMeta, cell int) float64 {
 	if !meta.hasTime {
 		return math.NaN()
 	}
-	return meta.seconds + a.header.info.StartSeconds - float64(cell)*a.span + a.times[cell]
+	inpoint := math.Max(0, a.times[cell]+a.inputStart)
+	return meta.seconds + a.header.info.StartSeconds - float64(cell)*a.span + inpoint - a.inputStart
 }
 
 // setCell copies frame into cell unless the cell already holds one, and

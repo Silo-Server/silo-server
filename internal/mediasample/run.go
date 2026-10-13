@@ -393,6 +393,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		offset = req.Window.StartSeconds
 	}
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset, sampledSheetsList.span)
+	assembler.inputStart = inputStart
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}
