@@ -197,6 +197,34 @@ func TestRecordTranscodeStreamDetailsIncludesTargetResolutionAndBitrate(t *testi
 	}
 }
 
+func TestRecordTranscodeStreamDetailsOmitsUnusedCopyTargets(t *testing.T) {
+	for _, audioCodec := range []string{"copy", "aac"} {
+		t.Run(audioCodec, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			mgr.RegisterReconstructed(&playback.Session{
+				ID: "upstream-1", TargetResolution: "1080p", TargetBitrateKbps: 8000,
+			})
+			h := &PlaybackHandler{sessionMgr: mgr}
+			opts := playback.TranscodeOpts{
+				TargetCodecVideo: "copy", TargetCodecAudio: audioCodec,
+				TargetResolution: "720p", TargetBitrateKbps: 3608,
+			}
+			h.recordTranscodeStreamDetails(t.Context(), "upstream-1", opts)
+
+			session, err := mgr.GetSession("upstream-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.TargetResolution != "" || session.TargetBitrateKbps != 0 {
+				t.Fatalf("copy stream reports unused video targets: resolution=%q bitrate=%d", session.TargetResolution, session.TargetBitrateKbps)
+			}
+			if session.TargetVideoCodec != "copy" || session.TargetAudioCodec != audioCodec || session.TranscodeAudio != (audioCodec == "aac") {
+				t.Fatalf("copy stream lost codec decisions: %+v", session)
+			}
+		})
+	}
+}
+
 type testCompatFileResolver struct {
 	file *models.MediaFile
 }

@@ -252,7 +252,13 @@ func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upst
 		return
 	}
 	transcodeAudio := playback.TranscodesAudio(opts.TargetCodecAudio)
-	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio, opts.EffectiveEncoderHWAccel(), opts.ToneMapMode, opts.TargetResolution, opts.TargetBitrateKbps); err != nil {
+	targetResolution, targetBitrateKbps := opts.TargetResolution, opts.TargetBitrateKbps
+	if opts.TargetCodecVideo == compatCopyCodec {
+		// Copying video applies neither target; keep them only in the recipe
+		// used to match or reconstruct the negotiated stream.
+		targetResolution, targetBitrateKbps = "", 0
+	}
+	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio, opts.EffectiveEncoderHWAccel(), opts.ToneMapMode, targetResolution, targetBitrateKbps); err != nil {
 		slog.WarnContext(ctx, "record transcode stream details failed", "component", "jellycompat",
 			"error", err, "playback_session_id", upstreamSessionID)
 		return
