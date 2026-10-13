@@ -563,7 +563,7 @@ func TestGetLibraryProviderDefaults(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	if want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`; strings.TrimSpace(rec.Body.String()) != want {
+	if want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`; strings.TrimSpace(rec.Body.String()) != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/provider-defaults?library_type=podcasts", "", bearer(adminToken))

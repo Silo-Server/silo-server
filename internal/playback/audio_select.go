@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
@@ -72,7 +73,77 @@ func langMatchRank(candidate, preferred string) int {
 // Language matches rank exact tag > bare language > another variant of the same
 // language. Track order breaks ties within a language rank. Saved signatures
 // and compatible saved indices take precedence over language-only preferences.
+//
+// Every step considers only tracks FFmpeg can decode (AudioTrackDecodable)
+// while the file has one: a server route that maps any other track fails to
+// start. When no track is decodable the ordinary choice stands and the planner
+// refuses it. The file-level codec is not needed here: it only matters when no
+// track names a codec, and then every track gets the same verdict.
 func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPref *AudioTrackPreference) int {
+	var decodable []int
+	var candidates []models.AudioTrack
+	for i, track := range tracks {
+		if AudioTrackDecodable(tracks, i, "") {
+			decodable = append(decodable, i)
+			candidates = append(candidates, track)
+		}
+	}
+	if len(decodable) == 0 || len(decodable) == len(tracks) {
+		return selectAudioTrack(tracks, preferredLang, seriesPref)
+	}
+	if seriesPref != nil {
+		pref := *seriesPref
+		pref.AudioTrackIndex = slices.Index(decodable, seriesPref.AudioTrackIndex)
+		seriesPref = &pref
+	}
+	return decodable[selectAudioTrack(candidates, preferredLang, seriesPref)]
+}
+
+// AudioTrackDecodable reports whether FFmpeg can decode tracks[index] of a
+// probed file whose file-level audio codec is fileCodec. ffprobe names no codec
+// for a stream FFmpeg has no codec ID for, such as AVS3 audio (av3a) in MP4:
+// its JSON output omits codec_name, and other writers print "unknown". FFmpeg
+// then has no decoder or muxer tag for the stream either, so converting or
+// copying it fails before the first segment.
+//
+// An empty track codec means that only when the probe named another track's
+// codec, or named no audio codec for the file at all. A file whose tracks all
+// lack a codec while the file names one carries older metadata that never
+// recorded per-track codecs; it is not refused for missing metadata.
+func AudioTrackDecodable(tracks []models.AudioTrack, index int, fileCodec string) bool {
+	switch probedAudioCodec(tracks[index].Codec) {
+	case ffprobeUnknownCodec:
+		return false
+	case "":
+		if slices.ContainsFunc(tracks, func(track models.AudioTrack) bool { return probedAudioCodec(track.Codec) != "" }) {
+			return false
+		}
+		codec := probedAudioCodec(fileCodec)
+		return codec != "" && codec != ffprobeUnknownCodec
+	}
+	return true
+}
+
+// AnyAudioTrackDecodable reports whether any of a file's audio tracks passes
+// AudioTrackDecodable.
+func AnyAudioTrackDecodable(tracks []models.AudioTrack, fileCodec string) bool {
+	for i := range tracks {
+		if AudioTrackDecodable(tracks, i, fileCodec) {
+			return true
+		}
+	}
+	return false
+}
+
+func probedAudioCodec(codec string) string {
+	return strings.ToLower(strings.TrimSpace(codec))
+}
+
+// ffprobeUnknownCodec is the codec name ffprobe's text writers print for a
+// stream FFmpeg has no codec ID for.
+const ffprobeUnknownCodec = "unknown"
+
+func selectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPref *AudioTrackPreference) int {
 	if len(tracks) == 0 {
 		return 0
 	}

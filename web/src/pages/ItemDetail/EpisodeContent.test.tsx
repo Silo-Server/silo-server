@@ -137,6 +137,12 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
   default: () => <div />,
 }));
 
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
+}));
+
 vi.mock("./DetailHero", () => ({
   default: (
     props: { context?: ReactNode; actions?: ReactNode; metadata?: ReactNode } & Record<
@@ -444,6 +450,25 @@ describe("EpisodeContent", () => {
 
     expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
     expect(markup).toContain(">Season 99<");
+  });
+
+  it("hides an unwatched episode's overview until the viewer reveals it", () => {
+    spoilerPrefs.hideOverviews = true;
+    try {
+      render(
+        <MemoryRouter initialEntries={["/item/episode-1"]}>
+          <EpisodeContent item={makeEpisodeItem({ user_data: { played: false } })} />
+        </MemoryRouter>,
+      );
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(true);
+
+      act(() => {
+        (mocks.capturedDetailHeroProps.value?.onRevealOverview as () => void)();
+      });
+      expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(false);
+    } finally {
+      spoilerPrefs.hideOverviews = false;
+    }
   });
 
   it("passes restartHref when the episode is partially watched", () => {

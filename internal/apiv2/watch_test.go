@@ -46,14 +46,17 @@ func (f *fakeWatch) WatchDetail(_ context.Context, userID int, profileID, conten
 		detail := &catalogpkg.WatchDetail{
 			ContentID: contentID, Type: "movie", Title: "Heat", Year: 1995,
 			EffectiveSubtitleLanguage: "eng", HasEffectiveSubtitleLang: true,
+			PosterURL: "/api/images/poster/heat.jpg?size=medium", PosterThumbhash: "poster-hash",
+			BackdropURL: "/api/images/backdrop/heat.jpg?size=medium", BackdropThumbhash: "backdrop-hash",
 			Versions: []catalogpkg.FileVersion{{
 				FileID: 42, Resolution: "1080p", CodecVideo: "h264", CodecAudio: "eac3", Container: "mkv", FileSize: 1024, Duration: 10200, Bitrate: 8000000,
-				AddedAt:     time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-				VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
-				AudioTracks: []models.AudioTrack{{Language: "eng", Codec: "eac3", Channels: 6, Default: true}},
-				Chapters:    []catalogpkg.VersionChapter{{Index: 1, Title: "Opening", StartSeconds: 0, EndSeconds: 300, Source: "embedded"}},
-				Intro:       &catalogpkg.Marker{Start: 0, End: 90},
-				Trickplay:   f.trickplay,
+				AddedAt:        time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+				VideoTracks:    []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
+				AudioTracks:    []models.AudioTrack{{Language: "eng", Codec: "eac3", Channels: 6, Default: true}},
+				Chapters:       []catalogpkg.VersionChapter{{Index: 1, Title: "Opening", StartSeconds: 0, EndSeconds: 300, Source: "embedded"}},
+				Intro:          &catalogpkg.Marker{Start: 0, End: 90},
+				MarkerPreviews: []catalogpkg.VersionMarkerPreview{{MarkerSegment: models.MarkerSegment{Kind: "intro", StartSeconds: 0, EndSeconds: 90}, ThumbnailURL: "https://images.example.test/intro.webp", ThumbnailThumbhash: "AQID", ThumbnailCaptureSeconds: 0}},
+				Trickplay:      f.trickplay,
 			}},
 			PlaybackVariants: []catalogpkg.PlaybackVariant{{VariantID: "v1", PartCount: 1, DefaultFileID: 42, Parts: []catalogpkg.PlaybackVariantPart{{PartIndex: 0, DefaultFileID: 42}}}},
 			Subtitles:        []catalogpkg.SubtitleInfo{{Source: "embedded", Language: "eng"}},
@@ -100,6 +103,11 @@ func TestGetWatchState(t *testing.T) {
 	}
 	if body["content_id"] != "movie:heat-1995" || body["effective_subtitle_language"] != "eng" || body["effective_subtitle_mode"] != nil {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// The artwork system media controls show (#803).
+	if body["poster_url"] != "/api/images/poster/heat.jpg?size=medium" || body["poster_thumbhash"] != "poster-hash" ||
+		body["backdrop_url"] != "/api/images/backdrop/heat.jpg?size=medium" || body["backdrop_thumbhash"] != "backdrop-hash" {
+		t.Fatalf("artwork in body = %s", rec.Body.String())
 	}
 	versions := body["versions"].([]any)
 	v := versions[0].(map[string]any)

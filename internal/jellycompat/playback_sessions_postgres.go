@@ -1002,14 +1002,15 @@ func (d *DurableCompatPlaybackStore) FindFinalizableByClientPlaySessionID(
 	)
 }
 
-// FindStreamGrant finds candidate rows by client address across replicas, then
-// validates each through Get so cached and pending state stay authoritative.
-func (d *DurableCompatPlaybackStore) FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool) {
+// FindStreamGrants finds candidate rows by client address across replicas,
+// then validates each through Get so cached and pending state stay
+// authoritative.
+func (d *DurableCompatPlaybackStore) FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) []*PlaybackSession {
 	if d.pool == nil {
-		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+		return d.mem.FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
 	}
 	if routeItemID == "" || mediaSourceID == "" || clientIP == "" || clientPeer == "" {
-		return nil, false
+		return nil
 	}
 	activeSince := d.now().Add(-maxIdle)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1025,7 +1026,7 @@ func (d *DurableCompatPlaybackStore) FindStreamGrant(routeItemID, mediaSourceID,
 		LIMIT 32
 	`, d.now(), clientIP, activeSince)
 	if err != nil {
-		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+		return d.mem.FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
 	}
 	var ids []string
 	for rows.Next() {
@@ -1036,16 +1037,16 @@ func (d *DurableCompatPlaybackStore) FindStreamGrant(routeItemID, mediaSourceID,
 	}
 	rows.Close()
 	if rows.Err() != nil {
-		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+		return d.mem.FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
 	}
 	now := d.now()
-	var match *PlaybackSession
+	var matches []*PlaybackSession
 	for _, id := range ids {
-		if session, ok := d.Get(id); ok && streamGrantMatches(session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) && (match == nil || session.UpdatedAt.After(match.UpdatedAt)) {
-			match = session
+		if session, ok := d.Get(id); ok && streamGrantMatches(session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) {
+			matches = append(matches, session)
 		}
 	}
-	return match, match != nil
+	return newestStreamGrantsFirst(matches)
 }
 
 // FindByUpstreamSessionID serves process-local lifecycle callbacks. A local

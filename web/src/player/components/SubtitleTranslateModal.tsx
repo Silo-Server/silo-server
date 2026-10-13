@@ -216,6 +216,7 @@ export function SubtitleTranslateModal({
         audioTracks,
         audioIndex,
         targetLang,
+        translateTranscript: translateEnabled,
         sessionId,
         startPosition: getStartPosition?.() ?? 0,
       });
@@ -266,6 +267,7 @@ export function SubtitleTranslateModal({
     audioIndex,
     mediaFileId,
     targetLang,
+    translateEnabled,
     sessionId,
     getStartPosition,
     playerConfig,
@@ -372,23 +374,30 @@ export function SubtitleTranslateModal({
                 </label>
               )}
 
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-white/60">
-                  {mode === "audio" ? "Subtitle language" : "Translate to"}
-                </span>
-                <select
-                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                  value={targetLang}
-                  onChange={(e) => setTargetLang(e.target.value)}
-                  disabled={submitting}
-                >
-                  {LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {mode === "audio" && !translateEnabled ? (
+                <p className="text-xs leading-relaxed text-white/60">
+                  Subtitles are written in the spoken language. AI translation is turned off on this
+                  server.
+                </p>
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-white/60">
+                    {mode === "audio" ? "Subtitle language" : "Translate to"}
+                  </span>
+                  <select
+                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                    disabled={submitting}
+                  >
+                    {LANGUAGES.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {mode === "audio" && quota && (
                 <p
@@ -432,7 +441,9 @@ export function SubtitleTranslateModal({
 
               <p className="text-[11px] leading-relaxed text-white/35">
                 {mode === "audio"
-                  ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
+                  ? translateEnabled
+                    ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
+                    : "The audio is transcribed on the server — longer files take a while. The finished track is saved for everyone."
                   : "Playback pauses while the first lines are translated, then resumes with subtitles streaming in. The finished track is saved for everyone."}
               </p>
             </>

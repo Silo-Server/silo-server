@@ -135,6 +135,20 @@ describe("admin log history", () => {
     expect(await screen.findByText("No audit logs matched the current filters.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("does not claim an empty result when the live stream failed", () => {
+    vi.mocked(useAdminLogStream).mockReturnValue({
+      rows: [],
+      isConnecting: false,
+      isLive: false,
+      error: "Unable to open log stream.",
+      connectionState: "disconnected",
+      reconnect: vi.fn(),
+    });
+    mount("/admin/logs?tab=audit&method=POST");
+    expect(screen.getByText("Audit logs could not be loaded.")).toBeTruthy();
+    expect(screen.queryByText("No audit logs matched the current filters.")).toBeNull();
+  });
 });
 
 function latestAppStreamParams() {

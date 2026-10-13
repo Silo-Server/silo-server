@@ -24,6 +24,18 @@ export class PlayerFetchError extends Error {
 }
 
 /**
+ * Whether the server answered that this playback session was ended for good
+ * (410 `playback_session_ended`), as it does after an administrator stops a
+ * player that did not confirm the command. The player exits instead of
+ * starting a fresh session.
+ */
+export function isPlaybackSessionEndedError(error: unknown): boolean {
+  if (!(error instanceof PlayerFetchError) || error.status !== 410) return false;
+  if (error.code === "playback_session_ended") return true;
+  return /\/problems\/playback_session_ended"/.test(error.rawBody ?? "");
+}
+
+/**
  * Whether a failed player request may succeed if it is sent again later: the
  * server answered 5xx, or never answered at all (network failure, timeout,
  * abort). A 4xx is the server's considered answer and is final.

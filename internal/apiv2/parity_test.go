@@ -39,12 +39,12 @@ type fakeSessions struct{ roles map[string]string }
 
 const storeDownSession = "s-store-down"
 
-func (f fakeSessions) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+func (f fakeSessions) ActiveSession(_ context.Context, id string) (auth.SessionAuthority, bool, error) {
 	if id == storeDownSession {
-		return "", false, errors.New("checking session validity: dial tcp: connection refused")
+		return auth.SessionAuthority{}, false, errors.New("checking session validity: dial tcp: connection refused")
 	}
 	role, ok := f.roles[id]
-	return role, ok, nil
+	return auth.SessionAuthority{Role: role, Purpose: models.SessionPurposeAccount}, ok, nil
 }
 
 type fakeUsers struct{ users map[int]*models.User }
@@ -199,12 +199,13 @@ func parityDeps(demo bool) Dependencies {
 		}
 		return false, false, nil
 	}
+	actingAdmin := apimw.NewActingAdminDecider(primary, nil)
 	return Dependencies{
 		CursorSecret:     []byte("synthetic-test-cursor-key"),
 		Auth:             fakeAuth(users),
 		ViewerAccess:     apimw.NewViewerAccessMiddleware(fakeResolver{}),
 		HouseholdProfile: apimw.NewHouseholdProfileGate(fakeHouseholds{}).Require,
-		ActingAdmin:      apimw.RequireActingAdmin(primary, nil),
+		ActingAdmin:      actingAdmin,
 		PermissionGates: map[string]func(http.Handler) http.Handler{
 			"marker_edit": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary, nil).RequireMarkerEdit,
 		},

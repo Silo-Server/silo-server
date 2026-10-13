@@ -12,7 +12,7 @@ func TestSectionGeneratedWritersAdvanceRevisionsDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated, err := f.repo.CreateGeneratedHomeLibraryRecentSections(t.Context(), f.library, "Original Library", "movies")
+	generated, err := f.repo.CreateGeneratedHomeLibraryRecentSections(t.Context(), f.library, "Original Library", "ebooks")
 	if err != nil {
 		t.Fatal(err)
 	}

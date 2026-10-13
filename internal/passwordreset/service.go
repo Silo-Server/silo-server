@@ -66,8 +66,8 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error
-	IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
+	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error
+	IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
 	Complete(ctx context.Context, tokenHash, newPassword string) (*models.User, error)
@@ -209,7 +209,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		issuedBy = &in.IssuedBy
 	}
 	expiresAt := s.now().Add(s.ttl)
-	if err := s.repo.Issue(ctx, user.ID, tokenHash, issuedBy, expiresAt); err != nil {
+	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuedBy, expiresAt); err != nil {
 		return nil, err
 	}
 
@@ -312,7 +312,7 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 		return fmt.Errorf("generate password reset token: %w", err)
 	}
 	expiresAt := s.now().Add(SelfServiceTTL)
-	stored, err := s.repo.IssueUnlessRecent(ctx, user.ID, tokenHash, expiresAt, selfServiceCooldown)
+	stored, err := s.repo.IssueUnlessRecent(ctx, user.ID, user.Email, tokenHash, expiresAt, selfServiceCooldown)
 	if err != nil || !stored {
 		return err
 	}

@@ -392,6 +392,9 @@ func registerInvitations(reg *Registry) {
 				}
 				input.LibraryIDs = append(input.LibraryIDs, n)
 			}
+			if p := reg.rejectUnknownLibraries(ctx, &input.LibraryIDs, locationLibraryIDs); p != nil {
+				return nil, p
+			}
 		}
 		return invitationDelivery(svc.Send(ctx, input))
 	})

@@ -1,6 +1,7 @@
 package playback_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -272,6 +273,79 @@ func TestIsOriginalLanguagePreference(t *testing.T) {
 	} {
 		if got := playback.IsOriginalLanguagePreference(value); got != want {
 			t.Errorf("IsOriginalLanguagePreference(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
+
+// undecodableFirstAudioTracks mirrors an MP4 whose first audio track is AVS3
+// (av3a): ffprobe's JSON names no codec for it, so the scanner stores none.
+func undecodableFirstAudioTracks() []models.AudioTrack {
+	return []models.AudioTrack{
+		{Language: "zh", Codec: "", Channels: 6, Default: true},
+		{Language: "zh", Codec: "eac3", Channels: 6, Layout: "5.1"},
+		{Language: "zh", Codec: "aac", Channels: 2, Layout: "stereo"},
+	}
+}
+
+func TestSelectAudioTrackSkipsUndecodableTracks(t *testing.T) {
+	tracks := undecodableFirstAudioTracks()
+	tests := []struct {
+		name          string
+		preferredLang string
+		seriesPref    *playback.AudioTrackPreference
+		want          int
+	}{
+		{name: "file default is undecodable", want: 1},
+		{name: "language match prefers a decodable track", preferredLang: "zh", want: 1},
+		{name: "saved index on the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh"}, want: 1},
+		{name: "saved index after the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 2, AudioLanguage: "zh"}, want: 2},
+		{name: "saved signature of the undecodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(tracks[0])}, want: 1},
+		{name: "saved signature of a decodable track", seriesPref: &playback.AudioTrackPreference{AudioTrackIndex: 0, AudioLanguage: "zh", TrackSignature: playback.AudioTrackSignatureFromTrack(tracks[2])}, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := playback.SelectAudioTrack(tracks, tt.preferredLang, tt.seriesPref); got != tt.want {
+				t.Fatalf("SelectAudioTrack() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectAudioTrackWithNoDecodableTrackKeepsOrdinaryChoice(t *testing.T) {
+	tracks := []models.AudioTrack{
+		{Language: "zh", Codec: "unknown"},
+		{Language: "en", Codec: "", Default: true},
+	}
+	if got := playback.SelectAudioTrack(tracks, "", nil); got != 1 {
+		t.Fatalf("SelectAudioTrack() = %d, want the container default 1", got)
+	}
+}
+
+func TestAudioTrackDecodable(t *testing.T) {
+	tests := []struct {
+		name      string
+		codecs    []string
+		fileCodec string
+		want      []bool
+	}{
+		{name: "named codecs", codecs: []string{"eac3", "aac", " TrueHD "}, fileCodec: "eac3", want: []bool{true, true, true}},
+		{name: "ffprobe text unknown", codecs: []string{" Unknown ", "aac"}, fileCodec: "aac", want: []bool{false, true}},
+		{name: "unnamed beside a named track", codecs: []string{"", "eac3"}, fileCodec: "eac3", want: []bool{false, true}},
+		{name: "no audio codec named anywhere", codecs: []string{"", ""}, want: []bool{false, false}},
+		{name: "older rows without per-track codecs", codecs: []string{"", ""}, fileCodec: "aac", want: []bool{true, true}},
+	}
+	for _, tt := range tests {
+		tracks := make([]models.AudioTrack, len(tt.codecs))
+		for i, codec := range tt.codecs {
+			tracks[i].Codec = codec
+		}
+		for i, want := range tt.want {
+			if got := playback.AudioTrackDecodable(tracks, i, tt.fileCodec); got != want {
+				t.Errorf("%s: AudioTrackDecodable(track %d) = %v, want %v", tt.name, i, got, want)
+			}
+		}
+		if got, want := playback.AnyAudioTrackDecodable(tracks, tt.fileCodec), slices.Contains(tt.want, true); got != want {
+			t.Errorf("%s: AnyAudioTrackDecodable = %v, want %v", tt.name, got, want)
 		}
 	}
 }

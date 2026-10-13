@@ -275,7 +275,7 @@ function AdminLogsPage() {
               browsingHistory ? appHistory.isPending : appLogs.isConnecting && appRows.length === 0
             }
             empty={
-              browsingHistory && appHistory.isError
+              (browsingHistory ? appHistory.isError : appLogs.error)
                 ? "Application logs could not be loaded."
                 : "No application logs matched the current filters."
             }
@@ -358,7 +358,7 @@ function AdminLogsPage() {
                 : auditLogs.isConnecting && auditRows.length === 0
             }
             empty={
-              browsingHistory && auditHistory.isError
+              (browsingHistory ? auditHistory.isError : auditLogs.error)
                 ? "Audit logs could not be loaded."
                 : "No audit logs matched the current filters."
             }

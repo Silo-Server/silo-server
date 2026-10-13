@@ -136,6 +136,22 @@ func TestSanitizeJSONRedactsURLFormsWithSpaces(t *testing.T) {
 	}
 }
 
+func TestRedactSecretAssignments(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"desc = api_key=s3cret rejected", "desc = api_key=[REDACTED] rejected"},
+		{"desc=api_key=s3cret", "desc=api_key=[REDACTED]"},
+		{`Get "https://h.example/x?Limit=5&access_token=s3cret": EOF`, `Get "https://h.example/x?Limit=5&access_token=[REDACTED]": EOF`},
+		{`password="two words" and X-Emby-Token='s3cret'`, `password="[REDACTED]" and X-Emby-Token='[REDACTED]'`},
+		{"Pw=s3cret;status=401", "Pw=[REDACTED];status=401"},
+		{"status=401 attempts=3", "status=401 attempts=3"},
+		{"api_key= empty", "api_key= empty"},
+	} {
+		if got := RedactSecretAssignments(tc.in); got != tc.want {
+			t.Errorf("RedactSecretAssignments(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestSanitizeTextMasksCredentials(t *testing.T) {
 	for _, text := range []string{
 		"desc = api_key=SECRET",

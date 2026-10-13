@@ -90,9 +90,11 @@ const fieldMaxAdvisoryAge = "max_advisory_age"
 // check the caller did not pass (an unverified PIN-locked primary profile).
 const codeProfileManagement = "profile_management"
 
-// locationAllowedLibraryIDs is the problem location of the allowlist member.
+// locationAllowedLibraryIDs is the problem location of the profile allowlist
+// member; locationLibraryIDs is the account, access group and invitation one.
 const (
 	locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
+	locationLibraryIDs        = locationBody + ".library_ids"
 	locationPIN               = locationBody + ".pin"
 )
 
@@ -654,6 +656,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	}
 	items := make([]Profile, 0, len(view.Profiles))
 	for _, v := range view.Profiles {
+		// A remote-playback handoff sees only the profile it is bound to.
+		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
@@ -687,7 +693,7 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		return nil, p
 	}
 	if len(req.AllowedLibraryIDs) > 0 {
-		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs); p != nil {
+		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 			return nil, p
 		}
 	}
@@ -776,7 +782,7 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	if p != nil {
 		return nil, p
 	}
-	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs); p != nil {
+	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 		return nil, p
 	}
 	view, err := reg.deps.Profiles.UpdateProfile(ctx, handlers.ProfileUpdateCommand{
@@ -796,11 +802,13 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	return &ProfileOutput{Body: profile}, nil
 }
 
-// rejectUnknownLibraries refuses an allowlist naming a library that does not
-// exist. The store's row-by-row insert would otherwise hit the library
-// foreign key (a 500) on Postgres, and persist a dangling id where no key
-// is enforced. A nil or empty allowlist has nothing to check.
-func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Problem {
+// rejectUnknownLibraries refuses a library list naming a library that does not
+// exist, reporting it at location. A profile allowlist's row-by-row insert
+// would otherwise hit the library foreign key (a 500) on Postgres; the
+// database silently drops an unknown id from account, access group and
+// invitation lists, so the client hears about it here. A nil or empty list
+// has nothing to check.
+func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int, location string) *Problem {
 	if ids == nil || len(*ids) == 0 {
 		return nil
 	}
@@ -818,7 +826,7 @@ func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Pr
 	for _, id := range *ids {
 		if !known[id] {
 			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
+				WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
 		}
 	}
 	return nil

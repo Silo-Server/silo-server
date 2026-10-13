@@ -136,6 +136,9 @@ func TestPopulationOnDemandKeepsManualAndRepeatedRangesWithoutPersisting(t *test
 		if err != nil || !changed {
 			t.Fatalf("Populate: changed=%v err=%v", changed, err)
 		}
+		if effective.MarkerThumbnailBaseSegments == nil || len(effective.MarkerThumbnailBaseSegments) != 1 || effective.MarkerThumbnailBaseSegments[0].StartSeconds != 10 {
+			t.Fatal("missing canonical edit fence")
+		}
 		if *effective.IntroStart != 10 || *effective.IntroEnd != 30 || len(effective.MarkerSegments) != 3 {
 			t.Fatalf("effective marker projection: %+v", effective.MarkerSegments)
 		}

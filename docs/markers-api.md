@@ -170,3 +170,27 @@ The legacy v1 adapter shares the manual writer path and retains its wire format.
 Jellyfin does not expose these manual editing routes. Its MediaSegments response
 returns each occurrence separately, with credits represented as `Outro`.
 The generated OpenAPI document is the authoritative v2 schema and error contract.
+
+### Marker preview images (v2)
+
+The `marker_thumbnails_v1` playback capability advertises optional `thumbnail_url`,
+`thumbnail_thumbhash` and `thumbnail_capture_seconds` fields on effective marker
+occurrences in watch and marker reads. Absent images omit these fields. Capture
+seconds equal the occurrence's start; navigation continues to use its unchanged
+start/end bounds. Embedded chapter images remain a separate inventory.
+
+The existing per-library chapter-thumbnail setting controls both chapter and
+marker extraction. Marker-only files are eligible. Effective occurrences include
+manual, provider and legacy ranges, including repeated kinds. Extraction uses
+the existing hardware, execution-mode, HDR, width and retry policies. A failed
+preview never prevents marker navigation or playback. Internal image metadata
+is bound to the file identity and exact occurrence; concurrent edits cannot
+publish a stale frame. The frozen v1 responses do not gain preview fields.
+
+On-demand provider ranges remain ephemeral. When the library enables previews,
+lookup queues thumbnails from the effective ranges and stores only opaque
+occurrence identities and image/retry metadata. Worker snapshots expire after
+15 minutes; after expiry or an API replica restart, a new on-demand lookup is
+required to generate or resize provider-only previews. Background scans do not
+fetch providers or persist their navigation ranges. A newer lookup or a manual
+range edit fences extraction results from the previous snapshot.

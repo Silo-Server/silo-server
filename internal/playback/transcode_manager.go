@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -64,7 +66,8 @@ type TranscodeManager struct {
 	Config func() TranscodeRuntimeConfig
 	// LogSinkFn returns the ffmpeg log sink for reconstructed processes.
 	LogSinkFn func() FFmpegLogSink
-	// JWTSecretFn returns the bearer used for remote transcode-node DELETEs.
+	// JWTSecretFn returns the shared secret that signs remote transcode-node
+	// DELETEs.
 	JWTSecretFn func() string
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
@@ -266,6 +269,18 @@ func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL strin
 	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
+}
+
+// StopRemoteTranscodeAfterFailure stops a remote job after a call to its node
+// failed. When the node could not be reached, the stop runs in the background:
+// waiting on an unreachable host would hold up the next candidate, and a node
+// that answers again by then still drops a job it may have started.
+func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeNodeURL string, err error) {
+	if nodepool.IsConnectFailure(err) {
+		go m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+		return
+	}
+	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
 }
 
 // CancelRemoteTranscode synchronously confirms that a remote process no longer
@@ -882,6 +897,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	cfg := m.runtimeConfig()
 	outputDir := reconstructionOutputDir(cfg.TranscodeDir, sessionID, card.OutputSubdir)
 	opts := card.TranscodeOpts(outputDir, cfg.FFmpegPath, m.logSink())
+	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but a reconstruction is
 	// not a fresh generation: restore the conservative manifest lead so recovery
 	// never exposes a hardware encoder after only one fragment.
@@ -1128,6 +1144,20 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
+// remoteTranscodeControlClient sends stop requests to transcode nodes. Playback
+// paths call the stop synchronously, so a stop aimed at a dead host must give
+// up as quickly as the start that found it dead: it uses the same connect bound
+// as playback's other node calls.
+var remoteTranscodeControlClient = func() *http.Client {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.DialContext = nodepool.NodeDialContext()
+	return &http.Client{Transport: transport}
+}()
+
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
@@ -1146,9 +1176,11 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+m.jwtSecret())
+	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
+		return fmt.Errorf("sign remote transcode delete: %w", err)
+	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := remoteTranscodeControlClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}
