@@ -50,6 +50,7 @@ func (s *Server) router() chi.Router {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusServiceUnavailable)
 	_ = json.NewEncoder(w).Encode(struct {
 		Status           string                 `json:"status"`
 		EncodingCapacity encodinglimit.Capacity `json:"encoding_capacity"`

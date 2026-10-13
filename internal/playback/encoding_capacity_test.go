@@ -5,11 +5,54 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 )
+
+func TestHardwareInventoryRunsAtCapacityAndBackendsRecoverImmediately(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hardware probe fixture requires a POSIX shell")
+	}
+	for _, backend := range []string{transcodeHWNVENC, transcodeHWQSV, transcodeHWVAAPI} {
+		t.Run(backend, func(t *testing.T) {
+			setupHWAccelTest(t)
+			ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
+			encodinglimit.Configure(1)
+			t.Cleanup(func() { encodinglimit.Configure(0) })
+			release, err := encodinglimit.Acquire()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			probe, ok := hwBackendProbeFor(backend)
+			if !ok {
+				t.Fatal("missing backend probe")
+			}
+			for range 2 {
+				result := cachedHardwareProbeResultContext(t.Context(), backend, ffmpeg.path, "fixture-device", probe)
+				if result.available || !result.transient || !strings.Contains(result.reason, "smoke encode failed") {
+					t.Fatalf("capacity did not reach the smoke encode as a transient result: %+v", result)
+				}
+			}
+			log, err := os.ReadFile(ffmpeg.logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(log), "\n"); got != 2*(probe.commandCount-1) {
+				t.Fatalf("inventory did not execute on both saturated attempts: %d commands, log=%s", got, log)
+			}
+			release()
+			result := cachedHardwareProbeResultContext(t.Context(), backend, ffmpeg.path, "fixture-device", probe)
+			if !result.available {
+				t.Fatalf("capacity release retained an unavailable GPU cache entry: %+v", result)
+			}
+		})
+	}
+}
 
 func TestTranscodeAndDownloadRespectSharedWorkerCeiling(t *testing.T) {
 	encodinglimit.Configure(1)

@@ -19,11 +19,12 @@ Use a separate worker environment file without the customer variables: a shared
 core `.env` supplying `SECRET_KEY` prevents credential-free worker startup.
 
 Before the database-backed runtime starts, its separate listener exposes
-`GET /api/v1/health` with `status: "unbound"` and the provider's encoding capacity,
+`GET /api/v1/health` with HTTP 503, `status: "unbound"` and the provider's encoding capacity,
 and `POST /api/v1/node/enroll` authenticated by the provider's one-time bearer
 token. HTTP is supported for trusted internal networks; HTTPS is optional and
 normal certificate verification applies. The core never follows enrollment
-redirects.
+redirects. The unbound listener is reachable for enrollment but remains unhealthy
+for node-pool placement until the configured worker runtime starts.
 
 The native acting-admin, demo-restricted `POST /api/v2/admin/nodes/enroll`
 accepts a transcode node's registration fields, `enrollment_token`, and optional

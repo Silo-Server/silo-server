@@ -1401,14 +1401,14 @@ func probeExecFFmpegPath(ffmpegPath string) string {
 // filter graph applies (see appendHWAccelArgs).
 func probeFFmpegVideoToolboxContext(ctx context.Context, ffmpegPath string, commandTimeout time.Duration) hardwareProbeResult {
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return hardwareProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hardwareProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, "videotoolbox") {
 		return hardwareProbeResult{reason: "videotoolbox hwaccel unavailable"}
 	}
 
 	output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders")
 	if err != nil {
-		return hardwareProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hardwareProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	}
 	if !ffmpegOutputHasToken(output, "h264_videotoolbox") {
 		return hardwareProbeResult{reason: "h264_videotoolbox encoder unavailable"}
@@ -1469,13 +1469,13 @@ func normalizeFFmpegPath(ffmpegPath string) string {
 // candidate device path is not part of the command line.
 func probeFFmpegNVENCContext(ctx context.Context, ffmpegPath, device string, commandTimeout time.Duration) hwProbeResult {
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return hwProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, "cuda") {
 		return hwProbeResult{reason: "cuda hwaccel unavailable"}
 	}
 
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, encoderH264NVENC) {
 		return hwProbeResult{reason: encoderUnavailableReason(encoderH264NVENC)}
 	} else if !ffmpegOutputHasToken(output, "hevc_nvenc") {
@@ -1483,7 +1483,7 @@ func probeFFmpegNVENCContext(ctx context.Context, ffmpegPath, device string, com
 	}
 
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-filters"); err != nil {
-		return hwProbeResult{reason: "filters probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "filters probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, "scale_cuda") {
 		return hwProbeResult{reason: "scale_cuda filter unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hwupload_cuda") {
@@ -1498,13 +1498,13 @@ func probeFFmpegNVENCContext(ctx context.Context, ffmpegPath, device string, com
 // initializes a VAAPI display and derives the QSV device from it.
 func probeFFmpegQSVContext(ctx context.Context, ffmpegPath, device string, commandTimeout time.Duration) hwProbeResult {
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return hwProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, transcodeHWQSV) && !ffmpegOutputHasToken(output, transcodeHWVAAPI) {
 		return hwProbeResult{reason: "qsv and vaapi hwaccels unavailable"}
 	}
 
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, encoderH264QSV) {
 		return hwProbeResult{reason: encoderUnavailableReason(encoderH264QSV)}
 	} else if !ffmpegOutputHasToken(output, "hevc_qsv") {
@@ -1519,7 +1519,7 @@ func probeFFmpegQSVContext(ctx context.Context, ffmpegPath, device string, comma
 // stays narrower than QSV's.
 func probeFFmpegVAAPIContext(ctx context.Context, ffmpegPath, device string, commandTimeout time.Duration) hwProbeResult {
 	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
+		return hwProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 	} else if !ffmpegOutputHasToken(output, encoderH264VAAPI) {
 		return hwProbeResult{reason: encoderUnavailableReason(encoderH264VAAPI)}
 	}

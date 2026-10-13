@@ -12,7 +12,40 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
+
+func TestUnboundEnrollmentListenerCannotTakeRemoteWork(t *testing.T) {
+	s, err := NewServer(testToken, bindingStore(t), func(context.Context, Binding) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := httptest.NewServer(s.Handler())
+	t.Cleanup(listener.Close)
+	response, err := http.Get(listener.URL + "/api/v1/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var body struct {
+		Status           string          `json:"status"`
+		EncodingCapacity json.RawMessage `json:"encoding_capacity"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusServiceUnavailable || body.Status != "unbound" || len(body.EncodingCapacity) == 0 {
+		t.Fatalf("unbound health=%d %+v", response.StatusCode, body)
+	}
+	node := &nodepool.Node{URL: listener.URL, Enabled: true}
+	report := nodepool.CheckNodeReport(t.Context(), node)
+	node.Healthy = report.Healthy
+	node.DrainState = report.DrainState
+	if node.TakesNewWork() {
+		t.Fatal("unbound listener became eligible for remote work")
+	}
+}
 
 const testToken = "provider-test-token-only-01234567890123456789"
 
