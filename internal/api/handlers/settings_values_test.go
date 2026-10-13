@@ -980,6 +980,63 @@ func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
 	}
 }
 
+// staticServerSettings is a fixed server-settings snapshot for the resolver's
+// administrator defaults.
+type staticServerSettings map[string]string
+
+func (s staticServerSettings) Get(_ context.Context, key string) (string, error) {
+	return s[key], nil
+}
+
+// TestEffectiveInheritsTheAdminDefault walks the viewer's side of an
+// administrator default: inherited while nothing is stored, overridden by an
+// explicit choice (even one equal to the contract default), and inherited
+// again once that choice is cleared.
+func TestEffectiveInheritsTheAdminDefault(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	handler.SetAdminDefaults(staticServerSettings{"defaults.ui.title_art": "false"})
+
+	effective := func() effectiveSettingValueResponse {
+		t.Helper()
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?keys=ui.title_art", nil)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("effective = %d: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Settings []effectiveSettingValueResponse `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("got %d settings, want 1", len(body.Settings))
+		}
+		return body.Settings[0]
+	}
+	expect := func(step, value, source string) {
+		t.Helper()
+		if got := effective(); string(got.Value) != value || got.Source != source {
+			t.Fatalf("%s: got %s from %s, want %s from %s", step, got.Value, got.Source, value, source)
+		}
+	}
+
+	expect("nothing stored", "false", "default")
+
+	if rec := routeValues(t, handler, http.MethodPut, "ui.title_art", "scope=profile_device",
+		[]byte(`{"value":true}`)); rec.Code != http.StatusOK {
+		t.Fatalf("writing the device choice = %d: %s", rec.Code, rec.Body.String())
+	}
+	expect("device chose title art", "true", "profile_device")
+
+	if rec := routeValues(t, handler, http.MethodDelete, "ui.title_art", "scope=profile_device",
+		nil); rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
+		t.Fatalf("clearing the device choice = %d: %s", rec.Code, rec.Body.String())
+	}
+	expect("device choice cleared", "false", "default")
+}
+
 func TestPostEffectiveResolvesContentContexts(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
 	for seriesID, value := range map[string]string{"s1": `"ja"`, "s2": `"de"`} {

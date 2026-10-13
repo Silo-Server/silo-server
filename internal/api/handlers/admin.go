@@ -2739,6 +2739,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
@@ -3123,6 +3124,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	if restartRequired {
