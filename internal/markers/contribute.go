@@ -125,7 +125,7 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	}
 	ids, err := s.resolver.ResolveForFile(ctx, file)
 	if err != nil {
-		return nil, err
+		return nil, errors.New(submissionErrorText(err))
 	}
 	if !ids.HasAnyID() {
 		return nil, nil
@@ -169,17 +169,16 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 }
 
 // urlInText matches a URL token of any scheme (postgres://, HTTPS://) inside
-// free text. It takes the whole non-space run, so trailing punctuation lands
-// in the query or path that SanitizeURL then trims, and anything unparseable
-// fails closed.
-var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
+// free text, stopping at whitespace or surrounding quote/markup delimiters.
+// Unparseable URLs fail closed.
+var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s'"<>]+`)
 
 // authSchemeInText matches the word after an HTTP auth scheme word. That word
 // is always masked unless it is one of authSchemeProse, a fixed list of words
 // that cannot be credentials, so "basic authentication required" keeps its
 // noun while any token, however short or plain, fails closed. A quoted value
 // is masked whole, spaces and all; an unterminated quote masks to the end.
-var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)(?:"([^"]*)"?|'([^']*)'?|([^\s"',;]+))`)
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)(?:[\\]*"((?:\\.|[^"\\])*)"?|[\\]*'((?:\\.|[^'\\])*)'?|([^\s"',;]+))`)
 
 var authSchemeProse = func() map[string]bool {
 	words := map[string]bool{}
@@ -191,14 +190,14 @@ var authSchemeProse = func() map[string]bool {
 
 // keyValueInText matches a key followed by ":" or "=" and its value, as in
 // "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
-// left to logredact.SecretKey, so new markers there apply here too.
-var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`)
+// delegated to submissionSecretKey, which follows the shared secret markers.
+var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',]+)`)
 
 // quotedKeyValueInText matches a key and its single- or double-quoted value,
 // as in "api_key='abc'" or `password="two words"`. keyValueInText alone would
 // stop a quoted value at its first space or miss a single-quoted one. An
 // unterminated quote runs to the end.
-var quotedKeyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*)(?:"([^"]*)"?|'([^']*)'?)`)
+var quotedKeyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*)(?:"((?:\\.|[^"\\])*)"?|'((?:\\.|[^'\\])*)'?)`)
 
 // submissionErrorText is a provider error's message safe to log and store.
 // URL errors are sanitized structurally; in other error text (gRPC status
@@ -208,9 +207,11 @@ var quotedKeyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*)(?:"([^"]*
 // auth scheme ("invalid token sk-abc") is left as is, since masking every
 // word after "token" would also eat ordinary diagnostics. Also unmasked: a
 // scheme-relative URL ("//user:pass@host"), and the tail of a quoted query
-// value containing a space, which \S+ splits off the URL.
+// value containing a space or quote, which ends the URL match.
 func submissionErrorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
+	// Mask labeled secrets before a URL can encode adjacent diagnostic text.
+	msg = maskKeyValueSecrets(msg)
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
 	msg = authSchemeInText.ReplaceAllStringFunc(msg, func(match string) string {
 		m := authSchemeInText.FindStringSubmatch(match)
@@ -229,18 +230,37 @@ func submissionErrorText(err error) string {
 	return maskKeyValueSecrets(msg)
 }
 
+// Encoded JSON keys cannot be safely delimited by the ordinary quoted-value
+// matcher. Keep context through the first encoded secret key and omit the rest.
+var escapedKeyInText = regexp.MustCompile(`([\w.-]+)([\\]+"\s*[:=]\s*)`)
+
+// A cookie header contains multiple credentials, so omit its whole value.
+var cookieInText = regexp.MustCompile(`(?im)(\b(?:set-cookie|cookie)\s*[:=]\s*)[^\r\n]*`)
+
+func submissionSecretKey(key string) bool {
+	key = strings.ReplaceAll(key, "-", "_")
+	return logredact.SecretKey(key) || strings.Contains(strings.ToLower(key), "passwd")
+}
+
 // maskKeyValueSecrets masks the values of secret-named key=value pairs. The
 // value of a pair whose key is not secret is scanned again, as it can hold an
 // assignment of its own: gRPC renders a status as "desc = api_key=...", where
 // the outer pair's value is the inner one.
 func maskKeyValueSecrets(msg string) string {
+	msg = cookieInText.ReplaceAllString(msg, "${1}"+logredact.Placeholder)
+	for _, m := range escapedKeyInText.FindAllStringSubmatchIndex(msg, -1) {
+		if submissionSecretKey(msg[m[2]:m[3]]) {
+			msg = msg[:m[1]] + logredact.Placeholder
+			break
+		}
+	}
 	// A secret's quoted value is masked whole first, quotes kept. Another
 	// pair's quoted value is scanned in place, since this match consumes it
 	// and the pass below would only see up to its first inner quote:
 	// desc="api_key='...' rejected".
 	msg = quotedKeyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
 		m := quotedKeyValueInText.FindStringSubmatchIndex(pair)
-		if !logredact.SecretKey(strings.ReplaceAll(pair[m[2]:m[3]], "-", "_")) {
+		if !submissionSecretKey(pair[m[2]:m[3]]) {
 			valueStart, valueEnd := m[6], m[7]
 			if valueStart < 0 {
 				valueStart, valueEnd = m[8], m[9]
@@ -254,7 +274,7 @@ func maskKeyValueSecrets(msg string) string {
 		m := keyValueInText.FindStringSubmatch(pair)
 		// Header-style names ("x-api-key") use hyphens where SecretKey's
 		// markers use underscores.
-		if !logredact.SecretKey(strings.ReplaceAll(m[1], "-", "_")) {
+		if !submissionSecretKey(m[1]) {
 			return m[1] + m[2] + maskKeyValueSecrets(m[3])
 		}
 		// "Authorization: Bearer [REDACTED]": the scheme word is not the

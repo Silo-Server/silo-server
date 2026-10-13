@@ -149,7 +149,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 					counts.failed++
 					counts.lastErr = err
 					slog.WarnContext(ctx, "contribute markers: resolve failed", "component", "taskmanager",
-						"file_id", file.ID, "error", err)
+						"file_id", file.ID, "error", err.Error())
 					break
 				}
 				retryAfter, limited := counts.add(outcomes, tallied)

@@ -53,6 +53,14 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{`rpc error: desc = rejected {"x-api-key": "FAKE_FIXTURE_6"}`, "FAKE_FIXTURE_6", "rejected"},
 		{"upstream said: Authorization: Bearer FAKE_FIXTURE_7 was expired", "FAKE_FIXTURE_7", "Bearer [REDACTED] was expired"},
 		{"token expired, please retry", "", "token expired, please retry"},
+		{`{"url":"https://example.test/x","api_key":"FAKE_FIXTURE_16"}`, "FAKE_FIXTURE_16", "https://example.test/x"},
+		{`password="first\"FAKE_FIXTURE_17" rejected`, "FAKE_FIXTURE_17", `password="[REDACTED]" rejected`},
+		{`rpc error: {"error":"{\"api_key\":\"FAKE_FIXTURE_18\"}"}`, "FAKE_FIXTURE_18", "rpc error:"},
+		{`Cookie: sid=FAKE_FIXTURE_19; sessionid=FAKE_FIXTURE_20`, "FAKE_FIXTURE_", "Cookie: [REDACTED]"},
+		{`{"error":"Authorization: Bearer \"FAKE_FIXTURE_23\" rejected"}`, "FAKE_FIXTURE_23", "Bearer [REDACTED]"},
+		{`Authorization: Basic \'FAKE_FIXTURE_24\'`, "FAKE_FIXTURE_24", "Basic [REDACTED]"},
+		{`password=first&FAKE_FIXTURE_21 rejected`, "FAKE_FIXTURE_21", "password=[REDACTED] rejected"},
+		{`passwd=FAKE_FIXTURE_22 rejected`, "FAKE_FIXTURE_22", "passwd=[REDACTED] rejected"},
 		{"session_token=FAKE_FIXTURE_8; retry=3", "FAKE_FIXTURE_8", "retry=3"},
 		// A secret assignment inside a non-secret pair's value: gRPC's
 		// "desc = " runs straight into a description that starts with one.
