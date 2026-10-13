@@ -33,7 +33,9 @@ resolve its findings. For non-trivial changes, describe its scope and method;
 
 Report real observations and check results, including required checks that failed
 or were not run. Keep validation summaries concise; include short output excerpts
-only when they explain a failure.
+only when they explain a failure. Changes that alter what users see need
+before-and-after evidence, as
+[Show visible changes](../CONTRIBUTING.md#show-visible-changes) describes.
 
 Reproduce bugs on a real deployment before filing. Separate observations from
 suspected causes, include relevant raw logs, and put AI-generated analysis under

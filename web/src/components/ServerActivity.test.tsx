@@ -114,7 +114,7 @@ describe("ServerActivity download preparation", () => {
     expect(screen.getByText("2 failed in the last 24 hours")).toBeInTheDocument();
     for (const link of screen.getAllByRole("link", { name: /View all|Example Movie/ })) {
       if (link.textContent?.includes("Example Movie")) {
-        expect(link).toHaveAttribute("href", "/admin/activity?view=preparations");
+        expect(link).toHaveAttribute("href", "/admin/downloads?tab=preparation");
       }
     }
   });

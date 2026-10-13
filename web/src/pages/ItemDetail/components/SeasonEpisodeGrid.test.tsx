@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeasonEpisodeGrid from "./SeasonEpisodeGrid";
 
 const capturedMenuProps: Record<string, unknown>[] = [];
+const spoilerPrefs = { hideImages: false, hideOverviews: false };
 
 vi.mock("@/components/MediaItemMenu", () => ({
   default: (props: Record<string, unknown>) => {
@@ -16,6 +17,10 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null, quickActionMode: "watched" }),
 }));
 
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
+}));
+
 vi.mock("@/hooks/queries/catalogRead", () => ({
   usePrefetchCatalogItemDetail: () => vi.fn(),
 }));
@@ -23,6 +28,48 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    spoilerPrefs.hideImages = false;
+    spoilerPrefs.hideOverviews = false;
+  });
+
+  it("hides the still and overview only for episodes the profile has not started", () => {
+    spoilerPrefs.hideImages = true;
+    spoilerPrefs.hideOverviews = true;
+    const episode = (n: number, userData?: Record<string, unknown>) => ({
+      content_id: `ep-${n}`,
+      season_number: 1,
+      episode_number: n,
+      title: `Episode title ${n}`,
+      overview: `Overview ${n}`,
+      air_date: null,
+      runtime: 42,
+      still_url: `https://img.test/still-${n}.jpg`,
+      still_thumbhash: "",
+      files: [],
+      user_data: userData as never,
+    });
+    render(
+      <MemoryRouter>
+        <SeasonEpisodeGrid
+          isLoading={false}
+          episodes={[
+            episode(1, { played: true }),
+            episode(2, { played: false, is_in_progress: true, position_seconds: 300 }),
+            episode(3, { played: false }),
+            episode(4),
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    for (const n of [1, 2]) {
+      expect(screen.getByAltText(`Episode title ${n}`)).not.toHaveClass("blur-xl");
+      expect(screen.getByText(`Overview ${n}`)).toBeInTheDocument();
+    }
+    for (const n of [3, 4]) {
+      expect(screen.getByAltText(`Episode title ${n}`)).toHaveClass("blur-xl");
+      expect(screen.queryByText(`Overview ${n}`)).not.toBeInTheDocument();
+    }
   });
 
   it("marks an episode only when none of its files can be read", () => {

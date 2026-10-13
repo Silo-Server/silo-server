@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 )
+
+const auditFilterAction = "action"
 
 type AdminLogsHandler struct {
 	opsRepo   *opslog.Repo
@@ -53,6 +56,11 @@ func (h *AdminLogsHandler) HandleListAuditLogs(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to query audit logs")
 		return
+	}
+	if !strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		for i := range result.Entries {
+			result.Entries[i] = activitylog.WithoutDetails(result.Entries[i])
+		}
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -128,6 +136,32 @@ func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, 
 		opts.To = to
 	}
 
+	if strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		for _, key := range []string{auditFilterAction, "target_type", "target_id"} {
+			if utf8.RuneCountInString(r.URL.Query().Get(key)) > 64 {
+				return activitylog.ListOptions{}, invalidQueryError(key)
+			}
+		}
+		rawActor := r.URL.Query().Get("actor_user_id")
+		if rawActor != "" {
+			if len(rawActor) > 20 || rawActor[0] < '1' || rawActor[0] > '9' {
+				return activitylog.ListOptions{}, invalidQueryError("actor_user_id")
+			}
+			for _, digit := range rawActor {
+				if digit < '0' || digit > '9' {
+					return activitylog.ListOptions{}, invalidQueryError("actor_user_id")
+				}
+			}
+		}
+		opts.Action = strings.TrimSpace(r.URL.Query().Get(auditFilterAction))
+		opts.TargetType = strings.TrimSpace(r.URL.Query().Get("target_type"))
+		opts.TargetID = strings.TrimSpace(r.URL.Query().Get("target_id"))
+		actor, err := parseOptionalIntQuery(r, "actor_user_id")
+		if err != nil || (actor != nil && *actor <= 0) {
+			return activitylog.ListOptions{}, invalidQueryError("actor_user_id")
+		}
+		opts.ActorUserID = actor
+	}
 	return opts, nil
 }
 
@@ -325,7 +359,7 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			seenIDs[entry.ID] = struct{}{}
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := conn.WriteJSON(auditWireMessage(r, msg)); err != nil {
 				return
 			}
 		}
@@ -346,6 +380,11 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 		for _, entry := range result.Entries {
 			seenIDs[entry.ID] = struct{}{}
 		}
+		if !strings.HasPrefix(r.URL.Path, "/api/v2/") {
+			for i := range result.Entries {
+				result.Entries[i] = activitylog.WithoutDetails(result.Entries[i])
+			}
+		}
 		if err := writeSnapshotMessage(conn, stream, result.Entries, result.NextCursor); err != nil {
 			return
 		}
@@ -365,7 +404,7 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			seenIDs[entry.ID] = struct{}{}
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := conn.WriteJSON(auditWireMessage(r, msg)); err != nil {
 				return
 			}
 		}
@@ -404,7 +443,7 @@ func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request
 				}
 				seenIDs[entry.ID] = struct{}{}
 			}
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := conn.WriteJSON(auditWireMessage(r, msg)); err != nil {
 				if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 					return
 				}
@@ -513,6 +552,25 @@ func matchesOperationalLog(opts opslog.ListOptions, entry opslog.EntryRow) bool 
 }
 
 func matchesAuditLog(opts activitylog.ListOptions, entry activitylog.AuditEntry) bool {
+	if opts.Action != "" && entry.Action != opts.Action {
+		return false
+	}
+	if opts.TargetType != "" && entry.TargetType != opts.TargetType {
+		return false
+	}
+	if opts.TargetID != "" && entry.TargetID != opts.TargetID {
+		return false
+	}
+	if opts.ActorUserID != nil {
+		actor := entry.UserID
+		if entry.ImpersonatorUserID != nil {
+			actor = entry.ImpersonatorUserID
+		}
+		if actor == nil || *actor != *opts.ActorUserID {
+			return false
+		}
+	}
+
 	if opts.From != nil && entry.Timestamp.Before(*opts.From) {
 		return false
 	}
@@ -546,4 +604,14 @@ func matchesAuditLog(opts activitylog.ListOptions, entry activitylog.AuditEntry)
 		return false
 	}
 	return true
+}
+
+func auditWireMessage(r *http.Request, msg logstream.Message) logstream.Message {
+	if msg.Stream != logstream.StreamAudit || strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		return msg
+	}
+	if entry, ok := decodeAuditEntry(msg); ok {
+		msg.Entry, _ = json.Marshal(activitylog.WithoutDetails(entry))
+	}
+	return msg
 }

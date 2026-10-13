@@ -31,16 +31,25 @@ type targetImageCacheJobs struct {
 	runningResults []bool
 	runningCalls   int
 	alwaysRunning  bool
+	localOnly      bool
+	// deferredElsewhere answers targetHasDeferredLocalJobs.
+	deferredElsewhere bool
 }
 
-func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
+func (f *targetImageCacheJobs) targetHasDeferredLocalJobs(context.Context, string) (bool, error) {
+	return f.deferredElsewhere, nil
+}
+
+func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string, localOnly bool) error {
 	f.retriedTarget = targetContentID
+	f.localOnly = localOnly
 	f.retryCalls++
 	return nil
 }
 
-func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, _ int) ([]*models.MetadataImageCacheJob, error) {
+func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, localOnly bool, _ int) ([]*models.MetadataImageCacheJob, error) {
 	f.claimedTarget = targetContentID
+	f.localOnly = f.localOnly && localOnly
 	var jobs []*models.MetadataImageCacheJob
 	if f.targetCalls < len(f.targetClaims) {
 		jobs = f.targetClaims[f.targetCalls]
@@ -49,7 +58,7 @@ func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, ta
 	return jobs, nil
 }
 
-func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string, _ bool) (bool, error) {
 	running := f.alwaysRunning
 	if f.runningCalls < len(f.runningResults) {
 		running = f.runningResults[f.runningCalls]
@@ -105,6 +114,8 @@ type loopingImageCacheJobs struct {
 	claimCalls     int
 	backlog        ImageCacheBacklog
 	backlogCalls   int
+	// mu guards succeededIDs: the processor marks jobs from concurrent workers.
+	mu sync.Mutex
 }
 
 type serializingImageCacheJobs struct {
@@ -171,6 +182,8 @@ func (f *loopingImageCacheJobs) ClaimDue(context.Context, string, int) ([]*model
 }
 
 func (f *loopingImageCacheJobs) MarkSucceeded(_ context.Context, id int64, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.succeededIDs = append(f.succeededIDs, id)
 	return nil
 }
@@ -196,10 +209,14 @@ type fakeImageCacher struct {
 	err    error
 	reqs   []CacheImageRequest
 	after  func()
+	// mu guards reqs: the processor caches images from concurrent workers.
+	mu sync.Mutex
 }
 
 func (f *fakeImageCacher) CacheImage(_ context.Context, req CacheImageRequest) (*CacheImageResult, error) {
+	f.mu.Lock()
 	f.reqs = append(f.reqs, req)
+	f.mu.Unlock()
 	if f.after != nil {
 		f.after()
 	}
@@ -223,9 +240,14 @@ type fakeEpisodeStillUpdater struct {
 	sourcePath string
 	cachedPath string
 	thumbhash  string
+	// mu guards the recorded call: the processor updates targets from
+	// concurrent workers.
+	mu sync.Mutex
 }
 
 func (f *fakeEpisodeStillUpdater) UpdateStillIfSourceMatches(_ context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.contentID = contentID
 	f.sourcePath = sourcePath
 	f.cachedPath = cachedPath

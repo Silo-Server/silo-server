@@ -30,6 +30,11 @@ func (s SegmentPayload) Present() bool { return len(s.Ranges) > 0 || s.Start != 
 // Online provider selection has already happened in the registry; a refreshed
 // selection is authoritative even when a provider's confidence has not risen.
 func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
+	// Manual provenance also represents a deliberate absence: clearing a kind
+	// keeps it suppressed until another manual write supplies a range.
+	if existing.Source == models.MarkerSourceManual && incoming.Source != models.MarkerSourceManual {
+		return false
+	}
 	if !existing.Present() {
 		return true
 	}

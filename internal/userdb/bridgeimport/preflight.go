@@ -26,9 +26,10 @@ type Mapping struct {
 // Manifest returns every persistent application table in the current SQLite schema.
 func Manifest() []Mapping {
 	var result []Mapping
-	for _, name := range strings.Fields("profiles profile_allowed_libraries watch_progress watch_history favorites watchlist home_item_dismissals personal_collections personal_collection_items personal_collection_profiles collection_sort_preferences audio_preferences subtitle_preferences series_playback_preferences library_playback_preferences profile_onboarding") {
+	for _, name := range strings.Fields("profiles profile_allowed_libraries watch_progress watch_history favorites watchlist home_item_dismissals personal_collections personal_collection_items collection_sort_preferences audio_preferences subtitle_preferences series_playback_preferences library_playback_preferences profile_onboarding") {
 		result = append(result, Mapping{name, "user_" + name, "preserve account-scoped identities, values, nulls, ordering and timestamps"})
 	}
+	result = append(result, Mapping{sourceCollectionAudiences, "", "consumed, not copied: a shared personal collection stays shared only when its allow list names every source profile (its creator implied); otherwise it is imported private"})
 	result = append(result, Mapping{"hidden_history_items", "user_history_hidden_items", "preserve hidden-before cutoffs"})
 	for _, name := range strings.Fields("user_settings user_device_settings user_devices user_setting_values user_setting_mutations user_setting_migration_rejects jellycompat_displayprefs") {
 		result = append(result, Mapping{name, name, "add account identity; preserve semantic scope, revisions, replay and opaque values; remap integer surrogate IDs"})
@@ -145,7 +146,7 @@ func Inspect(ctx context.Context, path string, accountID int64) (Report, error) 
 			r.Blockers = append(r.Blockers, "unmapped source table requires classification")
 		} else {
 			delete(mappings, name)
-			if mapping.Target == "" && count > 0 {
+			if mapping.Target == "" && mapping.Source != sourceCollectionAudiences && count > 0 {
 				r.Blockers = append(r.Blockers, fmt.Sprintf("nonempty %s requires legacy disposition", name))
 			}
 		}

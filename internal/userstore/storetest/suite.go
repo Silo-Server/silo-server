@@ -858,3 +858,111 @@ func testProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 		t.Fatalf("rest = %d rows, first %q", len(rest), rest[0].MediaItemID)
 	}
 }
+
+// RunCollectionSharing runs the personal collection visibility and owner-only
+// update conformance checks: a shared collection reaches every profile on the
+// login, a private one only its creator (#1615).
+func RunCollectionSharing(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("CollectionSharing", func(t *testing.T) {
+		testCollectionSharing(t, newStore)
+	})
+}
+
+func sorted(ids []string) []string {
+	return slices.Sorted(slices.Values(ids))
+}
+
+func testCollectionSharing(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Owner"}); err != nil {
+		t.Fatalf("CreateProfile(p1): %v", err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Viewer"}); err != nil {
+		t.Fatalf("CreateProfile(p2): %v", err)
+	}
+
+	shared, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: "p1",
+		Name:             "Family Action",
+		CollectionType:   "smart",
+		IsShared:         true,
+		QueryDefinition:  `{"match":"all","groups":[]}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(shared): %v", err)
+	}
+	private, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: "p1",
+		Name:             "Just Mine",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(private): %v", err)
+	}
+	theirs, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: "p2",
+		Name:             "Viewer's Own",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(theirs): %v", err)
+	}
+
+	// A profile created after the collection was shared still sees it.
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p3", Name: "Added Later"}); err != nil {
+		t.Fatalf("CreateProfile(p3): %v", err)
+	}
+
+	listed := func(profileID string) []string {
+		t.Helper()
+		collections, err := store.ListCollections(ctx, profileID)
+		if err != nil {
+			t.Fatalf("ListCollections(%s): %v", profileID, err)
+		}
+		ids := make([]string, 0, len(collections))
+		for _, c := range collections {
+			if !c.VisibleTo(profileID) {
+				t.Fatalf("ListCollections(%s) returned %s, which VisibleTo rejects", profileID, c.ID)
+			}
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	// A shared collection reaches every profile on the login, including one
+	// that no allow list ever named; a private one stays with its creator.
+	// Each profile's own collections come first.
+	if got, want := listed("p2"), []string{theirs.ID, shared.ID}; !slices.Equal(got, want) {
+		t.Fatalf("ListCollections(p2) = %v, want %v", got, want)
+	}
+	if got, want := listed("p3"), []string{shared.ID}; !slices.Equal(got, want) {
+		t.Fatalf("ListCollections(p3) = %v, want %v", got, want)
+	}
+	if got, want := listed("p1"), []string{shared.ID, private.ID}; !slices.Equal(sorted(got), sorted(want)) {
+		t.Fatalf("ListCollections(p1) = %v, want %v", got, want)
+	}
+	if got, err := store.GetCollection(ctx, private.ID); err != nil || got.VisibleTo("p2") || !got.VisibleTo("p1") {
+		t.Fatalf("private collection visibility = %+v, %v; want only its creator", got, err)
+	}
+
+	rejectedName := "Not Allowed"
+	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
+		ID:               shared.ID,
+		RequestProfileID: "p2",
+		Name:             &rejectedName,
+	}); err == nil {
+		t.Fatal("expected creator-only UpdateCollection rejection")
+	}
+
+	// Turning sharing off hides the collection from everyone but its creator.
+	notShared := false
+	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
+		ID:               shared.ID,
+		RequestProfileID: "p1",
+		IsShared:         &notShared,
+	}); err != nil {
+		t.Fatalf("UpdateCollection(is_shared=false): %v", err)
+	}
+	if got := listed("p3"); len(got) != 0 {
+		t.Fatalf("ListCollections(p3) after unsharing = %v, want none", got)
+	}
+}

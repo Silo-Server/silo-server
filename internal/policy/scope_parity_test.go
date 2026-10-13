@@ -275,12 +275,17 @@ func decisionToAccessScope(input ScopeInput, decision ScopeDecision) access.Scop
 	if len(disabled) == 0 {
 		disabled = nil
 	}
+	hidden := cloneParityInts(decision.HiddenLibraryIDs)
+	if len(hidden) == 0 {
+		hidden = nil
+	}
 	return access.Scope{
 		UserID:              input.UserID,
 		ProfileID:           input.ProfileID,
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,
+		HiddenLibraryIDs:    hidden,
 		MaturityLimits: access.MaturityLimits{
 			MaxContentRating: access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
 			MaxAdvisoryAge:   decision.MaxAdvisoryAge,

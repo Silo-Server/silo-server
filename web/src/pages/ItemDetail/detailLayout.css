@@ -558,8 +558,14 @@
       container-type: normal;
       grid-template-rows: minmax(max-content, 1fr) max-content;
     }
+    /* Reserve the hero the height it has above a season rail, so a season's
+       taller episode grid starts lower instead of shrinking the hero. */
     .series-detail-viewport:has(> .series-detail-navigation) > .item-detail-hero {
       max-height: none;
+      min-height: calc(
+        100dvh - var(--detail-header-height, 0px) - var(--detail-player-height) -
+          var(--detail-navigation-height)
+      );
     }
     /* A percentage height has nothing to resolve against in a content-sized
        hero and would inflate it, so pin the poster to its full size. */

@@ -110,8 +110,13 @@ func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testin
 		if got := r.URL.Query().Get("UserId"); got != "user-1" {
 			t.Fatalf("UserId = %q, want user-1", got)
 		}
-		if got := r.URL.Query().Get("IncludeItemTypes"); got != "Movie,Episode" {
-			t.Fatalf("IncludeItemTypes = %q, want Movie,Episode", got)
+		// IncludeItemTypes makes this query take over a minute on large
+		// Jellyfin 12.1 libraries; MediaTypes=Video is what Jellyfin Web sends.
+		if got := r.URL.Query().Get("MediaTypes"); got != "Video" {
+			t.Errorf("MediaTypes = %q, want Video", got)
+		}
+		if r.URL.Query().Has("IncludeItemTypes") {
+			t.Errorf("IncludeItemTypes = %q, want it omitted", r.URL.Query().Get("IncludeItemTypes"))
 		}
 		if got := r.URL.Query().Get("Fields"); got == "" {
 			t.Fatal("expected Fields query param")
@@ -121,12 +126,18 @@ func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testin
 		}
 
 		startIndex := r.URL.Query().Get("StartIndex")
-		response := jellyfinItemsResponse{TotalRecordCount: jellyfinPageSize + 1}
+		response := jellyfinItemsResponse{TotalRecordCount: jellyfinPageSize + 2}
 		switch startIndex {
 		case "0":
+			// A full page that includes a type the import drops must still
+			// lead to the next page.
 			response.Items = make([]jellyfinItem, jellyfinPageSize)
+			for i := range response.Items {
+				response.Items[i] = jellyfinItem{ID: "episode-" + strconv.Itoa(i), Type: "Episode"}
+			}
+			response.Items[0] = jellyfinItem{ID: "music-video", Type: "MusicVideo"}
 		case strconv.Itoa(jellyfinPageSize):
-			response.Items = []jellyfinItem{{ID: "resume-last", Type: "Movie"}}
+			response.Items = []jellyfinItem{{ID: "resume-last", Type: "Movie"}, {ID: "home-video", Type: "Video"}}
 		default:
 			t.Fatalf("unexpected StartIndex %q", startIndex)
 		}
@@ -148,8 +159,17 @@ func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testin
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
-	if len(items) != jellyfinPageSize+1 {
-		t.Fatalf("len(items) = %d, want %d", len(items), jellyfinPageSize+1)
+	// The page-one music video and the page-two home video are dropped.
+	if len(items) != jellyfinPageSize {
+		t.Fatalf("len(items) = %d, want %d", len(items), jellyfinPageSize)
+	}
+	for _, item := range items {
+		if item.Type != "Episode" && item.Type != "Movie" {
+			t.Fatalf("item %q has type %q, want only movies and episodes", item.ID, item.Type)
+		}
+	}
+	if last := items[len(items)-1]; last.ID != "resume-last" {
+		t.Fatalf("last item = %q, want resume-last from the second page", last.ID)
 	}
 }
 

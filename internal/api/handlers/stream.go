@@ -261,14 +261,15 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// source buffer whose advertised type its probe rejected — so the
 		// response has to keep the same promise the plan made.
 		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
-			DVMode:                 session.RemuxDVMode,
-			FFmpegPath:             h.ffmpegPath(),
-			ContentType:            playback.RemuxContentType(file.IsAudioOnly()),
-			AudioOnly:              file.IsAudioOnly(),
-			SourceAudioChannels:    session.SourceAudioChannels,
-			TargetAudioChannels:    session.TargetAudioChannels,
-			TargetAudioBitrateKbps: session.TargetAudioBitrateKbps,
-			Abort:                  abort,
+			DVMode:                    session.RemuxDVMode,
+			FFmpegPath:                h.ffmpegPath(),
+			DropResumeLeadingPictures: session.RemuxResumeLeadingPictureDrop,
+			ContentType:               playback.RemuxContentType(file.IsAudioOnly()),
+			AudioOnly:                 file.IsAudioOnly(),
+			SourceAudioChannels:       session.SourceAudioChannels,
+			TargetAudioChannels:       session.TargetAudioChannels,
+			TargetAudioBitrateKbps:    session.TargetAudioBitrateKbps,
+			Abort:                     abort,
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}

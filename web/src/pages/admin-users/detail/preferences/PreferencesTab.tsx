@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { userDetailTabSearch } from "../userDetailTabs";
 import { buildPreferenceLevels, type PreferenceLevel } from "./levels";
 import { LevelSettings } from "./LevelSettings";
+import { ProfileHomeSections } from "./ProfileHomeSections";
 
 function LevelIcon({ level }: { level: PreferenceLevel }) {
   const className = "h-3.5 w-3.5 shrink-0";
@@ -52,7 +53,9 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
   const settings = useAdminUserSettings(user.id);
   const profiles = useAdminUserProfiles(user.id);
   const libraries = useAdminLibraries();
-  const accountDevices = useAdminUserCapabilities().data?.account_devices === true;
+  const capabilities = useAdminUserCapabilities().data;
+  const accountDevices = capabilities?.account_devices === true;
+  const profileSections = capabilities?.profile_sections === true;
   const devices = useAdminUserDevices(user.id, accountDevices);
 
   const groups = useMemo(
@@ -165,13 +168,23 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
         ))}
       </nav>
 
-      <LevelSettings
-        key={selected.id}
-        userId={user.id}
-        level={selected}
-        profileEntries={profileEntries}
-        profileAllEntries={profileAllEntries}
-      />
+      <div className="min-w-0 space-y-4">
+        <LevelSettings
+          key={selected.id}
+          userId={user.id}
+          level={selected}
+          profileEntries={profileEntries}
+          profileAllEntries={profileAllEntries}
+        />
+        {profileSections && selected.kind === "profile" && selected.profileId ? (
+          <ProfileHomeSections
+            key={selected.profileId}
+            userId={user.id}
+            profileId={selected.profileId}
+            profileName={selected.profileName ?? selected.name}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

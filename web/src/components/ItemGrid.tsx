@@ -1,4 +1,13 @@
-import { useEffect, useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -18,6 +27,34 @@ interface SharedItemGridProps {
   onToggleSelect?: (item: BrowseItem) => void;
   /** Replaces the default "No items found." message when there are no items. */
   emptyState?: ReactNode;
+  /** Imperative access for jumping to a position, such as a letter bar. */
+  gridRef?: Ref<ItemGridHandle>;
+  /** The first and last item index of the top row the viewer can see. */
+  onTopRowChange?: (firstIndex: number, lastIndex: number) => void;
+}
+
+export interface ItemGridHandle {
+  /** Scroll so the row holding `index` sits at the top of the viewport. */
+  scrollToItem: (index: number) => void;
+}
+
+/**
+ * How much of the top of the viewport sticky page headers cover once stuck:
+ * the mobile top bar, or the library header on wide screens. Headers opt in
+ * with `data-sticky-header`; one that is hidden or scrolls with the page at
+ * the current width covers nothing.
+ */
+function stickyHeaderInset(): number {
+  let inset = 0;
+  for (const header of document.querySelectorAll<HTMLElement>("[data-sticky-header]")) {
+    const style = getComputedStyle(header);
+    const height = header.getBoundingClientRect().height;
+    if ((style.position !== "sticky" && style.position !== "fixed") || height === 0) continue;
+    const stuckTop =
+      (Number.parseFloat(style.top) || 0) + (Number.parseFloat(style.marginTop) || 0);
+    inset = Math.max(inset, stuckTop + height);
+  }
+  return inset;
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {
@@ -52,6 +89,8 @@ export default function ItemGrid(props: ItemGridProps) {
     selectedIds,
     onToggleSelect,
     emptyState,
+    gridRef,
+    onTopRowChange,
   } = props;
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
@@ -117,6 +156,47 @@ export default function ItemGrid(props: ItemGridProps) {
   }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
+
+  useImperativeHandle(
+    gridRef,
+    () => ({
+      scrollToItem: (index: number) => {
+        const row = Math.floor(Math.max(0, index) / columnCount);
+        virtualizer.scrollToOffset(
+          Math.max(0, virtualizer.options.scrollMargin + row * rowHeight - stickyHeaderInset()),
+          { behavior: "auto" },
+        );
+      },
+    }),
+    [columnCount, rowHeight, virtualizer],
+  );
+
+  // Sticky headers only change height at layout breakpoints, so measure them
+  // on resize rather than on every scroll frame.
+  const headerInsetRef = useRef(0);
+  useEffect(() => {
+    if (!onTopRowChange) return;
+    const measure = () => {
+      headerInsetRef.current = stickyHeaderInset();
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [onTopRowChange]);
+
+  const scrollOffset = virtualizer.scrollOffset ?? 0;
+  useEffect(() => {
+    if (!onTopRowChange) return;
+    // The top row is the first row at least half visible below the sticky
+    // header. Rounding, not flooring, also absorbs the fraction of a pixel a
+    // long list's scroll can settle short of a jump's offset, which would
+    // otherwise count the row hidden under the header.
+    const row = Math.max(
+      0,
+      Math.round((scrollOffset + headerInsetRef.current - scrollMargin) / rowHeight),
+    );
+    onTopRowChange(row * columnCount, (row + 1) * columnCount - 1);
+  }, [onTopRowChange, scrollOffset, scrollMargin, rowHeight, columnCount]);
 
   const showsItems = !loading && totalItems > 0;
   // Static grids rebuild `pages` each render; key on the data behind it.

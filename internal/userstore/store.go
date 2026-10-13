@@ -185,9 +185,9 @@ type UserStore interface {
 	ListCollectionItems(ctx context.Context, collectionID string) ([]CollectionItem, error)
 	ReplaceCollectionItems(ctx context.Context, collectionID string, items []CollectionItemReplacement) error
 	ReorderCollectionItems(ctx context.Context, collectionID string, orderedMediaItemIDs []string) error
-	// ReorderCollections scopes to the supplied group_id. A nil groupID means
-	// the implicit Ungrouped bucket.
-	ReorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string) error
+	// ReorderCollections replaces profileID's order of its own collections;
+	// orderedIDs must name each of them exactly once.
+	ReorderCollections(ctx context.Context, profileID string, orderedIDs []string) error
 	UpdateCollectionSyncState(ctx context.Context, input UpdateCollectionSyncStateInput) error
 	ListCollectionGroups(ctx context.Context) ([]CollectionGroup, error)
 	EnsureCollectionGroup(ctx context.Context, id string) error

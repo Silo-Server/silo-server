@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -159,7 +160,9 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+secret)
+	if err := nodeauth.Sign(httpReq, node.URL, secret); err != nil {
+		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
+	}
 	resp, err := telemetry.DoTrustedNode(e.client, httpReq, "trickplay_extract")
 	if err != nil {
 		// A node that dies mid-request is unavailable, not a failure of the file.

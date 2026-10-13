@@ -31,6 +31,7 @@ type AdminCollection struct {
 	PosterURL         string          `json:"poster_url"`
 	BackdropURL       string          `json:"backdrop_url"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url" example:"false"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
 	SourceURL         string          `json:"source_url"`
 	QueryDefinition   json.RawMessage `json:"query_definition"`
@@ -45,6 +46,8 @@ type AdminCollection struct {
 	SyncSchedule      string          `json:"sync_schedule,omitempty"`
 	NextSyncAt        *Instant        `json:"next_sync_at,omitempty" nullable:"false"`
 	ItemCount         int             `json:"item_count"`
+	HomeRowCount      *int            `json:"home_row_count,omitempty" nullable:"false" minimum:"0" doc:"Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
+	RowCount          *int            `json:"row_count,omitempty" nullable:"false" minimum:"0" doc:"Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
 	CreatedAt         Instant         `json:"created_at"`
 	UpdatedAt         Instant         `json:"updated_at"`
 }
@@ -484,6 +487,7 @@ func adminCollectionOf(v handlers.AdminCollection) AdminCollection {
 		PosterURL:         v.PosterURL,
 		BackdropURL:       v.BackdropURL,
 		PosterThumbhash:   v.PosterThumbhash,
+		PosterIsCollage:   v.PosterIsCollage && v.PosterURL != "",
 		BackdropThumbhash: v.BackdropThumbhash,
 		SourceURL:         v.SourceURL,
 		QueryDefinition:   v.QueryDefinition,

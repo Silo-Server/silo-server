@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -35,7 +36,7 @@ func nodeMediaRequest(t *testing.T, server *httptest.Server, path, token string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, req, testSecret)
 	if token != "" {
 		req.Header.Set("X-Silo-Stream-Token", token)
 	}

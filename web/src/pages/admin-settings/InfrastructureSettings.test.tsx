@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,6 +158,11 @@ describe("InfrastructureSettings", () => {
     mockUncheckedSourceHealth();
     taskJobsMock.mockReset();
     taskJobsMock.mockReturnValue({ data: [], isFetching: false, refetch: vi.fn() });
+    useCheckAdminSettingsConnectionMock.mockReset();
+    useCheckAdminSettingsConnectionMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
     storageTransitionCapabilitiesMock.mockReset();
     storageTransitionCapabilitiesMock.mockReturnValue({
       data: { state: "available", allowed: true },
@@ -342,7 +347,9 @@ describe("InfrastructureSettings", () => {
 
     const calls = settingsFormMock.mock.calls as [{ keys: string[] }][];
     const keys = calls[calls.length - 1]?.[0].keys ?? [];
-    expect(keys).toEqual(expect.arrayContaining(["redis.url", "database.max_connections"]));
+    expect(keys).toEqual(
+      expect.arrayContaining(["redis.url", "redis.db", "database.max_connections"]),
+    );
     expect(keys).toEqual(
       expect.arrayContaining(["s3.public_bucket", "s3.private_bucket", OPSLOG_BUCKET_POLICIES_KEY]),
     );
@@ -365,6 +372,172 @@ describe("InfrastructureSettings", () => {
     // but the check runs against the value the server merged from REDIS_URL.
     expect(redisGroup.getByLabelText("Connection URL")).toBeDisabled();
     expect(redisGroup.getByRole("button", { name: "Check Connection" })).toBeEnabled();
+  });
+
+  it("shows the Redis database number in use and stages an edit to it", () => {
+    const form = mockForm({
+      getValue: (key: string) => (key === "redis.db" ? "3" : ""),
+      sensitiveConfigured: ["redis.url"],
+    });
+
+    render(<InfrastructureSettings />);
+
+    const field = within(screen.getByRole("group", { name: "Redis" })).getByLabelText(
+      "Database number",
+    );
+    expect(field).toHaveValue(3);
+    expect(field).toBeEnabled();
+    fireEvent.change(field, { target: { value: "5" } });
+    expect(form.setValue).toHaveBeenCalledWith("redis.db", "5");
+  });
+
+  it("makes the Redis database number read-only when REDIS_URL comes from the environment", () => {
+    mockForm({
+      getValue: (key: string) => (key === "redis.db" ? "1" : ""),
+      sensitiveConfigured: ["redis.url"],
+      sensitiveManagedByEnv: ["redis.url", "redis.db"],
+    });
+
+    render(<InfrastructureSettings />);
+
+    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+    // The server reports the number in REDIS_URL; it cannot be saved here.
+    expect(redisGroup.getByLabelText("Database number")).toHaveValue(1);
+    expect(redisGroup.getByLabelText("Database number")).toBeDisabled();
+  });
+
+  it("checks the Redis connection with the database number", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
+    useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
+    const request = { values: { "redis.url": "", "redis.db": "5" }, dirty_keys: ["redis.db"] };
+    const form = mockForm({
+      sensitiveConfigured: ["redis.url"],
+      buildConnectionCheckRequest: vi.fn(() => request),
+    });
+
+    render(<InfrastructureSettings />);
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Redis" })).getByRole("button", {
+        name: "Check Connection",
+      }),
+    );
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ kind: "redis", body: request }));
+    expect(form.buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
+  });
+
+  it("marks the Redis database number for a restart on its own", () => {
+    // A registry where only the number needs a restart: the group cannot say
+    // so for every field, which leaves the chip to this one.
+    restartKeysMock.mockReturnValueOnce({ has: (key: string) => key === "redis.db" });
+    mockForm({ sensitiveConfigured: ["redis.url"] });
+
+    render(<InfrastructureSettings />);
+
+    const badges = within(screen.getByRole("group", { name: "Redis" })).getAllByLabelText(
+      "Takes effect after a server restart",
+    );
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.parentElement).toHaveTextContent("Database number");
+  });
+
+  describe("editing the Redis connection", () => {
+    const newUrl = "redis://new.example.invalid:6379/7";
+
+    beforeEach(() => {
+      realForm.enabled = true;
+      // No redis.db is saved: the server reports the 3 in the saved URL.
+      serverSettings.current = { "s3.public_url_auth": "presigned", "redis.db": "3" };
+      sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+      updateSettingsMock.mockReset();
+      updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });
+    });
+
+    afterEach(() => {
+      realForm.enabled = false;
+    });
+
+    it("saves the number on screen with a new URL", async () => {
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": newUrl, "redis.db": "3" }),
+      );
+    });
+
+    it("checks a new URL with the number on screen", async () => {
+      const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
+      useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+      await userEvent.click(redisGroup.getByRole("button", { name: "Check Connection" }));
+
+      await waitFor(() =>
+        expect(mutateAsync).toHaveBeenCalledWith({
+          kind: "redis",
+          body: {
+            values: { "redis.url": newUrl, "redis.db": "3" },
+            dirty_keys: ["redis.url", "redis.db"],
+          },
+        }),
+      );
+    });
+
+    it("stages nothing once the new URL is taken back", async () => {
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+
+      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
+      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+      await userEvent.clear(redisGroup.getByLabelText("Connection URL"));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+    });
+
+    it("drops a URL keystroke that arrives while a save is in flight", async () => {
+      updateSettingsMock.mockReturnValue(new Promise(() => {}));
+      render(<InfrastructureSettings />);
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+      fireEvent.change(redisGroup.getByLabelText("Database number"), { target: { value: "5" } });
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.db": "5" }));
+
+      fireEvent.change(redisGroup.getByLabelText("Connection URL"), { target: { value: "r" } });
+
+      expect(redisGroup.getByLabelText("Connection URL")).toHaveValue("");
+    });
+
+    it("sends the number with the empty URL when Redis is switched off", async () => {
+      // The server stores no number without a URL, so this removes a saved one.
+      render(<InfrastructureSettings />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": "", "redis.db": "3" }),
+      );
+    });
+
+    it("stages nothing once Redis is switched back on", async () => {
+      render(<InfrastructureSettings />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
+      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
+    });
   });
 
   it("saves unrelated edits before opening an S3 location transition", async () => {

@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The macOS /bin/bash 3.2 corrupts its heap on this script, and macOS 27 kills
+# it for that (SIGTRAP or SIGBUS), failing the pre-commit hook. Rerun under a
+# newer bash when one is installed.
+if ((BASH_VERSINFO[0] < 4)); then
+	if [[ -z "${LEAK_CHECK_BASH_REEXEC:-}" ]]; then
+		for newer_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+			if [[ -x "$newer_bash" ]] && "$newer_bash" -c '((BASH_VERSINFO[0] >= 4))'; then
+				LEAK_CHECK_BASH_REEXEC=1 exec "$newer_bash" "$0" "$@"
+			fi
+		done
+	fi
+	printf '%s\n' "${0##*/}: running under bash $BASH_VERSION; if it crashes, install a newer bash (brew install bash)." >&2
+fi
+
 usage() {
 	printf 'usage: %s [--cached]\n' "${0##*/}" >&2
 }

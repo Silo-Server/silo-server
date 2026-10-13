@@ -72,6 +72,19 @@ export function useHistoryImportSources() {
   });
 }
 
+/**
+ * Whether the server races `plex_base_urls`. A server without it rejects the
+ * member, so the request leaves it out until this confirms support.
+ */
+export function useHistoryImportCapability() {
+  return useQuery({
+    queryKey: historyImportKeys.capability(),
+    queryFn: () => v2("GET /api/v2/history-imports/capability"),
+    staleTime: STALE_TIME,
+    retry: false,
+  });
+}
+
 export function useHistoryImportRuns(limit = 10) {
   const scope = importScope();
   return useQuery({

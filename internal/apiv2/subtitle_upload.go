@@ -65,6 +65,7 @@ func registerSubtitleUploads(reg *Registry) {
 	upload := op("/subtitles/upload", "uploadSubtitle")
 	upload.ServiceBacked = true
 	upload.DemoRestricted = true
+	upload.HouseholdProfileGate = true
 	upload.RetrySafety = RetrySafetyNonRetryable
 	upload.Description = "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
 	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {

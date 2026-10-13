@@ -36,6 +36,7 @@ type AndroidPushRegistrationReceipt struct {
 	RegistrationID ID     `json:"registration_id"`
 	ServerDeviceID ID     `json:"server_device_id"`
 	PushMode       string `json:"push_mode"`
+	ServerID       string `json:"server_id,omitempty" doc:"This deployment's identity, the server_id getServerIdentity reports. Key this registration's push credentials by it and the registering profile: pushes name both. Absent when unavailable." example:"3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"`
 }
 type AndroidPushRegistrationOutput struct {
 	Body AndroidPushRegistrationReceipt
@@ -101,7 +102,7 @@ func registerOrderedAndroidPush(reg *Registry) {
 		if err != nil {
 			return nil, orderedPushProblem(err)
 		}
-		return &AndroidPushRegistrationOutput{Body: AndroidPushRegistrationReceipt{Generation: ID(strconv.FormatInt(result.Generation, 10)), RegistrationID: ID(result.RegistrationID), ServerDeviceID: ID(result.ServerDeviceID), PushMode: result.PushMode}}, nil
+		return &AndroidPushRegistrationOutput{Body: AndroidPushRegistrationReceipt{Generation: ID(strconv.FormatInt(result.Generation, 10)), RegistrationID: ID(result.RegistrationID), ServerDeviceID: ID(result.ServerDeviceID), PushMode: result.PushMode, ServerID: reg.knownServerID(ctx)}}, nil
 	})
 	remove := notificationOperation(http.MethodDelete, "/push/devices/{device_id}", "unregisterPushDevice")
 	remove.Summary = "Apply an ordered removal for the installation's current account/profile. Tombstones prevent stale registration replay."

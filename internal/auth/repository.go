@@ -34,7 +34,7 @@ func IsDuplicate(err error) bool {
 // CheckPassword verifies a plaintext password against the user's bcrypt hash.
 // This is a standalone function, not a repository method.
 func CheckPassword(user *models.User, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	err := comparePasswordHash([]byte(user.PasswordHash), []byte(password))
 	return err == nil
 }
 
@@ -149,7 +149,7 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), passwordHashCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
@@ -377,7 +377,7 @@ func updateUser(ctx context.Context, db interface {
 	}
 	var passwordHash *string
 	if input.Password != nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), passwordHashCost)
 		if err != nil {
 			return fmt.Errorf("hashing password: %w", err)
 		}
@@ -589,7 +589,7 @@ func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, e
 }
 
 func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}

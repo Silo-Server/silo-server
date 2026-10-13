@@ -165,13 +165,14 @@ type Service struct {
 	priorityBatchSize   int
 	normalBatchSize     int
 
-	mu             sync.Mutex
-	priorityQueue  []int
-	normalQueue    []int
-	queuedPriority map[int]ChapterThumbnailRequest
-	queuedNormal   map[int]ChapterThumbnailRequest
-	priorityRetry  map[int]time.Time
-	inProgress     map[int]struct{}
+	mu              sync.Mutex
+	priorityQueue   []int
+	normalQueue     []int
+	queuedPriority  map[int]ChapterThumbnailRequest
+	queuedNormal    map[int]ChapterThumbnailRequest
+	priorityRetry   map[int]time.Time
+	inProgress      map[int]struct{}
+	markerSnapshots map[int]markerThumbnailSnapshot
 
 	transcodePool      *nodepool.TranscodePool
 	remoteReservations *nodepool.Reservations
@@ -367,7 +368,11 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 		if !ok {
 			return
 		}
+		snapshotBefore := s.markerSnapshotExpiry(req.FileID)
 		requeueNormal, err := s.processRequest(ctx, req, req.priority)
+		// A lookup during processing could not queue the file, and its snapshot
+		// fences this run's marker save. Run once more for the new snapshot.
+		requeueNormal = requeueNormal || s.markerSnapshotExpiry(req.FileID).After(snapshotBefore)
 		if errors.Is(err, errChapterThumbnailLockBusy) {
 			s.retryPriorityRequest(req)
 		} else if err != nil {
@@ -454,7 +459,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	if err != nil || file == nil {
 		return false, err
 	}
-	if len(file.Chapters) == 0 {
+	file = s.withMarkerSnapshot(file)
+	if file.MarkerThumbnailBaseSegments == nil {
+		s.deferUnrecoverableMarkerImages(ctx, file, width, now)
+	}
+	if len(file.Chapters) == 0 && len(models.EffectiveMarkerThumbnails(file)) == 0 {
 		slog.InfoContext(ctx, "chapter thumbnail request skipped", "component", "chapterthumbs", "file_id", req.FileID, "priority", priority, "reason", "no_chapters")
 		return false, nil
 	}
@@ -474,7 +483,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	}
 
 	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now, width)
-	if len(selected) == 0 {
+	if len(selected) == 0 && !hasEligibleMarker(file, now, width) {
 		slog.InfoContext(ctx,
 			"chapter thumbnail request skipped", "component", "chapterthumbs",
 			"file_id",
@@ -618,7 +627,14 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	if widthErr != nil {
 		return false, widthErr
 	}
-	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now, currentWidth)
+	markerPending := false
+	if hardFileFailure == nil {
+		markerPending, err = s.processMarkers(ctx, file, req, priority, s.batchSize(priority)-len(selected), hdrPolicy, width, now)
+		if err != nil {
+			return false, err
+		}
+	}
+	requeue := hardFileFailure == nil && (hasEligibleMissingChapter(updated.Chapters, now, currentWidth) || markerPending)
 	slog.InfoContext(ctx,
 		"chapter thumbnail processing finished", "component", "chapterthumbs",
 		"file_id",
@@ -888,6 +904,10 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 		return s.uploadChapterThumbnailFunc(ctx, fileID, chapterIndex, frame)
 	}
 
+	return s.uploadThumbnail(ctx, fileID, strconv.Itoa(chapterIndex), frame, width)
+}
+
+func (s *Service) uploadThumbnail(ctx context.Context, fileID int, identity string, frame []byte, width int) (string, string, error) {
 	data, err := imageutil.EncodeWebPWidth(frame, width)
 	if err != nil {
 		return "", "", fmt.Errorf("encode thumbnail: %w", err)
@@ -896,7 +916,7 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 	// dies may finish an outstanding upload, but different stale bytes cannot
 	// overwrite the image a replacement worker published.
 	digest := sha256.Sum256(data)
-	key := fmt.Sprintf("%s%d/%d-%x/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, digest, width)
+	key := fmt.Sprintf("%s%d/%s-%x/w%d.webp", chapterImagesPrefix, fileID, identity, digest, width)
 	// Defer queued deletion before reusing a width, waiting for a collector
 	// that already holds the row. Keep any longer issued URL expiry: removing
 	// that protection would let file deletion collect the image too early.
