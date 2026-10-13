@@ -1227,21 +1227,22 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video || !isProgressiveRemux || watchTogetherRoomId) return;
     if (connectionStatusRef.current !== "connected") return;
-    if (replanningRef.current) {
-      reopenAfterReplanRef.current = planRevisionRef.current;
-      return;
-    }
     // A seek inside the buffer that the element has not reached yet is where
     // the viewer wants to be.
     const position =
       pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
-    // The session reads the play intent when the new plan lands, which can
-    // be before the effect that reports this play has run.
+    // The session reads the play intent when a new plan lands, which can be
+    // before the effect that reports this play has run. That includes the
+    // plan of a replan already in flight.
     onPlaybackStateChange?.({
       currentTime: position,
       duration: durationRef.current,
       playing: true,
     });
+    if (replanningRef.current) {
+      reopenAfterReplanRef.current = planRevisionRef.current;
+      return;
+    }
     // When the reopen does not take, the session may have expired during the
     // pause or the route may no longer be granted. The reconnect replans or
     // starts a new attempt at the same position, unless another plan already
