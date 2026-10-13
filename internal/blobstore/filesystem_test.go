@@ -456,3 +456,54 @@ func TestFilesystemDeletePrefixDoesNotFollowSwappedDirectory(t *testing.T) {
 		t.Fatalf("file outside the prefix was removed: %v", err)
 	}
 }
+
+// TestFilesystemDeletePrefixContinuesPastStuckEntry checks that one entry
+// that cannot be removed does not leave the rest of the prefix behind.
+func TestFilesystemDeletePrefixContinuesPastStuckEntry(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not apply to root")
+	}
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := range 5 {
+		if err = s.Put(ctx, fmt.Sprintf("item/h%d/image.jpg", i), []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stuck := filepath.Join(s.root, "item", "h1")
+	if err = os.Chmod(stuck, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stuck, 0o755) })
+
+	n, err := s.DeletePrefix(ctx, "item")
+	if err == nil || n != 4 {
+		t.Fatalf("delete with a stuck entry = %d, %v; want 4 and an error", n, err)
+	}
+	keys, _, err := s.List(ctx, "item/", "", 100)
+	if err != nil || len(keys) != 1 || keys[0].Key != "item/h1/image.jpg" {
+		t.Fatalf("remaining = %v, %v; want only item/h1/image.jpg", keys, err)
+	}
+}
+
+// TestFilesystemDeletePrefixMissingKeepsParents checks that deleting a
+// prefix that does not exist leaves the empty directory above it alone.
+func TestFilesystemDeletePrefixMissingKeepsParents(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(s.root, "item")
+	if err = os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.DeletePrefix(context.Background(), "item/missing/"); err != nil || n != 0 {
+		t.Fatalf("delete of a missing prefix = %d, %v; want 0, nil", n, err)
+	}
+	if _, err = os.Stat(parent); err != nil {
+		t.Fatalf("empty parent removed: %v", err)
+	}
+}

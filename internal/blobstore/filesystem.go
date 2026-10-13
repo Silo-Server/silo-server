@@ -379,6 +379,9 @@ func (f *Filesystem) DeletePrefix(ctx context.Context, prefix string) (int, erro
 	if err = check(root, prefix); err != nil {
 		return 0, err
 	}
+	if _, err = root.Lstat(prefix); os.IsNotExist(err) {
+		return 0, nil
+	}
 	n := 0
 	if err = deleteTree(ctx, root, prefix, &n); err != nil {
 		return n, err
@@ -447,12 +450,20 @@ func deleteChildren(ctx context.Context, parent *os.Root, name string, want fs.F
 	if err != nil {
 		return err
 	}
+	// Like RemoveAll, keep going past an entry that cannot be removed so it
+	// does not strand its siblings, and report the first error at the end.
+	// Cancellation still stops the walk at once.
+	var first error
 	for _, e := range entries {
-		if err = deleteTree(ctx, sub, e.Name(), n); err != nil {
+		err = deleteTree(ctx, sub, e.Name(), n)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
+		if first == nil {
+			first = err
+		}
 	}
-	return nil
+	return first
 }
 func (f *Filesystem) List(ctx context.Context, prefix, cursor string, limit int) ([]ObjectInfo, string, error) {
 	if prefix != "" {
