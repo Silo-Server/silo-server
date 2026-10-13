@@ -17,9 +17,10 @@ import (
 // notification, so the device fetches and shows that notification's real
 // text. Profile IDs repeat across accounts, so neither another account's
 // same-named profile nor a sibling profile lends its notification, and a
-// profile with no notification keeps a bare test. Repeating the test beside
-// the delivery's own attempt must not collide on the attempt key, and none of
-// it touches the inbox.
+// profile with no notification keeps a bare test. Dispatching that
+// notification must leave a pending test to the request that enqueued it.
+// Repeating the test beside the delivery's own attempt must not collide on the
+// attempt key, and none of it touches the inbox.
 func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -107,6 +108,17 @@ func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
 	})}
 	system := &System{Settings: settings, pushDeviceRepo: repo, pushSender: sender}
+
+	pending, _, err := repo.EnqueueTestAttempt(ctx, PushPlatformApple, profile, phone.ServerDeviceID)
+	if err != nil {
+		t.Fatalf("enqueue test: %v", err)
+	}
+	if dispatched, err := repo.ClaimPendingPushForDelivery(ctx, newest); err != nil || len(dispatched) != 0 {
+		t.Fatalf("delivery dispatch claimed %+v (err %v); the pending test belongs to its request", dispatched, err)
+	}
+	if claimed, err := repo.ClaimPushAttemptByID(ctx, pending.ID); err != nil || len(claimed) != 1 {
+		t.Fatalf("test claim = %+v (err %v), want the pending test", claimed, err)
+	}
 
 	for range 2 {
 		result, err := system.SendApplePushTest(ctx, profile, phone.ServerDeviceID)

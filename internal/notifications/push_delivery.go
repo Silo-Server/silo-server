@@ -276,15 +276,18 @@ func (r *PushDeviceRepository) getPushDeviceByID(ctx context.Context, id string)
 	return device, nil
 }
 
+// ClaimPendingPushForDelivery claims the delivery's own pending attempts for
+// immediate dispatch. An administrator test that carries the delivery stays
+// with the request that enqueued it.
 func (r *PushDeviceRepository) ClaimPendingPushForDelivery(ctx context.Context, deliveryID string) ([]PushDeliveryAttempt, error) {
 	return r.claimPushAttempts(ctx, `
 		UPDATE push_delivery_attempts SET outcome = 'retrying', next_retry_at = now() + $2, updated_at = now()
 		WHERE id IN (
 			SELECT id FROM push_delivery_attempts
-			WHERE notification_delivery_id = $1 AND outcome = 'pending'
+			WHERE notification_delivery_id = $1 AND trigger_type = $3 AND outcome = 'pending'
 			FOR UPDATE SKIP LOCKED
 		)`+pushAttemptReturning,
-		deliveryID, webhookClaimLease)
+		deliveryID, webhookClaimLease, PushTriggerDelivery)
 }
 
 func (r *PushDeviceRepository) ClaimPushAttemptByID(ctx context.Context, attemptID string) ([]PushDeliveryAttempt, error) {
