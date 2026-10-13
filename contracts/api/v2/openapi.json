@@ -4348,6 +4348,9 @@
           "downloads_stats": {
             "type": "boolean"
           },
+          "egress_totals": {
+            "type": "boolean"
+          },
           "health": {
             "type": "boolean"
           },
@@ -4393,6 +4396,7 @@
           "log_level_list",
           "watch_providers",
           "downloads_stats",
+          "egress_totals",
           "revision",
           "state",
           "allowed"
@@ -4661,6 +4665,14 @@
       "AdminDashboardTimeseries": {
         "additionalProperties": false,
         "properties": {
+          "download_egress_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "egress_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
           "from": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -4701,6 +4713,8 @@
           "from",
           "to",
           "oldest_sample_at",
+          "egress_bytes",
+          "download_egress_bytes",
           "points"
         ],
         "type": "object"
@@ -35525,7 +35539,10 @@
             ]
           },
           "reason_flags": {
-            "description": "A JSON value whose shape is the setting's value_schema in the settings contract."
+            "additionalProperties": true,
+            "description": "Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize.",
+            "type": "object",
+            "x-silo-extension-bag": "notification-reason-flags"
           },
           "season_number": {
             "format": "int64",
@@ -217948,6 +217965,10 @@
           "filled": {
             "format": "int64",
             "type": "integer"
+          },
+          "refined": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -218087,6 +218108,9 @@
         "properties": {
           "allow_software": {
             "type": "boolean"
+          },
+          "source": {
+            "type": "string"
           }
         },
         "type": "object"

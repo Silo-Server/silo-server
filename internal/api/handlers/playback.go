@@ -273,6 +273,7 @@ type PlaybackHandler struct {
 	v3Registry           *playback.TransformationRegistryV3
 	v3RegistryProbe      func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error)
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	v3RouteNodeProbe     func(context.Context, string) bool // nil: probeRouteNodeV3
 	v3NodeCapabilitiesMu sync.Mutex
 	v3NodeCapabilities   map[string]v3NodeCapabilityCache
 	// v3NodeProbeBudgets holds what each node last said a capability read of it

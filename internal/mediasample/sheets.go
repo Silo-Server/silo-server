@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // SheetsOutput asks for the sampled frames tiled into JPEG sprite sheets,
@@ -54,6 +56,10 @@ type SheetFrames struct {
 	Decoded int `json:"decoded"`
 	// Filled cells had no frame of their own and show a neighbor's.
 	Filled int `json:"filled"`
+	// Refined cells show a frame a repair found (see sheet_repair.go): one
+	// the first read missed, or one nearer the sample's time than the
+	// keyframe the previous cell already shows. They count as decoded too.
+	Refined int `json:"refined,omitzero"`
 }
 
 // Bounds of a SheetsOutput. A sheet of the widest tiles in the largest grid
@@ -65,6 +71,10 @@ const (
 	maxSheetPixels  = 16384
 	maxFilledShare  = 0.1
 	sheetMetadataID = "sheets"
+	// maxSheetsRunPixels bounds the tile pixels of one run, which holds
+	// every tile it decodes, about 1.5 bytes a pixel, until its repairs are
+	// done. Callers chunk longer files into several runs.
+	maxSheetsRunPixels = 64 << 20
 )
 
 func (o SheetsOutput) validate() error {
@@ -82,6 +92,19 @@ func (o SheetsOutput) validate() error {
 	if o.Quality < 1 || o.Quality > 100 {
 		return fmt.Errorf("sheet quality %d is outside 1..100", o.Quality)
 	}
+	if o.ToneMap != nil {
+		return o.ToneMap.validate()
+	}
+	return nil
+}
+
+// validateRun checks that the sheets of samples fit maxSheetsRunPixels.
+func (o SheetsOutput) validateRun(samples int) error {
+	perSheet := o.Columns * o.Rows
+	sheets := (samples + perSheet - 1) / perSheet
+	if pixels := int64(sheets) * int64(perSheet) * int64(o.TileWidth) * int64(o.TileHeight); pixels > maxSheetsRunPixels {
+		return fmt.Errorf("%d sheets of %dx%d tiles of %dx%d exceed %d pixels in one run", sheets, o.Columns, o.Rows, o.TileWidth, o.TileHeight, maxSheetsRunPixels)
+	}
 	return nil
 }
 
@@ -98,45 +121,79 @@ const sheetFullRange = "out_range=full:out_color_matrix=bt601"
 // sheetPixelFormat is the format of the raw frames a Sheets run writes.
 const sheetPixelFormat = "yuv420p"
 
-// buildSheetsGraph returns the video filter chain of a Sheets output for
-// frames decoded on accel (empty for software). softwareToneMap is the
-// software tone-map chain, needed when the attempt tone maps in software.
+// gpuScaleFactor is how many times a tile's size a GPU scales frames to
+// before they are downloaded and scaled the rest of the way in software. The
+// GPU scalers sample a few source pixels per output pixel, so a direct 4K to
+// 300-pixel scale aliases (SSIM 0.94 against an area scale of the same
+// frames); scaling to four tiles' size on the GPU and by area after keeps it
+// at 0.999 while downloading a fraction of the frame.
+const gpuScaleFactor = 4
+
+// sheetsToneMap is how a sheet attempt converts an HDR source. kind is the
+// source's base signal when the request named one (ToneMap.Source). software
+// is the software chain for scaled frames: kind's chain, or the best-effort
+// chain when the request named no kind.
+type sheetsToneMap struct {
+	kind     tonemap.SourceKind
+	software string
+}
+
+// buildSheetsGraph returns the video chain of a Sheets output for frames
+// decoded on accel (empty for software), converting HDR as toneMap says when
+// the output asks for tone mapping.
 //
 // Software and VideoToolbox frames are scaled first, tone mapped if asked,
 // and converted once:
 //
 //	scale=W:H:flags=area:out_range=full:out_color_matrix=bt601,format=yuv420p
-//	scale=W:H:flags=area,<tone map>,scale=out_range=full:out_color_matrix=bt601,format=yuv420p
+//	scale=W:H:flags=area,<software tone map>,scale=out_range=full:out_color_matrix=bt601,format=yuv420p
 //
-// VAAPI surfaces, which QSV decodes into too, are tone mapped on the GPU,
-// which needs the source's HDR metadata and so comes first, scaled there, and
-// downloaded:
+// GPU surfaces (VAAPI, which QSV decodes into too, and CUDA) are scaled on the
+// GPU to gpuScaleFactor tiles, downloaded, and then take the same chain. An
+// HDR source whose base signal the request named downloads as 10-bit P010,
+// so it is tone mapped in software, on thumbnail-sized frames, exactly as on
+// a software attempt: the GPU tone mappers disagree with it and with one
+// another (Intel's VAAPI tone mapper crushes PQ midtones and garbles HLG,
+// AMD's refuses HDR, neither applies a Dolby Vision RPU), and the frames are
+// too small for the cost to matter. A VAAPI attempt without a named signal
+// keeps the best-effort GPU tone map images use; CUDA has none.
 //
-//	[<vaapi tone map>,]scale_vaapi=w=W:h=H:format=nv12,hwdownload,format=nv12,scale=…,format=yuv420p
+//	scale_vaapi=w=min(iw\,4W):h=min(ih\,4H):format=nv12,hwdownload,format=nv12,scale=W:H:flags=area:out_range=full:…
+//	scale_cuda=w=min(iw\,4W):h=min(ih\,4H):interp_algo=bilinear:format=p010,hwdownload,format=p010le,scale=W:H:flags=area,<software tone map>,scale=out_range=full:…
 //
 // Every chain ends by giving each frame a "sample" entry of -1 unless its
 // packet already carries one, so metadata=print logs every frame and the
 // log lines up with the raw frames on stdout (see sheets_join.go).
-func buildSheetsGraph(out SheetsOutput, accel, softwareToneMap string) (string, error) {
-	toneMap := out.ToneMap != nil
-	scale := fmt.Sprintf("scale=%d:%d:flags=area", out.TileWidth, out.TileHeight)
-	convert := "format=" + sheetPixelFormat
+func buildSheetsGraph(out SheetsOutput, accel string, toneMap sheetsToneMap) (string, error) {
+	hdr := out.ToneMap != nil
+	gpuToneMaps := false
 	var filters []string
-	switch {
-	case accel != "" && !framesInSystemMemory(accel):
-		if toneMap {
+	if accel != "" && !framesInSystemMemory(accel) {
+		format, download := "nv12", hwDownloadFilter
+		switch {
+		case !hdr:
+		case toneMap.kind != "":
+			format, download = "p010", "hwdownload,format=p010le"
+		case accel == hwAccelNVENC:
+			return "", errors.New("CUDA sheets need the source's base signal to tone map")
+		default:
 			filters = append(filters, vaapiToneMap)
+			gpuToneMaps = true
 		}
-		filters = append(filters,
-			fmt.Sprintf("scale_vaapi=w=%d:h=%d:format=nv12", out.TileWidth, out.TileHeight),
-			hwDownloadFilter,
-			"scale="+sheetFullRange, convert)
-	case toneMap:
-		if softwareToneMap == "" {
+		filters = append(filters, gpuScaleFilter(out, accel, format), download)
+	}
+	software := ""
+	if hdr && !gpuToneMaps {
+		if toneMap.software == "" {
 			return "", errors.New("HDR sheets require a software tone-map filter")
 		}
-		filters = append(filters, scale, softwareToneMap, "scale="+sheetFullRange, convert)
-	default:
+		software = toneMap.software
+	}
+	scale := fmt.Sprintf("scale=%d:%d:flags=area", out.TileWidth, out.TileHeight)
+	convert := "format=" + sheetPixelFormat
+	if software != "" {
+		filters = append(filters, scale, software, "scale="+sheetFullRange, convert)
+	} else {
 		filters = append(filters, scale+":"+sheetFullRange, convert)
 	}
 	filters = append(filters,
@@ -145,18 +202,52 @@ func buildSheetsGraph(out SheetsOutput, accel, softwareToneMap string) (string, 
 	return strings.Join(filters, ","), nil
 }
 
-// prepareSheets settles the video chain of a sheet attempt before ffmpeg
-// starts, choosing the software tone-map chain if the attempt needs one.
-func (r Runner) prepareSheets(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver) (string, *AttemptError) {
-	softwareToneMap, failure := r.softwareToneMapFilter(ctx, req, attempt, toneMap)
-	if failure != nil {
-		return "", failure
+// gpuScaleFilter scales GPU surfaces of accel to gpuScaleFactor times the
+// tile, or the frame's own size if that is smaller, into format, ready for
+// hwdownload. The commas inside min() are escaped from the graph parser.
+func gpuScaleFilter(out SheetsOutput, accel, format string) string {
+	w := fmt.Sprintf("min(iw\\,%d)", gpuScaleFactor*out.TileWidth)
+	h := fmt.Sprintf("min(ih\\,%d)", gpuScaleFactor*out.TileHeight)
+	if accel == hwAccelNVENC {
+		return "scale_cuda=w=" + w + ":h=" + h + ":interp_algo=bilinear:format=" + format
 	}
+	return "scale_vaapi=w=" + w + ":h=" + h + ":format=" + format
+}
+
+// prepareSheets settles the video chain of a sheet attempt before ffmpeg
+// starts. A request naming its source's base signal takes that signal's
+// software chain on every attempt (see buildSheetsGraph), which needs
+// software tone mapping allowed and a filter the binary lists for the
+// signal; without them the attempt fails as unsupported, so a Dolby Vision
+// base makes no sheets rather than green and magenta ones. Otherwise an
+// attempt takes the best-effort chain, which CUDA lacks.
+func (r Runner) prepareSheets(ctx context.Context, req Request, attempt Attempt, resolver *toneMapResolver) (string, *AttemptError) {
 	accel := ""
 	if attempt.Hardware {
 		accel = r.HWAccel
 	}
-	graph, err := buildSheetsGraph(*req.Sheets, accel, softwareToneMap)
+	toneMap := sheetsToneMap{}
+	switch out := req.Sheets.ToneMap; {
+	case out == nil:
+	case out.Source != "":
+		if !out.AllowSoftware {
+			return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}
+		}
+		software, failure := resolver.source(ctx, r, out.Source)
+		if failure != nil {
+			return "", failure
+		}
+		toneMap = sheetsToneMap{kind: out.Source, software: software}
+	case accel == hwAccelNVENC:
+		return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("CUDA sheets need the source's base signal to tone map")}
+	default:
+		software, failure := r.softwareToneMapFilter(ctx, req, attempt, resolver)
+		if failure != nil {
+			return "", failure
+		}
+		toneMap.software = software
+	}
+	graph, err := buildSheetsGraph(*req.Sheets, accel, toneMap)
 	if err != nil {
 		return "", &AttemptError{Reason: ReasonArgs, Err: err}
 	}

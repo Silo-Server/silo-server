@@ -381,10 +381,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
   it.each([
     [{ capabilities: undefined }, true],
     [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
-    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, false],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, true],
+    [
+      { capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] } },
+      false,
+    ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "",
         capabilities_hash: "snapshot",
       },
@@ -392,7 +396,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "new-snapshot",
         capabilities_hash: "old-snapshot",
       },
@@ -400,14 +404,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
       },
       true,
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
         capabilities_hash: "snapshot",
       },
@@ -429,7 +433,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     useAdminNodesMock.mockReturnValue({
       data: [
         transcodeNode({
-          capabilities: { transport_features: ["trickplay_extract_v1"] },
+          capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
           advertised_capabilities_hash: "new-snapshot",
           capabilities_hash: "old-snapshot",
         }),

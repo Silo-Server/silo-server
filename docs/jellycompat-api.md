@@ -199,7 +199,11 @@ See [dropped-shows.md](architecture/dropped-shows.md).
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
 or to the series poster when the season has none; both are removed when the
-request disables Primary images.
+request disables Primary images. Episodes also set `ParentLogoItemId` and
+`ParentLogoImageTag` to their series' logo when it has one, as Jellyfin does,
+since clients read an episode's show logo there; both are removed when a list
+request disables Logo images. `/Shows/Upcoming` episodes carry no series
+artwork, so they have neither these nor the parent poster and backdrop.
 
 ### Extended artwork
 

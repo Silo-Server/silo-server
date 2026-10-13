@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -29,26 +31,52 @@ type NotificationInboxService interface {
 // NotificationItem preserves event-specific reason data while normalizing IDs
 // and timestamps for the native API. Realtime retains its existing event shape.
 type NotificationItem struct {
-	ID              ID              `json:"id"`
-	Type            string          `json:"type"`
-	ProfileID       ID              `json:"profile_id"`
-	LibraryID       *ID             `json:"library_id,omitempty"`
-	SeriesID        *ID             `json:"series_id,omitempty"`
-	EpisodeID       *ID             `json:"episode_id,omitempty"`
-	SeriesTitle     string          `json:"series_title,omitempty"`
-	EpisodeTitle    string          `json:"episode_title,omitempty"`
-	SeasonNumber    *int            `json:"season_number,omitempty"`
-	EpisodeNumber   *int            `json:"episode_number,omitempty"`
-	PosterPath      string          `json:"poster_path,omitempty"`
-	PosterURL       string          `json:"poster_url,omitempty"`
-	PosterThumbhash string          `json:"poster_thumbhash,omitempty"`
-	ReasonFlags     JSONValue       `json:"reason_flags"`
-	CreatedAt       Instant         `json:"created_at"`
-	ReadAt          NullableInstant `json:"read_at"`
+	ID              ID                      `json:"id"`
+	Type            string                  `json:"type"`
+	ProfileID       ID                      `json:"profile_id"`
+	LibraryID       *ID                     `json:"library_id,omitempty"`
+	SeriesID        *ID                     `json:"series_id,omitempty"`
+	EpisodeID       *ID                     `json:"episode_id,omitempty"`
+	SeriesTitle     string                  `json:"series_title,omitempty"`
+	EpisodeTitle    string                  `json:"episode_title,omitempty"`
+	SeasonNumber    *int                    `json:"season_number,omitempty"`
+	EpisodeNumber   *int                    `json:"episode_number,omitempty"`
+	PosterPath      string                  `json:"poster_path,omitempty"`
+	PosterURL       string                  `json:"poster_url,omitempty"`
+	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
+	ReasonFlags     NotificationReasonFlags `json:"reason_flags"`
+	CreatedAt       Instant                 `json:"created_at"`
+	ReadAt          NullableInstant         `json:"read_at"`
+}
+
+// NotificationReasonFlags is a delivery's event-specific reason data: the
+// stored reason_flags object, carried as written. Its keys depend on the
+// delivery type, so the contract declares only an object.
+type NotificationReasonFlags []byte
+
+func (v NotificationReasonFlags) MarshalJSON() ([]byte, error) {
+	if len(v) == 0 {
+		return []byte("{}"), nil
+	}
+	return v, nil
+}
+
+func (v *NotificationReasonFlags) UnmarshalJSON(b []byte) error {
+	*v = append((*v)[:0], b...)
+	return nil
+}
+
+func (NotificationReasonFlags) Schema(huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:                 huma.TypeObject,
+		AdditionalProperties: true,
+		Description:          "Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize.",
+		Extensions:           map[string]any{extExtensionBag: "notification-reason-flags"},
+	}
 }
 
 func notificationItemOf(row notifications.DeliveryRowPayload) NotificationItem {
-	out := NotificationItem{ID: ID(row.ID), Type: row.Type, ProfileID: ID(row.ProfileID), SeriesTitle: row.SeriesTitle, EpisodeTitle: row.EpisodeTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber, PosterPath: row.PosterPath, PosterURL: row.PosterURL, PosterThumbhash: row.PosterThumbhash, ReasonFlags: JSONValue(row.ReasonFlags), CreatedAt: NewInstant(row.CreatedAt)}
+	out := NotificationItem{ID: ID(row.ID), Type: row.Type, ProfileID: ID(row.ProfileID), SeriesTitle: row.SeriesTitle, EpisodeTitle: row.EpisodeTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber, PosterPath: row.PosterPath, PosterURL: row.PosterURL, PosterThumbhash: row.PosterThumbhash, ReasonFlags: NotificationReasonFlags(row.ReasonFlags), CreatedAt: NewInstant(row.CreatedAt)}
 	if row.LibraryID != nil {
 		out.LibraryID = new(ID(strconv.Itoa(*row.LibraryID)))
 	}

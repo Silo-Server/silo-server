@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import {
   adminLogsSocketProtocols,
@@ -61,6 +61,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
   const [error, setError] = useState<string>();
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  const attemptedNonce = useRef(reconnectNonce);
 
   const deferredParams = useDeferredValue(params);
   const queryString = useMemo(() => buildAdminLogsSocketQuery(deferredParams), [deferredParams]);
@@ -116,11 +117,14 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
     setConnectionState("connecting");
     setError(undefined);
 
-    // Debounce the initial attempt; an explicit reconnect() retries immediately.
+    // Debounce every attempt except the one an explicit reconnect() starts, so
+    // filter changes after a reconnect still wait for typing to settle.
     // Authority is captured once per connection attempt: the credential is
     // minted under it, and frames arriving after it changed are discarded.
     let closedByEffect = false;
-    const connectDelay = reconnectNonce === 0 ? 250 : 0;
+    const reconnectRequested = reconnectNonce !== attemptedNonce.current;
+    attemptedNonce.current = reconnectNonce;
+    const connectDelay = reconnectRequested ? 0 : 250;
     const connectTimer = window.setTimeout(() => {
       const authority = captureProfileRequestContext();
       if (!authority) {

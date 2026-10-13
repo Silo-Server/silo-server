@@ -226,6 +226,9 @@ func registerAdminAccessGroups(reg *Registry) {
 		if update.Name == nil {
 			return nil, NewProblem(TypeValidationFailed, "Access group name is required.")
 		}
+		if p = reg.rejectUnknownLibraries(ctx, update.LibraryIDs, locationLibraryIDs); p != nil {
+			return nil, p
+		}
 		body := access.CreateGroupInput{Name: *update.Name, DownloadAllowed: true, DownloadTranscodeAllowed: true, TranscodeAllowed: true, AudioTranscodeAllowed: true, RequestsAllowed: true}
 		applyGroupCreate(&body, update)
 		g, err := svc.CreateAdminAccessGroup(ctx, body)
@@ -253,6 +256,11 @@ func registerAdminAccessGroups(reg *Registry) {
 		}
 		guard, p := groupGuard(ctx, in.IfMatch, in.IfNoneMatch, g)
 		if p != nil {
+			return nil, p
+		}
+		// After the guard: an editor opened before a library was deleted holds
+		// the old ETag and gets 412, which tells it to reload.
+		if p = reg.rejectUnknownLibraries(ctx, body.LibraryIDs, locationLibraryIDs); p != nil {
 			return nil, p
 		}
 		g, err = svc.UpdateAdminAccessGroup(ctx, id, body, guard)

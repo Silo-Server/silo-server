@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -217,5 +218,30 @@ func BenchmarkBuildMediaItemDetailLocalization(b *testing.B) {
 			b.ReportMetric(float64(tracer.localizations)/float64(b.N), "localization-queries/op")
 			b.ReportMetric(float64(tracer.folders+tracer.folderPaths+tracer.localizations)/float64(b.N), "SQL-queries/op")
 		})
+	}
+}
+
+// The Jellyfin-compatible surface seeds an item's image tags from its stored
+// artwork paths, thumbhashes and modification time, as list rows do, so
+// detail carries them.
+func TestBuildMediaItemDetailCarriesImageTagSeeds(t *testing.T) {
+	service, _, _ := detailLocalizationFixture(t)
+	item := localizationDetailItem("translated", "Base overview")
+	item.PosterPath = "local/series/translated/aa/poster/original.r1.webp"
+	item.PosterThumbhash = "poster-th"
+	item.BackdropPath = "local/series/translated/aa/backdrop/original.r1.webp"
+	item.BackdropThumbhash = "backdrop-th"
+	item.LogoPath = "local/series/translated/aa/logo/original.r1.webp"
+	item.UpdatedAt = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, AccessFilter{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.PosterPath != item.PosterPath || detail.PosterThumbhash != item.PosterThumbhash ||
+		detail.BackdropPath != item.BackdropPath || detail.BackdropThumbhash != item.BackdropThumbhash ||
+		detail.LogoPath != item.LogoPath || !detail.UpdatedAt.Equal(item.UpdatedAt) {
+		t.Fatalf("image seeds = poster (%q, %q) backdrop (%q, %q) logo %q updated %v; want the item's",
+			detail.PosterPath, detail.PosterThumbhash, detail.BackdropPath, detail.BackdropThumbhash, detail.LogoPath, detail.UpdatedAt)
 	}
 }
