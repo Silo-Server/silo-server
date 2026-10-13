@@ -158,3 +158,11 @@ func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
 		t.Fatalf("SanitizeText changed ordinary text: %q", got)
 	}
 }
+
+func TestSanitizeTextMasksUserinfoContainingAt(t *testing.T) {
+	const input = "fetch ftp://user:pa@ss@host/file failed"
+	want := "fetch ftp://" + Placeholder + "@host/file failed"
+	if got := SanitizeText(input); got != want {
+		t.Fatalf("SanitizeText() = %q, want %q", got, want)
+	}
+}
