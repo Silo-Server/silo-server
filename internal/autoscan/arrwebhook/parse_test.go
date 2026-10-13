@@ -187,6 +187,31 @@ func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	}
 }
 
+// SeriesDelete and MovieDelete send deletedFiles as a bool, not the file list
+// an upgrade's download carries; they are valid deliveries with nothing to do.
+func TestParseSeriesAndMovieDeleteAreNoOps(t *testing.T) {
+	for _, tc := range []struct{ fixture, eventType, provider string }{
+		{"sonarr_series_delete.json", "SeriesDelete", ProviderSonarr},
+		{"radarr_movie_delete.json", "MovieDelete", ProviderRadarr},
+	} {
+		parsed, err := Parse(ProviderAuto, fixture(t, tc.fixture))
+		if err != nil {
+			t.Fatalf("%s: Parse: %v", tc.fixture, err)
+		}
+		if parsed.EventType != tc.eventType || parsed.Provider != tc.provider || parsed.Test || len(parsed.Changes) != 0 {
+			t.Fatalf("%s: want a no-op %s from %s, got %+v", tc.fixture, tc.eventType, tc.provider, parsed)
+		}
+	}
+}
+
+// A deletedFiles list that is not a list of files is still malformed.
+func TestParseMalformedDeletedFiles(t *testing.T) {
+	body := []byte(`{"eventType":"Download","series":{"path":"/tv/x"},"deletedFiles":[1]}`)
+	if _, err := Parse(ProviderAuto, body); !errors.Is(err, ErrMalformedPayload) {
+		t.Fatalf("want ErrMalformedPayload, got %v", err)
+	}
+}
+
 func TestParseMalformedBody(t *testing.T) {
 	if _, err := Parse(ProviderAuto, []byte("{not json")); !errors.Is(err, ErrMalformedPayload) {
 		t.Fatalf("want ErrMalformedPayload, got %v", err)

@@ -7,6 +7,7 @@
 package arrwebhook
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -67,7 +68,19 @@ type payload struct {
 	// Download/import payloads include the files replaced by an upgrade. They
 	// must be reconciled as vanished paths even when a separate "file delete for
 	// upgrade" notification is not enabled in arr.
-	DeletedFiles []fileRef `json:"deletedFiles"`
+	DeletedFiles deletedFileList `json:"deletedFiles"`
+}
+
+// deletedFileList decodes deletedFiles. SeriesDelete and MovieDelete payloads
+// send a bool under the same key (whether arr deleted the folder), which names
+// no files and must not make the delivery malformed.
+type deletedFileList []fileRef
+
+func (l *deletedFileList) UnmarshalJSON(data []byte) error {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && trimmed[0] != '[' {
+		return nil
+	}
+	return json.Unmarshal(data, (*[]fileRef)(l))
 }
 
 // importEventTypes are the events that carry newly imported files.
