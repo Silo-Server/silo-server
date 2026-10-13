@@ -498,13 +498,13 @@ func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	pinned, _ := openLibraryRoots([]string{root})
-	defer closeLibraryRoots(pinned)
+	opened := openLibraryRoots([]string{root})
+	defer closeLibraryRoots(opened)
 	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	handle := pinnedLibraryRoot(pinned, resolvedRoot)
+	handle, _ := openedLibraryRootFor(opened, resolvedRoot)
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if handle == nil || err != nil {
 		t.Fatalf("pinned root %v, rel error %v", handle, err)
@@ -554,28 +554,28 @@ func TestReadConfinedLocalImageRefusesRootSwappedAfterOpening(t *testing.T) {
 
 	t.Run("swapped before resolution", func(t *testing.T) {
 		root, posterPath, outside := setup(t)
-		pinned, _ := openLibraryRoots([]string{root})
-		defer closeLibraryRoots(pinned)
+		opened := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(opened)
 		swapRoot(t, root, outside)
 
 		_, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
-		if pinnedLibraryRoot(pinned, resolvedRoot) != nil {
+		if handle, _ := openedLibraryRootFor(opened, resolvedRoot); handle != nil {
 			t.Fatal("the replacement root matched the root opened before the swap")
 		}
 	})
 
 	t.Run("swapped after resolution", func(t *testing.T) {
 		root, posterPath, outside := setup(t)
-		pinned, _ := openLibraryRoots([]string{root})
-		defer closeLibraryRoots(pinned)
+		opened := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(opened)
 		resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
-		handle := pinnedLibraryRoot(pinned, resolvedRoot)
+		handle, _ := openedLibraryRootFor(opened, resolvedRoot)
 		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 		if handle == nil || err != nil {
 			t.Fatalf("pinned root %v, rel error %v", handle, err)
@@ -610,5 +610,24 @@ func TestReadConfinedLocalImageReportsUnopenableRoot(t *testing.T) {
 	_, err := readConfinedLocalImage(posterPath, []string{root})
 	if err == nil || !strings.Contains(err.Error(), "local image forbidden") {
 		t.Fatalf("err = %v, want the forbidden failure", err)
+	}
+}
+
+// A library root that cannot be stat'ed after the path resolved says nothing
+// about confinement, so it is a retryable read failure, not the stable
+// out-of-roots one; a resolved root that is none of the opened roots is.
+func TestOpenedLibraryRootForSeparatesStatFailuresFromEscapes(t *testing.T) {
+	root := t.TempDir()
+	opened := openLibraryRoots([]string{root})
+	defer closeLibraryRoots(opened)
+
+	if handle, err := openedLibraryRootFor(opened, filepath.Join(root, "gone")); handle != nil || err == nil {
+		t.Fatalf("missing resolved root = (%v, %v), want an error", handle, err)
+	}
+	if handle, err := openedLibraryRootFor(opened, t.TempDir()); handle != nil || err != nil {
+		t.Fatalf("other directory = (%v, %v), want no root and no error", handle, err)
+	}
+	if handle, err := openedLibraryRootFor(opened, root); handle == nil || err != nil {
+		t.Fatalf("the root itself = (%v, %v), want its handle", handle, err)
 	}
 }

@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1139,8 +1140,8 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 	// Open every library root before resolving anything. All reads go through
 	// one of these handles, so a root or an intermediate directory replaced
 	// after this point cannot redirect the read outside the library.
-	pinned, openFailures := openLibraryRoots(roots)
-	defer closeLibraryRoots(pinned)
+	opened := openLibraryRoots(roots)
+	defer closeLibraryRoots(opened)
 	// The lexical check above cannot see through symlinks. Resolve the path and
 	// roots and re-confine so an intermediate directory symlink planted inside a
 	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
@@ -1156,17 +1157,15 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 	}
 	// The resolved root must be one of the directories opened above; a root
 	// replaced in between resolves somewhere else and is refused.
-	root := pinnedLibraryRoot(pinned, resolvedRoot)
-	if root == nil {
-		// A root that could not be opened is a read failure, not a path
-		// outside the library: keep it off the stable-failure texts so a
-		// transient error (EMFILE, a mount hiccup) is retried normally.
-		if openErr := libraryRootOpenError(openFailures, resolvedRoot); openErr != nil {
-			if errors.Is(openErr, fs.ErrPermission) {
-				return nil, fmt.Errorf("local image forbidden: %s", localPath)
-			}
-			return nil, fmt.Errorf("local image read failed: opening library root: %w", openErr)
+	root, err := openedLibraryRootFor(opened, resolvedRoot)
+	if err != nil {
+		// A root that could not be opened or stat'ed is a read failure, not a
+		// path outside the library: keep it off the stable-failure texts so a
+		// transient error (EMFILE, EIO, a mount hiccup) is retried normally.
+		if errors.Is(err, fs.ErrPermission) {
+			return nil, fmt.Errorf("local image forbidden: %s", localPath)
 		}
+		return nil, fmt.Errorf("local image read failed: library root: %w", err)
 	}
 	rel, relErr := filepath.Rel(resolvedRoot, resolvedPath)
 	if root == nil || relErr != nil || !filepath.IsLocal(rel) {
@@ -1175,71 +1174,68 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 	return readLocalImageFile(localPath, root, rel)
 }
 
-// libraryRootOpenFailure records a library root that exists but could not be
-// opened.
-type libraryRootOpenFailure struct {
-	root string
-	err  error
+// openedLibraryRoot is a library root opened before the image path is
+// resolved, or the error that kept it from opening.
+type openedLibraryRoot struct {
+	path   string
+	handle *os.Root
+	err    error
 }
 
-// openLibraryRoots opens each library root that exists as an os.Root and
-// returns the roots that exist but failed to open.
-func openLibraryRoots(roots []string) ([]*os.Root, []libraryRootOpenFailure) {
-	pinned := make([]*os.Root, 0, len(roots))
-	var failures []libraryRootOpenFailure
+// openLibraryRoots opens each library root that exists as an os.Root. A root
+// that exists but fails to open keeps its error.
+func openLibraryRoots(roots []string) []openedLibraryRoot {
+	opened := make([]openedLibraryRoot, 0, len(roots))
 	for _, root := range roots {
 		root = filepath.Clean(strings.TrimSpace(root))
 		if root == "" || root == "." || !filepath.IsAbs(root) {
 			continue
 		}
 		handle, err := os.OpenRoot(root)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				failures = append(failures, libraryRootOpenFailure{root: root, err: err})
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		opened = append(opened, openedLibraryRoot{path: root, handle: handle, err: err})
+	}
+	return opened
+}
+
+func closeLibraryRoots(opened []openedLibraryRoot) {
+	for _, root := range opened {
+		if root.handle != nil {
+			_ = root.handle.Close()
+		}
+	}
+}
+
+// openedLibraryRootFor returns the opened root that is the same directory as
+// resolvedRoot. It returns nil and no error when no opened root is that
+// directory, which means the path left the library. An error means the
+// matching root failed to open, or a directory could not be stat'ed, so
+// nothing is known about confinement.
+func openedLibraryRootFor(opened []openedLibraryRoot, resolvedRoot string) (*os.Root, error) {
+	current, err := os.Stat(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	var failure error
+	for _, root := range opened {
+		if root.handle == nil {
+			if info, err := os.Stat(root.path); err == nil && os.SameFile(info, current) && failure == nil {
+				failure = root.err
 			}
 			continue
 		}
-		pinned = append(pinned, handle)
-	}
-	return pinned, failures
-}
-
-// libraryRootOpenError returns the open error of the failed root that is the
-// same directory as resolvedRoot, or nil when none is.
-func libraryRootOpenError(failures []libraryRootOpenFailure, resolvedRoot string) error {
-	if len(failures) == 0 {
-		return nil
-	}
-	if current, statErr := os.Stat(resolvedRoot); statErr == nil {
-		for _, failure := range failures {
-			if info, err := os.Stat(failure.root); err == nil && os.SameFile(info, current) {
-				return failure.err
-			}
+		info, err := root.handle.Stat(".")
+		if err != nil {
+			failure = cmp.Or(failure, err)
+			continue
+		}
+		if os.SameFile(info, current) {
+			return root.handle, nil
 		}
 	}
-	return nil
-}
-
-func closeLibraryRoots(pinned []*os.Root) {
-	for _, handle := range pinned {
-		_ = handle.Close()
-	}
-}
-
-// pinnedLibraryRoot returns the opened root that is the same directory as
-// resolvedRoot, or nil when none is.
-func pinnedLibraryRoot(pinned []*os.Root, resolvedRoot string) *os.Root {
-	current, err := os.Stat(resolvedRoot)
-	if err != nil {
-		return nil
-	}
-	for _, handle := range pinned {
-		info, err := handle.Stat(".")
-		if err == nil && os.SameFile(info, current) {
-			return handle
-		}
-	}
-	return nil
+	return nil, failure
 }
 
 // deleteStaleLocalPrefix removes the previous hashed local/ image prefix
