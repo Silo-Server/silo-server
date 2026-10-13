@@ -232,7 +232,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	}
 	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
 		return outputs.WrapOutputs(base, service.WrapTransport(base))
-	})
+	}, service.RequiresRecipe)
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()

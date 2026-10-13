@@ -114,6 +114,11 @@ delayed stop from removing a successor. Worker source handles and producers are
 closed by the exact affected generation. Reconstruction obtains the latest
 core-authorized recipe and fresh source grants; it cannot reconstruct from
 token-carried filesystem paths alone.
+Enrolled standalone HLS workers require a stored core recipe for both client
+authentication modes. The core classifies the selected node before dispatch and
+persists the accepted recipe before publishing a client or proxy route. A failed
+recipe write rolls back the accepted work. Existing legacy token-based workers
+retain their token-carried reconstruction behavior.
 Core recipe publications also have independent opaque versions. Teardown captures
 the version before stopping work and removes only that publication. Publishing
 the same recipe again still creates a new version, so delayed cleanup cannot

@@ -4,24 +4,40 @@
 package nodehttp
 
 import (
+	"context"
 	"net/http"
 	"sync/atomic"
 )
 
 type configuration struct {
-	wrap func(http.RoundTripper) http.RoundTripper
+	wrap           func(http.RoundTripper) http.RoundTripper
+	requiresRecipe func(context.Context, string) (bool, error)
 }
 
 var configured atomic.Pointer[configuration]
 
 // Configure is called by core startup before it admits background or viewer
 // work. Nil restores the ordinary legacy node transport.
-func Configure(wrap func(http.RoundTripper) http.RoundTripper) {
+func Configure(wrap func(http.RoundTripper) http.RoundTripper, requiresRecipe ...func(context.Context, string) (bool, error)) {
 	if wrap == nil {
 		configured.Store(nil)
 		return
 	}
-	configured.Store(&configuration{wrap: wrap})
+	options := &configuration{wrap: wrap}
+	if len(requiresRecipe) > 0 {
+		options.requiresRecipe = requiresRecipe[0]
+	}
+	configured.Store(options)
+}
+
+// RequiresRecipe asks the core's registered worker authority, independently of
+// the client's media-auth mode. Legacy transports have no such requirement.
+// Registry failures must remain errors rather than downgrade to a legacy node.
+func RequiresRecipe(ctx context.Context, nodeURL string) (bool, error) {
+	if options := configured.Load(); options != nil && options.requiresRecipe != nil {
+		return options.requiresRecipe(ctx, nodeURL)
+	}
+	return false, nil
 }
 
 type transport struct{ base http.RoundTripper }

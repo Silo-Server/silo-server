@@ -261,6 +261,7 @@
 ./cmd/silo TestWorkerEnrollmentCLIUsesLocalSQLAndExportsNoBootstrapCredentials
 ./cmd/silo TestWorkerContentAuthorityRevokesAccountProfileLibraryAndMediaFolder
 ./cmd/silo TestWorkerRegistryCanonicalOrigins
+./cmd/silo TestWorkerRecipeClassificationUsesSQLRegistrationAndFailsClosed
 ./cmd/silo TestWorkerContentAuthorityRevokesDirectAndInheritedEncodePermissions
 ./cmd/silo TestWorkerDownloadAttemptRetryFencesSameLeaseOwnerAndReadyArtifact
 

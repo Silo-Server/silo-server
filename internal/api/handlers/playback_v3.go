@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -3048,11 +3049,10 @@ func (h *PlaybackHandler) putNodeRecipeV3(ctx context.Context, transportID strin
 	}
 }
 
-// putRequiredNodeRecipeV3 persists the active authority for a progressive
-// remux executed by a transcode node. Unlike the reconstruction-only write
-// above, this one is part of route admission: the node checks the record before
-// every new remux request, and stop deletes it, so a still-valid stream token
-// cannot resurrect FFmpeg after a node replacement.
+// putRequiredNodeRecipeV3 persists active authority for a remote progressive
+// remux or an enrolled standalone HLS worker. This write is part of admission:
+// standalone workers never receive a client's token-carried recipe, and stop
+// deletes the current authority before an old token can rebuild the job.
 func (h *PlaybackHandler) putRequiredNodeRecipeV3(ctx context.Context, transportID string, card playback.RecipeCard) error {
 	if h == nil || h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() || transportID == "" {
 		return errors.New("node recipe store unavailable")
@@ -4003,6 +4003,12 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 // prepareRemoteTransportV3 starts an HLS generation on the selected transcode node.
 func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, nodePlan nodepool.Plan, timeline preparedTimelineV3, mode mediaAuthModeV3) (preparedTransportV3, *transportErrorV3) {
 	node := nodePlan.TranscodeNode
+	classifyCtx, cancelClassify := context.WithTimeout(r.Context(), nodeRecipeWriteTimeoutV3)
+	requiresRecipe, err := nodehttp.RequiresRecipe(classifyCtx, node.URL)
+	cancelClassify()
+	if err != nil {
+		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_unavailable", message: "The selected transcode node is unavailable.", retryable: true, cause: err}
+	}
 	transportID := transportGenerationV3(session.ID, result.Plan.PlanID)
 	videoCodec := result.TargetVideoCodec
 	if result.Plan.Delivery == playback.DeliveryRemuxHLSV3 {
@@ -4116,6 +4122,14 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		card.RoutingEgressNodeID = nodePlan.ProxyNode.ID
 	}
 	confirmedHWAccel := card.EffectiveEncoderHWAccel()
+	if requiresRecipe {
+		if err := h.putRequiredNodeRecipeV3(r.Context(), transportID, card); err != nil {
+			deleteRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, node.URL)
+			h.tm.StopRemoteTranscode(transportID, node.URL)
+			deleteRecipe()
+			return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "The selected transcode node's playback authority could not be stored.", retryable: true, cause: err}
+		}
+	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
 	// Either URL builder only returns an absolute proxy URL when a proxy was
 	// planned and its authority (a signed token, or a stored grant) could
@@ -4133,7 +4147,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	case mode.proxyEgress:
 		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode, accessPath)
 	}
-	if mode.headerAuth {
+	if mode.headerAuth && !requiresRecipe {
 		// No client-visible URL carries a stream token in this mode, so neither the
 		// client nor the API relay can hand the node its recipe back after the node
 		// restarts. Store it for the node to fetch. Both sub-modes need it: the
