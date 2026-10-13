@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
@@ -481,13 +482,10 @@ export default function PlaybackSettings() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Playback</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          The defaults this profile starts playback with. A library, a series, or one of your
-          devices can override some of them.
-        </p>
-      </header>
+      <PageHeader
+        title="Playback"
+        subtitle="The defaults this profile starts playback with. A library, a series, or one of your devices can override some of them."
+      />
 
       <SettingsGroup
         title="Quality"

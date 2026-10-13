@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { Button } from "@/components/ui/button";
@@ -261,14 +262,10 @@ export default function SubtitleAppearanceSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Subtitles</h1>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Choose when subtitles appear for this profile, and how they look on this device.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Subtitles"
+        subtitle="Choose when subtitles appear for this profile, and how they look on this device."
+      />
 
       <SettingsGroup
         title="Behavior"

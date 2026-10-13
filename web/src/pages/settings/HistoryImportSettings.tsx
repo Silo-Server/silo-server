@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { PageHeader } from "@/components/page/PageHeader";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useAuth } from "@/hooks/useAuth";
@@ -356,12 +357,10 @@ export default function HistoryImportSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">History Import</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Import watch history from an external media server into a Silo profile.
-        </p>
-      </div>
+      <PageHeader
+        title="History Import"
+        subtitle="Import watch history from an external media server into a Silo profile."
+      />
 
       {/* ── New import ──────────────────────────────────── */}
       <SettingsGroup

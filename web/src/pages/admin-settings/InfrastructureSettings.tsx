@@ -984,7 +984,7 @@ export default function InfrastructureSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Storage & Database" className="mb-8" />
+      <SettingsPageHeader title="Storage & Database" />
 
       <div className="flex-1 space-y-5">
         {!storageStatusKnown ? (

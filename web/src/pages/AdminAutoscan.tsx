@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
 import type { AutoscanSettings } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,58 +175,70 @@ export default function AdminAutoscan({ embedded = false }: AdminAutoscanProps =
     setSearchParams(next, { replace: true });
   }
 
+  const statusBadge =
+    settings.data &&
+    (enabled ? (
+      <Badge variant="secondary">Enabled</Badge>
+    ) : (
+      <Badge variant="outline" className="text-muted-foreground">
+        Disabled
+      </Badge>
+    ));
+  const description =
+    "Silo re-scans a library as soon as something changes, instead of waiting for the next scheduled scan. Add a source for each thing you want watched.";
+  const controls = (
+    <>
+      <div className="flex items-center gap-2">
+        <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
+          Autoscan
+        </Label>
+        <Switch
+          id="autoscan-enabled"
+          checked={enabled}
+          onCheckedChange={toggleEnabled}
+          disabled={!settings.data || updateSettings.isPending}
+          aria-label="Enable autoscan"
+        />
+      </div>
+      {runNowVisible ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={trigger.isPending}
+          onClick={() => trigger.mutate()}
+        >
+          <Play />
+          {trigger.isPending ? "Triggering…" : "Run now"}
+        </Button>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="space-y-6">
-      <div className="page-header">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2.5">
-            {embedded ? (
+      {embedded ? (
+        <div className="page-header">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2.5">
               <h2 className="text-xl font-semibold tracking-tight">Autoscan</h2>
-            ) : (
-              <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-                Autoscan
-              </h1>
-            )}
-            {settings.data &&
-              (enabled ? (
-                <Badge variant="secondary">Enabled</Badge>
-              ) : (
-                <Badge variant="outline" className="text-muted-foreground">
-                  Disabled
-                </Badge>
-              ))}
+              {statusBadge}
+            </div>
+            <p className="text-muted-foreground max-w-2xl text-sm leading-6">{description}</p>
           </div>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-6">
-            Silo re-scans a library as soon as something changes, instead of waiting for the next
-            scheduled scan. Add a source for each thing you want watched.
-          </p>
+          <div className="flex items-center gap-3">{controls}</div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
-              Autoscan
-            </Label>
-            <Switch
-              id="autoscan-enabled"
-              checked={enabled}
-              onCheckedChange={toggleEnabled}
-              disabled={!settings.data || updateSettings.isPending}
-              aria-label="Enable autoscan"
-            />
-          </div>
-          {runNowVisible ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={trigger.isPending}
-              onClick={() => trigger.mutate()}
-            >
-              <Play />
-              {trigger.isPending ? "Triggering…" : "Run now"}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      ) : (
+        <PageHeader
+          title="Autoscan"
+          subtitle={description}
+          actions={
+            <>
+              {statusBadge}
+              {controls}
+            </>
+          }
+        />
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
         <TabsList variant="line" className="border-border w-full justify-start border-b">

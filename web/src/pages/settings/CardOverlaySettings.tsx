@@ -3,6 +3,7 @@ import { Check, ImageIcon, ImageOff, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import {
   OverlayPreviewCard,
@@ -338,13 +339,10 @@ export default function CardOverlaySettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Card Overlays</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Choose the quick actions and badges shown on media cards, where badges sit, and how they
-          look. Inspired by Kometa.
-        </p>
-      </div>
+      <PageHeader
+        title="Card Overlays"
+        subtitle="Choose the quick actions and badges shown on media cards, where badges sit, and how they look. Inspired by Kometa."
+      />
 
       <SettingsGroup title="General" description="Override the server defaults for this profile.">
         <SettingRow

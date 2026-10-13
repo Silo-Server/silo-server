@@ -3,6 +3,7 @@ import { ChevronLeft, Info, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import type { UserDevice } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -100,13 +101,11 @@ export default function DeviceSettings() {
     <div className="space-y-5">
       {/* Hidden below xl while the detail view is open: on a phone that screen
           is about one device, and its own header says which. */}
-      <header className={cn("space-y-2", showDetailOnMobile && "hidden xl:block")}>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your Devices</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Every phone, tablet, TV and browser you watch on. Pick one to see what&apos;s set
-          differently there and change it — from here, whichever device you&apos;re holding.
-        </p>
-      </header>
+      <PageHeader
+        className={cn(showDetailOnMobile && "hidden xl:flex")}
+        title="Your Devices"
+        subtitle="Every phone, tablet, TV and browser you watch on. Pick one to see what's set differently there and change it — from here, whichever device you're holding."
+      />
 
       {/* Kept by this browser itself, not the server, so it sits apart from
           the device list, which edits server-held settings for any device. */}

@@ -13,6 +13,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries, useScanAllLibraries } from "@/hooks/queries/admin/libraries";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Plus, RefreshCw, ScanLine } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -212,62 +213,60 @@ export default function AdminDashboard() {
       <AdminSectionCommandDialog sections={adminSearchSections} />
 
       {/* Page header */}
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Dashboard</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Live sessions, content health, and server activity in one view.
-          </p>
-        </div>
-        <div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-          <div className="grid gap-2 sm:flex sm:items-center">
-            {lastUpdatedLabel && (
-              <span className="text-muted-foreground text-xs sm:whitespace-nowrap">
-                Updated {lastUpdatedLabel}
-              </span>
-            )}
+      <PageHeader
+        title="Dashboard"
+        subtitle="Live sessions, content health, and server activity in one view."
+        actions={
+          <div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+            <div className="grid gap-2 sm:flex sm:items-center">
+              {lastUpdatedLabel && (
+                <span className="text-muted-foreground text-xs sm:whitespace-nowrap">
+                  Updated {lastUpdatedLabel}
+                </span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-[8.25rem] justify-center sm:w-auto"
+                onClick={() => {
+                  void refreshDashboard({ manual: true });
+                }}
+                disabled={isManualRefreshPending}
+                aria-busy={isManualRefreshPending}
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
+                />
+                {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-pointer justify-center sm:w-auto"
+                onClick={toggleCustomizing}
+                aria-pressed={layout.isCustomizing}
+              >
+                <LayoutDashboard className="h-3.5 w-3.5" />
+                {layout.isCustomizing ? "Done" : "Customize"}
+              </Button>
+            </div>
             <Button
-              variant="outline"
+              variant="default"
               size="sm"
-              className="min-w-[8.25rem] justify-center sm:w-auto"
+              className="w-full cursor-pointer sm:w-auto"
               onClick={() => {
-                void refreshDashboard({ manual: true });
+                if (libraries.length > 0) {
+                  scanAll.mutate();
+                }
               }}
-              disabled={isManualRefreshPending}
-              aria-busy={isManualRefreshPending}
+              disabled={scanAll.isPending || libraries.length === 0}
             >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
-              />
-              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer justify-center sm:w-auto"
-              onClick={toggleCustomizing}
-              aria-pressed={layout.isCustomizing}
-            >
-              <LayoutDashboard className="h-3.5 w-3.5" />
-              {layout.isCustomizing ? "Done" : "Customize"}
+              <ScanLine className="h-3.5 w-3.5" />
+              Scan All Libraries
             </Button>
           </div>
-          <Button
-            variant="default"
-            size="sm"
-            className="w-full cursor-pointer sm:w-auto"
-            onClick={() => {
-              if (libraries.length > 0) {
-                scanAll.mutate();
-              }
-            }}
-            disabled={scanAll.isPending || libraries.length === 0}
-          >
-            <ScanLine className="h-3.5 w-3.5" />
-            Scan All Libraries
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Setup the server still owes, each item linking to the page that
           fixes it. The admin sidebar marks the broken ones too. */}

@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 
 import type { Profile } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -296,13 +297,10 @@ export default function ConnectAppsSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Connect Apps</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Exactly what to type on a sign-in screen. Pick the kind of app you're using — the
-          credentials are different for each.
-        </p>
-      </div>
+      <PageHeader
+        title="Connect Apps"
+        subtitle="Exactly what to type on a sign-in screen. Pick the kind of app you're using — the credentials are different for each."
+      />
 
       <div
         className="surface-panel-subtle grid grid-cols-1 gap-1 rounded-[1.1rem] p-1 sm:grid-cols-2"

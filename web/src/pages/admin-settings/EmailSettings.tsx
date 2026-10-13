@@ -52,7 +52,7 @@ export default function EmailSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Email" className="mb-7" />
+      <SettingsPageHeader title="Email" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup

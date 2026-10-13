@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -906,13 +907,10 @@ export default function WatchProvidersSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Watch Providers</h1>
-        <p className="text-muted-foreground text-[13px] leading-relaxed sm:text-sm">
-          Connect external trackers to import watch history, sync paused progress, and scrobble
-          playback in real time.
-        </p>
-      </div>
+      <PageHeader
+        title="Watch Providers"
+        subtitle="Connect external trackers to import watch history, sync paused progress, and scrobble playback in real time."
+      />
 
       {providers.length === 0 ? (
         <section className="surface-panel rounded-[1.7rem] border-0 px-4 py-5 shadow-none sm:px-6">

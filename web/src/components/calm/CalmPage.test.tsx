@@ -8,7 +8,6 @@ describe("CalmPage", () => {
   it("is a page's own h1 with its buttons in the header", () => {
     render(
       <CalmPage
-        heading="page"
         title="Collections"
         subtitle="What viewers see on each library's Collections tab."
         actions={<button type="button">New collection</button>}
@@ -24,9 +23,9 @@ describe("CalmPage", () => {
     expect(screen.getByRole("banner").parentElement).not.toHaveClass("pb-24");
   });
 
-  it("titles a settings page and leaves room for a docked bar", () => {
+  it("leaves room for a docked bar", () => {
     render(
-      <CalmPage heading="settings" title="Home Screen" subtitle="Your rows." padBottom>
+      <CalmPage title="Home Screen" subtitle="Your rows." padBottom>
         <p>List</p>
       </CalmPage>,
     );

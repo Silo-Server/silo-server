@@ -7,6 +7,8 @@ import {
   resolveAdminSettingsPageID,
   type AdminSettingsSearchItem,
 } from "@/lib/adminSettingsSearch";
+import { PageColumn } from "@/components/page/PageHeader";
+import { SettingsPageDescriptionContext } from "@/components/settings/settingsPageDescription";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 
 import GeneralSettings from "./GeneralSettings";
@@ -114,9 +116,13 @@ export default function AdminSettingsLayout() {
         role="region"
         aria-label={`${active.label} settings`}
         tabIndex={-1}
-        className="mx-auto w-full max-w-3xl min-w-0 focus:outline-none"
+        className="min-w-0 focus:outline-none"
       >
-        <ActiveComponent />
+        <PageColumn width="settings">
+          <SettingsPageDescriptionContext.Provider value={active.description}>
+            <ActiveComponent />
+          </SettingsPageDescriptionContext.Provider>
+        </PageColumn>
       </div>
     </div>
   );

@@ -245,7 +245,7 @@ export default function LoggingSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Logging" className="mb-7" />
+      <SettingsPageHeader title="Logging" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup

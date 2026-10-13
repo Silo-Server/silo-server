@@ -325,7 +325,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
     id: "library",
     label: "Library & Metadata",
     description:
-      "Provider artwork, browsing, maturity limits, rating sources, scanning, skip markers, subtitle sync, and search.",
+      "Maturity limits, rating sources, scanning, skip markers, subtitle sync, search, and artwork.",
     keywords: [
       "scanner workers",
       "image encoding workers",

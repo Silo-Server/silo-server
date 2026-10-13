@@ -48,7 +48,7 @@ export default function GeneralSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="General" className="mb-7" />
+      <SettingsPageHeader title="General" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup

@@ -347,7 +347,7 @@ export default function SecurityAccessSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Security" className="mb-8" />
+      <SettingsPageHeader title="Security" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Local network" restartAll={allRestart(LOCAL_NETWORK_KEYS)}>

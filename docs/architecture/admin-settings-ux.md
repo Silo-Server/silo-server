@@ -77,12 +77,23 @@ settings code when it opens.
 
 One page is on screen at a time, and each thing on screen carries one signal.
 
-A category page opens with `SettingsPageHeader`: the title, and page actions
-if it has any. No breadcrumb, no lede, no status strip. Below it, settings
-are hairline-ruled rows inside `FieldGroup`s — thin wrappers over the shared
-`SettingsGroup` panel the user settings pages use — one panel per group,
-never per field. The Advanced tier stays inline as one disclosure row per
-group. A row can carry its `server_settings` key as a mono caption under the
+Every admin page and every settings page, user or admin, opens with the
+shared `PageHeader` (`web/src/components/page/`): one title size at one
+position, a one-sentence subtitle, and page actions at the right. An admin
+settings page's subtitle is its description from the settings index, which
+`AdminSettingsLayout` provides to `SettingsPageHeader`. No breadcrumb and no
+status strip. Content sits in a `PageColumn` that starts at the layout's
+gutter instead of centering, so the title never moves between a narrow page
+and a wide one; settings pages cap the column at a reading width, while
+tables and dashboards use the full width. Below the header, settings are
+hairline-ruled rows inside `FieldGroup`s — thin wrappers over the shared
+`SettingsGroup` section the user settings pages use — one section per group,
+never per field. Sections are not cards: they sit on the page, divided by a
+hairline, and once the column is wide enough a section's title and
+description move into a left column beside its rows. Lists inside a section
+(providers, delivery channels) are rows too, not tiles. The Advanced tier
+stays inline as one disclosure row per group. A row can carry its
+`server_settings` key as a mono caption under the
 label (`SettingField`'s `settingKey`) so an admin can match the UI to the
 API and environment overrides, and a violet dot marks unsaved edits on the
 row and on the group heading (`dirty`, driven from `form.isDirty`). A
@@ -90,14 +101,14 @@ description under a field label is the exception, not the rule: one short
 sentence, and only when the label alone is ambiguous. Units live beside the
 control (`SettingField`'s `unit`), not in the label. When every field in a
 group needs a restart, the group says so once (`FieldGroup restartAll`) and
-the fields inside drop their chips. Provider credentials are `ProviderTile`s
-that expand in place to Test before saving; their border is neutral in every
-state and the state is a dot plus a word in the header. Provider setup lives on
+the fields inside drop their chips. Provider credentials are `ProviderTile` rows
+that expand in place to Test before saving; the state is a dot plus a word
+beside the provider's button. Provider setup lives on
 a provider page (Providers, Watch Providers), not on the page that owns the
 feature: Library & Metadata decides *whether* Silo looks for intro and
 credits markers, while *which provider answers, in what order, and on what
-terms* is a tile beside the subtitle and list providers, with a cross-link
-each way. A tile only reads "Connected" when the provider could actually serve
+terms* is a row beside the subtitle and list providers, with a cross-link
+each way. A provider only reads "Connected" when the provider could actually serve
 a request — its configuration saved and the provider switched on — so an
 installed plugin whose API key was never entered reads "Needs setup". Request
 servers (Sonarr, Radarr) are the exception to the provider-page rule: they are
@@ -155,7 +166,7 @@ Reuse these instead of adding a bespoke variant per page:
   and `useSettingsForm` (`web/src/hooks/`) — the one save model. Every page
   batches edits and commits them through one `SaveBar` with Discard; provider
   credentials are the only exception, and only because they need
-  Test-before-commit, which is `ProviderTile` rather than a bespoke card per
+  Test-before-commit, which is `ProviderTile` rather than a bespoke row per
   provider.
 - `UnsavedChangesGuard` (`web/src/components/`) plus `useReportUnsavedChanges`
   (`web/src/hooks/useUnsavedChanges.ts`) — the one unsaved-edits prompt. A form
@@ -166,15 +177,16 @@ Reuse these instead of adding a bespoke variant per page:
   which is why `App.tsx` mounts a data router (`createBrowserRouter` +
   `RouterProvider`) — a page must never grow its own prompt, its own blocker,
   or its own draft store.
-- `SettingsPageHeader` (`web/src/components/settings/`) — the one way a
-  section names itself. Server health belongs in the Dashboard's attention
+- `PageHeader` and `PageColumn` (`web/src/components/page/`) — the one page
+  title and the one content column for admin and settings pages;
+  `SettingsPageHeader` is the admin settings pages' way into it. Server health belongs in the Dashboard's attention
   notice, not repeated as a strip on every page.
 - `SideNavSection`/`SideNavItem`/`SideNavTopic`/`SideNavSubItem`
   (`web/src/components/SideNav.tsx`) — the admin sidebar's building blocks.
   Pages never render their own nav; a new settings page is an entry in
   `ADMIN_SETTINGS_NAV`, its component in `AdminSettingsLayout`, and its place
   in `ADMIN_NAV_SECTIONS`.
-- `SettingsGroup` (`web/src/components/settings/`) — the one settings panel,
+- `SettingsGroup` (`web/src/components/settings/`) — the one settings section,
   shared with the user settings pages; admin pages reach it through the
   `FieldGroup` wrapper, which layers on the restart-all line, the
   unsaved-edits dot, and the restart context.

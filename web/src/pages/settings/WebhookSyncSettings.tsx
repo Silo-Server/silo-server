@@ -16,6 +16,7 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -585,12 +586,10 @@ export default function WebhookSyncSettings() {
 
   return (
     <div className="space-y-6 pb-6">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Webhook Sync</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Receive watched, stop, and progress events from Plex, Emby, and Jellyfin.
-        </p>
-      </div>
+      <PageHeader
+        title="Webhook Sync"
+        subtitle="Receive watched, stop, and progress events from Plex, Emby, and Jellyfin."
+      />
 
       <SettingsGroup
         title="Add a connection"

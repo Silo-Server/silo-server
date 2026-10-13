@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router";
 import { ChevronLeft } from "lucide-react";
 
+import { PageColumn, PageHeader } from "@/components/page/PageHeader";
 import PageBack from "@/components/PageBack";
 import { CurrentProfileLink } from "@/components/settings/CurrentProfileLink";
 import { SettingsIndexList } from "@/components/settings/SettingsIndexList";
@@ -15,7 +16,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useUserSettingsGroups } from "@/hooks/useUserSettingsGroups";
 import { resolveSettingsDocumentTitle } from "@/lib/documentTitle";
 import { userSettingsHref, type UserSettingsNavGroup } from "@/lib/userSettingsNav";
-import { cn } from "@/lib/utils";
 
 /** Where `Layout` swaps the app sidebar for the settings sidebar. */
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
@@ -59,9 +59,9 @@ export default function SettingsLayout() {
         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         All settings
       </Link>
-      <div className={cn("mx-auto w-full", wideSetting ? "max-w-none" : "max-w-3xl")}>
+      <PageColumn width={wideSetting ? "full" : "settings"}>
         <Outlet />
-      </div>
+      </PageColumn>
     </div>
   );
 }
@@ -76,10 +76,12 @@ function SettingsIndex({ groups }: { groups: readonly UserSettingsNavGroup[] }) 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <PageBack to="/" up floating />
-      <header className="mt-10 space-y-3 sm:mt-12">
-        <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
-        <p className="page-subtitle text-sm sm:text-base">Make Silo work the way you like.</p>
-      </header>
+      {/* The top margin clears the floating back button above it. */}
+      <PageHeader
+        className="mt-10 sm:mt-12"
+        title="Settings"
+        subtitle="Make Silo work the way you like."
+      />
       <CurrentProfileLink className="surface-panel-subtle min-h-14 rounded-2xl px-4 py-3" />
       <SettingsSearchInput
         value={search}

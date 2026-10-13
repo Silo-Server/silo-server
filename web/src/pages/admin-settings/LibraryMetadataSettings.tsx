@@ -232,7 +232,7 @@ export default function LibraryMetadataSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Library & Metadata" className="mb-8" />
+      <SettingsPageHeader title="Library & Metadata" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup

@@ -193,14 +193,6 @@ function Chip({
   );
 }
 
-function ZoneHeading({ title }: { title: string }) {
-  return (
-    <h3 className="text-muted-foreground px-1 text-xs font-semibold tracking-[0.22em] uppercase">
-      {title}
-    </h3>
-  );
-}
-
 /**
  * A labelled cluster inside an Advanced disclosure. One element per cluster
  * means the disclosure's child rule draws a single hairline between clusters,
@@ -226,8 +218,8 @@ interface ChannelCardProps {
 }
 
 /**
- * One delivery channel: an always-visible header row (icon, title, status
- * chips, enable switch) with the channel's setup in an expandable body.
+ * One delivery channel as a settings row: icon, title, status chips and the
+ * enable switch, with the channel's setup in an expandable body below it.
  * Settings stay editable while the channel is off so admins can configure
  * before enabling.
  *
@@ -271,8 +263,8 @@ function ChannelCard({
   );
 
   return (
-    <div className="surface-panel overflow-hidden rounded-2xl border-0">
-      <div className="flex items-center gap-3 p-4 sm:px-5">
+    <div>
+      <div className="flex items-center gap-3 py-3.5">
         {expandable ? (
           <button
             type="button"
@@ -305,7 +297,7 @@ function ChannelCard({
       {expandable && open && (
         <div
           id={bodyId}
-          className="border-border/60 animate-in fade-in-0 slide-in-from-top-1 border-t px-4 pt-1 pb-4 duration-200 sm:px-5"
+          className="animate-in fade-in-0 slide-in-from-top-1 pb-4 pl-[3.25rem] duration-200"
         >
           {children}
         </div>
@@ -913,7 +905,7 @@ export default function NotificationsAdminSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader className="mb-6" title="Notifications" />
+      <SettingsPageHeader title="Notifications" />
 
       <div className="flex-1 space-y-5">
         {pausedMessage && (
@@ -927,9 +919,10 @@ export default function NotificationsAdminSettings() {
         )}
 
         {/* ── Delivery channels ── */}
-        <section className="space-y-3">
-          <ZoneHeading title="Delivery Channels" />
-
+        <FieldGroup
+          label="Delivery channels"
+          description="Where notifications go. A channel's setup stays editable while it is off, so it can be ready before it is turned on."
+        >
           <ChannelCard
             icon={Inbox}
             title="In-App"
@@ -1260,7 +1253,7 @@ export default function NotificationsAdminSettings() {
               </AdvancedSection>
             </div>
           </ChannelCard>
-        </section>
+        </FieldGroup>
 
         {/* ── Processing: everything here has a working default ── */}
         <FieldGroup

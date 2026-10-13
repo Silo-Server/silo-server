@@ -271,7 +271,7 @@ export default function PlaybackSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Playback" className="mb-8" />
+      <SettingsPageHeader title="Playback" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup

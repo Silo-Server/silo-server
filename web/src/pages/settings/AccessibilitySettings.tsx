@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
@@ -34,7 +35,10 @@ export default function AccessibilitySettings() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Accessibility</h1>
+      <PageHeader
+        title="Accessibility"
+        subtitle="Text size, weight, contrast, and date and time formats."
+      />
 
       <SettingsGroup
         title="Readability"

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Sparkles, ArrowRight, Heart, Map } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useFavorites } from "@/hooks/queries/favorites";
 import { useOnboardingFlow } from "@/hooks/queries/onboarding";
@@ -20,12 +21,12 @@ export default function PersonalizeSettings() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Personalize</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Pick titles you love so your home, recommendations, and "For You" rows reflect your taste.
-        </p>
-      </header>
+      <PageHeader
+        title="Personalize"
+        subtitle={
+          'Pick titles you love so your home, recommendations, and "For You" rows reflect your taste.'
+        }
+      />
 
       <div className="surface-panel rounded-2xl border-0 p-6">
         <div className="flex items-start gap-4">

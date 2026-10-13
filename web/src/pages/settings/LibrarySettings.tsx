@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { UserLibrary } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { SettingRow } from "@/components/settings/SettingRow";
@@ -652,13 +653,10 @@ export default function LibrarySettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Libraries</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Toggle which libraries appear in your navigation and customize playback defaults per
-          library.
-        </p>
-      </div>
+      <PageHeader
+        title="Libraries"
+        subtitle="Toggle which libraries appear in your navigation and customize playback defaults per library."
+      />
 
       <SettingsGroup
         title="Browsing"

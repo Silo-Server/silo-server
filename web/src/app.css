@@ -2624,3 +2624,24 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
   }
 }
+
+/* A settings section: no surface of its own, a hairline above it. Outside any
+   layer on purpose, so it also wins over a page's `space-y-*` margin and every
+   section is spaced the same on every page. A section nested in another keeps
+   to its parent's rule. */
+.settings-section {
+  margin-block: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  padding-block: 1.5rem;
+}
+
+.settings-section .settings-section {
+  border-top: 0;
+  padding-block: 0.75rem 0;
+}
+
+@media (min-width: 64rem) {
+  .settings-section {
+    padding-block: 1.75rem;
+  }
+}

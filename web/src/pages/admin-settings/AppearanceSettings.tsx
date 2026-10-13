@@ -137,7 +137,7 @@ export default function AppearanceSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Appearance" className="mb-8" />
+      <SettingsPageHeader title="Appearance" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Logos and icons">

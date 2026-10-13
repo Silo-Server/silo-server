@@ -213,7 +213,7 @@ export default function CompatibilityProxiesSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Compatibility" className="mb-8" />
+      <SettingsPageHeader title="Compatibility" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Jellyfin" restartAll={allRestart(JELLYFIN_KEYS)}>

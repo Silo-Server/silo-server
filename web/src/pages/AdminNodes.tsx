@@ -14,6 +14,7 @@ import {
   useSetNodeDrain,
   useToggleNode,
 } from "@/hooks/queries/admin/nodes";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1307,19 +1308,14 @@ export default function AdminNodes() {
     }
   }
 
-  if (isLoading) return <div className="page-shell py-8">Loading nodes...</div>;
+  if (isLoading) return <div className="page-shell pb-8">Loading nodes...</div>;
 
   return (
-    <div className="page-shell space-y-8 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Stream Nodes</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage proxy and transcode workers that distribute playback load across your
-            infrastructure.
-          </p>
-        </div>
-      </div>
+    <div className="page-shell space-y-8 pb-4 sm:pb-6">
+      <PageHeader
+        title="Stream Nodes"
+        subtitle="Manage proxy and transcode workers that distribute playback load across your infrastructure."
+      />
 
       <NodeGroupFilter
         options={groupOptions}

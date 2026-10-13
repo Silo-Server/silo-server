@@ -621,7 +621,7 @@ export default function ProvidersSettings() {
   }
 
   return (
-    <div className="flex h-full max-w-5xl flex-col gap-7">
+    <div className="space-y-5">
       <SettingsPageHeader title="Providers" />
 
       <FieldGroup label="Subtitle providers">

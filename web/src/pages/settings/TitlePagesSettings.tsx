@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Switch } from "@/components/ui/switch";
@@ -78,12 +79,10 @@ export default function TitlePagesSettings() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Title Pages</h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          What a movie or show page shows and plays when you open it.
-        </p>
-      </header>
+      <PageHeader
+        title="Title Pages"
+        subtitle="What a movie or show page shows and plays when you open it."
+      />
 
       <TitleArtSettingsGroup />
 

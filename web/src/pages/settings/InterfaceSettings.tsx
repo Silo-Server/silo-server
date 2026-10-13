@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Monitor, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,13 +87,10 @@ function CardPreview({ presentation }: { presentation: CardPresentation }) {
 
 function InterfaceHeader() {
   return (
-    <header className="space-y-2">
-      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Navigation & Cards</h1>
-      <p className="text-muted-foreground text-sm">
-        These choices sync between web browsers signed into this profile. TV, mobile, tablet, and
-        desktop-native apps keep their own matching-device layouts.
-      </p>
-    </header>
+    <PageHeader
+      title="Navigation & Cards"
+      subtitle="These choices sync between web browsers signed into this profile. TV, mobile, tablet, and desktop-native apps keep their own matching-device layouts."
+    />
   );
 }
 

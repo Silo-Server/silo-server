@@ -177,7 +177,6 @@ export function HomeRowsPage({
   return (
     <CalmPage
       // Settings > Home Screen titles itself like every other settings page.
-      heading={surface === "admin" ? "page" : "settings"}
       title={title}
       subtitle={subtitle}
       actions={

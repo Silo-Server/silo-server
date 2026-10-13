@@ -192,7 +192,7 @@ export default function SignInSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Sign-in" className="mb-7" />
+      <SettingsPageHeader title="Sign-in" />
 
       <div className="flex-1 space-y-5">
         {capabilities.isError || (caps && !supported) ? (

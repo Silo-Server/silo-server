@@ -45,6 +45,7 @@ import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMo
 import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -343,11 +344,10 @@ export default function AdminLibraries() {
   }
 
   if (isLoading && activeTab === "libraries")
-    return <div className="p-8">Loading libraries...</div>;
+    return <div className="pb-8">Loading libraries...</div>;
 
   return (
     <div className="space-y-6">
-      <JobPageControls query={refreshJobsQuery} label="Load older refresh jobs" />
       <ConfirmDialog
         open={confirmDeleteLib !== null}
         onOpenChange={(open) => {
@@ -376,85 +376,83 @@ export default function AdminLibraries() {
           setConfirmEmptyRootLib(null);
         }}
       />
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Libraries</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage library roots and scans. Catalog import/export now lives under Maintenance.
-          </p>
-        </div>
-        <div className={cn("flex gap-2", activeTab !== "libraries" && "hidden")}>
-          {activeScanGroups.length > 0 && (
-            <ScanQueuePopover
-              groups={activeScanGroups}
-              cancellingLibraryID={
-                cancelScansMutation.isPending ? (cancelScansMutation.variables ?? null) : null
+      <PageHeader
+        title="Libraries"
+        subtitle="Manage library roots and scans. Catalog import/export now lives under Maintenance."
+        actions={
+          <div className={cn("flex gap-2", activeTab !== "libraries" && "hidden")}>
+            {activeScanGroups.length > 0 && (
+              <ScanQueuePopover
+                groups={activeScanGroups}
+                cancellingLibraryID={
+                  cancelScansMutation.isPending ? (cancelScansMutation.variables ?? null) : null
+                }
+                onCancel={(libraryID) => cancelScansMutation.mutate(libraryID)}
+              />
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => scanAllMutation.mutate()}
+              disabled={scanAllMutation.isPending}
+            >
+              <ScanLine className="h-3.5 w-3.5" />
+              Scan All Libraries
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/admin/maintenance">
+                <Wrench className="mr-1 h-4 w-4" />
+                Catalog Maintenance
+              </Link>
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditingLib(null);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add Library
+            </Button>
+            <LibraryEditorDialog
+              open={dialogOpen}
+              onOpenChange={(open) => {
+                setDialogOpen(open);
+                if (!open) setEditingLib(null);
+              }}
+              library={editingLib}
+              chapterThumbnailsSupported={
+                editingLib?.chapter_thumbnails_supported ??
+                libraries[0]?.chapter_thumbnails_supported ??
+                true
               }
-              onCancel={(libraryID) => cancelScansMutation.mutate(libraryID)}
+              trickplaySupported={
+                editingLib?.trickplay_supported ??
+                libraries[0]?.trickplay_supported ??
+                (libraryCapabilities?.trickplay === true
+                  ? libraryCapabilities.trickplay_supported
+                  : undefined)
+              }
             />
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => scanAllMutation.mutate()}
-            disabled={scanAllMutation.isPending}
-          >
-            <ScanLine className="h-3.5 w-3.5" />
-            Scan All Libraries
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/admin/maintenance">
-              <Wrench className="mr-1 h-4 w-4" />
-              Catalog Maintenance
-            </Link>
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditingLib(null);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="mr-1 h-4 w-4" /> Add Library
-          </Button>
-          <LibraryEditorDialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              setDialogOpen(open);
-              if (!open) setEditingLib(null);
-            }}
-            library={editingLib}
-            chapterThumbnailsSupported={
-              editingLib?.chapter_thumbnails_supported ??
-              libraries[0]?.chapter_thumbnails_supported ??
-              true
-            }
-            trickplaySupported={
-              editingLib?.trickplay_supported ??
-              libraries[0]?.trickplay_supported ??
-              (libraryCapabilities?.trickplay === true
-                ? libraryCapabilities.trickplay_supported
-                : undefined)
-            }
-          />
-          <LibraryRefreshDialog
-            libraryName={refreshLib?.name ?? null}
-            onOpenChange={(open) => {
-              // Keep the dialog up until the queued request settles.
-              if (!open && !refreshMutation.isPending) setRefreshLib(null);
-            }}
-            isPending={refreshMutation.isPending}
-            onConfirm={(mode) => {
-              if (!refreshLib) return;
-              const id = refreshLib.id;
-              refreshMutation.mutate(
-                { id, mode },
-                { onSettled: () => setRefreshLib((open) => (open?.id === id ? null : open)) },
-              );
-            }}
-          />
-        </div>
-      </div>
+            <LibraryRefreshDialog
+              libraryName={refreshLib?.name ?? null}
+              onOpenChange={(open) => {
+                // Keep the dialog up until the queued request settles.
+                if (!open && !refreshMutation.isPending) setRefreshLib(null);
+              }}
+              isPending={refreshMutation.isPending}
+              onConfirm={(mode) => {
+                if (!refreshLib) return;
+                const id = refreshLib.id;
+                refreshMutation.mutate(
+                  { id, mode },
+                  { onSettled: () => setRefreshLib((open) => (open?.id === id ? null : open)) },
+                );
+              }}
+            />
+          </div>
+        }
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-6">
         <TabsList variant="line" className="border-border w-full justify-start border-b">
@@ -847,6 +845,8 @@ export default function AdminLibraries() {
           <AdminAutoscan embedded />
         </TabsContent>
       </Tabs>
+      {/* After the content so its padded row never pushes the page header down. */}
+      <JobPageControls query={refreshJobsQuery} label="Load older refresh jobs" />
     </div>
   );
 }
