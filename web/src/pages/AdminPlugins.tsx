@@ -156,7 +156,7 @@ function PluginsBoard() {
 
   if (isLoading) {
     return (
-      <div className="page-shell space-y-6 pb-4 sm:pb-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         {header}
         <div className="text-muted-foreground py-12 text-center text-sm">Loading plugins...</div>
       </div>
@@ -164,7 +164,7 @@ function PluginsBoard() {
   }
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       {header}
 
       <Tabs

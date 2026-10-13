@@ -92,7 +92,7 @@ export default function AdminSubtitles() {
 
   if (subtitlesQuery.isLoading) {
     return (
-      <div className="page-shell space-y-6 pb-4 sm:pb-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         <div className="space-y-3">
           <Skeleton className="h-12 w-72 rounded-lg" />
           <Skeleton className="h-5 w-full max-w-xl rounded-lg" />
@@ -107,7 +107,7 @@ export default function AdminSubtitles() {
   }
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Subtitles"
         subtitle="Manage stored subtitle files across the library — user uploads and provider downloads."

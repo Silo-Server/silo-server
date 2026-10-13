@@ -155,11 +155,7 @@ export default function AdminPluginDetail() {
 }
 
 function PageLoading() {
-  return (
-    <div className="page-shell text-muted-foreground pb-16 text-center text-sm">
-      Loading plugin...
-    </div>
-  );
+  return <div className="text-muted-foreground pb-16 text-center text-sm">Loading plugin...</div>;
 }
 
 function AllPluginsLink() {
@@ -302,7 +298,7 @@ function InstalledPluginPage({
   );
 
   return (
-    <div className="page-shell space-y-5 pb-4 sm:pb-6">
+    <div className="space-y-5 pb-4 sm:pb-6">
       <BackLink fallback="/admin/plugins" />
 
       <PluginPageHeader
@@ -500,7 +496,7 @@ function CatalogPluginPreview({ entry }: { entry: PluginCatalogEntry }) {
   const jobs = capabilityListLabel(entry.capabilities ?? []);
 
   return (
-    <div className="page-shell space-y-5 pb-4 sm:pb-6">
+    <div className="space-y-5 pb-4 sm:pb-6">
       <BackLink fallback="/admin/plugins?tab=catalog" />
       <PluginPageHeader
         name={name}

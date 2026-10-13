@@ -229,7 +229,7 @@ function AccessGroupsPage() {
 
   if (selected && available) {
     return (
-      <div className="page-shell space-y-6 pb-4 sm:pb-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         <Button
           type="button"
           variant="ghost"
@@ -257,7 +257,7 @@ function AccessGroupsPage() {
   }
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Access Groups"
         subtitle="The shared policy layer for a set of users. A group supplies the value for every field its members leave on Inherit; a per-user override replaces the group value in either direction."

@@ -27,7 +27,7 @@ export default function AdminStats() {
   const sessions = sessionsQuery.data ?? [];
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="System stats"
         subtitle="Track the size of the library and inspect the sessions currently playing through the system."

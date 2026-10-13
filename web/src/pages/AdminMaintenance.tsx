@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page/PageHeader";
 
 export default function AdminMaintenance() {
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Maintenance"
         subtitle="Operational tools that affect the whole catalog live here. Use this page for bulk import/export workflows and other future maintenance actions."

@@ -33,7 +33,7 @@ export default function AdminMarkerHistory() {
   const rows = history.data ?? [];
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Marker History"
         subtitle="Recent manual intro, recap, credits, and preview marker edits across the server."

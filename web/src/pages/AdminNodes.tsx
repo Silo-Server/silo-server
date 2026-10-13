@@ -1308,10 +1308,10 @@ export default function AdminNodes() {
     }
   }
 
-  if (isLoading) return <div className="page-shell pb-8">Loading nodes...</div>;
+  if (isLoading) return <div className="pb-8">Loading nodes...</div>;
 
   return (
-    <div className="page-shell space-y-8 pb-4 sm:pb-6">
+    <div className="space-y-8 pb-4 sm:pb-6">
       <PageHeader
         title="Stream Nodes"
         subtitle="Manage proxy and transcode workers that distribute playback load across your infrastructure."

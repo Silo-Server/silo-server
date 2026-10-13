@@ -123,7 +123,7 @@ export default function AdminPlaybackHistory() {
   const activeMediaItemLabel = allRows[0]?.media_title || selectedMediaItemId;
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Playback History"
         subtitle="Finalized playback attempts across all users and profiles."

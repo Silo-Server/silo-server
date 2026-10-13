@@ -603,7 +603,7 @@ export default function AdminTaskDetail() {
   };
 
   if (isLoading) {
-    return <p className="page-shell text-muted-foreground pb-8 text-sm">Loading...</p>;
+    return <p className="text-muted-foreground pb-8 text-sm">Loading...</p>;
   }
 
   // A key that names no task used to leave this on "Loading..." for good.
@@ -635,7 +635,7 @@ export default function AdminTaskDetail() {
   const isRunning = task.state === "running" || task.state === "cancelling";
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         eyebrow={
           <nav

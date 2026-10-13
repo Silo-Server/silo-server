@@ -2171,17 +2171,22 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 1.75rem;
   }
 
+  /* Anchored at the gutter, not centered, so a page title sits at the same
+     place on every admin page at every width. Settings pages narrow their
+     PageColumn to a reading width; every other page fills the shell. */
   .admin-shell {
     width: 100%;
     min-width: 0;
     max-width: 1560px;
-    margin-inline: auto;
   }
 
-  /* AdminLayout owns the outer gutter. Older admin pages still use page-shell
-     for their max-width, so remove its second horizontal gutter when nested. */
+  /* AdminLayout owns the gutter and the width. Shared components that also
+     render in the app (the collection editor) carry page-shell, so drop its
+     own gutter, cap, and centering here. */
   .admin-shell > .page-shell,
   .admin-shell > .page-shell-wide {
+    max-width: none;
+    margin-inline: 0;
     padding-inline: 0;
   }
 

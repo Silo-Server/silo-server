@@ -22,7 +22,9 @@ interface SettingsGroupProps {
  * as the same product. Sections sit on the page itself, divided by hairlines
  * rather than drawn as cards. Once the section is wide enough its title and
  * description move into a left column beside the settings, which uses the
- * width a wide screen has instead of leaving it empty.
+ * width a wide screen has instead of leaving it empty. Only from `lg`, where
+ * the sidebar appears: below it a section can be just as wide, and would go
+ * two-column, then back to one as the sidebar took its width.
  */
 export function SettingsGroup({
   title,
@@ -39,7 +41,7 @@ export function SettingsGroup({
       aria-labelledby={titleId}
       className={cn("settings-section @container/settings-section", className)}
     >
-      <div className="grid gap-x-12 gap-y-4 @[52rem]/settings-section:grid-cols-[16rem_minmax(0,1fr)]">
+      <div className="grid gap-x-12 gap-y-4 lg:@[52rem]/settings-section:grid-cols-[16rem_minmax(0,1fr)]">
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-baseline justify-between gap-3">
             <h3 id={titleId} className="text-foreground text-[15px] font-semibold tracking-tight">
@@ -51,7 +53,9 @@ export function SettingsGroup({
             <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
           ) : null}
         </div>
-        <div className={cn("min-w-0", flush ? "@[52rem]/settings-section:-mt-3.5" : "space-y-4")}>
+        <div
+          className={cn("min-w-0", flush ? "lg:@[52rem]/settings-section:-mt-3.5" : "space-y-4")}
+        >
           {children}
         </div>
       </div>

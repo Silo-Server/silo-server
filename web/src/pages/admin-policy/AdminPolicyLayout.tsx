@@ -82,7 +82,7 @@ export default function AdminPolicyLayout() {
     capability.data?.editor_available === false;
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Policy"
         subtitle="Household access rules: what Silo allows by default, and where you tighten it."

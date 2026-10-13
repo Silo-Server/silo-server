@@ -127,7 +127,7 @@ function ApiKeyManager() {
     }
   }
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="API Keys"
         subtitle="Create and manage credentials for integrations and automation."

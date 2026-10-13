@@ -1491,7 +1491,7 @@ function AdminHistoryImportPage() {
   if (sourcesError && sources.length === 0)
     return <p role="alert">Saved servers could not be loaded.</p>;
   return (
-    <div className="page-shell space-y-8 pb-4 sm:pb-6">
+    <div className="space-y-8 pb-4 sm:pb-6">
       <PageHeader
         title="History Import"
         subtitle="Import watch history from external servers into Silo user profiles."

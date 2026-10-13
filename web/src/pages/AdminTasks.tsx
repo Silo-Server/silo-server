@@ -315,7 +315,7 @@ export default function AdminTasks() {
   ].filter((g) => g.tasks.length > 0);
 
   return (
-    <div className="page-shell space-y-6 pb-4 sm:pb-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
         title="Scheduled Tasks"
         subtitle="View and manage background tasks. You can trigger tasks manually or adjust their schedules, including whether a task runs on server startup. Internal workers that need no attention run automatically and are not listed."
