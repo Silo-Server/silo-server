@@ -208,7 +208,7 @@ var urlInText = regexp.MustCompile(`(?i)https?://\S+`)
 // SDK error, say) loses its query, fragment and userinfo.
 func errorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
-	return urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+	return logredact.SanitizeText(urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL))
 }
 
 func inferComponent(message string) string {

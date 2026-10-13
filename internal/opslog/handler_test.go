@@ -108,3 +108,13 @@ func TestAttrValueErrorMasksQueryAfterQuoteInURL(t *testing.T) {
 		t.Fatalf("attrValue kept the signature: %s", got)
 	}
 }
+
+func TestHandlerMasksNestedCredentialAssignments(t *testing.T) {
+	writer := &recordingWriter{}
+	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "fixture"))
+	logger.WarnContext(t.Context(), "fixture rejected", "error", errors.New("rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_SECRET rejected"))
+	got, ok := writer.entries[0].Attrs["error"].(string)
+	if !ok || strings.Contains(got, "FAKE_FIXTURE_SECRET") || !strings.Contains(got, "api_key=[REDACTED]") || !strings.Contains(got, "Unauthenticated") {
+		t.Fatalf("captured error = %#v, want redacted credential and preserved diagnosis", writer.entries[0].Attrs["error"])
+	}
+}
