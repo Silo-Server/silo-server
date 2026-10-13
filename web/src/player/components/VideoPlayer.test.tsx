@@ -3976,6 +3976,121 @@ describe("VideoPlayer controls auto-hide", () => {
   });
 });
 
+describe("VideoPlayer progressive remux after a long pause", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-13T12:00:00Z"));
+    realtimeOptions.current = null;
+    controls.current = null;
+    hlsJS.supported = false;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  // A remux reanchored at 1800s: the element clock starts at the origin.
+  const remuxPlan = fixturePlanV3({
+    ...directPlan,
+    delivery: "server_remux_progressive",
+    timeline: { ...directPlan.timeline, timeline_offset_seconds: 1_800, can_seek_anywhere: false },
+  });
+
+  function playThenPause(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+    const onReanchorSeek = vi.fn(() => true);
+    const onPlaybackStateChange = vi.fn();
+    const onConnectionLost = vi.fn();
+    const { container } = renderPlayer({
+      plan: remuxPlan,
+      onReanchorSeek,
+      onPlaybackStateChange,
+      onConnectionLost,
+      ...overrides,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+    fireEvent.pause(video);
+    return { video, onReanchorSeek, onPlaybackStateChange, onConnectionLost };
+  }
+
+  it("reopens the stream at the paused position when playback resumes", () => {
+    const { video, onReanchorSeek, onPlaybackStateChange, onConnectionLost } = playThenPause();
+
+    vi.advanceTimersByTime(10 * 60_000);
+    onPlaybackStateChange.mockClear();
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_840);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    // The reopened stream must keep playing, so the session hears the play
+    // before it can adopt the new plan.
+    expect(onPlaybackStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ currentTime: 1_840, playing: true }),
+    );
+    expect(onPlaybackStateChange.mock.invocationCallOrder[0]!).toBeLessThan(
+      onReanchorSeek.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("hands a reopen the session refuses to the reconnect", async () => {
+    const { video, onReanchorSeek, onConnectionLost } = playThenPause();
+    // The session expired during the pause, so the replan is turned down.
+    onReanchorSeek.mockImplementation(() => Promise.resolve(false) as unknown as boolean);
+
+    vi.advanceTimersByTime(40 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
+  });
+
+  it.each([
+    ["a short pause on a progressive remux", {}, 30_000],
+    [
+      "a long pause on an original file the browser can range-request",
+      { plan: directPlan },
+      10 * 60_000,
+    ],
+    [
+      "a long pause in a room, which drives its own transport",
+      { watchTogetherRoomId: "room-1", watchTogetherConnection: roomConnection() },
+      10 * 60_000,
+    ],
+    ["a long pause while another replan replaces the stream", { replanning: true }, 10 * 60_000],
+  ])("keeps the stream after %s", (_, overrides, pauseMs) => {
+    const { video, onReanchorSeek } = playThenPause(overrides);
+
+    vi.advanceTimersByTime(pauseMs);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("reopens a stream that settled paused and waited", async () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: remuxPlan, onReanchorSeek, shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    fireEvent.canPlay(video);
+    video.currentTime = 12;
+
+    vi.advanceTimersByTime(5 * 60_000);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_812);
+  });
+});
+
 describe("VideoPlayer lost connection", () => {
   beforeEach(() => {
     realtimeOptions.current = null;
