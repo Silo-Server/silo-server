@@ -33,6 +33,10 @@ type endpointInfoResponse struct {
 	Address     string `json:"Address,omitempty"`
 }
 
+// compatProductName is the product name Jellyfin reports in system info and
+// answers to Ping with.
+const compatProductName = "Jellyfin Server"
+
 // SystemHandler serves Jellyfin setup/system endpoints.
 type SystemHandler struct {
 	cfg func() *config.Config
@@ -66,11 +70,6 @@ func (h *SystemHandler) HandleBrandingConfiguration(w http.ResponseWriter, r *ht
 	})
 }
 
-// HandleQuickConnectEnabled serves GET /QuickConnect/Enabled.
-func (h *SystemHandler) HandleQuickConnectEnabled(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, false)
-}
-
 // HandleEndpoint serves GET /System/Endpoint.
 func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, endpointInfoResponse{
@@ -80,9 +79,18 @@ func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandlePing serves GET /System/Ping.
-func (h *SystemHandler) HandlePing(w http.ResponseWriter, r *http.Request) {
+// HandleBrandingCSS serves GET /Branding/Css and /Branding/Css.css. Jellyfin
+// returns its admin's custom CSS for Jellyfin Web here. Silo's custom CSS
+// targets its own web client, so this is always empty, as on a stock server.
+func (h *SystemHandler) HandleBrandingCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+}
+
+// HandlePing serves GET and POST /System/Ping, and HEAD for reachability
+// probes. Like Jellyfin, it answers with the product name as a JSON string.
+func (h *SystemHandler) HandlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, compatProductName)
 }
 
 func (h *SystemHandler) systemInfo() publicSystemInfoResponse {
@@ -90,7 +98,7 @@ func (h *SystemHandler) systemInfo() publicSystemInfoResponse {
 		LocalAddress:           h.cfg().JellyfinCompat.PublicURL,
 		ServerName:             h.cfg().JellyfinCompat.ServerName,
 		Version:                h.cfg().JellyfinCompat.EmulatedServerVersion,
-		ProductName:            "Jellyfin Server",
+		ProductName:            compatProductName,
 		ID:                     h.cfg().JellyfinCompat.ServerID,
 		StartupWizardCompleted: true,
 	}

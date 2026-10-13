@@ -59,6 +59,15 @@ func (f *curationImageService) ApplyItemImage(ctx context.Context, r metadata.Ap
 	}
 	return &metadata.ApplyItemImageResult{StoredPath: f.stored, Thumbhash: "hash", Revision: "revision"}, nil
 }
+func (f *curationImageService) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType, language string, folderID int, _ string) ([]metadata.RemoteImage, map[string]string, error) {
+	return f.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+}
+func (f *curationImageService) LocalImagePreview(context.Context, string, string) (string, error) {
+	return "", errors.New("no local images")
+}
+func (f *curationImageService) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	return nil, errors.New("no local images")
+}
 func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	svc := &curationImageService{fail: true}
 	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil)

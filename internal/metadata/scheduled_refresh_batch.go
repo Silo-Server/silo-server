@@ -231,7 +231,8 @@ func (s *MetadataService) flushScheduledRefreshBatch(ctx context.Context, batch 
 				"series_id", target.seriesID)
 			continue
 		}
-		if err := s.syncRefreshDebtForTarget(ctx, target.targetType, target.contentID); err != nil {
+		targetCtx := withCountedRefreshAttempt(ctx, target.targetType, target.contentID)
+		if err := s.syncRefreshDebtForTarget(targetCtx, target.targetType, target.contentID); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to sync refresh debt after a scheduled refresh batch", "component", "metadata",
 				"target_type", target.targetType,
 				"content_id", target.contentID,

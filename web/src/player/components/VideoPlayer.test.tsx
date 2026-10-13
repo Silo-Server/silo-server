@@ -54,6 +54,7 @@ const subtitleTimeline = vi.hoisted(() => ({
   setLoadState: null as null | ((state: string) => void),
 }));
 const toastError = vi.hoisted(() => vi.fn());
+const toastInfo = vi.hoisted(() => vi.fn());
 const hlsJS = vi.hoisted(() => ({
   supported: false,
   constructed: vi.fn(),
@@ -62,7 +63,9 @@ const hlsJS = vi.hoisted(() => ({
   latest: null as null | { emit: (event: string, data: unknown) => void },
 }));
 
-vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn(), message: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { error: toastError, info: toastInfo, success: vi.fn(), message: vi.fn() },
+}));
 
 vi.mock("../hooks/usePlaybackRealtime", () => ({
   usePlaybackRealtime: vi.fn((options) => {
@@ -4077,5 +4080,16 @@ describe("VideoPlayer lost connection", () => {
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+  });
+});
+
+describe("VideoPlayer when the server ended the session", () => {
+  it("leaves the player and says why instead of showing a lost connection", async () => {
+    toastInfo.mockClear();
+    const onExit = vi.fn();
+    renderPlayer({ onExit, connectionStatus: "ended" });
+    await waitFor(() => expect(onExit).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+    expect(toastInfo).toHaveBeenCalledWith("An administrator ended this playback session.");
+    expect(screen.queryByText("Retry")).toBeNull();
   });
 });

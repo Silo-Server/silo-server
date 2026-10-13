@@ -9,6 +9,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -44,7 +46,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -67,6 +73,7 @@ GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media
@@ -80,6 +87,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media
@@ -163,6 +171,8 @@ HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
 GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
+GET /Branding/Css	non-media
+GET /Branding/Css.css	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
 POST /DisplayPreferences/{displayPreferencesId}	non-media
@@ -198,7 +208,11 @@ GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
 GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+POST /QuickConnect/Authorize	non-media
+GET /QuickConnect/Connect	non-media
 GET /QuickConnect/Enabled	non-media
+GET /QuickConnect/Initiate	non-media
+POST /QuickConnect/Initiate	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
 POST /Sessions/Capabilities	non-media
@@ -221,6 +235,7 @@ GET /System/Info/Public	non-media
 HEAD /System/Info/Public	non-media
 GET /System/Ping	non-media
 HEAD /System/Ping	non-media
+POST /System/Ping	non-media
 DELETE /UserFavoriteItems/{itemId}	non-media
 POST /UserFavoriteItems/{itemId}	non-media
 GET /UserImage	non-media
@@ -234,6 +249,7 @@ GET /UserViews	non-media
 GET /UserViews/GroupingOptions	non-media
 GET /Users	non-media
 POST /Users/AuthenticateByName	non-media
+POST /Users/AuthenticateWithQuickConnect	non-media
 POST /Users/Configuration	non-media
 GET /Users/Me	non-media
 GET /Users/Public	non-media

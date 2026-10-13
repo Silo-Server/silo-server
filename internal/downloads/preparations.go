@@ -58,7 +58,7 @@ type Preparation struct {
 	TargetBitrateKbps int
 	ToneMapMode       string
 	ToneMapSourceKind string
-	AllAudioTracks    bool // the multi-track layout keeps every source audio track
+	AllAudioTracks    bool // the multi-track layout keeps every decodable source audio track
 
 	WorkerKind          string
 	WorkerNodeID        *int

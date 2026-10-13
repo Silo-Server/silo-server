@@ -108,7 +108,7 @@ func TestStopAttemptOnce(t *testing.T) {
 		t.Fatalf("progress after stop: %v", err)
 	}
 	record, err := store.GetAttempt(ctx, sessionID)
-	if err != nil || record.StoppedAt == nil || record.LastSequence != 3 || record.LastSample == nil || *record.LastSample != final {
+	if err != nil || record.StoppedAt == nil || record.StopID != stopID || record.LastSequence != 3 || record.LastSample == nil || *record.LastSample != final {
 		t.Fatalf("stopped row: %+v %v", record, err)
 	}
 	// A receipt for a different stop id is not the stored stop and is refused.

@@ -520,7 +520,16 @@ func sortedEpisodeNumbers(episodes map[int]localEpisodeMatchHint) []int {
 }
 
 func extractEpisodeMatchTitle(path string, libraryRoots ...string) string {
-	title := naming.EpisodeTitleSuffix(path, libraryRoots...)
+	return cleanEpisodeMatchTitle(naming.EpisodeTitleSuffix(path, libraryRoots...))
+}
+
+// extractAirDateMatchTitle returns the episode title a by-date filename carries
+// after its air date, with release details removed.
+func extractAirDateMatchTitle(path string) string {
+	return cleanEpisodeMatchTitle(naming.AirDateTitleSuffix(path))
+}
+
+func cleanEpisodeMatchTitle(title string) string {
 	if cut := strings.IndexAny(title, "[{"); cut >= 0 {
 		title = title[:cut]
 	}

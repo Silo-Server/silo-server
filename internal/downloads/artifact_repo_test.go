@@ -85,12 +85,23 @@ func remoteOrphansForArtifact(orphans []RemoteArtifactOrphan, artifactID string)
 }
 
 func TestArtifactEnsureQueuedRoundTripsToneMapRecipe(t *testing.T) {
+	for _, kind := range tonemap.AllSourceKinds() {
+		t.Run(string(kind), func(t *testing.T) {
+			assertArtifactToneMapRecipeRoundTrips(t, kind)
+		})
+	}
+}
+
+// assertArtifactToneMapRecipeRoundTrips proves the download_artifacts recipe
+// constraint accepts a tone-map source kind and that every field survives.
+func assertArtifactToneMapRecipeRoundTrips(t *testing.T, kind tonemap.SourceKind) {
+	t.Helper()
 	repo, _, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
-	artifact := newArtifact(t, fileID, "hash-tone-map-round-trip")
+	artifact := newArtifact(t, fileID, "hash-tone-map-round-trip-"+string(kind))
 	artifact.ToneMapPolicy = tonemap.PolicyHardwareThenSoftware
 	artifact.ToneMapMode = tonemap.ModeHardware
-	artifact.ToneMapSourceKind = tonemap.SourcePQ
+	artifact.ToneMapSourceKind = kind
 	wantRecipeVersion := playback.TransformationHDRToSDRToneMapRecipeVersionV3
 	wantSourceRevision := tonemap.SourceRevision{MediaFileID: fileID, FileSize: 100, StreamSignature: "video"}.Encode()
 	artifact.ToneMapRecipeVersion = wantRecipeVersion
@@ -102,7 +113,7 @@ func TestArtifactEnsureQueuedRoundTripsToneMapRecipe(t *testing.T) {
 	}
 	assertToneMapRecipe := func(name string, got *Artifact) {
 		t.Helper()
-		if got.ToneMapPolicy != tonemap.PolicyHardwareThenSoftware || got.ToneMapMode != tonemap.ModeHardware || got.ToneMapSourceKind != tonemap.SourcePQ || got.ToneMapRecipeVersion != wantRecipeVersion || got.ToneMapSourceRevision != wantSourceRevision {
+		if got.ToneMapPolicy != tonemap.PolicyHardwareThenSoftware || got.ToneMapMode != tonemap.ModeHardware || got.ToneMapSourceKind != kind || got.ToneMapRecipeVersion != wantRecipeVersion || got.ToneMapSourceRevision != wantSourceRevision {
 			t.Fatalf("%s tone-map recipe = policy %q mode %q source %q version %q revision %q; want version %q revision %q", name, got.ToneMapPolicy, got.ToneMapMode, got.ToneMapSourceKind, got.ToneMapRecipeVersion, got.ToneMapSourceRevision, wantRecipeVersion, wantSourceRevision)
 		}
 	}

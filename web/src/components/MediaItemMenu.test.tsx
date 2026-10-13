@@ -404,6 +404,72 @@ describe("MediaItemMenu trigger visibility", () => {
     });
   });
 
+  function renderTriggerMenu() {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+    return screen.getByRole("button", { name: "More actions" });
+  }
+
+  it("opens on a lone click from assistive technology before the menu mounts", async () => {
+    const trigger = renderTriggerMenu();
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // The trigger's wrapper cancels the click so the card link never sees it.
+    expect(fireEvent.click(trigger)).toBe(false);
+
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens on element.click() and closes on the next one", async () => {
+    const trigger = renderTriggerMenu();
+
+    act(() => trigger.click());
+    expect(await screen.findByRole("menu")).toBeTruthy();
+
+    act(() => trigger.click());
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for a pointer press followed by its click", async () => {
+    const trigger = renderTriggerMenu();
+
+    fireEvent.pointerDown(trigger, { pointerId: 4, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    // Some assistive technology pairs a pointerdown with a detail-0 click.
+    fireEvent.pointerDown(trigger, { pointerId: 5, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for Space and Enter", async () => {
+    const trigger = renderTriggerMenu();
+
+    trigger.focus();
+    await userEvent.keyboard(" ");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+  });
+
   it("still returns keyboard focus after a cancelled pointer press inside the menu", async () => {
     render(
       <MemoryRouter>
@@ -1140,5 +1206,74 @@ describe("MediaItemMenu long-press action sheet", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
     ).toBeTruthy();
+  });
+});
+
+describe("MediaItemMenu lazy machinery", () => {
+  function renderMenu() {
+    return render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  const radixRoot = () => document.querySelector('[data-slot="dropdown-menu-trigger"]');
+
+  it("mounts no menu root until the card is used, then opens on the first press", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(radixRoot()).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("data-state", "closed");
+
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(radixRoot()).not.toBeNull();
+    // The visible trigger kept its element and reports the open menu.
+    expect(screen.getByRole("button", { name: "More actions" })).toBe(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("data-state", "open");
+    expect(trigger.getAttribute("aria-controls")).toBe(screen.getByRole("menu").id);
+  });
+
+  it("mounts the menu when the trigger takes focus and opens to the first item by keyboard", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    act(() => trigger.focus());
+    expect(radixRoot()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await userEvent.keyboard("{Enter}");
+
+    const items = screen.getAllByRole("menuitem");
+    await waitFor(() => expect(document.activeElement).toBe(items[0]));
+  });
+
+  it("runs a quick action pressed before the machinery mounted", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Remove from favorites" })).toBeTruthy();
+  });
+
+  it("warms the machinery on mouse hover without opening the menu", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+
+    await waitFor(() => expect(radixRoot()).not.toBeNull());
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -185,9 +184,13 @@ func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinL
 
 func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocalAuth, endpoint string, query url.Values) ([]jellyfinItem, error) {
 	var allItems []jellyfinItem
+	var budget listingBudget
 	startIndex := 0
 
 	for {
+		if err := budget.startPage(); err != nil {
+			return nil, err
+		}
 		pageQuery := url.Values{}
 		for key, values := range query {
 			copied := make([]string, len(values))
@@ -204,7 +207,10 @@ func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocal
 		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
 
 		var payload jellyfinItemsResponse
-		if err := c.doJSON(req, &payload); err != nil {
+		if err := c.doJSONWithBudget(req, &payload, &budget); err != nil {
+			return nil, err
+		}
+		if err := budget.addItems(len(payload.Items)); err != nil {
 			return nil, err
 		}
 
@@ -219,6 +225,11 @@ func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocal
 }
 
 func (c *JellyfinClient) doJSON(req *http.Request, out any) error {
+	return c.doJSONWithBudget(req, out, nil)
+}
+
+// doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
+func (c *JellyfinClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
@@ -228,10 +239,10 @@ func (c *JellyfinClient) doJSON(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body := readUpstreamErrorBody(resp.Body)
 		return &jellyfinHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return decodeUpstreamJSON(resp.Body, out, budget)
 }
 
 type jellyfinHTTPError struct {

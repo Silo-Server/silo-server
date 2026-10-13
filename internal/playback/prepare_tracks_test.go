@@ -155,6 +155,38 @@ func TestBuildPrepareFileArgsMapsPreparedTracks(t *testing.T) {
 	}
 }
 
+// An audio track FFmpeg cannot decode would fail the whole encode, so the
+// prepared file leaves it out and the next decodable track becomes default.
+func TestPlanPreparedTracksSkipsUndecodableAudio(t *testing.T) {
+	file := &models.MediaFile{
+		CodecAudio: "eac3",
+		AudioTracks: []models.AudioTrack{
+			{Codec: "", Channels: 6, Language: "zh", Default: true},
+			{Codec: "eac3", Channels: 6, Language: "zh"},
+			{Codec: "aac", Channels: 2, Language: "zh"},
+		},
+	}
+	plan := PlanPreparedTracks(file, "aac", -1)
+	want := []PreparedAudioTrack{
+		{SourceIndex: 1, Codec: "aac", SourceChannels: 6, Language: "zh", Default: true},
+		{SourceIndex: 2, Codec: "aac", SourceChannels: 2, Language: "zh"},
+	}
+	if !reflect.DeepEqual(plan.Audio, want) {
+		t.Fatalf("audio plan = %+v, want %+v", plan.Audio, want)
+	}
+	if explicit := PlanPreparedTracks(file, "aac", 0); !reflect.DeepEqual(explicit.Audio, want) {
+		t.Fatalf("audio plan with the undecodable track requested = %+v, want %+v", explicit.Audio, want)
+	}
+
+	joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
+		InputPath: "/media/in.mp4", TargetCodecVideo: "copy", TargetCodecAudio: "aac",
+		HWAccel: "none", AudioTrackIndex: -1, SubtitleTrackIndex: -1, PreparedTracks: plan,
+	}, "/artifacts/out.mp4"), " ")
+	if !strings.Contains(joined, "-map 0:v:0 -map 0:a:1 -map 0:a:2 -dn") || strings.Contains(joined, "0:a:0") || !strings.Contains(joined, "-disposition:a:0 default") {
+		t.Fatalf("prepared track args must map only the decodable tracks:\n%s", joined)
+	}
+}
+
 func TestBuildPrepareFileArgsWithoutPreparedTracksKeepsLegacyLayout(t *testing.T) {
 	joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
 		InputPath: "/media/in.mkv", TargetCodecVideo: "copy", TargetCodecAudio: "copy",

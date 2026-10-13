@@ -74,12 +74,14 @@ func newCompatTelemetryServer(t testing.TB, registry *streamtelemetry.Registry) 
 		}},
 	}
 	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	file := &models.MediaFile{ID: 42, ContentID: contentID, FilePath: filePath}
 	router := NewRouter(Dependencies{
 		Config:          cfg,
 		SessionStore:    store,
 		IDCodec:         codec,
 		ContentService:  &stubContentService{detail: detail},
-		FileResolver:    testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: filePath}},
+		FileResolver:    testCompatFileResolver{file: file},
+		Downloads:       newTestDownloadService(true, true, file),
 		SessionMgr:      &testCompatSessionManager{},
 		PlaybackStore:   playbackStore,
 		StreamTelemetry: registry,

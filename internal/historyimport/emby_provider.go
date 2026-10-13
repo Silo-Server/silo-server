@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -53,6 +54,11 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	// episodes has no resumable episode, and the row is the only place Emby
 	// shows whether it was hidden.
 	listed, err := p.client.FetchResumeItems(ctx, p.auth)
+	// A source over the size limits fails the run here and below, rather
+	// than importing without the list it sent.
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return nil, nil, err
+	}
 	rowRead := err == nil
 	if err != nil {
 		slog.WarnContext(ctx, "emby history import: continue watching list unavailable", "component", "historyimport", "error", warningLogError("emby", err))
@@ -63,6 +69,9 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return nil, nil, err
+	}
 	if err != nil {
 		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbyFavoritesUnavailable)
@@ -83,6 +92,9 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 
 	watchedItems := slices.Concat(playedItems, resumableItems)
 	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems, listed))
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return nil, nil, err
+	}
 	seriesMetaRead := err == nil
 	if err != nil {
 		// Episodes carrying their own provider IDs still match without it.

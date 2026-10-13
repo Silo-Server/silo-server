@@ -885,6 +885,22 @@ acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refres
 admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
 This is the same critical bridge fix.
 
+Routes outside the admin groups that widen what an admin sees or may do (another account's
+media requests and their download-server fields, another account's downloaded subtitles,
+on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+that reach from the same decision, the acting admin, never from the account role: v1 and v2 handlers call `apimw.ActingAdmin`, which answers with
+the decider the router hands the acting-admin gate. It counts a declared profile only after the
+viewer gate verified it in the same request, so an operation that relies on it runs the viewer
+gate (v2 `profile_scoped`, optionally with `ProfileOptional`). Without a decider it answers
+false. Another profile on an admin's account is treated like any profile on a regular account.
+
+A remote-playback handoff session is narrower still: it acts only as its bound profile, with
+the account role `user`, on the v2 routes a TV needs to play and browse, and ends at its
+`session_expires_at` however often it refreshes. Every other route answers the existing 403
+(v2 `permission_denied`, v1 `forbidden`). The rules are in
+[device sign-in](device-login.md#remote-playback-handoff); the v1 change is a critical bridge
+fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
@@ -1221,10 +1237,20 @@ tombstone. The retained contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
+  answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
+  while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
+  listeners close. The booleans report the last dependency probe, so the answer does not wait
+  on a slow dependency; `shutting_down` is additive to the frozen shape. See
+  [api-shutdown.md](api-shutdown.md).
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also
   `egress_kbps`); read from already-published snapshots, never a probe, path-redacted because the
   route takes no credential. `internal/nodepool/health.go` `CheckNode` is the internal consumer.
+  Revision (2026-10-11, with node drain): a draining transcode node answers the same `200` shape
+  with `status` `draining`, then `drained` once it has no work left; the values are additive to
+  the frozen shape, and the status code does not change, so probes keep passing while the node
+  finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
@@ -1524,13 +1550,25 @@ its revision are read in one database snapshot; authorization and catalog hydrat
 by checks of that revision. Smart results are live keysets, not a frozen catalog snapshot.
 The pinned web carousel requests a bounded teaser and links to the full collection browse view.
 
-**Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
-`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
-`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
+**Section catalog-home (Phase 4).** Nine profile-scoped operations under the `home` tag:
+`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeCapabilities`, `getHomeLayout`,
+`listHomeSections`, `getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
 gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
 `RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
-shape as a library page with scope=home, so the layout, section, and card reads reuse
-`SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+shape as a library page with scope=home, so the section and card reads reuse
+`SectionLayoutEntry`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+`getHomeLayout` answers its own `HomeLayout` rather than `SectionLayout`: besides `sections` it
+carries `included_sections`, so the library layout's contract stays unchanged. With
+`include_items=N` (0 to 4, default 0) and an optional `image_size`, the layout also answers the
+first N sections in display order, each identical to its `getHomeSectionItems` answer for the
+same viewer and `image_size` (no cross-row duplicate filter). The rows are built in parallel
+under one fixed budget that covers each row's whole build, its item fetch and its card lookups; a
+row that errors or is not built in time is left out rather than failing or delaying the layout,
+and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
+Because v2 rejects unknown query parameters, a client sends `include_items` only after
+`getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
+largest value the layout accepts (4); the document is `not_configured`, without the field, when the
+home sections service is not wired.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
@@ -2052,6 +2090,15 @@ update ignores the toggles. See
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
 dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
 the same way; see [dropped-shows.md](dropped-shows.md).
+
+Provider connection settings are v2-only in the same way. A plugin declares them in its
+watch-sync descriptor, and `GET /watch-providers` lists them per provider as
+`connection_settings` (key, label, description, `type`, `default_value`). The settings
+projection returns their values for the connection in `connection_settings`, defaults
+included, and PATCH accepts a partial `connection_settings` object whose keys are merged
+into the stored values. An undeclared key or a value of the wrong type fails with
+`validation_failed`. `boolean` is the only type so far; a client skips a setting whose
+type it does not know. See [watch-provider-plugins.md](watch-provider-plugins.md).
 
 ### Webhook connection management
 

@@ -2,6 +2,16 @@ package models
 
 import "time"
 
+// Login session purposes (auth_sessions.purpose).
+const (
+	// SessionPurposeAccount is an ordinary sign-in of the account.
+	SessionPurposeAccount = "account"
+	// SessionPurposeRemotePlayback is a remote-playback handoff: a temporary
+	// session bound to one profile, with no admin or account-management
+	// powers, that ends at AbsoluteExpiresAt.
+	SessionPurposeRemotePlayback = "remote_playback"
+)
+
 // AuthSession represents a row in the auth_sessions table.
 type AuthSession struct {
 	ID                     string     // UUID session ID (included in JWT claims)
@@ -30,4 +40,18 @@ type AuthSession struct {
 	// data: never authorize with them.
 	DeviceID       string
 	DevicePlatform string
+	// Purpose is SessionPurposeAccount or SessionPurposeRemotePlayback; empty
+	// is read as an account session.
+	Purpose string
+	// BoundProfileID is the only profile a remote-playback session may act
+	// as; empty for an account session.
+	BoundProfileID string
+	// AbsoluteExpiresAt is the latest ExpiresAt may reach: a refresh never
+	// extends the session past it. nil for a session without a fixed end.
+	AbsoluteExpiresAt *time.Time
+}
+
+// IsRemotePlayback reports whether the session is a remote-playback handoff.
+func (s *AuthSession) IsRemotePlayback() bool {
+	return s != nil && s.Purpose == SessionPurposeRemotePlayback
 }

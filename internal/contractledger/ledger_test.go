@@ -1127,6 +1127,12 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"drainAdminNode":                           "V2-only transcode node drain (v1 is frozen): it sets the node's drain request, so a replay converges on the same request and placement state.",
+	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
+	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
+	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",
+	"selectAdminChatGPTAccount":                "V2-only administrator ChatGPT account selection: it changes the active account and cancels a pending sign-in, so replaying it after intervening account activity must not happen automatically.",
+	"disconnectAdminChatGPTAccount":            "V2-only administrator ChatGPT disconnect: it revokes renewable credentials and cancels pending sign-in, so replaying it after a reconnect must not happen automatically.",
 	"createShuffle":                            "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
 	"advanceShuffle":                           "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
 	"skipShuffleItem":                          "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",
@@ -1158,6 +1164,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"updateRequestRouting":                     "V2-only request routing mode switch, guarded by If-Match on the mode's revision; a replay after success answers 412.",
 	"reorderRequestRoutes":                     "V2-only reorder of a media type's routing rules. The body names the full order, so a replay sets the same positions; it is non-retryable because it moves every rule to a new revision.",
 	"previewRequestRoute":                      "V2-only read-only route preview (POST for the request body). It reads TMDB and the rules and writes nothing, so a replay returns the same answer.",
+	"queryCatalogLetters":                      "V2-only read-only letter index for an alphabetical jump bar (POST for the rule-group body, like queryCatalogItems). It counts titles and writes nothing, so a replay returns the same answer.",
 	"followRequestMedia":                       "V2-only title follow (Requests acceptance AC1/AC5): v1 had no way to follow a title someone else requested. The follow row is keyed by title and profile, so a replay converges on the same follow.",
 	"unfollowRequestMedia":                     "V2-only title unfollow, the inverse of followRequestMedia. Deleting an absent follow is a no-op, so a replay converges on no follow.",
 	"addWatchlistTitle":                        "V2-only watchlist entry for a title the library doesn't have: v1 had no such entries. The entry is keyed by title and profile, but the add can also create or follow a request and, for a title the library has, fires the library watchlist add's provider and refresh effects, so it is non-retryable like addToWatchlist.",
