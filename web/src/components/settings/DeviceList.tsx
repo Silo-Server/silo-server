@@ -349,9 +349,7 @@ function DeviceRow({
           {device.device_name || "Unknown device"}
         </span>
         <span className="text-muted-foreground block truncate text-[13px]">
-          {device.is_current_device
-            ? "This is the device you're on"
-            : lastSeenLabel(device.last_seen_at, now)}
+          {device.is_current_device ? "This device" : lastSeenLabel(device.last_seen_at, now)}
         </span>
       </span>
       {device.is_current_device ? (
