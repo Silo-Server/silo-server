@@ -297,6 +297,16 @@ The response is `202` with `job` in the existing v2 job projection (string IDs)
 and `live_delivery_attached`. That boolean reports whether this request attached
 its live notifier to a newly created job. It does not acknowledge socket delivery.
 An existing active job is returned without attaching another viewer's stream.
+A `translate` request for the same file, source track, target language and model
+as a completed job whose track is still stored returns that completed job, with
+its `result_subtitle_id`, and does not call the provider again. The source track
+is matched by its content, not by `source_index`, which shifts when sidecars or
+stored subtitles change: a sidecar or stored subtitle by its bytes with any saved
+timing correction applied, an embedded track by its container stream and the media
+file's hash, size and modification time. Editing a sidecar, correcting its timing or
+replacing the media file starts a new translation. The returned job's
+`source_index` is the one the request sent. Deleting the track allows a fresh
+translation. Transcription requests always start a new job.
 Clients should poll the returned job or refresh the file's subtitle inventory.
 
 Creation is `non_retryable`: send once, with no automatic authentication replay

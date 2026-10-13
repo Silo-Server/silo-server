@@ -538,6 +538,13 @@ export function VideoPlayer({
   // The subtitle selection active before a translation hijacked it, so a failed
   // translation can restore it instead of leaving subtitles off.
   const preTranslationSubtitleIndexRef = useRef<number | null>(null);
+  // A stored subtitle the server returned for a request it had already
+  // finished, waiting to be selected once the inventory lists it.
+  const [pendingStoredSubtitle, setPendingStoredSubtitle] = useState<{
+    jobId: string;
+    subtitleId: string;
+    refreshed: boolean;
+  } | null>(null);
 
   // Drop any live translation when the media changes so a stale track from the
   // previous file never lingers.
@@ -552,6 +559,7 @@ export function VideoPlayer({
     acceptedSubtitleJobRef.current = null;
     reportedSubtitleFailureRef.current = null;
     setPendingTranslationHandoff(null);
+    setPendingStoredSubtitle(null);
     setLiveTranslation(null);
     setLiveCues([]);
     setTranslationBuffering(false);
@@ -597,16 +605,31 @@ export function VideoPlayer({
   }, []);
 
   const handleSubtitleJobAccepted = useCallback(
-    (jobId: string) => {
+    (jobId: string, resultSubtitleId?: string) => {
       acceptedSubtitleJobRef.current = jobId;
+      if (resultSubtitleId) {
+        // An earlier identical request already produced this track, and the
+        // job is finished, so no event will follow.
+        setPendingStoredSubtitle({ jobId, subtitleId: resultSubtitleId, refreshed: false });
+        return;
+      }
+      setPendingStoredSubtitle(null);
       // Source loading can fail before Started, even before the POST response.
       // Reconcile once after acceptance so that early terminal event is not lost.
       void playerV2(playerConfig, "GET /api/v2/subtitles/ai/jobs/{job_id}", {
         path: { job_id: jobId },
       })
         .then((result) => {
-          if (acceptedSubtitleJobRef.current === jobId && result?.job.status === "failed") {
+          if (acceptedSubtitleJobRef.current !== jobId || !result) return;
+          if (result.job.status === "failed") {
             reportSubtitleFailure(jobId, result.job.error_message);
+          } else if (result.job.status === "completed" && result.job.result_subtitle_id) {
+            // An earlier identical request already produced this track.
+            setPendingStoredSubtitle({
+              jobId,
+              subtitleId: result.job.result_subtitle_id,
+              refreshed: false,
+            });
           }
         })
         .catch(() => {
@@ -1489,6 +1512,32 @@ export function VideoPlayer({
     );
   }, []);
 
+  // Select a reused stored track once the inventory lists it, refreshing the
+  // inventory once if it predates the track.
+  useEffect(() => {
+    if (!pendingStoredSubtitle) return;
+    // A newer job took over while this track waited for the inventory.
+    if (acceptedSubtitleJobRef.current !== pendingStoredSubtitle.jobId) {
+      setPendingStoredSubtitle(null);
+      return;
+    }
+    const key = `stored-${pendingStoredSubtitle.subtitleId}`;
+    const track = subtitleUrls.find((t) => syncKeyOf(t) === key);
+    if (track) {
+      setPendingStoredSubtitle(null);
+      handleSubtitleSelect(track.index);
+    } else if (!pendingStoredSubtitle.refreshed) {
+      setPendingStoredSubtitle({ ...pendingStoredSubtitle, refreshed: true });
+      onRefreshSubtitles?.(getSubtitleStartPosition());
+    }
+  }, [
+    pendingStoredSubtitle,
+    subtitleUrls,
+    handleSubtitleSelect,
+    onRefreshSubtitles,
+    getSubtitleStartPosition,
+  ]);
+
   const resumeFromTranslationPause = useCallback(() => {
     if (translationResumeTimerRef.current !== null) {
       window.clearTimeout(translationResumeTimerRef.current);
@@ -1552,6 +1601,7 @@ export function VideoPlayer({
           const payload = event.payload;
           if (!isForActiveStream(payload) || matchesLiveTranslation(payload)) break;
           acceptedSubtitleJobRef.current = String(payload.job_id);
+          setPendingStoredSubtitle(null);
           liveTranslationIdentityRef.current = {
             jobId: payload.job_id,
             trackKey: payload.track_key,
