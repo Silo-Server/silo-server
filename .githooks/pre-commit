@@ -3,4 +3,7 @@ set -euo pipefail
 
 # Resolve via git toplevel so the hook works from any cwd (e.g., when
 # git invokes hooks from within a non-root subdirectory).
-"$(git rev-parse --show-toplevel)/scripts/check-local-path-leaks.sh" --cached
+repo_root="$(git rev-parse --show-toplevel)"
+
+"$repo_root/scripts/check-local-path-leaks.sh" --cached
+"$repo_root/scripts/check-go-lint.sh" --cached

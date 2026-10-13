@@ -329,7 +329,7 @@ func (e *initialSetupEnv) checkCreated(t *testing.T, all initialRows, mode, sess
 	delete(user, "password_hash")
 	initialTimestamp(t, user, "created_at", lower, upper)
 	initialTimestamp(t, user, "updated_at", lower, upper)
-	initialExact(t, "user", user, map[string]any{"id": float64(1), "email": "INITIAL-OWNER@SILO.EXAMPLE.TEST", "username": "Initial-Owner", "local_password_login_enabled": true, "role": "admin", "permissions": []any{}, "enabled": true, "library_ids": nil, "max_playback_quality": nil, "max_streams": nil, "max_transcodes": nil, "transcode_allowed": nil, "audio_transcode_allowed": nil, "download_allowed": nil, "download_transcode_allowed": nil, "requests_allowed": nil, "max_profiles": float64(5), "access_group_id": nil, "access_policy_revision": float64(1), "admin_revision": float64(1)})
+	initialExact(t, "user", user, map[string]any{"id": float64(1), "email": "INITIAL-OWNER@SILO.EXAMPLE.TEST", "username": "Initial-Owner", "local_password_login_enabled": true, "role": "admin", "permissions": []any{}, "enabled": true, "library_ids": nil, "max_playback_quality": nil, "max_streams": nil, "max_transcodes": nil, "transcode_allowed": nil, "audio_transcode_allowed": nil, "download_allowed": nil, "download_transcode_allowed": nil, "requests_allowed": nil, "max_profiles": nil, "access_group_id": nil, "access_policy_revision": float64(1), "admin_revision": float64(1)})
 	session := all["auth_sessions"][0]
 	initialTimestamp(t, session, "created_at", lower, upper)
 	initialTimestamp(t, session, "expires_at", lower.Add(e.jwt.RefreshExpiry()), upper.Add(e.jwt.RefreshExpiry()))

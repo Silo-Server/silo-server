@@ -72,6 +72,21 @@ value; `0` explicitly allows unlimited bitrate. Both access-group fields
 default to `0`. Values are nonnegative integers in kbps. A policy edit changes
 new playback sessions, not streams already playing.
 
+`max_profiles` is the household profile limit and is a nullable account override
+as well. `null` inherits the access group's `max_profiles`, and a value of at least
+1 replaces it. An administrator or an account outside every group inherits 5, and
+an access group created without a value gets 5. `effective_policy.max_profiles` is
+the limit that profile creation enforces: an account at its limit gets
+`409 profile_limit_reached`, and profiles it already has above a lowered limit are
+kept. The bridge v1 body has no inherit state for this field, so its
+`max_profiles` reports the limit that applies. A v1 update stores an override,
+except that sending back the inherited limit an account reported leaves it
+inheriting, and an explicit `null` clears an override back to inherit, as with
+the other policy fields. The group's own limit is v2-only: the v1
+access-group body carries no `max_profiles`, so a group limit is set and read
+through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
+when access groups and account overrides take `max_profiles`.
+
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
 provisioner. Unsupported transactional profile storage fails before account
@@ -103,6 +118,21 @@ full access except that server-prepared downloads
 clients show where a default comes from without keeping their own copy. The
 values come from the server build. Account capabilities advertise
 `policy_defaults`. Existing `admin:users` keys may use this read.
+
+## Library lists
+
+An account's or access group's `library_ids` is `null` for every library and an
+array for exactly the listed ones, so `[]` allows none. Create and update return
+`422 validation_failed` at `body.library_ids` when the array names a library that
+does not exist; a guarded update checks its precondition first. Whichever API
+writes these lists, and the [invitation](invitations-api.md) lists too, the
+database keeps only libraries that exist, and a write racing a library delete
+waits for it as it would behind a foreign key.
+
+Deleting a library removes its ID from every account, access group and
+invitation in the same transaction. A list left with no IDs stays `[]` and never
+widens to `null`. The edited accounts and groups get new revisions, so an editor
+holding the old ETag gets 412 instead of writing the deleted library back.
 
 ## Passwords
 

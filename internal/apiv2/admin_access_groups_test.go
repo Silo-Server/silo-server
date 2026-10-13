@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +25,7 @@ type fakeAdminAccessGroups struct {
 }
 
 func fixtureAdminAccessGroups() *fakeAdminAccessGroups {
-	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
+	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MaxProfiles: 5, MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
 }
 func (f *fakeAdminAccessGroups) GetAdminAccessGroup(context.Context, int64) (*access.Group, error) {
 	g := f.g
@@ -102,6 +104,55 @@ func TestAdminAccessGroupTransport(t *testing.T) {
 		t.Fatal(created.Code, created.Body.String(), f.created)
 	}
 }
+func TestAdminAccessGroupProfileLimit(t *testing.T) {
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccessGroups = f
+	h := NewHandler(deps)
+	create := Prefix + "/admin/access-groups"
+	created := do(t, h, http.MethodPost, create, `{"name":"Guests","max_profiles":2}`, actingRequestAdmin)
+	if created.Code != 201 || f.created.MaxProfiles != 2 {
+		t.Fatal(created.Code, created.Body.String(), f.created)
+	}
+	// A limit below 1 is refused before any write, so 0 never reaches the
+	// store, where it would mean "use the default".
+	writes := f.writes
+	requireProblem(t, do(t, h, http.MethodPost, create, `{"name":"None","max_profiles":0}`, actingRequestAdmin), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPut, create+"/7", `{"max_profiles":0}`, with(actingRequestAdmin, "If-Match", "*")), TypeValidationFailed)
+	if f.writes != writes {
+		t.Fatalf("writes = %d, want %d after refused limits", f.writes, writes)
+	}
+	updated := do(t, h, http.MethodPut, create+"/7", `{"max_profiles":4}`, with(actingRequestAdmin, "If-Match", "*"))
+	if updated.Code != 200 || f.last.MaxProfiles == nil || *f.last.MaxProfiles != 4 {
+		t.Fatal(updated.Code, updated.Body.String(), f.last)
+	}
+}
+
+// Clients detect profile limits on groups and accounts through the admin
+// users capabilities, as older servers reject max_profiles on a group.
+func TestAdminAccountCapabilitiesAdvertiseProfileLimits(t *testing.T) {
+	read := func(deps Dependencies) any {
+		t.Helper()
+		reply := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/users/capabilities", "", actingRequestAdmin)
+		if reply.Code != http.StatusOK {
+			t.Fatalf("%d %s", reply.Code, reply.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(reply.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body["profile_limits"]
+	}
+	deps := requestDeps(fixtureRequests())
+	if got := read(deps); got != false {
+		t.Errorf("without access groups: profile_limits = %v, want false", got)
+	}
+	deps.AdminAccessGroups = fixtureAdminAccessGroups()
+	if got := read(deps); got != true {
+		t.Errorf("with access groups: profile_limits = %v, want true", got)
+	}
+}
+
 func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
 	f := fixtureAdminAccessGroups()
 	deps := requestDeps(fixtureRequests())
@@ -173,5 +224,34 @@ func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {
 				t.Fatal("denied writer reached service")
 			}
 		})
+	}
+}
+
+// A group's library list is an integer array no foreign key covers, so an id
+// no library carries is refused before the store, on create and update alike.
+func TestAdminAccessGroupRejectsUnknownLibraries(t *testing.T) {
+	f := fixtureAdminAccessGroups()
+	deps := requestDeps(fixtureRequests()) // knows libraries 1-4
+	deps.AdminAccessGroups = f
+	h := NewHandler(deps)
+	path := Prefix + "/admin/access-groups/7"
+	for _, rec := range []*httptest.ResponseRecorder{
+		do(t, h, http.MethodPost, Prefix+"/admin/access-groups", `{"name":"New","library_ids":["1","9"]}`, actingRequestAdmin),
+		do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", "*")),
+	} {
+		p := requireProblem(t, rec, TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != locationLibraryIDs || p.Errors[0].Detail != "unknown library identifier: 9" {
+			t.Fatalf("errors = %+v", p.Errors)
+		}
+	}
+	// An editor opened before the library was deleted holds an old ETag: 412
+	// tells it to reload, rather than 422 for a library it no longer lists.
+	requireProblem(t, do(t, h, http.MethodPut, path, `{"library_ids":["9"]}`, with(actingRequestAdmin, "If-Match", `"stale"`)), TypePreconditionFailed)
+	if f.writes != 0 {
+		t.Fatal("unknown library reached the store")
+	}
+	saved := do(t, h, http.MethodPut, path, `{"library_ids":["2","1"]}`, with(actingRequestAdmin, "If-Match", "*"))
+	if saved.Code != 200 || f.last.LibraryIDs == nil || !slices.Equal(*f.last.LibraryIDs, []int{2, 1}) {
+		t.Fatal(saved.Code, saved.Body.String(), f.last.LibraryIDs)
 	}
 }

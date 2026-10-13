@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import {
   audioTitle,
   compactAudioMeta,
@@ -47,7 +47,7 @@ function describeTrack(track: PlayerAudioTrack, index: number): TrackDescriptor 
   return {
     title,
     meta: metaParts.join(" \u00B7 "),
-    codecLabel: track.codec ? mapAudioLabel(track.codec) : "",
+    codecLabel: audioTrackLabel(track),
     channelsLabel: formatChannels(track.channels),
     isDefault: Boolean(track.default),
   };

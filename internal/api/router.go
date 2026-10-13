@@ -1128,6 +1128,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.UserStoreProvider != nil {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
+		if accessGroupStore != nil {
+			profileHandler.AccessGroups = accessGroupStore
+		}
 		profileHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {
 			// Drops live in Postgres whichever store holds the profile.
@@ -1880,6 +1883,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			aiSem,
 		)
 		aiService.SetExternalTimings(subtitleRepo)
+		if streamHandler != nil && streamHandler.SubtitleCache != nil {
+			aiService.SetSubtitleCache(streamHandler.SubtitleCache)
+		}
 		aiService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {

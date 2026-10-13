@@ -1101,7 +1101,7 @@ func (h *PlaybackHandler) hlsToneMapCapabilityInventoryForClientV3(
 
 	var nodeURLs []string
 	if enumerator, ok := h.NodePlanner.(transcodeNodeEnumeratorV3); ok && workerAllowed {
-		nodeURLs = transcodeNodeURLsForNewPlanV3(enumerator)
+		nodeURLs = withoutUnreachableRouteNodesV3(ctx, transcodeNodeURLsForNewPlanV3(enumerator))
 	}
 	results := make([]capabilityResult, len(nodeURLs))
 	var wg sync.WaitGroup
@@ -1292,6 +1292,7 @@ func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeU
 }
 
 func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, nodeURLs []string) map[string]v3NodeCapabilityCache {
+	nodeURLs = withoutUnreachableRouteNodesV3(ctx, nodeURLs)
 	fetchCtx, cancel := context.WithTimeout(ctx, v3NodeCapabilityPlanTimeout)
 	defer cancel()
 	results := make([]v3NodeCapabilityCache, len(nodeURLs))
@@ -1405,13 +1406,13 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 	if !ok || session == nil {
 		return noderouting.Decision{Outcome: noderouting.OutcomePolicyUnsatisfied}
 	}
-	eligible := h.transcodeEligibilityV3(ctx, result, excludedNodes)
+	eligible := excludeUnreachableRouteNodesV3(ctx, h.transcodeEligibilityV3(ctx, result, excludedNodes))
 	// A client that arrived through a network access provider can only use a
 	// proxy that has a connected origin on that same overlay; on the default
 	// path this is nil and every healthy proxy stays eligible. Filtering here
 	// rather than at the URL builder keeps the resolver's fallbacks (API
 	// egress, API relay to the transcode node) in charge of what happens next.
-	proxyEligible := nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil)
+	proxyEligible := excludeUnreachableRouteNodesV3(ctx, nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil))
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
@@ -1419,6 +1420,7 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 		SessionID: session.ID, CurrentTranscodeURL: session.TranscodeNodeURL,
 		EstimatedBitrateKbps: result.TargetBitrateKbps,
 		TranscodeEligible:    eligible, ProxyEligible: proxyEligible, ExcludedShapeIDs: excludedShapes,
+		UnreachableNodes: unreachableRouteNodesV3(ctx),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "compile playback node route", "component", "noderouting", "error", err)
@@ -3134,8 +3136,11 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 			Policy: policy, ProxyAllowed: proxyAllowed,
 		},
 		SessionID: sessionID, EstimatedBitrateKbps: identityStreamBitrateKbpsV3(result),
-		TranscodeEligible: h.transcodeEligibilityV3(r.Context(), result, nil), ProxyEligible: nodepool.ClientReachableVia(accessPath, relayEligible),
-		ProxyExecutionEligible: nodepool.ClientReachableVia(accessPath, h.identityProxyEligibilityV3(r.Context(), result)), ExcludedShapeIDs: excludedShapes,
+		TranscodeEligible:      excludeUnreachableRouteNodesV3(r.Context(), h.transcodeEligibilityV3(r.Context(), result, nil)),
+		ProxyEligible:          excludeUnreachableRouteNodesV3(r.Context(), nodepool.ClientReachableVia(accessPath, relayEligible)),
+		ProxyExecutionEligible: excludeUnreachableRouteNodesV3(r.Context(), nodepool.ClientReachableVia(accessPath, h.identityProxyEligibilityV3(r.Context(), result))),
+		ExcludedShapeIDs:       excludedShapes,
+		UnreachableNodes:       unreachableRouteNodesV3(r.Context()),
 	})
 	if err != nil {
 		return noderouting.Decision{}, &transportErrorV3{reason: string(noderouting.OutcomePolicyUnsatisfied), message: "The playback routing policy is invalid.", retryable: false, cause: err}
@@ -3334,8 +3339,15 @@ func (h *PlaybackHandler) escalateRefusedProgressiveRemuxV3(ctx context.Context,
 // API may execute, or a proxy-egress shape whose proxies this client can
 // address. It gates the escalation above, so a false answer means the delivery
 // is refused for every candidate, not merely that the preferred one is busy.
+// A proxy this request found not answering does not count: a replan leaving a
+// dead proxy would otherwise keep the remux and fail on route capacity instead
+// of moving to HLS on a transcode node.
 func (h *PlaybackHandler) progressiveRemuxRouteAvailableV3(ctx context.Context, mode mediaAuthModeV3) bool {
 	proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
+	reachableProxy := false
+	if enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3); ok {
+		reachableProxy = len(withoutUnreachableRouteNodesV3(ctx, enumerator.ProxyNodeURLs())) > 0
+	}
 	compiled, err := noderouting.Candidates(noderouting.Request{
 		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryProgressiveRemux,
 		Policy: h.playbackRoutingPolicyForContextV3(ctx), ProxyAllowed: proxyAllowed,
@@ -3348,13 +3360,12 @@ func (h *PlaybackHandler) progressiveRemuxRouteAvailableV3(ctx context.Context, 
 			return true
 		}
 		if mode.headerAuth {
-			if h.proxyEgressOriginsAvailableV3() {
+			if reachableProxy && h.proxyEgressOriginsAvailableV3() {
 				return true
 			}
 			continue
 		}
-		enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3)
-		if ok && h.JWTSecret != "" && len(enumerator.ProxyNodeURLs()) > 0 {
+		if reachableProxy && h.JWTSecret != "" {
 			return true
 		}
 	}
@@ -3785,7 +3796,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, SegmentRetentionSeconds: cfg.SegmentRetentionSeconds, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
+	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: cfg.KeyframePlaylist && videoCodec == "copy", SegmentRetentionSeconds: cfg.SegmentRetentionSeconds, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
 	if opts.ToneMapMode != "" {
 		opts.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
 		opts.ToneMapDVBLCompatIDPresent = sourceMetadata.ToneMapDVBLCompatIDPresent
@@ -4015,7 +4026,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 			hwAccel = playback.HWAccelNone
 		}
 	}
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: h.playbackConfig().KeyframePlaylist && videoCodec == "copy", HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
 	req.ThrottleSeconds = playback.ConfiguredTranscodeThrottleSeconds(r.Context(), h.SettingsRepo)
 	if strings.EqualFold(videoCodec, "copy") {
 		req.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
@@ -4080,6 +4091,10 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if err := transcodenode.ValidateThrottleAttestation(req, nodeResp); err != nil {
 		h.tm.StopRemoteTranscode(transportID, node.URL)
 		return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "The selected transcode node did not confirm the throttle policy.", retryable: true, cause: err}
+	}
+	if err := transcodenode.ValidateKeyframePlaylistAttestation(req, nodeResp); err != nil {
+		h.tm.StopRemoteTranscode(transportID, node.URL)
+		return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "The selected transcode node did not confirm the keyframe playlist.", retryable: true, cause: err}
 	}
 	if req.ToneMapMode != "" && nodeResp.ToneMapMode != req.ToneMapMode {
 		h.tm.StopRemoteTranscode(transportID, node.URL)
@@ -4220,7 +4235,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 // not part of the node's request/response contract, so the caller supplies it.
 func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFile, nodeURL, transportID string, req transcodenode.TranscodeStartRequest, nodeResp transcodenode.TranscodeStartResponse, toneMapFilter string) playback.RecipeCard {
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
 	card.ToneMapDVConfigPresent = req.ToneMapDVConfigPresent
 	if encoderHWAccel := strings.TrimSpace(nodeResp.EncoderHWAccel); encoderHWAccel != "" {
 		card.EncoderHWAccel = encoderHWAccel
@@ -4880,6 +4895,16 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
+	// A seek reanchor must keep its route; every other replan first finds out
+	// whether the session's nodes still answer, so neither the plan nor the
+	// route is built on a node that went away.
+	var unreachableNodes map[string]struct{}
+	if !seekReanchor {
+		if current, err := h.sessionMgr.GetSession(record.SessionID); err == nil {
+			unreachableNodes = h.unreachableSessionNodesV3(r.Context(), current)
+			r = r.WithContext(withUnreachableRouteNodesV3(r.Context(), unreachableNodes))
+		}
+	}
 	trackChange := operation == playback.ReplanOperationTrackChangeV3
 	qualityChange := operation == playback.ReplanOperationQualityChangeV3
 	outputChange := operation == playback.ReplanOperationOutputChangeV3
@@ -5088,10 +5113,21 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 		}
 	}
+	// A recovery whose node stopped answering failed on the node, not on its
+	// recipe: keep the failed plan eligible so the replacement can run the same
+	// recipe on another node instead of stepping down or running out of plans.
+	nodeRecovery := !userIntentOperation && len(unreachableNodes) > 0
+	currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, req.LocalMutations)
 	attemptedKeys := []string(nil)
 	if !intentChange && !seekReanchor && !userIntentOperation {
-		attemptedKeys = append(attemptedKeys, req.AttemptedPlanKeys...)
-		if !proxyOriginRecovery && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
+		failedKey := strings.TrimSpace(req.PlanAttemptKey)
+		for _, key := range req.AttemptedPlanKeys {
+			if trimmed := strings.TrimSpace(key); nodeRecovery && (trimmed == failedKey || trimmed == currentKey) {
+				continue
+			}
+			attemptedKeys = append(attemptedKeys, key)
+		}
+		if !proxyOriginRecovery && !nodeRecovery && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
 			attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 		}
 	}
@@ -5101,11 +5137,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// ping-pong the session. A client-reported local mutation (for example a
 		// PCM recovery route) is folded into the failed plan's key here — the
 		// server owns the hash; clients only echo opaque keys.
-		currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, req.LocalMutations)
-		if !proxyOriginRecovery && !containsStringExactV3(attemptedKeys, currentKey) {
+		if !proxyOriginRecovery && !nodeRecovery && !containsStringExactV3(attemptedKeys, currentKey) {
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
-		if len(req.LocalMutations) > 0 && !proxyOriginRecovery {
+		if len(req.LocalMutations) > 0 && !proxyOriginRecovery && !nodeRecovery {
 			// The unmutated recipe already failed before the client mutated it
 			// locally; exclude it as well.
 			unmutatedKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, nil)
@@ -5355,7 +5390,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	transportReused := false
-	if trackChange && h.hasActiveHLSTransportV3(session) {
+	if trackChange && len(unreachableNodes) == 0 && h.hasActiveHLSTransportV3(session) {
 		proxyAllowed := mode.proxyEgress || (!mode.headerAuth && h.JWTSecret != "")
 		policy := h.playbackRoutingPolicyForContextV3(r.Context())
 		if reusedRecipe, ok := sidecarOnlyHLSReplanV3(record, result.Plan, artifactRecipe, req.ClientPlaybackContext.Output.OutputContextID); ok &&

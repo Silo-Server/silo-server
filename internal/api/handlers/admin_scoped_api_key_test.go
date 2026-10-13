@@ -111,7 +111,7 @@ func newScopedKeyAdminHandler(targetRole string) (*AdminHandler, *scopedKeyUserR
 		Role:        targetRole,
 		Permissions: []string{},
 		Enabled:     true,
-		MaxProfiles: 5,
+		MaxProfiles: new(5),
 	}}
 	return &AdminHandler{
 		userRepo:           repo,
