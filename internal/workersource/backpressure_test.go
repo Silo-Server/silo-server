@@ -18,6 +18,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+const backpressureMediaKind = "media"
+
 type backpressureFixture struct {
 	authority *Authority
 	active    atomic.Bool
@@ -60,7 +62,7 @@ func newBackpressureFixture(t *testing.T) *backpressureFixture {
 	f.authority, err = New(Options{
 		Store: NewMemoryStore(), Origin: f.server.URL, Limits: Limits{MaxReaders: 1},
 		PathApprover: func(_ context.Context, path, kind string) error {
-			if path != f.path || kind != "media" {
+			if path != f.path || kind != backpressureMediaKind {
 				return ErrDenied
 			}
 			return nil
@@ -76,7 +78,7 @@ func newBackpressureFixture(t *testing.T) *backpressureFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.source, err = f.authority.Acquire(t.Context(), 7, "work", 3, f.path, "media")
+	f.source, err = f.authority.Acquire(t.Context(), 7, "work", 3, f.path, backpressureMediaKind)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +127,7 @@ func waitSourceHandler(t *testing.T, f *backpressureFixture) {
 func TestAuthorizedSourceBackpressureKeepsCompleteBody(t *testing.T) {
 	f := newBackpressureFixture(t)
 	response := f.request(t, t.Context(), http.MethodGet)
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.ContentLength != f.source.Size {
 		t.Fatalf("source response%d length%d", response.StatusCode, response.ContentLength)
 	}
@@ -155,18 +158,20 @@ func TestAuthorizedSourceBackpressureKeepsCompleteBody(t *testing.T) {
 	var reused atomic.Bool
 	ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { reused.Store(info.Reused) }})
 	head := f.request(t, ctx, http.MethodHead)
+	defer func() { _ = head.Body.Close() }()
 	if head.StatusCode != http.StatusOK || !reused.Load() {
 		t.Fatalf("finished reader poisoned reusable connection: status%d reused%v", head.StatusCode, reused.Load())
 	}
 }
 
 func TestBlockedSourceWriteRevocationAndCancellationReleaseQuota(t *testing.T) {
-	for _, reason := range []string{"inactive", "released", "canceled", "mutated"} {
+	for _, reason := range []string{"disabled_work", "released", "canceled", "mutated"} {
 		t.Run(reason, func(t *testing.T) {
 			f := newBackpressureFixture(t)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			response := f.request(t, ctx, http.MethodGet)
+			defer func() { _ = response.Body.Close() }()
 			if response.StatusCode != http.StatusOK {
 				t.Fatalf("source response%d", response.StatusCode)
 			}
@@ -176,7 +181,7 @@ func TestBlockedSourceWriteRevocationAndCancellationReleaseQuota(t *testing.T) {
 			// There is no downstream body read: the producer must observe these
 			// authority changes even when its bounded socket window is full.
 			switch reason {
-			case "inactive":
+			case "disabled_work":
 				f.active.Store(false)
 			case "released":
 				if err := f.authority.Release(t.Context(), 7, "work", 3, f.source.Grant); err != nil {
@@ -196,6 +201,7 @@ func TestBlockedSourceWriteRevocationAndCancellationReleaseQuota(t *testing.T) {
 			}
 			if reason == "canceled" {
 				head := f.request(t, t.Context(), http.MethodHead)
+				defer func() { _ = head.Body.Close() }()
 				if head.StatusCode != http.StatusOK {
 					t.Fatalf("fetch cancellation revoked a healthy grant: %d", head.StatusCode)
 				}
