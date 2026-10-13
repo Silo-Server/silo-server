@@ -1717,6 +1717,17 @@ export function CollectionEditForm({
     : isTraktCollection
       ? libraryEligibilityForMediaKind(isTraktListMode ? "mixed" : traktMediaType)
       : undefined;
+  const hasInvalidTmdbFranchiseLibraries =
+    isTMDBFranchise &&
+    libraryIds.some((id) => {
+      const library = libraries.find((candidate) => candidate.id === id);
+      return (
+        !library ||
+        (library.type &&
+          library.type !== "mixed" &&
+          !editEligibility?.kinds?.includes(library.type))
+      );
+    });
 
   useEffect(() => {
     if (tmdbMediaType !== normalizedTMDBMediaType) {
@@ -1983,7 +1994,13 @@ export function CollectionEditForm({
               <Label htmlFor="collection-tmdb-source">Source</Label>
               <Select
                 value={tmdbSourceKind}
-                onValueChange={(v) => setTmdbSourceKind(v as TMDBSourceKind)}
+                onValueChange={(v) => {
+                  if (isTMDBFranchise) {
+                    const limit = parseTmdbCollectionLimit(tmdbLimit);
+                    if (limit !== undefined) setTmdbLimit(String(limit));
+                  }
+                  setTmdbSourceKind(v as TMDBSourceKind);
+                }}
               >
                 <SelectTrigger id="collection-tmdb-source">
                   <SelectValue />
@@ -2130,6 +2147,13 @@ export function CollectionEditForm({
               </div>
             )}
           </div>
+        ) : null}
+
+        {hasInvalidTmdbFranchiseLibraries ? (
+          <p className="text-destructive text-sm" role="alert">
+            Franchise collections need movie or mixed libraries. Remove incompatible libraries
+            before saving.
+          </p>
         ) : null}
 
         {isTraktCollection ? (
@@ -2288,6 +2312,7 @@ export function CollectionEditForm({
             hasInvalidSourceLimit ||
             missingSourceURL ||
             hasInvalidTmdbCollectionId ||
+            hasInvalidTmdbFranchiseLibraries ||
             hasInvalidTmdbLimit ||
             invalidTMDBListURL ||
             hasInvalidTraktLimit ||

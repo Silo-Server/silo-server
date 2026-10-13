@@ -72,7 +72,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderEditor(overrides: Partial<LibraryCollection>) {
+function renderEditor(
+  overrides: Partial<LibraryCollection>,
+  libraries: Library[] = [{ id: 7, name: "Movies", type: "movies" } as Library],
+) {
   const onClose = vi.fn();
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -82,7 +85,7 @@ function renderEditor(overrides: Partial<LibraryCollection>) {
       <CollectionEditForm
         etag={'"rev-1"'}
         collection={{ ...baseCollection, ...overrides }}
-        libraries={[{ id: 7, name: "Movies", type: "movies" } as Library]}
+        libraries={libraries}
         initialLibraryId={7}
         onClose={onClose}
       />
@@ -170,6 +173,62 @@ describe("TMDB collection edit form", () => {
     fireEvent.change(screen.getByLabelText("TMDB list URL"), {
       target: { value: "https://www.themoviedb.org/movie/550" },
     });
+    expect(screen.getByRole("button", { name: "Save Collection" })).toBeDisabled();
+  });
+
+  it("requires compatible libraries after switching a TV collection to Franchise", () => {
+    renderEditor(
+      {
+        source_url: "tmdb://popular/tv",
+        source_config: { mode: "tmdb_preset", preset: "popular", media_type: "tv" },
+      },
+      [
+        { id: 7, name: "Series", type: "series" } as Library,
+        { id: 8, name: "Movies", type: "movies" } as Library,
+      ],
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: /Source/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Franchise/ }));
+    fireEvent.change(screen.getByLabelText("TMDB Collection ID"), { target: { value: "119" } });
+    expect(screen.getByRole("button", { name: "Save Collection" })).toBeDisabled();
+
+    // The admin chooses the new scope rather than losing selected libraries silently.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Series" }), { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Series" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Save Collection" })).toBeEnabled();
+  });
+
+  it.each(["Preset", "Public list"])(
+    "keeps the numeric franchise limit when switching to %s",
+    async (source) => {
+      const onClose = renderEditor({
+        source_url: "tmdb://collection/119",
+        source_config: { mode: "tmdb_collection", collection_id: 119 },
+      });
+      fireEvent.change(screen.getByLabelText("Max Items"), { target: { value: "1e2" } });
+      fireEvent.click(screen.getByRole("combobox", { name: /Source/ }));
+      fireEvent.click(screen.getByRole("option", { name: new RegExp(source) }));
+      if (source === "Public list") {
+        fireEvent.change(screen.getByLabelText("TMDB list URL"), {
+          target: { value: "https://www.themoviedb.org/list/310" },
+        });
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Save Collection" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      expect(patches[0]?.source_config).toMatchObject({ limit: 100 });
+    },
+  );
+
+  it("waits for the selected libraries before allowing a franchise save", () => {
+    renderEditor(
+      {
+        source_url: "tmdb://collection/119",
+        source_config: { mode: "tmdb_collection", collection_id: 119 },
+      },
+      [],
+    );
     expect(screen.getByRole("button", { name: "Save Collection" })).toBeDisabled();
   });
 });
