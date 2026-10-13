@@ -137,8 +137,8 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasEnabledSharedHomeRecentlyAdded(home) {
-		// Older homes have no shared row, and a disabled shared row shows
+	if !hasEnabledHomeRecentlyAddedCovering(home, "movies") {
+		// Older homes have no covering row, and a disabled covering row shows
 		// nothing; both keep per-library rows.
 		disabled, err := f.repo.Create(ctx, &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Title: f.app + "-disabled", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: false})
 		if err != nil {
@@ -184,24 +184,33 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	}
 }
 
-func TestHasEnabledSharedHomeRecentlyAdded(t *testing.T) {
-	shared := func(enabled bool) *PageSection {
-		return &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: enabled}
+func TestHasEnabledHomeRecentlyAddedCovering(t *testing.T) {
+	row := func(scope string, enabled bool) *PageSection {
+		return &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig(scope), Enabled: enabled}
 	}
-	movieOnly := &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig("movie"), Enabled: true}
+	shared := func(enabled bool) *PageSection { return row(catalog.MediaScopeVideo, enabled) }
+	movieOnly := row("movie", true)
+	seriesOnly := row("series", true)
 	tests := []struct {
-		name string
-		home []*PageSection
-		want bool
+		name        string
+		home        []*PageSection
+		libraryType string
+		want        bool
 	}{
-		{"enabled shared row", []*PageSection{movieOnly, shared(true)}, true},
-		{"disabled shared row", []*PageSection{movieOnly, shared(false)}, false},
-		{"no shared row", []*PageSection{movieOnly}, false},
+		{"enabled shared row covers movies", []*PageSection{movieOnly, shared(true)}, "movies", true},
+		{"enabled shared row covers mixed", []*PageSection{shared(true)}, "mixed", true},
+		{"disabled shared row covers nothing", []*PageSection{shared(false)}, "series", false},
+		{"movie row covers movies", []*PageSection{movieOnly}, "movies", true},
+		{"movie row misses series", []*PageSection{movieOnly}, "series", false},
+		{"split rows cover mixed", []*PageSection{movieOnly, seriesOnly}, "mixed", true},
+		{"movie row alone misses mixed", []*PageSection{movieOnly}, "mixed", false},
+		{"disabled split row misses mixed", []*PageSection{movieOnly, row("series", false)}, "mixed", false},
+		{"no rows", nil, "movies", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasEnabledSharedHomeRecentlyAdded(tt.home); got != tt.want {
-				t.Fatalf("hasEnabledSharedHomeRecentlyAdded = %v, want %v", got, tt.want)
+			if got := hasEnabledHomeRecentlyAddedCovering(tt.home, tt.libraryType); got != tt.want {
+				t.Fatalf("hasEnabledHomeRecentlyAddedCovering(%q) = %v, want %v", tt.libraryType, got, tt.want)
 			}
 		})
 	}
