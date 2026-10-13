@@ -73,11 +73,14 @@ type payload struct {
 
 // deletedFileList decodes deletedFiles. SeriesDelete and MovieDelete payloads
 // send a bool under the same key (whether arr deleted the folder), which names
-// no files and must not make the delivery malformed.
+// no files and must not make the delivery malformed. Any other value that is
+// not a list of files still is.
 type deletedFileList []fileRef
 
 func (l *deletedFileList) UnmarshalJSON(data []byte) error {
-	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && trimmed[0] != '[' {
+	switch string(bytes.TrimSpace(data)) {
+	case "true", "false":
+		*l = nil
 		return nil
 	}
 	return json.Unmarshal(data, (*[]fileRef)(l))
