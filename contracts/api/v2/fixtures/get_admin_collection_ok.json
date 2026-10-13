@@ -14,6 +14,7 @@
   "featured": false,
   "poster_url": "",
   "backdrop_url": "",
+  "poster_is_collage": false,
   "source_url": "",
   "query_definition": {},
   "sort_config": {},

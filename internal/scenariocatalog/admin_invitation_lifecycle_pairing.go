@@ -53,7 +53,12 @@ func AdminInvitationLifecycleAcceptance(catalogs []*Catalog) ([]*Catalog, error)
 					switch i {
 					case 0:
 						if s.ID == "adm_inv_list.admin_no_profile" {
+							// The fixture admin household has a PIN-locked
+							// profile, so a profile-less admin session is
+							// refused (critical v1 bridge fix).
 							principal.Class = "admin"
+							status = http.StatusForbidden
+							v2status = status
 						}
 						if s.ID == "adm_inv_list.error_shape" {
 							principal.Class = adminInvitationResendMemberPrincipal

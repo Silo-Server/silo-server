@@ -368,10 +368,20 @@ func (c *ScheduledTaskClient) Run(ctx context.Context, req *pluginv1.RunSchedule
 	return c.client.Run(callCtx, req)
 }
 
+// PollChanges calls the plugin with the host's per-call deadline. When the
+// call fails because that deadline passed or the caller canceled, the returned
+// error also wraps the context error, so callers can tell a host-side timeout
+// or cancellation (errors.Is) from a status code the plugin chose itself.
 func (c *ScanSourceClient) PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error) {
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
-	return c.client.PollChanges(callCtx, req)
+	resp, err := c.client.PollChanges(callCtx, req)
+	if err != nil {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("%w: %w", ctxErr, err)
+		}
+	}
+	return resp, err
 }
 
 func (c *RequestRouterClient) Fulfill(ctx context.Context, req *pluginv1.FulfillRequest) (*pluginv1.FulfillResponse, error) {

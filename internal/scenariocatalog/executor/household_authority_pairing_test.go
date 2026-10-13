@@ -127,9 +127,11 @@ func TestRequiredHouseholdAuthorityAcceptance(t *testing.T) {
 		}
 	}
 	if followup {
-		expectedIDs = []string{"household.ok", "household.empty", "household.shape", "household.admin"}
-		if len(results) != 4 {
-			t.Fatal("followup requires exactly four results")
+		// household.admin is a refusal since the critical v1 bridge fix, so
+		// three successful reads remain.
+		expectedIDs = []string{"household.ok", "household.empty", "household.shape"}
+		if len(results) != 3 {
+			t.Fatal("followup requires exactly three results")
 		}
 		for _, id := range expectedIDs {
 			count := 0
@@ -147,7 +149,7 @@ func TestRequiredHouseholdAuthorityAcceptance(t *testing.T) {
 	}
 	expectedSnapshots := 36
 	if followup {
-		expectedSnapshots = 8
+		expectedSnapshots = 6
 	}
 	if snapshots != expectedSnapshots {
 		t.Errorf("snapshots=%d want36", snapshots)

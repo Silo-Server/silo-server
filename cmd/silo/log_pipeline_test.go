@@ -20,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
@@ -37,7 +38,7 @@ func TestOperationalLoggingReturnsWhileRedisIsDown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+refusedAddr(t)))
+	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + refusedAddr(t)}))
 	t.Cleanup(hub.Close)
 	_, _, stop := configureOperationalLogging(ctx, unreachablePool(t), newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")
@@ -83,7 +84,7 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 	t.Cleanup(cancel)
 
 	fake := startFakeRedis(t)
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
+	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + fake.addr}))
 	t.Cleanup(hub.Close)
 	pool := unreachablePool(t)
 	_, _, stopOperational := configureOperationalLogging(ctx, pool, newMemorySettings(), hub,
@@ -128,7 +129,7 @@ func BenchmarkLoggedInfo(b *testing.B) {
 	b.Cleanup(cancel)
 
 	fake := startFakeRedis(b)
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
+	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + fake.addr}))
 	b.Cleanup(hub.Close)
 	_, _, stop := configureOperationalLogging(ctx, unreachablePool(b), newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")

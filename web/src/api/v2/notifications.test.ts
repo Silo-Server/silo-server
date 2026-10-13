@@ -47,6 +47,28 @@ it("preserves the server cutoff and serializes it exactly for mark-all", async (
   });
   expect(new Headers(fetch.mock.calls[1]![1]?.headers).get("X-Profile-Id")).toBe("owner");
 });
+it("keeps the follower flag so a followed title is not described as the viewer's request", async () => {
+  const fulfilled = {
+    ...row,
+    type: "request.fulfilled",
+    reason_flags: { request_id: "9", media_type: "movie", tmdb_id: 10378, follower: true },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        response({ items: [fulfilled], page: { has_more: false }, read_cutoff: "cutoff" }),
+      ),
+  );
+  const page = await listNotifications("all");
+  expect(page.notifications[0]?.reason_flags).toEqual({
+    request_id: "9",
+    media_type: "movie",
+    tmdb_id: 10378,
+    follower: true,
+  });
+});
 it("refuses a missing cutoff or malformed page instead of marking the current inbox", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>();
   vi.stubGlobal("fetch", fetch);

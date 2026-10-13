@@ -29,7 +29,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		ToneMapPreflightRequired: true,
 		ToneMapSourceRevision:    revision,
 		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		VideoSampleEntry:       VideoSampleEntryDVH1,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -88,7 +88,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.ThrottleSeconds != 180 {
 		t.Errorf("ThrottleSeconds = %d, want 180", got.ThrottleSeconds)
 	}
-	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
+	if got.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
 	if got.VideoSampleEntry != VideoSampleEntryDVH1 {
@@ -363,7 +363,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		ToneMapPreflightRequired: true,
 		ToneMapSourceRevision:    revision,
 		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		VideoSampleEntry:       VideoSampleEntryDVH1,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,

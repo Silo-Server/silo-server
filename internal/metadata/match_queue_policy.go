@@ -15,8 +15,8 @@ var (
 )
 
 const (
-	movieMatcherRevision       = 11
-	seriesMatcherRevision      = 11
+	movieMatcherRevision       = 12
+	seriesMatcherRevision      = 12
 	movieQueueRetryDelay       = 15 * time.Second
 	seriesRootQueueQuietWindow = 10 * time.Second
 	seriesRootQueueRetryDelay  = 30 * time.Second

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DownloadsSettings from "./DownloadsSettings";
@@ -17,6 +18,10 @@ function makeForm(values: Record<string, string> = {}, dirty: string[] = []) {
   const dirtyKeys = new Set(dirty);
   return {
     isLoading: false,
+    isPending: false,
+    loadError: false,
+    loaded: true,
+    retryLoad: vi.fn(),
     getValue: (key: string) => values[key] ?? "",
     setValue: vi.fn(),
     isDirty: (key: string) => dirtyKeys.has(key),
@@ -42,6 +47,15 @@ function lastForm() {
   return results[results.length - 1]?.value as ReturnType<typeof makeForm>;
 }
 
+// The page links to the storage view, so it renders inside a router.
+function renderSettings() {
+  return render(
+    <MemoryRouter>
+      <DownloadsSettings />
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   localStorage.clear();
   useSettingsFormMock.mockReset();
@@ -50,7 +64,7 @@ beforeEach(() => {
 
 describe("DownloadsSettings staged edits", () => {
   it("stages the downloads toggle without saving it", () => {
-    render(<DownloadsSettings />);
+    renderSettings();
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "download.enabled",
@@ -64,6 +78,8 @@ describe("DownloadsSettings staged edits", () => {
       "download.artifact_dir",
       "download.max_concurrent_prepares",
       "download.artifact_max_bytes",
+      "download.artifact_cache_hours",
+      "download.artifact_disk_ceiling_percent",
     ]);
 
     fireEvent.click(screen.getByRole("switch", { name: /Allow downloads/i }));
@@ -74,7 +90,7 @@ describe("DownloadsSettings staged edits", () => {
   });
 
   it("stages a per-user bandwidth cap", () => {
-    render(<DownloadsSettings />);
+    renderSettings();
 
     fireEvent.change(screen.getByLabelText("Per-user bandwidth"), { target: { value: "25" } });
 
@@ -83,7 +99,7 @@ describe("DownloadsSettings staged edits", () => {
 
   it("stages an advanced text field", () => {
     expandAdvanced();
-    render(<DownloadsSettings />);
+    renderSettings();
 
     fireEvent.change(screen.getByLabelText("Prepared file directory"), {
       target: { value: "/var/lib/silo/downloads" },
@@ -101,14 +117,14 @@ describe("DownloadsSettings prepared file storage budget", () => {
 
   it("writes bytes back when a GB budget is typed", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_max_bytes": "53687091200" }));
-    render(<DownloadsSettings />);
+    renderSettings();
 
-    expect(screen.getByLabelText("Prepared file storage budget")).toHaveValue(53.687);
+    expect(screen.getByLabelText("Default storage budget per location")).toHaveValue(53.687);
     expect(screen.getByRole("group", { name: "Downloads" }).textContent).not.toContain(
       "53687091200",
     );
 
-    fireEvent.change(screen.getByLabelText("Prepared file storage budget"), {
+    fireEvent.change(screen.getByLabelText("Default storage budget per location"), {
       target: { value: "100" },
     });
 
@@ -117,9 +133,9 @@ describe("DownloadsSettings prepared file storage budget", () => {
 
   it("keeps unlimited as the default rather than showing 0 GB", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_max_bytes": "0" }));
-    render(<DownloadsSettings />);
+    renderSettings();
 
-    const input = screen.getByLabelText("Prepared file storage budget");
+    const input = screen.getByLabelText("Default storage budget per location");
 
     expect(input).toHaveValue(null);
     expect(input).toHaveAttribute("placeholder", "Unlimited");
@@ -129,7 +145,7 @@ describe("DownloadsSettings prepared file storage budget", () => {
   // "use the built-in worker count", so it must not become an Unlimited box.
   it("keeps 0 meaningful on Files prepared at once", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.max_concurrent_prepares": "0" }));
-    render(<DownloadsSettings />);
+    renderSettings();
 
     expect(screen.getByLabelText("Files prepared at once")).toHaveValue(0);
     expect(screen.getByText("0 uses the built-in default of 2.")).toBeInTheDocument();
@@ -143,10 +159,20 @@ describe("DownloadsSettings prepared file directory", () => {
 
   it("stages an empty value when an overridden directory is reset", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_dir": "/mnt/downloads" }));
-    render(<DownloadsSettings />);
+    renderSettings();
 
     fireEvent.click(screen.getByRole("button", RESET));
 
     expect(lastForm().setValue).toHaveBeenCalledWith("download.artifact_dir", "");
   });
+});
+
+it("shows a failed read without editable defaults and permits retry", () => {
+  const form = { ...makeForm(), loaded: false, loadError: true };
+  useSettingsFormMock.mockReturnValue(form);
+  render(<DownloadsSettings />);
+  expect(screen.getByRole("alert")).toHaveTextContent("could not be loaded");
+  expect(screen.queryByLabelText("Per-user bandwidth")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(form.retryLoad).toHaveBeenCalledOnce();
 });

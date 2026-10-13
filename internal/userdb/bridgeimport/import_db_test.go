@@ -108,6 +108,9 @@ func newImportFixture(t *testing.T, pool *pgxpool.Pool) importFixture {
 		{`INSERT INTO personal_collections VALUES('collection','parent','parent','Synthetic collection','manual',1,'{}','{}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`, nil},
 		{`INSERT INTO personal_collection_items VALUES('collection',?,3,'2026-01-01T00:00:00Z')`, []any{f.item}},
 		{`INSERT INTO personal_collection_profiles VALUES('collection','child')`, nil},
+		// Shared with nobody but its creator: imported as private (#1615).
+		{`INSERT INTO personal_collections VALUES('creator-only','parent','parent','Creator only','manual',1,'{}','{}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`, nil},
+		{`INSERT INTO personal_collection_profiles VALUES('creator-only','parent')`, nil},
 		{`INSERT INTO collection_sort_preferences VALUES('parent','user','collection','title','asc','2026-01-01T00:00:00Z')`, nil},
 		{`INSERT INTO audio_preferences VALUES('parent',?,0,'en','{}','2026-01-01T00:00:00Z')`, []any{f.item}},
 		{`INSERT INTO subtitle_preferences VALUES('parent',?,'en',0,'','off','{}',NULL,'2026-01-01T00:00:00Z')`, []any{f.item}},
@@ -182,6 +185,7 @@ func TestImportCompleteAccountDB(t *testing.T) {
 		}
 	}
 	assertImportedStoreReads(t, pool, f)
+	assertImportedCollectionSharing(t, pool, f)
 	if got := sourceDigestForTest(t, f.path); got != f.identity.SourceSHA256 {
 		t.Fatal("source changed")
 	}
@@ -330,5 +334,30 @@ func TestImportTwoAccountsAndConcurrentReplayDB(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatal("changed-source replay rotated generation")
+	}
+}
+
+// A collection whose allow list names every source profile (its creator
+// implied) is imported shared; one shared with fewer profiles is imported
+// private, so nobody gains access its owner withheld. Imported collections are
+// native, and no allow-list rows are written.
+func assertImportedCollectionSharing(t *testing.T, pool *pgxpool.Pool, f importFixture) {
+	t.Helper()
+	for id, wantShared := range map[string]bool{"collection": true, "creator-only": false} {
+		var shared, native bool
+		if err := pool.QueryRow(t.Context(), "SELECT is_shared, native FROM user_personal_collections WHERE user_id=$1 AND id=$2", f.identity.AccountID, id).Scan(&shared, &native); err != nil {
+			t.Fatal(err)
+		}
+		if shared != wantShared || !native {
+			t.Fatalf("%s imported is_shared=%t native=%t, want is_shared=%t native=true", id, shared, native, wantShared)
+		}
+	}
+	var visibilityRows int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM user_personal_collection_profiles WHERE user_id=$1", f.identity.AccountID).Scan(&visibilityRows); err != nil || visibilityRows != 0 {
+		t.Fatalf("allow-list rows written: %d (%v)", visibilityRows, err)
+	}
+	listed, err := pgstoreForTest(t, pool, f.identity.AccountID).ListCollections(t.Context(), "child")
+	if err != nil || len(listed) != 1 || listed[0].ID != "collection" {
+		t.Fatalf("child lists %+v (%v), want only the shared collection", listed, err)
 	}
 }

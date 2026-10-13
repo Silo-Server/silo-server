@@ -8,6 +8,10 @@ type Manifest struct {
 	FormatVersion int       `json:"format_version"`
 	ExportedAt    time.Time `json:"exported_at"`
 	SchemaVersion int       `json:"schema_version"`
+	// TMDBRatingSources marks a bundle whose items carry their TMDB rating
+	// source. Older exporters left it out, so an item without one in their
+	// bundles says nothing about the source the target already has.
+	TMDBRatingSources bool `json:"tmdb_rating_sources,omitempty"`
 }
 
 type Bundle struct {
@@ -85,6 +89,10 @@ type ItemRecord struct {
 	Status            string     `json:"status"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+
+	// TMDBRating is the item's TMDB rating source; import writes it back so
+	// the server derives the TMDB vote pair discovery rows rank by.
+	TMDBRating *RatingSourceRecord `json:"tmdb_rating_source,omitempty"`
 }
 
 type PersonRecord struct {
@@ -312,4 +320,12 @@ type ImportResult struct {
 	EmbeddingsImported int      `json:"embeddings_imported"`
 	Skipped            int      `json:"skipped"`
 	UnmatchedRoots     []string `json:"unmatched_roots,omitempty"`
+}
+
+// RatingSourceRecord is an item's TMDB rating source (0-100 score, vote count,
+// providing plugin).
+type RatingSourceRecord struct {
+	Score    float64 `json:"score"`
+	Votes    *int64  `json:"votes,omitempty"`
+	Provider string  `json:"provider"`
 }

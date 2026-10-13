@@ -49,3 +49,17 @@ func TestOriginalOfNamesTheRevisionsOriginal(t *testing.T) {
 		}
 	}
 }
+
+func TestIsLocal(t *testing.T) {
+	for key, want := range map[string]bool{
+		"local/movies/1/0badf00d/poster/original.webp": true,
+		"nfo/movies/1/poster/original.webp":            true,
+		"tmdb/movies/1/poster/original.webp":           false,
+		"nfo-extra/movies/1/poster/original.webp":      false,
+		"": false,
+	} {
+		if got := IsLocal(key); got != want {
+			t.Errorf("IsLocal(%q) = %v, want %v", key, got, want)
+		}
+	}
+}

@@ -907,35 +907,108 @@ func waitFor(timeout time.Duration, cond func() bool) bool {
 // TestBlockingRebuildDetachedFromLeaderCancellation verifies a cold-miss
 // blocking rebuild survives the initiating request's cancellation: singleflight
 // shares one build across every collapsed waiter, so the leader's client
-// disconnecting must not fail all the other requests riding on the flight.
+// disconnecting must not fail the build. The leader itself stops waiting at
+// once with its context's error, and a later caller reads the shared result.
 func TestBlockingRebuildDetachedFromLeaderCancellation(t *testing.T) {
 	resetResolvedListCacheForTest()
 	defer resetResolvedListCacheForTest()
 
-	// A context canceled BEFORE the build starts: without detachment the loader
-	// (which honors ctx like the real fetchers do) would fail immediately.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
+	var calls atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	loadErr := make(chan error, 1)
 	loader := func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
+		calls.Add(1)
+		close(entered)
+		<-release
+		// The loader honors ctx like the real fetchers do: without detachment
+		// the leader's cancellation would fail the shared build here.
+		loadErr <- loadCtx.Err()
 		if err := loadCtx.Err(); err != nil {
 			return nil, 0, err
 		}
 		return mediaItems("x1"), 1, nil
 	}
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
 
 	now := time.Unix(1_700_000_000, 0)
-	items, total, err := getOrRefresh(ctx, "detach-key", now, loader)
+	ctx, cancel := context.WithCancel(context.Background())
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, _, err := getOrRefresh(ctx, "detach-key", now, loader)
+		leaderDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the rebuild never started")
+	}
+
+	// The leader gives up while the build is still running.
+	cancel()
+	select {
+	case err := <-leaderDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled waiter returned %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled waiter kept waiting on the shared rebuild")
+	}
+
+	// A caller whose context is already done starts no second build.
+	if _, _, err := getOrRefresh(ctx, "detach-key", now, loader); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-canceled caller returned %v, want context.Canceled", err)
+	}
+
+	close(release)
+	select {
+	case err := <-loadErr:
+		if err != nil {
+			t.Fatalf("the detached build saw the leader's cancellation: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the rebuild never finished")
+	}
+	if !waitFor(5*time.Second, func() bool {
+		_, ok := resolvedListGet("detach-key")
+		return ok
+	}) {
+		t.Fatal("detached rebuild did not cache its result")
+	}
+
+	// A later caller reads the shared result without another build.
+	items, total, err := getOrRefresh(context.Background(), "detach-key", now, loader)
 	if err != nil {
-		t.Fatalf("blocking rebuild must run detached from the leader's cancellation, got %v", err)
+		t.Fatalf("later caller: %v", err)
 	}
 	if total != 1 || len(items) != 1 || items[0].ContentID != "x1" {
 		t.Fatalf("unexpected result: items=%v total=%d", itemIDs(items), total)
 	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("loader invoked %d times, want exactly 1", got)
+	}
+}
 
-	// The successful detached build must have been cached for later requests.
-	if _, ok := resolvedListGet("detach-key"); !ok {
-		t.Fatal("detached rebuild did not cache its result")
+// TestBlockingRebuildPanicBecomesError verifies a loader panic on the
+// detached build goroutine reaches the waiter as an error instead of
+// crashing the process.
+func TestBlockingRebuildPanicBecomesError(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	_, _, err := getOrRefresh(context.Background(), "panic-key", time.Unix(1_700_000_000, 0), func(context.Context) ([]*models.MediaItem, int, error) {
+		panic("loader exploded")
+	})
+	if err == nil {
+		t.Fatal("a panicking rebuild returned no error")
+	}
+	if _, ok := resolvedListGet("panic-key"); ok {
+		t.Fatal("a panicking rebuild cached a result")
 	}
 }
 

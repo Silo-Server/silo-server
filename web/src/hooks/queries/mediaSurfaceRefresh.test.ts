@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   catalogKeys,
@@ -273,6 +273,32 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     expect(queryClient.getQueryState(moviesKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(internationalKey)?.isInvalidated).toBe(true);
+  });
+
+  it("lets a running letter index finish, then reads it once more", async () => {
+    const queryClient = new QueryClient();
+    const key = catalogKeys.letters({ library_id: 3, type: "movie", query_fingerprint: "f" });
+    queryClient.setQueryData(key, { total: 1, letters: [] });
+    let finishFirst: (value: unknown) => void = () => undefined;
+    const queryFn = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => (finishFirst = resolve)))
+      .mockResolvedValue({ total: 3, letters: [] });
+    const observer = new QueryObserver(queryClient, { queryKey: key, queryFn });
+    const unsubscribe = observer.subscribe(() => undefined);
+    expect(queryFn).toHaveBeenCalledOnce();
+
+    // A sweep during a scan must not cancel and restart the read: on a large
+    // library each sweep would restart it before it could finish.
+    await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
+    expect(queryFn).toHaveBeenCalledOnce();
+
+    finishFirst({ total: 2, letters: [] });
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData(key)).toEqual({ total: 3, letters: [] }),
+    );
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    unsubscribe();
   });
 
   it("does not invalidate library section queries for a different library scope", async () => {

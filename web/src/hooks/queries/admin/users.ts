@@ -14,7 +14,8 @@ import {
   adminUserScope,
   captureAdminUserAuthority,
   listAdminUsers,
-  getAdminUser,
+  getAdminUserSnapshot,
+  isStrongTag,
   createAdminUser,
   updateAdminUser,
   deleteAdminUser,
@@ -190,12 +191,14 @@ export function useAdminUser(id: number) {
   const context = captureProfileRequestContext();
   const query = useQuery({
     queryKey: [...adminUsersKey(adminUserScope(context)), "detail", id],
-    queryFn: () => getAdminUser(id, context ?? captureAdminUserAuthority()),
+    queryFn: () => getAdminUserSnapshot(id, context ?? captureAdminUserAuthority()),
     enabled: context !== null && Number.isSafeInteger(id) && id > 0,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
   });
-  return { ...query, editor: query.data, data: query.data?.user };
+  // A proxy that strips the ETag leaves the account readable but not editable.
+  const editor = query.data && isStrongTag(query.data.etag) ? query.data : undefined;
+  return { ...query, editor, data: query.data?.user };
 }
 export function useAdminUserCapabilities() {
   const context = captureProfileRequestContext();

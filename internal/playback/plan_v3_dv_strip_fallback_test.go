@@ -56,7 +56,7 @@ func planStripsDVToHDR10V3(plan PlanV3) bool {
 
 func dvStripFallbackRegistryV3() *TransformationRegistryV3 {
 	return NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 	})
 }
@@ -111,7 +111,7 @@ func TestPlanPlaybackV3DV81FallsBackToHDR10StripAfterNativeDVFails(t *testing.T)
 func TestPlanPlaybackV3DV81PrefersHDR10StripOverToneMap(t *testing.T) {
 	file, req := dv81NativeAndHDR10FixtureV3()
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
 		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
@@ -216,7 +216,7 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1", Default: true}
 	req.Capabilities.CodecsAudio = []string{"truehd"}
 	withoutAAC := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 	})
 	plans, terminal := replanChainV3(t, PlannerInputV3{
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,

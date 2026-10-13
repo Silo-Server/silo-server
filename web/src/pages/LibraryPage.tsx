@@ -5,6 +5,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import LibraryHeader from "@/components/LibraryHeader";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
@@ -16,6 +17,7 @@ import {
 import {
   applySavedLibraryPageSearchParams,
   hasLibraryPageSearchParams,
+  isShuffleLibraryType,
   parseLibraryPageState,
   serializeLibraryPageSearchParams,
   updateLibraryPageSearchParams,
@@ -71,6 +73,7 @@ export default function LibraryPage() {
   const libraryPageStateKey = `${libraryPageStateOwnerKey ?? "none"}:${id}`;
   const library = libraries?.find((l) => l.id === id);
   const libraryType = library?.type ?? "";
+  const { startShuffle, isStarting: isStartingShuffle } = useStartShuffle();
   const savedLibrarySearch =
     Number.isFinite(id) && id > 0
       ? libraryPageStatePreference.libraries[String(id)]?.search
@@ -436,7 +439,17 @@ export default function LibraryPage() {
   return (
     <div className="relative">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <LibraryHeader libraryName={library.name} libraryType={libraryType} overlay={useOverlay} />
+        <LibraryHeader
+          libraryName={library.name}
+          libraryType={libraryType}
+          overlay={useOverlay}
+          onShuffle={
+            isShuffleLibraryType(libraryType)
+              ? () => startShuffle({ kind: "library", id: String(library.id) })
+              : undefined
+          }
+          shuffleDisabled={isStartingShuffle}
+        />
         <TabsContent value="recommended" className="mt-0">
           <LibraryRecommended
             libraryId={id}

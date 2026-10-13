@@ -17,6 +17,7 @@ import {
   getDefaultQuerySortOrder,
   getQuerySortOptions,
   normalizeQuerySortForScope,
+  querySortScopeForMediaScope,
   type QuerySortRelevanceScope,
 } from "@/lib/querySortOptions";
 
@@ -89,14 +90,6 @@ export default function CatalogFilterBar({
         <Select
           value={state.mediaScope}
           onValueChange={(v) => {
-            // "video" spans movie+series, so sorts valid for "all" stay valid.
-            // Manga reuses the ebook sort universe (no dedicated sort scope).
-            const nextRelevanceScope: QuerySortRelevanceScope =
-              v === "all" || v === "video"
-                ? "all"
-                : v === "manga"
-                  ? "ebook"
-                  : (v as QuerySortRelevanceScope);
             if (usesSourceOrder) {
               onUpdate({ mediaScope: v as GuidedFormState["mediaScope"] });
               return;
@@ -105,7 +98,7 @@ export default function CatalogFilterBar({
               { field: state.sortField, order: state.sortOrder },
               {
                 includePersonalized: allowPersonalizedSorts,
-                relevanceScope: nextRelevanceScope,
+                relevanceScope: querySortScopeForMediaScope(v),
               },
             );
             onUpdate({

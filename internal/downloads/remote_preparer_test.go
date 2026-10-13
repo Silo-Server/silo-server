@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -790,8 +791,8 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if got, want := request.Header.Get("Authorization"), "Bearer secret"; got != want {
-			t.Errorf("Authorization = %q, want %q", got, want)
+		if !nodeauthtest.Signed(request, "secret") {
+			t.Errorf("request is not signed: Authorization = %q", request.Header.Get("Authorization"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -1291,5 +1292,25 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T)
 	}
 	if hits.Load() != 2 {
 		t.Fatalf("node was asked %d times, want a second read after the invalidation", hits.Load())
+	}
+}
+
+// With local fallback off, a job whose only nodes are full of prepared files
+// waits for space instead of failing as if no node existed.
+func TestNodeAwarePreparerWaitsWhenEveryNodeIsFull(t *testing.T) {
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{{ID: 5, URL: "http://full", Enabled: true, Healthy: true}})
+	local := &recordingEncodePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.SetStorageGate(func(nodeID int) bool { return nodeID == 5 })
+	p.SetSettingsReader(staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"})
+
+	if _, err := p.PrepareFile(context.Background(), "artifact-nodes-full", playback.TranscodeOpts{}, "/artifacts/job.mp4"); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("err = %v, want ErrStorageFull", err)
+	}
+	if local.calls != 0 {
+		t.Fatalf("local calls = %d, want 0", local.calls)
 	}
 }

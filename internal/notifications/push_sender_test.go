@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +247,180 @@ func TestPushSenderSendMapsRelayTerminalFCMRejection(t *testing.T) {
 	}
 	if result.UpstreamReason != "fcm_rejected" || result.RelayRequestID != "relay-request-fcm-2" {
 		t.Fatalf("terminal diagnostic = %+v", result)
+	}
+}
+
+// Every push names the deployment and profile it belongs to, so a device
+// signed into several servers or profiles fetches display data from the right
+// one. The relay rejects an empty field, so a target it cannot complete is
+// left out whole.
+func TestPushSenderNamesTheServerAndProfileOfEachPush(t *testing.T) {
+	deliveryID := "delivery-1"
+	identity := func(context.Context) (string, error) { return "server-1", nil }
+	for _, tc := range []struct {
+		name     string
+		attempt  PushDeliveryAttempt
+		device   PushDevice
+		serverID func(context.Context) (string, error)
+		path     string
+		named    bool
+	}{
+		{name: "apple delivery", attempt: PushDeliveryAttempt{ID: "attempt-1", NotificationDeliveryID: &deliveryID},
+			device:   PushDevice{ProfileID: "profile-1", APNsEnvironment: APNsEnvironmentSandbox, APNsTopic: ApplePushTopicSilo, ServerDeviceID: "server-device-1"},
+			serverID: identity, path: relayAppleSendPath, named: true},
+		{name: "android test push", attempt: PushDeliveryAttempt{ID: "attempt-2"},
+			device:   PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-2"},
+			serverID: identity, path: relayFcmSendPath, named: true},
+		{name: "identity unreadable", attempt: PushDeliveryAttempt{ID: "attempt-3"},
+			device:   PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-3"},
+			serverID: func(context.Context) (string, error) { return "", errors.New("settings store down") }, path: relayFcmSendPath},
+		{name: "profile missing", attempt: PushDeliveryAttempt{ID: "attempt-4"},
+			device:   PushDevice{APNsEnvironment: APNsEnvironmentSandbox, APNsTopic: ApplePushTopicSilo, ServerDeviceID: "server-device-4"},
+			serverID: identity, path: relayAppleSendPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tc.path)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request body: %v", err)
+				}
+				_, _ = w.Write([]byte(`{"request_id":"relay-request","status":"accepted"}`))
+			}))
+			defer server.Close()
+			sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
+				SettingPushRelayURL:    server.URL,
+				SettingPushRelayAPIKey: "relay-key",
+			}))
+			sender.client = server.Client()
+			sender.developmentRelayURL = server.URL
+			sender.serverID = tc.serverID
+
+			result := sender.send(context.Background(), tc.attempt, &tc.device, strings.Repeat("a", 64))
+			if !result.OK {
+				t.Fatalf("result = %+v", result)
+			}
+			serverID, hasServer := body["server_id"]
+			profileID, hasProfile := body["profile_id"]
+			if tc.named && (serverID != "server-1" || profileID != "profile-1") {
+				t.Fatalf("relay body = %v, want server-1 and profile-1", body)
+			}
+			if !tc.named && (hasServer || hasProfile) {
+				t.Fatalf("relay body = %v, want neither server_id nor profile_id", body)
+			}
+		})
+	}
+}
+
+// A relay that predates server_id and profile_id rejects them as unexpected
+// before recording the idempotency key. The attempt is resent without them
+// under the same key, and later sends to that relay leave them out until the
+// recheck window passes. Any other unexpected field keeps its ordinary failure.
+func TestPushSenderResendsWithoutTargetToARelayThatPredatesIt(t *testing.T) {
+	type sent struct {
+		key      string
+		targeted bool
+	}
+	var requests []sent
+	rejectField := "server_id"
+	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingStore{}))
+	sender.now = func() time.Time { return now }
+	sender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		_, targeted := body["server_id"]
+		requests = append(requests, sent{key: req.Header.Get("Idempotency-Key"), targeted: targeted})
+		if targeted {
+			return relayResponse(http.StatusBadRequest, `{"error":{"code":"unexpected_field","message":"unexpected field: `+rejectField+`"}}`), nil
+		}
+		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
+	})}
+	device := &PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
+	target := pushRelayTarget{ServerID: "server-1", ProfileID: "profile-1"}
+	send := func(attemptID string) pushSendResult {
+		requests = nil
+		return sender.sendWithCapability(context.Background(), PushDeliveryAttempt{ID: attemptID}, device, strings.Repeat("F", 140), target, DefaultPushRelayURL, "capability")
+	}
+
+	if result := send("attempt-1"); !result.OK {
+		t.Fatalf("fallback result = %+v", result)
+	}
+	if want := []sent{{"attempt-1", true}, {"attempt-1", false}}; !slices.Equal(requests, want) {
+		t.Fatalf("first send requests = %+v, want %+v", requests, want)
+	}
+	if result := send("attempt-2"); !result.OK || !slices.Equal(requests, []sent{{"attempt-2", false}}) {
+		t.Fatalf("remembered relay: result = %+v, requests = %+v", result, requests)
+	}
+	now = now.Add(relayTargetRecheck)
+	if result := send("attempt-3"); !result.OK || len(requests) != 2 || !requests[0].targeted {
+		t.Fatalf("after recheck: result = %+v, requests = %+v", result, requests)
+	}
+
+	now = now.Add(relayTargetRecheck)
+	rejectField = "collapse_id"
+	result := send("attempt-4")
+	if result.OK || result.HTTPStatus != http.StatusBadRequest || result.UpstreamReason != "unexpected_field" || len(requests) != 1 {
+		t.Fatalf("other unexpected field: result = %+v, requests = %+v", result, requests)
+	}
+}
+
+func TestPushSenderRetriesAnAttemptWithTheTargetChoiceTheRelayRecorded(t *testing.T) {
+	type sent struct {
+		key      string
+		targeted bool
+	}
+	var requests []sent
+	recorded := map[string]bool{}
+	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingStore{}))
+	sender.now = func() time.Time { return now }
+	sender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		key := req.Header.Get("Idempotency-Key")
+		_, targeted := body["server_id"]
+		requests = append(requests, sent{key: key, targeted: targeted})
+		if first, ok := recorded[key]; ok && first != targeted {
+			return relayResponse(http.StatusUnprocessableEntity, `{"error":{"code":"idempotency_key_reuse","message":"Idempotency-Key was reused with a different payload"}}`), nil
+		}
+		recorded[key] = targeted
+		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
+	})}
+	device := &PushDevice{Platform: PushPlatformApple, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
+	target := pushRelayTarget{ServerID: "server-1", ProfileID: "profile-1"}
+	send := func(attemptID string, target pushRelayTarget) pushSendResult {
+		requests = nil
+		return sender.sendWithCapability(context.Background(), PushDeliveryAttempt{ID: attemptID}, device, strings.Repeat("a", 64), target, DefaultPushRelayURL, "capability")
+	}
+
+	// First sent without the fields, by an earlier server version or while the
+	// relay was remembered as lacking them; retried with them.
+	recorded["attempt-1"] = false
+	if result := send("attempt-1", target); !result.OK || !slices.Equal(requests, []sent{{"attempt-1", true}, {"attempt-1", false}}) {
+		t.Fatalf("recorded without target: result = %+v, requests = %+v", result, requests)
+	}
+
+	// First sent with them; retried while this process remembers the relay as
+	// lacking them.
+	recorded["attempt-2"] = true
+	sender.markRelayLacksTarget(DefaultPushRelayURL)
+	if result := send("attempt-2", target); !result.OK || !slices.Equal(requests, []sent{{"attempt-2", false}, {"attempt-2", true}}) {
+		t.Fatalf("recorded with target: result = %+v, requests = %+v", result, requests)
+	}
+
+	// Without a target of its own the server has no other choice to offer.
+	// send keeps such an attempt retryable when only the identity lookup failed.
+	recorded["attempt-3"] = true
+	result := send("attempt-3", pushRelayTarget{})
+	if result.OK || result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != relayCodeIdempotencyKeyReuse || len(requests) != 1 {
+		t.Fatalf("no target: result = %+v, requests = %+v", result, requests)
 	}
 }
 
@@ -506,8 +681,8 @@ func TestPushSenderMapsRelayIdempotencyStatesWithStableKey(t *testing.T) {
 				APNsTopic:       ApplePushTopicSilo,
 				ServerDeviceID:  "server-device-stable",
 			}
-			first := sender.sendWithCapability(context.Background(), attempt, device, strings.Repeat("a", 64), DefaultPushRelayURL, "capability")
-			second := sender.sendWithCapability(context.Background(), attempt, device, strings.Repeat("a", 64), DefaultPushRelayURL, "capability")
+			first := sender.sendWithCapability(context.Background(), attempt, device, strings.Repeat("a", 64), pushRelayTarget{}, DefaultPushRelayURL, "capability")
+			second := sender.sendWithCapability(context.Background(), attempt, device, strings.Repeat("a", 64), pushRelayTarget{}, DefaultPushRelayURL, "capability")
 			if first.HTTPStatus != tc.status || first.UpstreamReason != tc.code {
 				t.Fatalf("result = %+v", first)
 			}
@@ -779,5 +954,33 @@ func TestPushSenderKeepsCredentialRegisteredWhileParking(t *testing.T) {
 	}
 	if store.values[SettingPushRelayAPIKey] != "admin.capability" || store.values[SettingPushRelayReregister] == "true" {
 		t.Fatalf("stored state = %#v, want the administrator's credential kept", store.values)
+	}
+}
+
+func TestPushSenderRetriesLaterWhenAFailedIdentityLookupMismatchesTheRecordedAttempt(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":{"code":"idempotency_key_reuse","message":"Idempotency-Key was reused with a different payload"}}`))
+	}))
+	defer server.Close()
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
+		SettingPushRelayURL:    server.URL,
+		SettingPushRelayAPIKey: "relay-key",
+	}))
+	sender.client = server.Client()
+	sender.developmentRelayURL = server.URL
+	device := &PushDevice{Platform: PushPlatformAndroid, ProfileID: "profile-1", ServerDeviceID: "server-device-1"}
+	send := func() pushSendResult {
+		return sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-1"}, device, strings.Repeat("a", 64))
+	}
+
+	sender.serverID = func(context.Context) (string, error) { return "", errors.New("settings store down") }
+	if result := send(); result.HTTPStatus != http.StatusServiceUnavailable || result.UpstreamReason != "server_identity_unavailable" || !retryableHTTPStatus(result.HTTPStatus) {
+		t.Fatalf("identity lookup failed: result = %+v, want a retryable server_identity_unavailable", result)
+	}
+
+	sender.serverID = nil
+	if result := send(); result.HTTPStatus != http.StatusUnprocessableEntity || result.UpstreamReason != relayCodeIdempotencyKeyReuse {
+		t.Fatalf("no identity configured: result = %+v, want the relay's 422", result)
 	}
 }

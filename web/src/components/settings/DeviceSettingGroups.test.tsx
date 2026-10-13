@@ -125,11 +125,124 @@ describe("DeviceSettingGroups", () => {
     expect(onReset).toHaveBeenCalledWith("player.hdr_enabled");
   });
 
+  // Beside the control, the reset took width from the description: in the
+  // narrow pane next to the device list the text wrapped a word per line and
+  // the button overlapped it.
+  it("puts the reset under the description, apart from the control", () => {
+    renderGroups({
+      "playback.intro_skip_mode": effective({
+        key: "playback.intro_skip_mode",
+        value: "skip",
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    const description = screen.getByText(/What Silo does when an intro starts/);
+    const labelColumn = description.parentElement as HTMLElement;
+    const reset = screen.getByRole("button", { name: /Use your setting/ });
+
+    expect(labelColumn).toContainElement(reset);
+    expect(labelColumn).not.toContainElement(screen.getByRole("combobox", { name: "Skip intros" }));
+    expect(
+      description.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("does not offer a reset when nothing is stored on this device", () => {
     renderGroups({ "player.hdr_enabled": effective({ source: "profile" }) });
 
     expect(screen.queryByText("Changed here")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Use your setting/ })).not.toBeInTheDocument();
+  });
+
+  // After "Use your setting" the row must still say where its value now comes
+  // from, or a reset looks like it did nothing.
+  it("names the profile as the source of a value not changed on this device", () => {
+    renderGroups({
+      "playback.audio_language": effective({
+        key: "playback.audio_language",
+        value: "fr",
+        source: "profile",
+        scope: "profile",
+      }),
+    });
+
+    expect(screen.getByText("From your profile")).toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed here")).not.toBeInTheDocument();
+  });
+
+  it("names the other profile when acting for someone in the household", () => {
+    renderGroups(
+      {
+        "playback.audio_language": effective({
+          key: "playback.audio_language",
+          value: "fr",
+          source: "profile",
+          scope: "profile",
+        }),
+      },
+      { ownerLabel: "Sam's" },
+    );
+
+    expect(screen.getByText("From Sam's profile")).toBeInTheDocument();
+  });
+
+  it("names the app default when neither the device nor the profile sets a value", () => {
+    renderGroups({ "player.hdr_enabled": effective({ value: true, source: "default" }) });
+
+    expect(screen.getByText("App default")).toBeInTheDocument();
+    expect(screen.queryByText(/From your profile/)).not.toBeInTheDocument();
+  });
+
+  it("shows only the device badge for a value changed on this device", () => {
+    renderGroups({
+      "playback.audio_language": effective({
+        key: "playback.audio_language",
+        value: "de",
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
+  });
+
+  it("does not repeat the source under a profile-wide value", () => {
+    renderGroups({
+      "ui.title_art": effective({
+        key: "ui.title_art",
+        value: false,
+        source: "profile",
+        scope: "profile",
+      }),
+    });
+
+    expect(screen.getByText(/Set for all devices on this profile/)).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+  });
+
+  // A household limit replaces the value but keeps the source, so the source
+  // would credit the profile or the default with a value neither set.
+  it("leaves the source to the household limit when the limit narrowed the value", () => {
+    renderGroups({
+      "playback.preferred_quality": effective({
+        key: "playback.preferred_quality",
+        value: "1080p",
+        stored_value: "2160p",
+        source: "profile",
+        scope: "profile",
+        constrained: true,
+        constraint_kind: "ceiling",
+      }),
+    });
+
+    expect(screen.getByText("Household limit")).toBeInTheDocument();
+    expect(screen.queryByText("From your profile")).not.toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
   });
 
   it("offers the three intro modes and writes the selected device override", async () => {

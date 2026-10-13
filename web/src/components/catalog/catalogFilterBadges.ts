@@ -231,8 +231,3 @@ export function getActiveFilterBadges(
 
   return badges;
 }
-
-/** Count how many secondary filters are active (for the badge count on the Filters button). */
-export function countActiveFilters(state: GuidedFormState): number {
-  return getActiveFilterBadges(state).length;
-}

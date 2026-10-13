@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/downloadstorage"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -356,7 +358,7 @@ type RemotePreparer interface {
 	Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error
 }
 
-// HTTPPreparer implements RemotePreparer over bearer-protected node APIs. A
+// HTTPPreparer implements RemotePreparer over signed node APIs. A
 // full-file prepare has no transport timeout; its caller owns cancellation.
 // Metadata and relay operations use a bounded response-header wait by default.
 type HTTPPreparer struct {
@@ -478,6 +480,38 @@ func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID
 		return responseError(resp, "remote download artifact delete")
 	}
 	return nil
+}
+
+// maxArtifactListingBytes bounds a node's directory listing. A listing entry is
+// about 150 bytes, so this is tens of thousands of prepared files.
+const maxArtifactListingBytes = 16 << 20
+
+// ErrArtifactListingUnsupported means the node predates the listing route.
+var ErrArtifactListingUnsupported = errors.New("node does not list prepared download files")
+
+// ListArtifacts reads a node's prepared-download directory listing.
+func (p HTTPPreparer) ListArtifacts(ctx context.Context, nodeURL, jwtSecret string) (downloadstorage.Listing, error) {
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/artifacts", nil)
+	if err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return downloadstorage.Listing{}, ErrArtifactListingUnsupported
+	default:
+		return downloadstorage.Listing{}, responseError(resp, "remote download artifact listing")
+	}
+	var listing downloadstorage.Listing
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxArtifactListingBytes)).Decode(&listing); err != nil {
+		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: decode response: %w", err)
+	}
+	return listing, nil
 }
 
 // Open returns an authenticated streaming response for a GET or HEAD relay.
@@ -619,14 +653,22 @@ func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, p
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
 		return nil, fmt.Errorf("invalid node URL")
 	}
-	base.Path = strings.TrimRight(base.Path, "/") + path
+	// Sign against the same normalized node URL the request is built from:
+	// re-escaping or trimming only one of them would sign a path prefix the
+	// worker never sees.
+	base.Path = strings.TrimRight(base.Path, "/")
+	base.RawPath = ""
 	base.RawQuery = ""
 	base.Fragment = ""
+	signingBase := base.String()
+	base.Path += path
 	req, err := http.NewRequestWithContext(ctx, method, base.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+jwtSecret)
+	if err := nodeauth.Sign(req, signingBase, jwtSecret); err != nil {
+		return nil, err
+	}
 	return req, nil
 }
 

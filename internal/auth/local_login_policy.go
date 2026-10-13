@@ -114,7 +114,7 @@ func (r *UserRepository) EnableAccountLocalLogin(ctx context.Context, login, tem
 	}
 	var hash string
 	if temporaryPassword != "" {
-		raw, err := bcrypt.GenerateFromPassword([]byte(temporaryPassword), bcrypt.DefaultCost)
+		raw, err := bcrypt.GenerateFromPassword([]byte(temporaryPassword), passwordHashCost)
 		if err != nil {
 			return nil, fmt.Errorf("hashing password: %w", err)
 		}

@@ -223,7 +223,7 @@ export default function ItemCard({
           <MediaCardArtwork
             src={item.poster_url}
             alt={displayTitle}
-            fallbackLabel={displayTitle}
+            mediaType={item.type}
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             scrim="background"

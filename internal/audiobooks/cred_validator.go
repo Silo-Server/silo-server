@@ -7,27 +7,38 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// SiloCredValidator implements abs.ProfileCredentialValidator using silo's
-// existing auth.Service. In-process validation avoids the HTTP round-trip
-// the plugin previously made to POST /api/v1/auth/login.
+// SiloCredValidator implements abs.ProfileCredentialValidator and
+// abs.ProfileVerifier using silo's existing auth.Service. In-process
+// validation avoids the HTTP round-trip the plugin previously made to
+// POST /api/v1/auth/login.
 type SiloCredValidator struct {
 	Auth *auth.Service
 	Pool *pgxpool.Pool
+	// Stores reads the account's profiles and checks their PINs.
+	Stores userstore.UserStoreProvider
+	// PINAttempts is the native API's profile PIN limiter, so password#pin
+	// guesses here count against the same per-profile budget. Nil allows
+	// every attempt.
+	PINAttempts *ratelimit.AttemptLimiter
 }
 
 // Validate checks (username, password) against silo's local auth provider
-// and returns the string user ID, profile ID, and display name.
+// and the selected profile's PIN, and returns the signed-in principal.
 //
 // Accepts two username formats:
 //
-//   - "alice"         — primary profile for user alice. profileID will be the
-//     alice user's primary profile.
+//   - "alice"         — the profile named "alice" if there is one, otherwise
+//     the primary profile for user alice. A primary
+//     profile with a PIN is refused (abs.ErrProfilePINRequired):
+//     it has to be named, as below.
 //   - "alice#kids"    — the "kids" household profile under user alice.
 //     Authentication still uses alice's password; only the
 //     profile selector differs. If alice has no profile
@@ -35,16 +46,24 @@ type SiloCredValidator struct {
 //     ErrInvalidCredentials so we don't leak which arm of
 //     the user#profile pair was wrong.
 //
+// A PIN-protected profile needs its PIN after the last '#' in the password
+// ("password#pin"), as on the Jellyfin-compatible listener: the full password
+// is tried first, and the part before the last '#' only when that fails.
+// PIN attempts count against the profile's shared lockout, and only once the
+// account password has matched.
+//
 // The ABS compat layer represents user/profile IDs as strings; we format the
-// integer user ID and UUID profile ID accordingly. Users with no profiles at
-// all (newly created accounts pre-setup) get an empty profileID and the ABS
-// handler treats that as "primary".
+// integer user ID and UUID profile ID accordingly. An account with no
+// profiles at all (newly created, pre-setup) gets an empty profileID.
 func (v *SiloCredValidator) Validate(
 	ctx context.Context,
 	username, password string,
-) (userID, profileID, displayName string, err error) {
+) (abs.Principal, error) {
 	if v.Auth == nil {
-		return "", "", "", errors.New("auth service not configured")
+		return abs.Principal{}, errors.New("auth service not configured")
+	}
+	if v.Stores == nil {
+		return abs.Principal{}, errors.New("user store not configured")
 	}
 
 	authName, profileSelector := splitUserProfile(username)
@@ -53,45 +72,144 @@ func (v *SiloCredValidator) Validate(
 	// informational for session bookkeeping only.
 	// CompatLogin refuses a temporary password: Audiobookshelf clients cannot
 	// run the password change it requires.
-	_, user, err := v.Auth.CompatLogin(ctx, authName, password, "abs-compat", "")
+	basePw, pin := auth.SplitPasswordPIN(password)
+	_, user, usedFallback, err := v.Auth.CompatLoginWithLocalFallback(ctx, authName, password, basePw, "abs-compat", "")
 	if err != nil {
 		// Propagate auth sentinel errors as-is so callers can distinguish
 		// "bad credentials" (ErrInvalidCredentials) from "service down".
-		return "", "", "", err
+		return abs.Principal{}, err
+	}
+	if !usedFallback {
+		// The full password matched, so no PIN was split out of it.
+		pin = ""
 	}
 
-	userIDStr := strconv.Itoa(user.ID)
-	displayName = user.Username
-
-	if profileSelector != "" {
-		// Explicit profile requested — look it up by name. A miss here is
-		// reported as ErrInvalidCredentials (rather than a separate "no
-		// such profile" error) so an attacker can't enumerate profiles
-		// using a valid user/password.
-		pid, pname, pidErr := profileForUserByName(ctx, v.Pool, user.ID, profileSelector)
-		if pidErr != nil {
-			return "", "", "", fmt.Errorf("lookup profile by name: %w", pidErr)
-		}
-		if pid == "" {
-			return "", "", "", auth.ErrInvalidCredentials
-		}
-		profileID = pid
-		if pname != "" {
-			displayName = pname
-		}
-		return userIDStr, profileID, displayName, nil
+	store, err := v.Stores.ForUser(ctx, user.ID)
+	if err != nil {
+		return abs.Principal{}, fmt.Errorf("open user store: %w", err)
+	}
+	// The listing carries each profile's PIN revision, read before the PIN
+	// is checked: a PIN change in between leaves the token on the older
+	// revision, which ProfileVerifier refuses.
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil {
+		return abs.Principal{}, fmt.Errorf("list profiles: %w", err)
+	}
+	principal := abs.Principal{UserID: strconv.Itoa(user.ID), DisplayName: user.Username}
+	// The account's own username, not the name typed: a sign-in by email
+	// selects the same account-named profile.
+	profile, err := selectSignInProfile(profiles, user.Username, profileSelector)
+	if err != nil {
+		return abs.Principal{}, err
+	}
+	if profile == nil {
+		// An account with no profiles signs in without one.
+		return principal, nil
 	}
 
-	// No profile selector — fall back to the primary profile.
-	pid, pname, pidErr := primaryProfileForUser(ctx, v.Pool, user.ID)
-	if pidErr == nil && pid != "" {
-		profileID = pid
-		if pname != "" {
-			displayName = pname
+	if profile.PINHash != "" {
+		if pin == "" {
+			return abs.Principal{}, abs.ErrProfilePINRequired
 		}
+		// Counted before the PIN is checked, so concurrent guesses cannot
+		// overrun the limit, and while the profile is locked even the right
+		// PIN is refused.
+		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
+		if _, ok := v.PINAttempts.Reserve(ctx, attemptKey); !ok {
+			return abs.Principal{}, abs.ErrProfilePINLocked
+		}
+		valid, err := store.VerifyPIN(ctx, profile.ID, pin)
+		if err != nil {
+			return abs.Principal{}, fmt.Errorf("verify profile PIN: %w", err)
+		}
+		if !valid {
+			return abs.Principal{}, abs.ErrProfilePINIncorrect
+		}
+		v.PINAttempts.Reset(ctx, attemptKey)
 	}
 
-	return userIDStr, profileID, displayName, nil
+	principal.ProfileID = profile.ID
+	principal.PINRevision = profile.PINRevision
+	if profile.Name != "" {
+		principal.DisplayName = profile.Name
+	}
+	return principal, nil
+}
+
+// selectSignInProfile picks the profile a sign-in names: the one called
+// profileName (case-insensitive). With no profile name, a profile named like
+// the account counts as named, as on the Jellyfin-compatible listener;
+// otherwise the primary, which is not picked implicitly when it has a PIN.
+// Returns nil without an error only for an account with no profiles.
+func selectSignInProfile(profiles []userstore.Profile, accountName, profileName string) (*userstore.Profile, error) {
+	name := profileName
+	if name == "" {
+		name = accountName
+	}
+	for i := range profiles {
+		if strings.EqualFold(profiles[i].Name, name) {
+			return &profiles[i], nil
+		}
+	}
+	if profileName != "" {
+		// A miss is reported as ErrInvalidCredentials (rather than a
+		// separate "no such profile" error) so an attacker can't enumerate
+		// profiles using a valid user/password.
+		return nil, auth.ErrInvalidCredentials
+	}
+	if len(profiles) == 0 {
+		return nil, nil
+	}
+	for i := range profiles {
+		if !profiles[i].IsPrimary {
+			continue
+		}
+		if profiles[i].PINHash != "" {
+			return nil, abs.ErrProfilePINRequired
+		}
+		return &profiles[i], nil
+	}
+	// Every account with profiles has a primary; refuse rather than sign in
+	// without one.
+	return nil, auth.ErrInvalidCredentials
+}
+
+// VerifyTokenProfile implements abs.ProfileVerifier.
+func (v *SiloCredValidator) VerifyTokenProfile(ctx context.Context, userID, profileID string, pinRevision *int64) error {
+	if v.Stores == nil {
+		return errors.New("user store not configured")
+	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return abs.ErrTokenProfileUnverified
+	}
+	store, err := v.Stores.ForUser(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("open user store: %w", err)
+	}
+	if profileID == "" {
+		// Signed in before the account had profiles. Once it has one, the
+		// token would bypass that profile's limits and PIN.
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			return fmt.Errorf("list profiles: %w", err)
+		}
+		if len(profiles) > 0 {
+			return abs.ErrTokenProfileUnverified
+		}
+		return nil
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("load profile: %w", err)
+	}
+	if profile == nil {
+		return abs.ErrTokenProfileUnverified
+	}
+	if profile.PINHash != "" && (pinRevision == nil || *pinRevision != profile.PINRevision) {
+		return abs.ErrTokenProfileUnverified
+	}
+	return nil
 }
 
 // ResolveUsername returns the ABS display name for (userID, profileID) without
@@ -136,48 +254,4 @@ func splitUserProfile(raw string) (user, profile string) {
 		return raw, ""
 	}
 	return strings.TrimSpace(raw[:i]), strings.TrimSpace(raw[i+1:])
-}
-
-// primaryProfileForUser returns the (id, name) of the primary profile for
-// the given user from the user_profiles table. Returns ("", "", nil) when no
-// profiles exist (newly created user, pre-profile-setup).
-func primaryProfileForUser(ctx context.Context, pool *pgxpool.Pool, userID int) (id, name string, err error) {
-	if pool == nil {
-		return "", "", fmt.Errorf("no pgx pool available")
-	}
-	row := pool.QueryRow(ctx,
-		`SELECT id, name FROM user_profiles
-		 WHERE user_id = $1 AND is_primary = TRUE
-		 LIMIT 1`,
-		userID,
-	)
-	err = row.Scan(&id, &name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// No primary profile — acceptable for a brand-new user or a user who
-		// hasn't set up profiles yet. Return empty strings; the ABS handler
-		// interprets empty profileID as "use primary / no profile".
-		return "", "", nil
-	}
-	return id, name, err
-}
-
-// profileForUserByName returns the (id, name) of a profile under the given
-// user matched by name (case-insensitive). Returns ("", "", nil) when no
-// matching profile exists, so callers can map that to invalid-credentials
-// without unwrapping a sentinel.
-func profileForUserByName(ctx context.Context, pool *pgxpool.Pool, userID int, profileName string) (id, name string, err error) {
-	if pool == nil {
-		return "", "", fmt.Errorf("no pgx pool available")
-	}
-	row := pool.QueryRow(ctx,
-		`SELECT id, name FROM user_profiles
-		 WHERE user_id = $1 AND LOWER(name) = LOWER($2)
-		 LIMIT 1`,
-		userID, profileName,
-	)
-	err = row.Scan(&id, &name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", nil
-	}
-	return id, name, err
 }
