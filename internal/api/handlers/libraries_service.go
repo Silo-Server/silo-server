@@ -980,11 +980,14 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil {
 		return
 	}
+	// A movie's files go through the movie queue and a series' roots through
+	// the series queue; any other item has no matcher queue to reconcile.
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, media_folder_id, observed_root_path
-		FROM media_files
-		WHERE content_id = $1 AND missing_since IS NULL
-		ORDER BY id
+		SELECT mf.id, mf.media_folder_id, mf.observed_root_path, mi.type
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.content_id = $1 AND mf.missing_since IS NULL
+		ORDER BY mf.id
 	`, contentID)
 	if err != nil {
 		slog.WarnContext(ctx, "listing item files to requeue match work", "component", "api", "content_id", contentID, "error", err)
@@ -994,21 +997,26 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 		folderID int
 		path     string
 	}
-	var fileIDs []int
+	var movieFiles []int
 	var roots []seriesRoot
 	seen := map[seriesRoot]bool{}
 	for rows.Next() {
 		var fileID int
 		var root seriesRoot
-		if err := rows.Scan(&fileID, &root.folderID, &root.path); err != nil {
+		var itemType string
+		if err := rows.Scan(&fileID, &root.folderID, &root.path, &itemType); err != nil {
 			rows.Close()
 			slog.WarnContext(ctx, "scanning item file to requeue match work", "component", "api", "content_id", contentID, "error", err)
 			return
 		}
-		fileIDs = append(fileIDs, fileID)
-		if root.path != "" && !seen[root] {
-			seen[root] = true
-			roots = append(roots, root)
+		switch strings.ToLower(strings.TrimSpace(itemType)) {
+		case "movie":
+			movieFiles = append(movieFiles, fileID)
+		case "series":
+			if root.path != "" && !seen[root] {
+				seen[root] = true
+				roots = append(roots, root)
+			}
 		}
 	}
 	rows.Close()
@@ -1016,10 +1024,8 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 		slog.WarnContext(ctx, "listing item files to requeue match work", "component", "api", "content_id", contentID, "error", err)
 		return
 	}
-	// Each enqueue checks the library type itself, so a movie queue call on
-	// a series file (or the reverse) changes nothing.
 	if h.MovieMatchQueueRepo != nil {
-		for _, fileID := range fileIDs {
+		for _, fileID := range movieFiles {
 			if err := h.MovieMatchQueueRepo.EnqueueMovieFile(ctx, fileID); err != nil {
 				slog.WarnContext(ctx, "requeueing movie match work", "component", "api", "content_id", contentID, "file_id", fileID, "error", err)
 			}

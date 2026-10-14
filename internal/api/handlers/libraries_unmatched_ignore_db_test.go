@@ -210,4 +210,51 @@ func TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB(t *testing.T) {
 	requireAPIStatus(t, h.SetUnmatchedItemIgnored(ctx, bookID, true), http.StatusConflict)
 	requireAPIStatus(t, h.SetUnmatchedItemIgnored(ctx, contentID+"-missing", true), http.StatusNotFound)
 	requireAPIStatus(t, h.SetUnmatchedItemIgnored(ctx, contentID+"-missing", false), http.StatusNotFound)
+
+	// A series goes through the series root queue the same way.
+	var seriesFolder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`, tag+" shows").Scan(&seriesFolder); err != nil {
+		t.Fatalf("seed series folder: %v", err)
+	}
+	seriesID := contentID + "-series"
+	seriesRoot := fmt.Sprintf("/ignore-%d/Backyard Workshop Diaries", suffix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, seriesFolder)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, seriesFolder)
+	})
+	if err := items.Upsert(ctx, &models.MediaItem{ContentID: seriesID, Type: "series", Title: tag + " Series", Status: "unmatched"}); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	for _, name := range []string{"S01E01.mkv", "S01E02.mkv"} {
+		if _, err := files.Upsert(ctx, models.MediaFile{ContentID: seriesID, MediaFolderID: seriesFolder, FilePath: seriesRoot + "/Season 01/" + name, ObservedRootPath: seriesRoot, FileSize: 1024, BaseType: "series"}); err != nil {
+			t.Fatalf("seed episode file: %v", err)
+		}
+	}
+	seriesQueued := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM series_root_match_queue WHERE media_folder_id = $1`, seriesFolder).Scan(&n); err != nil {
+			t.Fatalf("count series queue rows: %v", err)
+		}
+		return n
+	}
+	if err := h.SeriesMatchQueueRepo.EnqueueSeriesRoot(ctx, seriesFolder, seriesRoot); err != nil {
+		t.Fatalf("queue series root: %v", err)
+	}
+	if got := seriesQueued(); got != 1 {
+		t.Fatalf("before ignoring the series: series queue rows = %d, want 1", got)
+	}
+	if err := h.SetUnmatchedItemIgnored(ctx, seriesID, true); err != nil {
+		t.Fatalf("ignore series: %v", err)
+	}
+	if got := seriesQueued(); got != 0 {
+		t.Fatalf("after ignoring the series: series queue rows = %d, want 0", got)
+	}
+	if err := h.SetUnmatchedItemIgnored(ctx, seriesID, false); err != nil {
+		t.Fatalf("unignore series: %v", err)
+	}
+	if got := seriesQueued(); got != 1 {
+		t.Fatalf("after unignoring the series: series queue rows = %d, want 1", got)
+	}
 }
