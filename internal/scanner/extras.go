@@ -136,6 +136,12 @@ func (c *extrasClassifier) classify(path string) (extraCandidate, bool) {
 			return extraCandidate{}, false
 		}
 		candidate.Kind = models.NormalizeExtraKind(kind)
+	} else if !librarykind.IsMovie(c.folderType) {
+		// A folder named like an extras folder that holds season folders
+		// (Kids/Shorts/Season 01/) is a show of its own.
+		if ctx := c.pathContext(path); ctx != nil && ctx.HasSeasonStructure && cleanRoot(ctx) == candidate.SupplementalDir {
+			return extraCandidate{}, false
+		}
 	}
 
 	// Preserve the documented series behavior: an episode-tokened file under
@@ -164,12 +170,16 @@ func (c *extrasClassifier) keepsEpisodeToken(candidate extraCandidate) bool {
 		return false
 	}
 	owner := firstNonSupplementalAncestor(candidate.SupplementalDir)
-	return owner == filepath.Dir(candidate.SupplementalDir) && c.seriesRoot(candidate.Path) == owner
+	return owner == filepath.Dir(candidate.SupplementalDir) && cleanRoot(c.pathContext(candidate.Path)) == owner
 }
 
-// seriesRoot is the cleaned series root naming derives for file.
-func (c *extrasClassifier) seriesRoot(file string) string {
-	ctx := naming.ResolvePathContext(file, c.folderType, c.libraryRoots...)
+// pathContext is naming's reading of file in this library.
+func (c *extrasClassifier) pathContext(file string) *naming.PathContext {
+	return naming.ResolvePathContext(file, c.folderType, c.libraryRoots...)
+}
+
+// cleanRoot is ctx's content root as a cleaned OS path, or "" without one.
+func cleanRoot(ctx *naming.PathContext) string {
 	if ctx == nil || ctx.RootPath == "" {
 		return ""
 	}
@@ -228,13 +238,15 @@ func (c *extrasClassifier) walkedShowFolder(dir string) bool {
 }
 
 // showEvidence reports what file, below dir, says about dir belonging to a
-// show: the file resolves to dir as its series root, or to a show folder above
-// dir (dir is a season or disc folder of that show), so dir owns its extras
-// folders. A file that resolves to a folder directly inside dir marks that
-// folder as a show of its own, none of whose other files can resolve to dir,
-// so the caller can skip them (skip names it); this keeps a category folder of
-// many shows to about one file per show. A file more than showEvidenceDepth
-// path components below dir, or inside one of dir's own extras folders
+// title: the file resolves to dir as its content root, to a show folder above
+// dir (dir is a season or disc folder of that show), or to a folder inside dir
+// under dir's own title (a version folder, Alien (1979)/1080p/, or a wrapper,
+// Show/Show/Season 01/), so dir owns its extras folders. A file that resolves
+// to a folder directly inside dir under another title marks that folder as a
+// show of its own, none of whose other files can resolve to dir, so the caller
+// can skip them (skip names it); this keeps a category folder of many shows to
+// about one file per show. A file more than showEvidenceDepth path components
+// below dir, or inside one of dir's own extras folders
 // (Kids/Extras/Show S01E01.mkv resolves to Kids), says nothing.
 func (c *extrasClassifier) showEvidence(file, dir string) (owns bool, skip string) {
 	rel, err := filepath.Rel(dir, file)
@@ -246,15 +258,25 @@ func (c *extrasClassifier) showEvidence(file, dir string) (owns bool, skip strin
 			return false, ""
 		}
 	}
-	root := c.seriesRoot(file)
+	ctx := c.pathContext(file)
+	root := cleanRoot(ctx)
+	sep := string(filepath.Separator)
 	switch {
 	case root == "":
 		return false, ""
 	case root == dir:
 		return true, ""
-	case strings.HasPrefix(dir, root+string(filepath.Separator)) && !c.rootSet[root] && pathWithinAnyRoot(root, c.libraryRoots):
+	case strings.HasPrefix(dir, root+sep) && !c.rootSet[root] && pathWithinAnyRoot(root, c.libraryRoots):
 		return true, ""
-	case filepath.Dir(root) == dir && strings.HasPrefix(file, root+string(filepath.Separator)):
+	case !strings.HasPrefix(root, dir+sep):
+		return false, ""
+	}
+	// root lies inside dir.
+	dirTitle, _, _ := naming.ParseInferFolderTitleYear(filepath.Base(dir))
+	if naming.InferTitlesCoherent(ctx.Title, dirTitle) {
+		return true, ""
+	}
+	if filepath.Dir(root) == dir && strings.HasPrefix(file, root+sep) {
 		return false, root
 	}
 	return false, ""

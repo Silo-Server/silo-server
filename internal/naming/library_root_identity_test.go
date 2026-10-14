@@ -205,6 +205,9 @@ func TestSpecialsInsideASeasonFolderJoinTheShow(t *testing.T) {
 		{"/tv/Drama/24/Extras/24 S00E02.mkv", "/tv/Drama/24", "24", 0, 2},
 		{"/tv/Extras/Specials/Extras S00E01.mkv", "/tv/Extras", "Extras", 0, 1},
 		{"/tv/Comedy/Extras/Specials/Extras S00E01.mkv", "/tv/Comedy/Extras", "Extras", 0, 1},
+		// A show whose name starts like a season keeps its specials.
+		{"/tv/Documentaries/Series 7 Documentary (2024) {tvdb-123456}/Specials/Series 7 Documentary S00E01.mkv", "/tv/Documentaries/Series 7 Documentary (2024) {tvdb-123456}", "Series 7 Documentary", 0, 1},
+		{"/tv/Documentaries/Series 7 Documentary/Specials/Series 7 Documentary S00E01.mkv", "/tv/Documentaries/Series 7 Documentary", "Series 7 Documentary", 0, 1},
 		// A season folder directly in the library folder is not lifted to it.
 		{"/tv/Season 01/Specials/Show S00E01.mkv", "/tv/Season 01", "Season 01", 0, 1},
 	} {

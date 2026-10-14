@@ -408,16 +408,17 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 }
 
 // specialsInSeasonFolder reports whether segment, the folder that holds a
-// Specials/ or Extras/ folder, is a season folder. A bare number or another
-// Specials/Extras label there is the show's own title (24, Extras), not a
-// season. A bare "Season" folder counts only when bareAllowed: the
-// Specials/Extras folder holds the file directly and the file carries an
-// episode code (or the library is a series library).
+// Specials/ or Extras/ folder, is a season folder. Only a plain season name
+// counts: a bare number, another Specials/Extras label, provider IDs, or a
+// season word followed by more title ("Series 7 Documentary") is the show's
+// own name (24, Extras), not a season. A bare "Season" folder counts only when
+// bareAllowed: the Specials/Extras folder holds the file directly and the file
+// carries an episode code (or the library is a series library).
 func specialsInSeasonFolder(segment, parent, fileTitle string, bareAllowed bool) bool {
-	if specialsDirRe.MatchString(strings.TrimSpace(segment)) {
+	if specialsDirRe.MatchString(strings.TrimSpace(segment)) || ParseFolderIDs(segment) != nil {
 		return false
 	}
-	if _, ok := seasonDirectoryNumber(segment, parent, false, false); ok {
+	if _, ok := seasonDirectoryNumber(segment, parent, false, true); ok {
 		return true
 	}
 	return bareAllowed && isBareSeasonFolder(segment, fileTitle)

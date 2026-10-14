@@ -281,12 +281,8 @@ func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 // folder, and a single-file event must agree, because a file that flips
 // between extra and primary from one scan to the next churns its show.
 func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
-	type want struct {
-		extra bool
-		kind  models.ExtraKind
-		root  string // series root of a primary file, relative to the library
-	}
-	layout := map[string]want{
+	type want = extrasLayoutWant
+	checkExtrasLayout(t, "series", map[string]want{
 		// A show with episodes in season folders owns every extras folder in
 		// it, whatever the files are named.
 		"Glimmer Harbor/Season 01/Glimmer Harbor - S01E01.mkv":            {root: "Glimmer Harbor"},
@@ -326,6 +322,15 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 		"Documentaries/Interviews/S01E02.mkv":                {root: "Documentaries/Interviews"},
 		"Documentaries/Interviews/The.Interviews.S01E03.mkv": {root: "Documentaries/Interviews"},
 		"other/Flat Show/pilot.mkv":                          {root: "other/Flat Show"},
+		// A loose episode makes a category look like a show, but a folder
+		// named like an extras folder with season folders inside is a show of
+		// its own.
+		"Toons/Peppa S01E01.mkv":                   {root: "Toons"},
+		"Toons/Shorts/Season 01/Shorts S01E01.mkv": {root: "Toons/Shorts"},
+		"Toons/Shorts/Specials/Shorts S00E01.mkv":  {root: "Toons/Shorts"},
+		// A same-name wrapper folder owns its extras.
+		"Lumen/Lumen/Season 01/Lumen S01E01.mkv": {root: "Lumen"},
+		"Lumen/Trailers/teaser.mkv":              {extra: true, kind: models.ExtraKindTrailer},
 		// A category's own Extras/ folder doesn't make it a show, and neither
 		// does a year in its name.
 		"Cartoons/Extras/Peppa S01E01.mkv":                          {root: "Cartoons"},
@@ -340,24 +345,51 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 		"Extras/Specials/Extras S00E01.mkv":         {root: "Extras"},
 		"Drama/1883/Season 01/1883 S01E01.mkv":      {root: "Drama/1883"},
 		"Drama/1883/Specials/1883 S00E01.mkv":       {root: "Drama/1883"},
-	}
-	library := filepath.Join(t.TempDir(), "tv")
+	})
+}
+
+// TestMixedLibraryVersionFolderOwnsExtras covers a movie whose file sits in a
+// version folder in a mixed library: the title folder still owns its
+// trailers, while a category's extras-named folder stays content.
+func TestMixedLibraryVersionFolderOwnsExtras(t *testing.T) {
+	type want = extrasLayoutWant
+	checkExtrasLayout(t, "mixed", map[string]want{
+		"Alien (1979)/1080p/Alien (1979).mkv":   {root: "Alien (1979)/1080p/Alien (1979)"},
+		"Alien (1979)/Trailers/trailer.mkv":     {extra: true, kind: models.ExtraKindTrailer},
+		"Kids/Bluey/Season 01/Bluey S01E01.mkv": {root: "Kids/Bluey"},
+		"Kids/Shorts/Season 01/S01E01.mkv":      {root: "Kids/Shorts"},
+	})
+}
+
+// extrasLayoutWant is the classification a layout test expects for a file.
+type extrasLayoutWant struct {
+	extra bool
+	kind  models.ExtraKind
+	root  string // content root of a primary file, relative to the library
+}
+
+// checkExtrasLayout writes layout below a fresh library folder and checks
+// each file's classification in a full scan, a subtree scan of its own
+// folder, and a single-file event, plus the root of every primary file.
+func checkExtrasLayout(t *testing.T, libraryType string, layout map[string]extrasLayoutWant) {
+	t.Helper()
+	library := filepath.Join(t.TempDir(), "library")
 	for rel := range layout {
 		writeTestFile(t, filepath.Join(library, rel), "media")
 	}
 	roots := []string{library}
-	walked := collectTestFilePaths(t, library, "series")
+	walked := collectTestFilePaths(t, library, libraryType)
 	if len(walked) != len(layout) {
 		t.Fatalf("walked %d files, want %d", len(walked), len(layout))
 	}
 
-	primary, extras := partitionExtraPaths(walked, "series", roots, roots)
+	primary, extras := partitionExtraPaths(walked, libraryType, roots, roots)
 	full := make(map[string]extraCandidate, len(extras))
 	for _, candidate := range extras {
 		full[candidate.Path] = candidate
 	}
-	assignments := inferRootAssignments(primary, "series", 1, nil, library).Assignments
-	watch := newWatchExtrasClassifier("series", roots)
+	assignments := inferRootAssignments(primary, libraryType, 1, nil, library).Assignments
+	watch := newWatchExtrasClassifier(libraryType, roots)
 	for rel, w := range layout {
 		path := filepath.Join(library, rel)
 		candidate, isExtra := full[path]
@@ -369,7 +401,7 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 				t.Errorf("full scan: %s root %q, want %q", rel, got, filepath.Join(library, w.root))
 			}
 		}
-		_, subtree := partitionExtraPaths([]string{path}, "series", roots, []string{filepath.Dir(path)})
+		_, subtree := partitionExtraPaths([]string{path}, libraryType, roots, []string{filepath.Dir(path)})
 		if got := len(subtree) == 1; got != w.extra {
 			t.Errorf("subtree scan of its folder: %s extra=%v, want %v", rel, got, w.extra)
 		}
