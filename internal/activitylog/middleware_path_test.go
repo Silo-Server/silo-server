@@ -36,6 +36,10 @@ func TestMiddlewarePathFiltering(t *testing.T) {
 		{name: "v2 admin logs ws ticket", path: "/api/v2/admin/logs/ws-ticket", logged: false},
 		{name: "v2 admin logs ws capabilities", path: "/api/v2/admin/logs/ws/capabilities", logged: false},
 
+		// Standalone worker control and source traffic.
+		{name: "worker snapshot", path: "/api/internal/workers/7/snapshot", logged: false},
+		{name: "worker source range", path: "/api/internal/workers/7/sources/grant-1", logged: false},
+
 		// Session starts stay logged on both majors.
 		{name: "v1 stream session start", path: "/api/v1/stream/sess-1", logged: true},
 		{name: "v2 stream session start", path: "/api/v2/stream/sess-1", logged: true},
