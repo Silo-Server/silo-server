@@ -78,7 +78,8 @@ const (
 )
 
 const (
-	// jobLockTimeout bounds taking a job's cluster lock, not the job.
+	// jobLockTimeout bounds taking a job's cluster lock, or checking its
+	// session, not the job.
 	jobLockTimeout = 10 * time.Second
 	// jobHistoryTimeout bounds recording a run, which happens after the job's
 	// own deadline may have passed.
@@ -158,8 +159,13 @@ func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, er
 	}, true, nil
 }
 
+// Check gives the probe jobLockTimeout, not the job's deadline: a session
+// whose connection stopped answering would otherwise hold the job, and its
+// claim, until the deadline.
 func (l pgClusterLock) Check(ctx context.Context) error {
-	if err := l.lock.Check(ctx); err != nil {
+	checkCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
+	defer cancel()
+	if err := l.lock.Check(checkCtx); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
