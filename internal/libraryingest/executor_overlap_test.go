@@ -273,6 +273,50 @@ func TestDisjointSubtreeIngestsRunConcurrently(t *testing.T) {
 	}
 }
 
+// TestPodcastIngestsOfOneLibraryRunOneAtATime keeps podcast scans of one
+// library apart: a scan of another show, and a library scan, wait for a
+// running show scan instead of indexing a show next to it.
+func TestPodcastIngestsOfOneLibraryRunOneAtATime(t *testing.T) {
+	const showA, showB = "/podcasts/Show A", "/podcasts/Show B"
+	scan := newGatedSubtreeScanner(showA)
+	exec := newOverlapTestExecutor(scan)
+	folder := &models.MediaFolder{ID: 7, Type: "podcasts", Paths: []string{"/podcasts"}}
+
+	firstDone, _ := startSubtreeIngest(context.Background(), exec, folder, showA)
+	waitStarted(t, scan, showA)
+
+	secondDone, secondMessages := startSubtreeIngest(context.Background(), exec, folder, showB)
+	waitUntilWaiting(t, secondDone, secondMessages)
+
+	libraryMessages := make(chan string, 64)
+	libraryCtx := WithProgressReporter(context.Background(), func(update ProgressUpdate) {
+		select {
+		case libraryMessages <- update.Message:
+		default:
+		}
+	})
+	libraryDone := make(chan ingestOutcome, 1)
+	go func() {
+		result, err := exec.IngestFolder(libraryCtx, folder)
+		libraryDone <- ingestOutcome{result: result, err: err}
+	}()
+	waitUntilWaiting(t, libraryDone, libraryMessages)
+
+	scan.release(showA)
+	for what, done := range map[string]<-chan ingestOutcome{
+		"first show scan":  firstDone,
+		"second show scan": secondDone,
+		"library scan":     libraryDone,
+	} {
+		if got := awaitOutcome(t, done, what); got.err != nil {
+			t.Fatalf("%s: %v", what, got.err)
+		}
+	}
+	if got := scan.scannedPaths(); !slices.Equal(got, []string{showA, showB}) {
+		t.Fatalf("scanned subtrees = %v, want %v", got, []string{showA, showB})
+	}
+}
+
 // TestOverlappingWaitersStartInArrivalOrder keeps an older waiter from being
 // overtaken: a request that overlaps only a waiting scan queues behind it
 // instead of starting and sending that waiter back to sleep.
