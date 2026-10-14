@@ -136,13 +136,13 @@ describe("EnginePlayer", () => {
     vi.restoreAllMocks();
   });
 
-  function start(onFailure = vi.fn()) {
+  function start(onFailure = vi.fn(), muted = false) {
     const player = new EnginePlayer({
       source: { ...source },
       surface: document.createElement("div"),
       element,
       volume: 1,
-      muted: false,
+      muted,
       onFailure,
     });
     player.load();
@@ -524,6 +524,77 @@ describe("EnginePlayer", () => {
     await expect(player.play()).rejects.toMatchObject({ name: "NotAllowedError" });
     expect(events.length).toBe(before);
     expect(player.paused).toBe(true);
+    player.destroy();
+  });
+
+  /** Frames for the first `seconds` of the current run, with audio buffered. */
+  function feed(worker: FakeWorker, seconds: number, from = 0) {
+    for (let time = from; time < from + seconds; time += 0.04) {
+      worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(time) });
+    }
+    worker.emit({ type: "audio-buffered", generation: worker.generation });
+  }
+
+  for (const when of ["before", "after"] as const) {
+    it(`plays muted without a user gesture on wall time, play() ${when} the file opens`, async () => {
+      audioOutput.resumes = false;
+      audioOutput.state = "suspended";
+      vi.stubGlobal("navigator", { ...navigator, userActivation: { hasBeenActive: false } });
+      const { player, worker } = start(vi.fn(), true);
+      if (when === "before") await player.play();
+      await open(worker, true);
+      feed(worker, 2);
+      await settle();
+      if (when === "after") await player.play();
+      expect(events).toContain("play");
+      expect(events[events.length - 1]).toBe("playing");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(player.paused).toBe(false);
+      expect(player.currentTime).toBeGreaterThan(0.9);
+      player.destroy();
+    });
+  }
+
+  it("brings audio back in step from the current position when unmuted", async () => {
+    audioOutput.resumes = false;
+    audioOutput.state = "suspended";
+    vi.stubGlobal("navigator", { ...navigator, userActivation: { hasBeenActive: false } });
+    const { player, worker } = start(vi.fn(), true);
+    await open(worker, true);
+    feed(worker, 3);
+    await settle();
+    await player.play();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // The unmute click is the gesture the browser was waiting for.
+    audioOutput.resumes = true;
+    const before = worker.generation;
+    const position = player.currentTime;
+    player.muted = false;
+    await settle();
+    expect(worker.generation).toBe(before + 1);
+    expect(worker.posted[worker.posted.length - 1]).toMatchObject({ type: "start" });
+    expect((worker.posted[worker.posted.length - 1] as { position: number }).position).toBeCloseTo(
+      position,
+      1,
+    );
+    expect(player.paused).toBe(false);
+    player.destroy();
+  });
+
+  it("pauses when unmuted while the browser still refuses audio", async () => {
+    audioOutput.resumes = false;
+    audioOutput.state = "suspended";
+    vi.stubGlobal("navigator", { ...navigator, userActivation: { hasBeenActive: false } });
+    const { player, worker } = start(vi.fn(), true);
+    await open(worker, true);
+    feed(worker, 2);
+    await settle();
+    await player.play();
+    player.muted = false;
+    await settle();
+    expect(player.paused).toBe(true);
+    expect(events[events.length - 1]).toBe("pause");
     player.destroy();
   });
 

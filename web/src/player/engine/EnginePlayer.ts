@@ -135,6 +135,11 @@ export class EnginePlayer {
   private rateValue = 1;
   private failed = false;
   private disposed = false;
+  /**
+   * Playing muted on wall time because the browser keeps audio suspended
+   * until a user gesture, as a media element may autoplay muted.
+   */
+  private silent = false;
 
   private frameRequest = 0;
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
@@ -249,6 +254,7 @@ export class EnginePlayer {
     this.mutedValue = value;
     this.audio?.setVolume(this.volumeValue, this.mutedValue);
     this.dispatch("volumechange");
+    if (!value && this.silent) this.endSilence();
   }
 
   get playbackRate(): number {
@@ -270,16 +276,21 @@ export class EnginePlayer {
     }
     // Like a media element, refuse before changing state when the page has
     // never had a user gesture: no play/pause events for a blocked attempt.
+    // Muted playback is allowed and runs without audio until it can start.
     if (this.audio && this.audio.context.state !== "running" && !hasUserActivation()) {
-      throw autoplayRefused();
+      if (!this.mutedValue) throw autoplayRefused();
+      this.silent = true;
     }
     if (this.endedValue) this.seek(0);
     if (!this.pausedValue) return;
     this.pausedValue = false;
     this.dispatch("play");
-    if (this.audio && !(await this.audio.resume())) {
-      if (!this.pausedValue) this.settlePaused();
-      throw autoplayRefused();
+    if (this.audio && !this.silent && !(await this.audio.resume())) {
+      if (!this.mutedValue) {
+        if (!this.pausedValue) this.settlePaused();
+        throw autoplayRefused();
+      }
+      this.silent = true;
     }
     if (this.pausedValue || this.disposed) return;
     if (!this.seekingValue && this.ready >= 4) this.startFlow();
@@ -835,18 +846,54 @@ export class EnginePlayer {
   private startFlow(): void {
     // play() already resumed the context when it could; a context created
     // after that call (playback requested before the file opened) starts
-    // here, and settles paused if the browser refuses it.
+    // here, and settles paused if the browser refuses it, or plays silently
+    // if muted.
     const audio = this.audio;
-    if (audio && audio.context.state !== "running") {
-      void audio.resume().then((running) => {
-        if (!running && !this.pausedValue && !this.disposed) this.settlePaused();
-      });
+    if (audio && audio.context.state !== "running" && !this.silent) {
+      if (this.mutedValue && !hasUserActivation()) {
+        this.silent = true;
+      } else {
+        void audio.resume().then((running) => {
+          if (running || this.pausedValue || this.stopped) return;
+          if (this.mutedValue) this.playSilently();
+          else this.settlePaused();
+        });
+      }
     }
-    this.audio?.setPlaying(true);
+    if (this.silent) this.playSilently();
+    else this.audio?.setPlaying(true);
     this.clock?.setRunning(true);
     this.waitingValue = false;
     this.updatePresence();
     this.dispatch("playing");
+  }
+
+  /**
+   * Runs the clock on wall time with the audio held, as if it had already
+   * played out. A seek starts the next run on the audio clock again, so
+   * startFlow() comes back here while the player stays silent.
+   */
+  private playSilently(): void {
+    this.silent = true;
+    this.audio?.setPlaying(false);
+    this.audioDrained = true;
+    this.clock?.detachAudio(!this.pausedValue && !this.seekingValue);
+  }
+
+  /** Unmuted while silent: start audio, then resume from here in step with it. */
+  private endSilence(): void {
+    const audio = this.audio;
+    if (!audio) return;
+    void audio.resume().then((running) => {
+      if (this.stopped || !this.silent || this.mutedValue) return;
+      if (!running) {
+        // A media element pauses when unmuted without a gesture, too.
+        if (!this.pausedValue) this.settlePaused();
+        return;
+      }
+      this.silent = false;
+      this.seek(this.currentTime);
+    });
   }
 
   /**
