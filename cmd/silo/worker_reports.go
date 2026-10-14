@@ -27,7 +27,6 @@ type workerReportSink struct {
 	service     func() *workercontrolcore.Service
 	mu          sync.Mutex
 	trackers    map[int]*nodesessions.Tracker
-	previous    map[int]map[string]struct{}
 	publishers  map[int]*streamtelemetry.RedisStore
 }
 
@@ -58,10 +57,8 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		return work != "" && generation > 0 && s.service().WorkActive(ctx, nodeID, work, generation)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.trackers == nil {
 		s.trackers = make(map[int]*nodesessions.Tracker)
-		s.previous = make(map[int]map[string]struct{})
 		s.publishers = make(map[int]*streamtelemetry.RedisStore)
 	}
 	tracker := s.trackers[nodeID]
@@ -69,7 +66,8 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		tracker = nodesessions.NewTracker(s.rdb, node.URL, "HTTP worker", "transcode")
 		s.trackers[nodeID] = tracker
 	}
-	present := make(map[string]struct{})
+	s.mu.Unlock()
+	infos := make([]nodesessions.SessionInfo, 0, len(batch.Sessions))
 	for _, item := range batch.Sessions {
 		if !valid(item.WorkID, item.Generation) {
 			continue
@@ -109,15 +107,15 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		}
 		info.NodeURL = node.URL
 		info.NodeName = "HTTP worker"
-		tracker.Track(ctx, info)
-		present[info.SessionID] = struct{}{}
+		infos = append(infos, info)
 	}
-	for id := range s.previous[nodeID] {
-		if _, ok := present[id]; !ok {
-			tracker.Remove(ctx, id)
-		}
+	lease, ok := ctx.Value(workerReportLeaseKey{}).(workerReportLease)
+	if !ok {
+		return errors.New("worker report lease unavailable")
 	}
-	s.previous[nodeID] = present
+	if err := tracker.ReplaceSnapshot(ctx, "http-worker-"+strconv.Itoa(nodeID), nodesessions.SnapshotFence{Key: lease.key, Value: lease.owner}, infos); err != nil {
+		return err
+	}
 	if batch.Observations == nil {
 		return nil
 	}
@@ -175,14 +173,18 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		allowed = append(allowed, view)
 	}
 	snapshot.Sessions = allowed
+	s.mu.Lock()
 	publisher := s.publishers[nodeID]
 	if publisher == nil {
 		cfg := streamtelemetry.ConfigFromEnv(snapshot.NodeID)
 		cfg.PublisherID = snapshot.PublisherID
+		// API replicas share this publisher without sharing delta state.
+		cfg.FullResyncEvery = 1
 		publisher = streamtelemetry.NewRedisStore(s.rdb, cfg, slog.Default())
 		s.publishers[nodeID] = publisher
 	}
-	if err := publisher.Publish(ctx, snapshot); err != nil {
+	s.mu.Unlock()
+	if err := publisher.PublishWithLease(ctx, snapshot, lease.key, lease.owner); err != nil {
 		return err
 	}
 	for _, line := range o.Logs {

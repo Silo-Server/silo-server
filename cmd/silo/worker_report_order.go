@@ -19,6 +19,15 @@ type workerReportCursor struct {
 	Retired  map[string]int64 `json:"retired,omitempty"`
 }
 
+type workerReportLeaseKey struct{}
+type workerReportLease struct{ key, owner string }
+
+var setWorkerReportCursor = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', 120)
+return 1
+`)
+
 // Reports can arrive on different API replicas. Serialize their writes and
 // keep the boot/sequence cursor in Redis so a delayed batch cannot roll back
 // newer ownership or telemetry. The request deadline is much shorter than
@@ -37,6 +46,7 @@ func lockWorkerReport(ctx context.Context, rdb *redis.Client, node int, batch wo
 		cancel()
 		return ctx, nil, false, errors.New("worker report already publishing or storage unavailable")
 	}
+	ctx = context.WithValue(ctx, workerReportLeaseKey{}, workerReportLease{key: lock, owner: owner})
 	release := func() {
 		cancel()
 		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
@@ -77,7 +87,11 @@ func lockWorkerReport(ctx context.Context, rdb *redis.Client, node int, batch wo
 	cursor.BootID, cursor.Sequence = batch.BootID, batch.Sequence
 	encoded, err := json.Marshal(cursor)
 	if err == nil {
-		err = rdb.Set(ctx, key, encoded, 2*time.Minute).Err()
+		var accepted int
+		accepted, err = setWorkerReportCursor.Run(ctx, rdb, []string{lock, key}, owner, encoded).Int()
+		if err == nil && accepted != 1 {
+			err = errors.New("worker report lease replaced")
+		}
 	}
 	if err != nil {
 		release()

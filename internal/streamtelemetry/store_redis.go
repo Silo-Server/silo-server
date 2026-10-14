@@ -17,6 +17,8 @@ import (
 
 const redisFieldChunk = 512
 
+var ErrPublishFenced = errors.New("stream telemetry publication lease replaced")
+
 type RedisStore struct {
 	client *redis.Client
 	cfg    Config
@@ -108,6 +110,19 @@ func (s *RedisStore) plan(snapshot Snapshot) (sets map[string][]byte, dels []str
 }
 
 func (s *RedisStore) Publish(ctx context.Context, snapshot Snapshot) error {
+	return s.publish(ctx, snapshot, "", "")
+}
+
+// PublishWithLease checks the lease owner and watches that exact lease through
+// transaction commit. A superseded publisher cannot overwrite its successor.
+func (s *RedisStore) PublishWithLease(ctx context.Context, snapshot Snapshot, leaseKey, leaseOwner string) error {
+	if leaseKey == "" || leaseOwner == "" {
+		return ErrPublishFenced
+	}
+	return s.publish(ctx, snapshot, leaseKey, leaseOwner)
+}
+
+func (s *RedisStore) publish(ctx context.Context, snapshot Snapshot, leaseKey, leaseOwner string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("stream telemetry redis client is nil")
 	}
@@ -132,7 +147,7 @@ func (s *RedisStore) Publish(ctx context.Context, snapshot Snapshot) error {
 	// the delta alone and the next publish must be full. Costs one pipelined
 	// command and self-heals in one sweep instead of up to FullResyncEvery.
 	var fieldCount *redis.IntCmd
-	_, err = s.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+	commands := func(pipe redis.Pipeliner) error {
 		if full {
 			pipe.Del(ctx, key)
 		}
@@ -165,7 +180,25 @@ func (s *RedisStore) Publish(ctx context.Context, snapshot Snapshot) error {
 			fieldCount = pipe.HLen(ctx, key)
 		}
 		return nil
-	})
+	}
+	if leaseKey == "" {
+		_, err = s.client.TxPipelined(ctx, commands)
+	} else {
+		err = s.client.Watch(ctx, func(tx *redis.Tx) error {
+			owner, readErr := tx.Get(ctx, leaseKey).Result()
+			if errors.Is(readErr, redis.Nil) || readErr == nil && owner != leaseOwner {
+				return ErrPublishFenced
+			}
+			if readErr != nil {
+				return readErr
+			}
+			_, txErr := tx.TxPipelined(ctx, commands)
+			return txErr
+		}, leaseKey)
+		if errors.Is(err, redis.TxFailedErr) {
+			err = ErrPublishFenced
+		}
+	}
 	if err != nil {
 		s.needFullResync = true
 		clear(s.published)
