@@ -167,7 +167,7 @@ func (c *extrasClassifier) keepsEpisodeToken(candidate extraCandidate) bool {
 		return true
 	}
 	switch normalizeScannerDirLabel(filepath.Base(candidate.SupplementalDir)) {
-	case "extra", "extras":
+	case extraDirLabel, extrasDirLabel:
 	default:
 		return false
 	}
